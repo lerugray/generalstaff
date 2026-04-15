@@ -1,0 +1,103 @@
+# GeneralStaff project registry — example schema
+#
+# Real registry lives at projects.yaml (gitignored if it contains paths
+# you don't want public). This file is the schema reference.
+#
+# Adding a project to this file is a 4-step ceremony, NOT a casual edit:
+#   1. Generate the project's .generalstaff/MISSION.md
+#   2. Generate or curate a real backlog file the planner can read
+#   3. Define the verification command (test suite, build, lint — must
+#      pass for the cycle to be considered clean)
+#   4. Define the hands_off list (anything bot must not touch —
+#      proprietary code, infrastructure files, configs)
+#
+# A project without all 4 is a slop machine. Don't register it until
+# the ceremony is done.
+
+projects:
+  - id: catalogdna
+    path: C:/Users/rweis/OneDrive/Documents/catalogdna
+    priority: 1                              # 1 = highest, 5 = lowest
+    cycle_minutes: 360                       # hard timeout per cycle
+    mission_file: .generalstaff/MISSION.md
+    backlog_glob: docs/bot-proposals/*.md
+    branch: bot/work
+    verification_command: "py -m pytest tests/ -q"
+    auto_merge: false                        # MUST be false until 5 clean cycles
+    hands_off:
+      - src/catalogdna/interpret/            # IP boundary — proprietary
+      - CLAUDE.md                            # project conventions
+      - CLAUDE-AUTONOMOUS.md                 # bot instructions
+      - .claude/                             # claude code config
+      - run_bot*.sh                          # bot launcher scripts
+      - run_bot*.bat                         # bot launcher scripts
+      - bot_tasks.md                         # bot task list (read+mark only)
+      - scripts/bot_heartbeat.sh             # infra script
+      - scripts/chrome_review*.sh            # chrome review loop
+      - scripts/worktree_venv.py             # worktree bootstrap
+    notes: |
+      Cornerstone project. Has the most mature bot infra. The
+      .generalstaff/ directory will be added in a future build session
+      — for now the dispatcher reads catalogdna's existing
+      CLAUDE-AUTONOMOUS.md and bot_tasks.md as the equivalent of
+      MISSION.md + tasks.json.
+    last_cycle_at: null
+    last_cycle_outcome: null
+
+  - id: retrogaze-experimental
+    path: C:/Users/rweis/OneDrive/Documents/Retrogaze-experimental
+    priority: 2
+    cycle_minutes: 180
+    mission_file: .generalstaff/MISSION.md
+    backlog_glob: backlog.md
+    branch: bot/work
+    verification_command: "<TBD — needs verification gate before registering>"
+    auto_merge: false
+    hands_off:
+      - "<TBD — needs hands_off list before registering>"
+    notes: |
+      PLACEHOLDER — not registered yet. Pipeline work and sprite
+      generation tests are bot-friendly because output is eyeballable.
+      Marketing / ideation work is OFF LIMITS per the creative-vs-
+      mechanical rule (../catalogdna/docs/internal/AI Collaboration Principles.md §6).
+    last_cycle_at: null
+    last_cycle_outcome: null
+
+  - id: sandkasten
+    path: C:/Users/rweis/OneDrive/Documents/Sandkasten
+    priority: 3
+    cycle_minutes: 180
+    mission_file: .generalstaff/MISSION.md
+    backlog_glob: backlog.md
+    branch: bot/work
+    verification_command: "<TBD>"
+    auto_merge: false
+    hands_off:
+      - "<TBD>"
+    notes: |
+      PLACEHOLDER — not registered yet. Bot work scoped to NON-GAME-LOGIC
+      only (UI, scaffolding, save/load, map loading, tests for
+      already-working features). Game rules / wargame logic is OFF
+      LIMITS — too hard to verify automatically. Hard rule.
+    last_cycle_at: null
+    last_cycle_outcome: null
+
+# ---------------------------------------------------------------------
+# Dispatcher-level config (separate from per-project config)
+# ---------------------------------------------------------------------
+
+dispatcher:
+  log_dir: ./logs
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP                          # if this file exists, dispatcher exits
+  morning_digest_dir: ./digests              # one file per cycle, dated
+  telegram:
+    enabled: true
+    chat_id_env: GENERALSTAFF_TELEGRAM_CHAT_ID
+    bot_token_env: GENERALSTAFF_TELEGRAM_BOT_TOKEN
+  # Picker algorithm: priority * (days_since_last_cycle + 1)
+  # Tie-break: most recently added project wins
+  picker: priority_x_staleness
+  # Override file: if next_project.txt contains a project id, dispatcher
+  # picks that project instead of running the picker
+  override_file: ./next_project.txt

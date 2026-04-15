@@ -1,0 +1,40 @@
+# Real projects.yaml may contain absolute paths Ray prefers private
+projects.yaml
+
+# Logs from dispatcher runs
+logs/
+*.log
+
+# Fleet state — committed or not depending on whether GeneralStaff itself
+# becomes a git repo. For now, treat as private working state.
+fleet_state.json
+
+# Per-cycle digest files
+digests/
+
+# Override + kill-switch files (transient)
+next_project.txt
+STOP
+
+# Temporary
+*.tmp
+*.swp
+.DS_Store
+
+# Python bytecode (in case any helpers get written in Python)
+__pycache__/
+*.pyc
+
+# Editor
+.vscode/
+.idea/
+
+# Claude Code per-machine settings (allow-lists, etc.)
+# Shared settings would go in .claude/settings.json, which IS tracked
+.claude/settings.local.json
+
+# Obsidian per-machine vault state
+# Shared settings would be in .obsidian/app.json etc., which can be tracked
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/workspaces.json
