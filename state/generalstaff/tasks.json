@@ -134,7 +134,7 @@
   {
     "id": "gs-048",
     "title": "Add a test for extractChangedFiles in cycle.ts — verify it handles renames (diff --git a/old b/new), binary files, and files with spaces in their names",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
