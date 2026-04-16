@@ -5,7 +5,7 @@ import { existsSync, mkdirSync } from "fs";
 import { appendFile, readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { getRootDir } from "./state";
-import type { ProgressEntry, ProgressEventType } from "./types";
+import { isProgressEntry, type ProgressEntry, type ProgressEventType } from "./types";
 
 function progressPath(projectId: string): string {
   return join(getRootDir(), "state", projectId, "PROGRESS.jsonl");
@@ -57,7 +57,10 @@ export async function tailProgressLog(
       for (const line of content.trim().split("\n")) {
         if (line.trim()) {
           try {
-            entries.push(JSON.parse(line));
+            const parsed = JSON.parse(line);
+            if (isProgressEntry(parsed)) {
+              entries.push(parsed);
+            }
           } catch {
             // skip malformed
           }
@@ -94,7 +97,12 @@ async function tailSingleProject(projectId: string, lines: number) {
 
   for (const line of tail) {
     try {
-      printEntry(JSON.parse(line));
+      const parsed = JSON.parse(line);
+      if (isProgressEntry(parsed)) {
+        printEntry(parsed);
+      } else {
+        console.log(line);
+      }
     } catch {
       console.log(line);
     }
