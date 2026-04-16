@@ -1,0 +1,419 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+"status": "done",
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/audit.ts b/src/audit.ts
+index 1b97d27..5e6082e 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -241,3 +241,9 @@ export function printHistoryTable(rows: CycleHistoryRow[]): void {
+     console.log(keys.map((k) => pad(row[k], widths[k])).join("  "));
+   }
+ }
++
++export function printHistoryCompact(rows: CycleHistoryRow[]): void {
++  for (const row of rows) {
++    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${row.outcome}\t${row.duration}\t${row.sha_range}`);
++  }
++}
+diff --git a/src/cli.ts b/src/cli.ts
+index 06ceb4f..d8f80b1 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -7,7 +7,7 @@ import { runSingleCycle } from "./cycle";
+ import { loadFleetState } from "./state";
+ import { loadProjects } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+-import { tailProgressLog, loadCycleHistory, printHistoryTable } from "./audit";
++import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ 
+@@ -24,7 +24,8 @@ Usage:
+   generalstaff init <path> [--id=<id>]         Scaffold state dir for a new project
+   generalstaff stop                           Create STOP file (halt dispatcher)
+   generalstaff start                          Remove STOP file (allow dispatch)
+-  generalstaff history [--project=<id>] [--lines=<n>]  Compact cycle history table
++  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact]
++                                         Cycle history (compact: tab-delimited, no headers)
+   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
+   generalstaff doctor                         Check prerequisites (bun, git, claude)
+   generalstaff --version                      Show version
+@@ -172,6 +173,7 @@ switch (command) {
+       options: {
+         project: { type: "string" },
+         lines: { type: "string", default: "20" },
++        format: { type: "string", default: "table" },
+       },
+       allowPositionals: false,
+     });
+@@ -179,7 +181,11 @@ switch (command) {
+       historyValues.project,
+       parseInt(historyValues.lines!, 10),
+     );
+-    printHistoryTable(rows);
++    if (historyValues.format === "compact") {
++      printHistoryCompact(rows);
++    } else {
++      printHistoryTable(rows);
++    }
+     break;
+   }
+ 
+diff --git a/src/session.ts b/src/session.ts
+index 38d880a..55da79e 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -161,9 +161,16 @@ export async function runSession(options: SessionOptions) {
+ 
+   // Log session end for each project
+   for (const p of projects) {
++    const projectResults = allResults.filter((r) => r.project_id === p.id);
+     await appendProgress(p.id, "session_end", {
+       duration_minutes: Math.round(elapsed),
+-      total_cycles: allResults.filter((r) => r.project_id === p.id).length,
++      total_cycles: projectResults.length,
++      total_verified: projectResults.filter(
++        (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
++      ).length,
++      total_failed: projectResults.filter(
++        (r) => r.final_outcome === "verification_failed",
++      ).length,
+     });
+   }
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 7809f42..af16e4e 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -39,19 +39,19 @@
+   {
+     "id": "gs-028",
+     "title": "Add a --format=compact flag to the history command that outputs one line per cycle (no headers, no borders) suitable for piping to grep/awk. Default stays as the current table format.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+     "id": "gs-029",
+     "title": "In session.ts, add a session summary to PROGRESS.jsonl at session end that includes total_cycles, total_verified, total_failed, and duration_minutes — useful for the history command and digest.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+     "id": "gs-030",
+     "title": "Add test coverage for the init command edge cases: project ID with special characters is sanitized, init on an already-initialized project warns but doesn't overwrite, init creates parent directories if needed.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index 1d612ab..a0a0bc3 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "../src/audit";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
+@@ -201,6 +201,26 @@ describe("tailProgressLog", () => {
+   });
+ });
+ 
++describe("session_end entries", () => {
++  it("stores total_verified and total_failed alongside total_cycles and duration_minutes", async () => {
++    await appendProgress("proj-sess", "session_end", {
++      duration_minutes: 15,
++      total_cycles: 4,
++      total_verified: 3,
++      total_failed: 1,
++    });
++
++    const filePath = join(TEST_DIR, "state", "proj-sess", "PROGRESS.jsonl");
++    const content = readFileSync(filePath, "utf8");
++    const entry = JSON.parse(content.trim());
++    expect(entry.event).toBe("session_end");
++    expect(entry.data.duration_minutes).toBe(15);
++    expect(entry.data.total_cycles).toBe(4);
++    expect(entry.data.total_verified).toBe(3);
++    expect(entry.data.total_failed).toBe(1);
++  });
++});
++
+ describe("loadCycleHistory", () => {
+   it("returns empty array when no state directory exists", async () => {
+     const stateDir = join(TEST_DIR, "state");
+@@ -308,3 +328,31 @@ describe("printHistoryTable", () => {
+     expect(lines[2]).toContain("2m");
+   });
+ });
++
++describe("printHistoryCompact", () => {
++  it("outputs nothing when rows is empty", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryCompact([])));
++    expect(lines).toHaveLength(0);
++  });
++
++  it("outputs one tab-delimited line per row with no headers", async () => {
++    const rows = [
++      { cycle_id: "cycle-abc123", project: "myproj", outcome: "verified", duration: "2m", sha_range: "aaa..bbb", timestamp: "2026-04-16 12:00:00Z" },
++      { cycle_id: "cycle-def456", project: "other", outcome: "failed", duration: "45s", sha_range: "ccc..ddd", timestamp: "2026-04-16 12:05:00Z" },
++    ];
++    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows)));
++    expect(lines).toHaveLength(2);
++    // No header keywords
++    expect(lines[0]).not.toContain("CYCLE");
++    expect(lines[0]).not.toContain("PROJECT");
++    // Tab-delimited fields
++    const fields = lines[0].split("\t");
++    expect(fields).toHaveLength(6);
++    expect(fields[0]).toBe("2026-04-16 12:00:00Z");
++    expect(fields[1]).toBe("myproj");
++    expect(fields[2]).toBe("cycle-abc123");
++    expect(fields[3]).toBe("verified");
++    expect(fields[4]).toBe("2m");
++    expect(fields[5]).toBe("aaa..bbb");
++  });
++});
+diff --git a/tests/init.test.ts b/tests/init.test.ts
+index fa27cef..bad1453 100644
+--- a/tests/init.test.ts
++++ b/tests/init.test.ts
+@@ -102,6 +102,51 @@ describe("init command", () => {
+     expect(result.stderr).toContain("already exists");
+   });
+ 
++  it("sanitizes special characters in derived project ID", async () => {
++    const result = await runCli(["init", "/tmp/My Project @v2!"], TEST_DIR);
++    expect(result.exitCode).toBe(0);
++
++    // Special chars replaced with hyphens, lowercased
++    const expected = "my-project--v2-";
++    expect(existsSync(join(TEST_DIR, "state", expected))).toBe(true);
++    expect(result.stdout).toContain(`id: ${expected}`);
++  });
++
++  it("does not overwrite existing files when state dir already exists", async () => {
++    // First init
++    await runCli(["init", "/tmp/my-project", "--id=existing"], TEST_DIR);
++
++    const missionPath = join(TEST_DIR, "state", "existing", "MISSION.md");
++    const originalContent = readFileSync(missionPath, "utf8");
++
++    // Second init should fail without touching files
++    const result = await runCli(
++      ["init", "/tmp/different-path", "--id=existing"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("already exists");
++
++    // Original file must be unchanged
++    const afterContent = readFileSync(missionPath, "utf8");
++    expect(afterContent).toBe(originalContent);
++  });
++
++  it("creates parent state directory if it does not exist", async () => {
++    // Remove the state dir entirely so mkdirSync must create it
++    const stateDir = join(TEST_DIR, "state");
++    rmSync(stateDir, { recursive: true, force: true });
++    expect(existsSync(stateDir)).toBe(false);
++
++    const result = await runCli(
++      ["init", "/tmp/fresh-project", "--id=freshproj"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(0);
++    expect(existsSync(join(stateDir, "freshproj", "MISSION.md"))).toBe(true);
++    expect(existsSync(join(stateDir, "freshproj", "tasks.json"))).toBe(true);
++  });
++
+   it("fails if no path is provided", async () => {
+     const result = await runCli(["init"], TEST_DIR);
+     expect(result.exitCode).toBe(1);
+
+
+Diff summary: src/audit.ts                  |  6 ++++++
+ src/cli.ts                    | 12 ++++++++---
+ src/session.ts                |  9 +++++++-
+ state/generalstaff/tasks.json |  6 +++---
+ tests/audit.test.ts           | 50 ++++++++++++++++++++++++++++++++++++++++++-
+ tests/init.test.ts            | 45 ++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 120 insertions(+), 8 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree
+Started: 2026-04-16T16:05:02.291Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\digest.test.ts:
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260416_160529.md
+
+Digest written to: C:\Users\rweiss\Documents\Dev Work\generalstaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260416_160529.md
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+ 200 pass
+ 0 fail
+ 638 expect() calls
+Ran 200 tests across 16 files. [40.64s]
+
+========================================
+Exit code: 0
+Duration: 46.9s
+Ended: 2026-04-16T16:05:49.194Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-2026-04-15.md`
+- `RULE-RELAXATION-2026-04-15.md`
+- `PHASE-1-PLAN-2026-04-15.md`
+- `PHASE-1-RESOLUTIONS-2026-04-15.md`
+- `PHASE-1-SKETCH-2026-04-15.md`
+- `UI-VISION-2026-04-15.md`
+- `FUTURE-DIRECTIONS-2026-04-15.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `projects.yaml`
+- `projects.yaml.example`
+- `docs/`
+- `.gitignore`
+- `.claude/`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
