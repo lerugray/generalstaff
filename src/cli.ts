@@ -11,6 +11,7 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
+import { loadTasks, pendingTasks, addTask } from "./tasks";
 
 const VERSION = "0.0.1";
 
@@ -55,6 +56,12 @@ Usage:
     Example: generalstaff doctor
   generalstaff clean [--keep=N]                           Remove stale worktrees + prune old cycles
     Example: generalstaff clean --keep=10
+
+  generalstaff task list --project=<id>                   Show pending tasks for a project
+    Example: generalstaff task list --project=myapp
+  generalstaff task add --project=<id> [--priority=N] <title>
+                                                          Append a new task to tasks.json
+    Example: generalstaff task add --project=myapp "Fix login bug"
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -232,6 +239,67 @@ switch (command) {
     });
     console.log("=== GeneralStaff Clean ===\n");
     await runClean(parseInt(cleanValues.keep!, 10));
+    break;
+  }
+
+  case "task": {
+    const sub = args[1];
+    if (sub === "list") {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: { project: { type: "string" } },
+        allowPositionals: false,
+      });
+      if (!values.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const tasks = await loadTasks(values.project);
+      const pending = pendingTasks(tasks);
+      if (pending.length === 0) {
+        console.log("No pending tasks.");
+      } else {
+        for (const t of pending) {
+          console.log(`${t.id}  p${t.priority}  ${t.status.padEnd(11)}  ${t.title}`);
+        }
+      }
+    } else if (sub === "add") {
+      const { values: taskValues, positionals: taskPositionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          priority: { type: "string" },
+        },
+        allowPositionals: true,
+      });
+      if (!taskValues.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const title = taskPositionals.join(" ").trim();
+      if (!title) {
+        console.error("Error: task title is required\n  Usage: generalstaff task add --project=<id> <title>");
+        process.exit(1);
+      }
+      let priority = 2;
+      if (taskValues.priority !== undefined) {
+        const parsed = parseInt(taskValues.priority, 10);
+        if (isNaN(parsed) || parsed < 1) {
+          console.error("Error: --priority must be a positive integer");
+          process.exit(1);
+        }
+        priority = parsed;
+      }
+      const task = await addTask(taskValues.project, title, priority);
+      console.log(`Added ${task.id}: ${task.title}`);
+    } else {
+      console.error(
+        "Error: task subcommand required (list or add)\n" +
+          "  Usage: generalstaff task list --project=<id>\n" +
+          "         generalstaff task add --project=<id> <title>",
+      );
+      process.exit(1);
+    }
     break;
   }
 
