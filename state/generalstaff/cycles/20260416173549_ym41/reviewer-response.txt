@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff adds estimateSessionPlan with tests matching the single claimed task gs-037, all 212 tests pass, no hands-off files touched.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-037: In dispatcher.ts, add a function estimateSessionPlan(projects, fleet, budgetMinutes) that returns a preview of which projects would be picked and how many cycles each would get, without executing anything. Add test.",
+      "evidence": "src/dispatcher.ts adds the estimateSessionPlan function with the required signature (projects, fleet, budgetMinutes) returning a preview with picks and per-project counts; tests/dispatcher.test.ts adds a describe block with 8 tests covering empty budget, single project, rotation, priority preference, max cycle cap, budget exhaustion, input immutability, and empty projects list; no execution occurs (simulation clones fleet state).",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification passed with exit code 0, 212 tests passing. The function deep-clones fleet state to avoid mutation (confirmed by test), simulates via scoreProjects, and respects cycle_budget_minutes + 5 overhead per cycle. Only state/generalstaff/tasks.json status flip and the dispatcher.ts + test additions are present — clean scope."
+}
