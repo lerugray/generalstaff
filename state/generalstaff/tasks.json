@@ -1,0 +1,32 @@
+[
+  {
+    "id": "gs-001",
+    "title": "Add verification module test: verify passed vs failed outcomes",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-002",
+    "title": "Add reviewer prompt template test: validate placeholder substitution",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-003",
+    "title": "Add engineer module test: dry-run produces expected log output",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-004",
+    "title": "Improve error messages in projects.ts validation for missing fields",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-005",
+    "title": "Add CLI test: --version, --help, unknown command exit codes",
+    "status": "pending",
+    "priority": 2
+  }
+]
