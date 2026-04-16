@@ -1,0 +1,347 @@
+diff --git a/src/session.ts b/src/session.ts
+index 52003e7..38d880a 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -170,7 +170,7 @@ export async function runSession(options: SessionOptions) {
+   return allResults;
+ }
+ 
+-async function writeDigest(
++export async function writeDigest(
+   results: CycleResult[],
+   durationMinutes: number,
+   config: { digest_dir: string },
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 242c84c..2ed6da8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -30,13 +30,13 @@
+   {
+     "id": "gs-014",
+     "title": "Add digest writer test: verify digest file is created with correct markdown format including cycle outcomes and SHA ranges",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+     "id": "gs-015",
+     "title": "Add dispatcher test: pickNextProject respects override file (next_project.txt) and falls back to priority x staleness picker",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+diff --git a/tests/digest.test.ts b/tests/digest.test.ts
+new file mode 100644
+index 0000000..6dc3e0c
+--- /dev/null
++++ b/tests/digest.test.ts
+@@ -0,0 +1,145 @@
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import { writeDigest } from "../src/session";
++import { setRootDir } from "../src/state";
++import { join } from "path";
++import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
++import type { CycleResult } from "../src/types";
++
++const TEST_DIR = join(import.meta.dir, "fixtures", "digest_test");
++
++beforeEach(() => {
++  mkdirSync(TEST_DIR, { recursive: true });
++  setRootDir(TEST_DIR);
++});
++
++afterEach(() => {
++  rmSync(TEST_DIR, { recursive: true, force: true });
++});
++
++function makeCycleResult(overrides: Partial<CycleResult> = {}): CycleResult {
++  return {
++    cycle_id: "cycle-001",
++    project_id: "test-proj",
++    started_at: "2026-04-16T10:00:00.000Z",
++    ended_at: "2026-04-16T10:05:00.000Z",
++    cycle_start_sha: "abcdef1234567890",
++    cycle_end_sha: "1234567890abcdef",
++    engineer_exit_code: 0,
++    verification_outcome: "passed",
++    reviewer_verdict: "verified",
++    final_outcome: "verified",
++    reason: "all tests pass",
++    ...overrides,
++  };
++}
++
++describe("writeDigest", () => {
++  it("creates digest directory and writes a markdown file", async () => {
++    const results = [makeCycleResult()];
++    await writeDigest(results, 5.2, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    expect(files).toHaveLength(1);
++    expect(files[0]).toMatch(/^digest_\d{8}_\d{6}\.md$/);
++  });
++
++  it("includes header with date, duration, and cycle count", async () => {
++    const results = [makeCycleResult(), makeCycleResult({ cycle_id: "cycle-002", project_id: "proj-b" })];
++    await writeDigest(results, 12.5, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++
++    expect(content).toContain("# GeneralStaff Session Digest");
++    expect(content).toContain("**Duration:** 12.5 min");
++    expect(content).toContain("**Cycles:** 2");
++    expect(content).toMatch(/\*\*Date:\*\* \d{4}-\d{2}-\d{2}T/);
++  });
++
++  it("includes cycle outcomes with correct fields", async () => {
++    const result = makeCycleResult({
++      project_id: "catalogdna",
++      cycle_id: "cycle-042",
++      final_outcome: "verified",
++      reason: "tests pass, scope matches",
++      engineer_exit_code: 0,
++      verification_outcome: "passed",
++      reviewer_verdict: "verified",
++    });
++    await writeDigest([result], 3.0, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++
++    expect(content).toContain("## catalogdna — cycle-042");
++    expect(content).toContain("- **Outcome:** verified");
++    expect(content).toContain("- **Reason:** tests pass, scope matches");
++    expect(content).toContain("- **Engineer exit:** 0");
++    expect(content).toContain("- **Verification:** passed");
++    expect(content).toContain("- **Reviewer:** verified");
++  });
++
++  it("truncates SHAs to 8 characters", async () => {
++    const result = makeCycleResult({
++      cycle_start_sha: "abcdef1234567890",
++      cycle_end_sha: "1234567890abcdef",
++    });
++    await writeDigest([result], 1.0, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++
++    expect(content).toContain("**SHA:** abcdef12 → 12345678");
++    // Full SHAs should not appear
++    expect(content).not.toContain("abcdef1234567890");
++    expect(content).not.toContain("1234567890abcdef");
++  });
++
++  it("includes sections for multiple cycle results", async () => {
++    const results = [
++      makeCycleResult({ project_id: "proj-a", cycle_id: "c-1", final_outcome: "verified" }),
++      makeCycleResult({ project_id: "proj-b", cycle_id: "c-2", final_outcome: "verification_failed", reason: "lint errors" }),
++      makeCycleResult({ project_id: "proj-a", cycle_id: "c-3", final_outcome: "verified_weak", reason: "minor scope drift" }),
++    ];
++    await writeDigest(results, 15.0, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++
++    expect(content).toContain("## proj-a — c-1");
++    expect(content).toContain("## proj-b — c-2");
++    expect(content).toContain("## proj-a — c-3");
++    expect(content).toContain("- **Outcome:** verification_failed");
++    expect(content).toContain("- **Reason:** lint errors");
++    expect(content).toContain("- **Outcome:** verified_weak");
++    expect(content).toContain("- **Reason:** minor scope drift");
++  });
++
++  it("creates digest directory if it does not exist", async () => {
++    const results = [makeCycleResult()];
++    await writeDigest(results, 1.0, { digest_dir: "nested/deep/digests" });
++
++    const digestDir = join(TEST_DIR, "nested", "deep", "digests");
++    const files = readdirSync(digestDir);
++    expect(files).toHaveLength(1);
++    expect(files[0]).toMatch(/^digest_.*\.md$/);
++  });
++
++  it("writes empty-cycle digest when results array is empty", async () => {
++    await writeDigest([], 0.5, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    expect(files).toHaveLength(1);
++
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).toContain("**Cycles:** 0");
++    // No cycle sections
++    expect(content).not.toContain("##");
++  });
++});
+diff --git a/tests/dispatcher.test.ts b/tests/dispatcher.test.ts
+index 3855960..b4d14b3 100644
+--- a/tests/dispatcher.test.ts
++++ b/tests/dispatcher.test.ts
+@@ -1,6 +1,9 @@
+-import { describe, expect, it } from "bun:test";
+-import { scoreProjects, shouldChain } from "../src/dispatcher";
+-import type { FleetState, ProjectConfig, CycleResult } from "../src/types";
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import { scoreProjects, shouldChain, pickNextProject } from "../src/dispatcher";
++import { setRootDir } from "../src/state";
++import { join } from "path";
++import { mkdirSync, rmSync, writeFileSync } from "fs";
++import type { FleetState, ProjectConfig, CycleResult, DispatcherConfig } from "../src/types";
+ 
+ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+   return {
+@@ -82,6 +85,145 @@ describe("scoreProjects", () => {
+   });
+ });
+ 
++const TEST_DIR = join(import.meta.dir, "fixtures", "dispatcher_test");
++
++function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig {
++  return {
++    state_dir: "state",
++    fleet_state_file: "fleet_state.json",
++    stop_file: "STOP",
++    override_file: "next_project.txt",
++    picker: "priority_staleness",
++    max_cycles_per_project_per_session: 3,
++    log_dir: "logs",
++    digest_dir: "digests",
++    ...overrides,
++  };
++}
++
++function makeFleet(projects: Record<string, Partial<FleetState["projects"][string]>> = {}): FleetState {
++  const built: FleetState["projects"] = {};
++  for (const [id, overrides] of Object.entries(projects)) {
++    built[id] = {
++      last_cycle_at: null,
++      last_cycle_outcome: null,
++      total_cycles: 0,
++      total_verified: 0,
++      total_failed: 0,
++      accumulated_minutes: 0,
++      ...overrides,
++    };
++  }
++  return { version: 1, updated_at: new Date().toISOString(), projects: built };
++}
++
++describe("pickNextProject", () => {
++  beforeEach(() => {
++    mkdirSync(TEST_DIR, { recursive: true });
++    setRootDir(TEST_DIR);
++  });
++
++  afterEach(() => {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  });
++
++  it("respects override file (next_project.txt)", async () => {
++    const config = makeConfig();
++    writeFileSync(join(TEST_DIR, "next_project.txt"), "proj-b\n", "utf8");
++
++    const projects = [
++      makeProject({ id: "proj-a", priority: 1 }),
++      makeProject({ id: "proj-b", priority: 5 }),
++    ];
++    const fleet = makeFleet();
++
++    const result = await pickNextProject(projects, config, fleet);
++    expect(result).not.toBeNull();
++    expect(result!.project.id).toBe("proj-b");
++    expect(result!.reason).toContain("override");
++    expect(result!.reason).toContain("next_project.txt");
++  });
++
++  it("skips override if project is in skipProjectIds", async () => {
++    const config = makeConfig();
++    writeFileSync(join(TEST_DIR, "next_project.txt"), "proj-a\n", "utf8");
++
++    const projects = [
++      makeProject({ id: "proj-a", priority: 1 }),
++      makeProject({ id: "proj-b", priority: 1 }),
++    ];
++    const fleet = makeFleet();
++
++    const result = await pickNextProject(projects, config, fleet, new Set(["proj-a"]));
++    expect(result).not.toBeNull();
++    // Should fall through to picker since override project is skipped
++    expect(result!.project.id).toBe("proj-b");
++    expect(result!.reason).toContain("picker");
++  });
++
++  it("falls back to priority x staleness picker when no override file exists", async () => {
++    const config = makeConfig();
++    // No override file created
++
++    const projects = [
++      makeProject({ id: "low-pri", priority: 5 }),
++      makeProject({ id: "high-pri", priority: 1 }),
++    ];
++    const fleet = makeFleet();
++
++    const result = await pickNextProject(projects, config, fleet);
++    expect(result).not.toBeNull();
++    expect(result!.project.id).toBe("high-pri");
++    expect(result!.reason).toContain("picker");
++    expect(result!.reason).toContain("priority=1");
++  });
++
++  it("prefers staler project when priorities are equal", async () => {
++    const config = makeConfig();
++
++    const projects = [
++      makeProject({ id: "fresh", priority: 1 }),
++      makeProject({ id: "stale", priority: 1 }),
++    ];
++    const fleet = makeFleet({
++      fresh: { last_cycle_at: new Date().toISOString() },
++      // stale has no entry → maximum staleness
++    });
++
++    const result = await pickNextProject(projects, config, fleet);
++    expect(result).not.toBeNull();
++    expect(result!.project.id).toBe("stale");
++  });
++
++  it("returns null when all projects are skipped", async () => {
++    const config = makeConfig();
++
++    const projects = [
++      makeProject({ id: "proj-a", priority: 1 }),
++      makeProject({ id: "proj-b", priority: 2 }),
++    ];
++    const fleet = makeFleet();
++
++    const result = await pickNextProject(projects, config, fleet, new Set(["proj-a", "proj-b"]));
++    expect(result).toBeNull();
++  });
++
++  it("ignores empty override file", async () => {
++    const config = makeConfig();
++    writeFileSync(join(TEST_DIR, "next_project.txt"), "  \n", "utf8");
++
++    const projects = [
++      makeProject({ id: "proj-a", priority: 1 }),
++    ];
++    const fleet = makeFleet();
++
++    const result = await pickNextProject(projects, config, fleet);
++    expect(result).not.toBeNull();
++    expect(result!.project.id).toBe("proj-a");
++    expect(result!.reason).toContain("picker");
++  });
++});
++
+ describe("shouldChain", () => {
+   it("chains when conditions are met", async () => {
+     // Note: this will try to check tasks.json which won't exist,
