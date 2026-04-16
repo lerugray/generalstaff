@@ -4,7 +4,7 @@ import { parseArgs } from "util";
 import { basename, resolve } from "path";
 import { runSession } from "./session";
 import { runSingleCycle } from "./cycle";
-import { loadFleetState } from "./state";
+import { loadFleetState, getProjectSummary } from "./state";
 import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
@@ -139,14 +139,10 @@ switch (command) {
     const stopped = await isStopFilePresent();
 
     if (statusValues.json) {
-      const output = {
-        stopped,
-        projects: projects.map((p) => ({
-          id: p.id,
-          priority: p.priority,
-          state: fleet.projects[p.id] ?? null,
-        })),
-      };
+      const summaries = await Promise.all(
+        projects.map((p) => getProjectSummary(p, fleet)),
+      );
+      const output = { stopped, projects: summaries };
       console.log(JSON.stringify(output, null, 2));
     } else {
       console.log("=== GeneralStaff Fleet Status ===\n");

@@ -5,13 +5,23 @@
 import { existsSync, mkdirSync } from "fs";
 import { readFile, writeFile, rename, unlink } from "fs/promises";
 import { join, dirname } from "path";
+import { countRemainingWork } from "./work_detection";
 import type {
   FleetState,
   ProjectState,
   ProjectFleetState,
   CycleOutcome,
   DispatcherConfig,
+  ProjectConfig,
 } from "./types";
+
+export interface ProjectSummary {
+  id: string;
+  priority: number;
+  state: ProjectFleetState | null;
+  project_state: ProjectState;
+  remaining_tasks: number;
+}
 
 let _rootDir: string | null = null;
 
@@ -163,6 +173,24 @@ export async function saveProjectState(
     "STATE.json",
   );
   await atomicWrite(filePath, JSON.stringify(state, null, 2) + "\n");
+}
+
+export async function getProjectSummary(
+  project: ProjectConfig,
+  fleet: FleetState,
+  config?: DispatcherConfig,
+): Promise<ProjectSummary> {
+  const [projectState, remaining] = await Promise.all([
+    loadProjectState(project.id, config),
+    countRemainingWork(project),
+  ]);
+  return {
+    id: project.id,
+    priority: project.priority,
+    state: fleet.projects[project.id] ?? null,
+    project_state: projectState,
+    remaining_tasks: remaining,
+  };
 }
 
 // --- Cycle directory setup ---
