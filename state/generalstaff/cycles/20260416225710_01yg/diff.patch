@@ -1,0 +1,220 @@
+diff --git a/src/clean.ts b/src/clean.ts
+index b0299b0..d96810e 100644
+--- a/src/clean.ts
++++ b/src/clean.ts
+@@ -7,7 +7,10 @@ import { $ } from "bun";
+ import { getRootDir } from "./state";
+ import { loadProjects } from "./projects";
+ 
+-export async function runClean(keepCycles: number = 20) {
++export async function runClean(
++  keepCycles: number = 20,
++  logDays: number = 30,
++) {
+   const projects = await loadProjects();
+   const root = getRootDir();
+   let cleaned = 0;
+@@ -27,7 +30,36 @@ export async function runClean(keepCycles: number = 20) {
+     }
+   }
+ 
+-  // 2. Prune old cycle directories (keep last N per project)
++  // 2. Rotate old log files in <root>/logs (older than logDays)
++  const logsDir = join(root, "logs");
++  if (existsSync(logsDir)) {
++    const cutoffMs = Date.now() - logDays * 86_400_000;
++    let deletedLogs = 0;
++    for (const f of readdirSync(logsDir)) {
++      const full = join(logsDir, f);
++      let st;
++      try {
++        st = statSync(full);
++      } catch {
++        continue;
++      }
++      if (!st.isFile()) continue;
++      if (st.mtimeMs < cutoffMs) {
++        try {
++          rmSync(full, { force: true });
++          deletedLogs++;
++        } catch { /* ignore */ }
++      }
++    }
++    if (deletedLogs > 0) {
++      console.log(
++        `  Deleted ${deletedLogs} log file(s) older than ${logDays} day(s)`,
++      );
++      cleaned += deletedLogs;
++    }
++  }
++
++  // 3. Prune old cycle directories (keep last N per project)
+   const stateDir = join(root, "state");
+   if (!existsSync(stateDir)) {
+     if (cleaned === 0) console.log("Nothing to clean.");
+diff --git a/src/cli.ts b/src/cli.ts
+index 4f51e67..83f4b54 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -61,8 +61,9 @@ Usage:
+ 
+   generalstaff doctor                                     Check prerequisites (bun, git, claude)
+     Example: generalstaff doctor
+-  generalstaff clean [--keep=N]                           Remove stale worktrees + prune old cycles
++  generalstaff clean [--keep=N] [--log-days=N]            Remove stale worktrees + prune old cycles + rotate logs
+     Example: generalstaff clean --keep=10
++    Example: generalstaff clean --log-days=7             # delete logs older than 7 days
+ 
+   generalstaff task list --project=<id>                   Show pending tasks for a project
+     Example: generalstaff task list --project=myapp
+@@ -265,11 +266,15 @@ switch (command) {
+       args: args.slice(1),
+       options: {
+         keep: { type: "string", default: "20" },
++        "log-days": { type: "string", default: "30" },
+       },
+       allowPositionals: false,
+     });
+     console.log("=== GeneralStaff Clean ===\n");
+-    await runClean(parseInt(cleanValues.keep!, 10));
++    await runClean(
++      parseInt(cleanValues.keep!, 10),
++      parseInt(cleanValues["log-days"]!, 10),
++    );
+     break;
+   }
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index d65be0a..0e4a9d3 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -182,7 +182,7 @@
+   {
+     "id": "gs-056",
+     "title": "In src/clean.ts, add a log-rotation step: delete files in logs/ older than N days (N configurable via --log-days=<n> flag, default 30). Surface count of deleted files in the clean output. Add tests covering files on both sides of the threshold and a custom --log-days override.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/clean.test.ts b/tests/clean.test.ts
+new file mode 100644
+index 0000000..3545f16
+--- /dev/null
++++ b/tests/clean.test.ts
+@@ -0,0 +1,115 @@
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import { mkdirSync, rmSync, writeFileSync, existsSync, utimesSync, readdirSync } from "fs";
++import { join } from "path";
++import { runClean } from "../src/clean";
++import { setRootDir } from "../src/state";
++
++const TEST_DIR = join(import.meta.dir, "fixtures", "clean_test");
++
++const MINIMAL_PROJECTS_YAML = `
++projects:
++  - id: alpha
++    path: /tmp/clean-alpha-nonexistent
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++function setMtimeDaysAgo(filePath: string, daysAgo: number) {
++  const t = (Date.now() - daysAgo * 86_400_000) / 1000;
++  utimesSync(filePath, t, t);
++}
++
++beforeEach(() => {
++  mkdirSync(TEST_DIR, { recursive: true });
++  writeFileSync(join(TEST_DIR, "projects.yaml"), MINIMAL_PROJECTS_YAML);
++  setRootDir(TEST_DIR);
++});
++
++afterEach(() => {
++  rmSync(TEST_DIR, { recursive: true, force: true });
++});
++
++describe("runClean log rotation", () => {
++  it("deletes log files older than the default 30-day threshold", async () => {
++    const logsDir = join(TEST_DIR, "logs");
++    mkdirSync(logsDir, { recursive: true });
++
++    const oldFile = join(logsDir, "old.log");
++    const newFile = join(logsDir, "new.log");
++    writeFileSync(oldFile, "stale\n");
++    writeFileSync(newFile, "fresh\n");
++    setMtimeDaysAgo(oldFile, 45);
++    setMtimeDaysAgo(newFile, 5);
++
++    await runClean(20, 30);
++
++    expect(existsSync(oldFile)).toBe(false);
++    expect(existsSync(newFile)).toBe(true);
++  });
++
++  it("respects a custom --log-days threshold", async () => {
++    const logsDir = join(TEST_DIR, "logs");
++    mkdirSync(logsDir, { recursive: true });
++
++    const day3 = join(logsDir, "day3.log");
++    const day10 = join(logsDir, "day10.log");
++    writeFileSync(day3, "x");
++    writeFileSync(day10, "y");
++    setMtimeDaysAgo(day3, 3);
++    setMtimeDaysAgo(day10, 10);
++
++    // Threshold = 7 days: day10 is older than 7 days, day3 is not.
++    await runClean(20, 7);
++
++    expect(existsSync(day3)).toBe(true);
++    expect(existsSync(day10)).toBe(false);
++  });
++
++  it("reports the count of deleted log files in the output", async () => {
++    const logsDir = join(TEST_DIR, "logs");
++    mkdirSync(logsDir, { recursive: true });
++
++    for (let i = 0; i < 3; i++) {
++      const f = join(logsDir, `old-${i}.log`);
++      writeFileSync(f, "x");
++      setMtimeDaysAgo(f, 60);
++    }
++    const fresh = join(logsDir, "fresh.log");
++    writeFileSync(fresh, "x");
++    setMtimeDaysAgo(fresh, 1);
++
++    const originalLog = console.log;
++    const lines: string[] = [];
++    console.log = (...args: unknown[]) => {
++      lines.push(args.map(String).join(" "));
++    };
++    try {
++      await runClean(20, 30);
++    } finally {
++      console.log = originalLog;
++    }
++
++    const output = lines.join("\n");
++    expect(output).toMatch(/Deleted 3 log file\(s\) older than 30 day\(s\)/);
++    expect(existsSync(fresh)).toBe(true);
++    expect(readdirSync(logsDir)).toEqual(["fresh.log"]);
++  });
++
++  it("does nothing when logs/ directory does not exist", async () => {
++    expect(existsSync(join(TEST_DIR, "logs"))).toBe(false);
++    await expect(runClean(20, 30)).resolves.toBeUndefined();
++  });
++});
