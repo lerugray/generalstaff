@@ -88,5 +88,35 @@
     "title": "Add a projects.test.ts test that validates warnProjectPaths with a real git repo (use the GeneralStaff repo itself as the valid path) and a non-git directory",
     "status": "pending",
     "priority": 2
+  },
+  {
+    "id": "gs-041",
+    "title": "Wire estimateSessionPlan into the session command — before running cycles, print a preview table showing which projects will be picked and how many cycles each gets. Only show when not --dry-run. Add to session output.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-042",
+    "title": "Add a generalstaff task command to cli.ts with subcommands: 'task list --project=<id>' shows pending tasks, 'task add --project=<id> <title>' appends a new task to tasks.json. Include tests.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-043",
+    "title": "In the history command output, add ANSI color codes: green for verified, red for verification_failed, yellow for verified_weak, gray for cycle_skipped. Only colorize when stdout is a TTY.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-044",
+    "title": "Add a session.test.ts test that validates the empty-cycle guard exits after 3 consecutive empty diffs, and that capped projects get added to the skip set",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-045",
+    "title": "In audit.ts, add a function summarizeCosts that counts reviewer_invoked events from PROGRESS.jsonl and estimates total token usage based on prompt_length. Wire into the history --format=compact output as an optional column.",
+    "status": "pending",
+    "priority": 3
   }
 ]
