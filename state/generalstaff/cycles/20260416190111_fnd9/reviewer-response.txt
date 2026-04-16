@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "Diff implements gs-047 (validateHandsOff with test) cleanly; verification passed and no hands-off files touched.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-047: In projects.ts, add a validateHandsOff function that checks each hands_off pattern against the project's actual file tree (git ls-files) and warns about patterns that don't match anything — helps users catch typos in their hands-off config. Add test.",
+      "evidence": "src/projects.ts adds validateHandsOff() that runs git ls-files and warns on patterns matching no tracked files; tests/projects.test.ts adds 5 test cases covering match, no-match, missing path, non-git, and multi-pattern cases.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "297 tests pass, tsc clean. validateHandsOff correctly skips non-existent paths and non-git dirs rather than warning, which is sensible defensive behavior."
+}
