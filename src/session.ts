@@ -56,6 +56,23 @@ export async function runSession(options: SessionOptions) {
     });
   }
 
+  // Auto-commit session initialization so the tree is clean for cycle checks
+  // (matters for dogfooding where the project IS the GeneralStaff repo)
+  try {
+    const root = (await import("./state")).getRootDir();
+    await import("bun").then(({ $ }) =>
+      $`git -C ${root} add --ignore-errors state/`.quiet().nothrow()
+    );
+    const hasStagedChanges = await import("bun").then(({ $ }) =>
+      $`git -C ${root} diff --cached --quiet`.quiet().nothrow().then((r) => r.exitCode !== 0)
+    );
+    if (hasStagedChanges) {
+      await import("bun").then(({ $ }) =>
+        $`git -C ${root} commit -m ${"state: session init"}`.quiet()
+      );
+    }
+  } catch { /* non-fatal */ }
+
   let currentProject: ProjectConfig | null = null;
   let pickReason: string = "";
 
