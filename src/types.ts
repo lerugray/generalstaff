@@ -159,3 +159,37 @@ export interface BotRunningResult {
   running: boolean;
   reason?: string;
 }
+
+// --- Type guards for parse boundaries ---
+
+const VALID_VERDICTS: readonly string[] = ["verified", "verified_weak", "verification_failed"];
+const VALID_EVENTS: readonly string[] = [
+  "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
+  "verification_run", "verification_outcome", "diff_summary",
+  "reviewer_invoked", "reviewer_response", "reviewer_verdict",
+  "cycle_end", "session_start", "session_end",
+];
+
+export function isReviewerResponse(v: unknown): v is ReviewerResponse {
+  if (v == null || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.verdict === "string" && VALID_VERDICTS.includes(o.verdict) &&
+    typeof o.reason === "string" &&
+    Array.isArray(o.scope_drift_files) &&
+    Array.isArray(o.hands_off_violations) &&
+    Array.isArray(o.task_evidence) &&
+    Array.isArray(o.silent_failures) &&
+    typeof o.notes === "string"
+  );
+}
+
+export function isProgressEntry(v: unknown): v is ProgressEntry {
+  if (v == null || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.timestamp === "string" &&
+    typeof o.event === "string" && VALID_EVENTS.includes(o.event) &&
+    (o.data != null && typeof o.data === "object" && !Array.isArray(o.data))
+  );
+}

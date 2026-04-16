@@ -173,4 +173,46 @@ describe("isBotRunning", () => {
     );
     expect(isBotRunning(makeProject())).toEqual({ running: false });
   });
+
+  // --- Worktree detection mode (single-signal: .bot-worktree only) ---
+
+  it("worktree mode: detects fresh .bot-worktree as running", () => {
+    const worktree = join(FIXTURES, "proj", ".bot-worktree");
+    mkdirSync(worktree, { recursive: true });
+    const result = isBotRunning(
+      makeProject({ concurrency_detection: "worktree" }),
+    );
+    expect(result.running).toBe(true);
+    expect(result.reason).toContain(".bot-worktree");
+  });
+
+  it("worktree mode: ignores stale .bot-worktree (>10 min old)", () => {
+    const worktree = join(FIXTURES, "proj", ".bot-worktree");
+    mkdirSync(worktree, { recursive: true });
+    setAge(worktree, 15);
+    expect(
+      isBotRunning(makeProject({ concurrency_detection: "worktree" })),
+    ).toEqual({ running: false });
+  });
+
+  it("worktree mode: returns false when .bot-worktree does not exist", () => {
+    expect(
+      isBotRunning(makeProject({ concurrency_detection: "worktree" })),
+    ).toEqual({ running: false });
+  });
+
+  it("worktree mode: ignores bot_status.md and heartbeat signals", () => {
+    // Set up signals that would trigger in catalogdna mode
+    writeFixture(
+      "proj/bot_status.md",
+      `# Bot Status\nStatus: **working**\nCurrent task: Fix login bug\n`,
+    );
+    const sentinelPath = join(FIXTURES, "proj", "logs", "heartbeat_001.sentinel");
+    mkdirSync(join(FIXTURES, "proj", "logs"), { recursive: true });
+    writeFileSync(sentinelPath, "beat", "utf8");
+    // Worktree mode should only check .bot-worktree — these other signals are irrelevant
+    expect(
+      isBotRunning(makeProject({ concurrency_detection: "worktree" })),
+    ).toEqual({ running: false });
+  });
 });
