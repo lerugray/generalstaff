@@ -1,62 +1,42 @@
 [
+  { "id": "gs-001", "title": "Add verification module test: verify passed vs failed outcomes", "status": "done", "priority": 1 },
+  { "id": "gs-002", "title": "Add reviewer prompt template test: validate placeholder substitution", "status": "done", "priority": 1 },
+  { "id": "gs-003", "title": "Add engineer module test: dry-run produces expected log output", "status": "done", "priority": 2 },
+  { "id": "gs-004", "title": "Improve error messages in projects.ts validation for missing fields", "status": "done", "priority": 3 },
+  { "id": "gs-005", "title": "Add CLI test: --version, --help, unknown command exit codes", "status": "done", "priority": 2 },
+  { "id": "gs-006", "title": "Add work_detection test: greenfield tasks with in_progress status should count as remaining work", "status": "done", "priority": 1 },
+  { "id": "gs-007", "title": "Add safety module test: isBotRunning with catalogdna detection mode using fixture files for .bot-worktree, bot_status.md, and heartbeat sentinels", "status": "done", "priority": 1 },
+  { "id": "gs-008", "title": "Add reviewer module test: parseReviewerResponse handles raw JSON, fenced JSON, JSON with surrounding prose, and malformed responses", "status": "done", "priority": 1 },
+  { "id": "gs-009", "title": "Add state module test: atomic write safety — concurrent writes don't corrupt STATE.json (write tmp then rename)", "status": "done", "priority": 2 },
+  { "id": "gs-010", "title": "Add audit module test: tailProgressLog formats entries correctly across multiple projects", "status": "done", "priority": 2 },
   {
-    "id": "gs-001",
-    "title": "Add verification module test: verify passed vs failed outcomes",
-    "status": "done",
+    "id": "gs-011",
+    "title": "Skip reviewer agent when diff is empty — no API call needed, log cycle_end with reason 'empty diff, no work to review' and outcome verified_weak",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-002",
-    "title": "Add reviewer prompt template test: validate placeholder substitution",
-    "status": "done",
+    "id": "gs-012",
+    "title": "In cycle.ts, before running the engineer, update the bot/work branch to match the current HEAD so the bot always starts from the latest code (git branch -f bot/work HEAD)",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-003",
-    "title": "Add engineer module test: dry-run produces expected log output",
-    "status": "done",
+    "id": "gs-013",
+    "title": "Add --json flag to the CLI status command that outputs fleet state as JSON instead of formatted text",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-004",
-    "title": "Improve error messages in projects.ts validation for missing fields",
-    "status": "done",
-    "priority": 3
-  },
-  {
-    "id": "gs-005",
-    "title": "Add CLI test: --version, --help, unknown command exit codes",
-    "status": "done",
+    "id": "gs-014",
+    "title": "Add digest writer test: verify digest file is created with correct markdown format including cycle outcomes and SHA ranges",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-006",
-    "title": "Add work_detection test: greenfield tasks with in_progress status should count as remaining work",
-    "status": "done",
-    "priority": 1
-  },
-  {
-    "id": "gs-007",
-    "title": "Add safety module test: isBotRunning with catalogdna detection mode using fixture files for .bot-worktree, bot_status.md, and heartbeat sentinels",
-    "status": "done",
-    "priority": 1
-  },
-  {
-    "id": "gs-008",
-    "title": "Add reviewer module test: parseReviewerResponse handles raw JSON, fenced JSON, JSON with surrounding prose, and malformed responses",
-    "status": "done",
-    "priority": 1
-  },
-  {
-    "id": "gs-009",
-    "title": "Add state module test: atomic write safety — concurrent writes don't corrupt STATE.json (write tmp then rename)",
-    "status": "done",
-    "priority": 2
-  },
-  {
-    "id": "gs-010",
-    "title": "Add audit module test: tailProgressLog formats entries correctly across multiple projects",
-    "status": "done",
+    "id": "gs-015",
+    "title": "Add dispatcher test: pickNextProject respects override file (next_project.txt) and falls back to priority x staleness picker",
+    "status": "pending",
     "priority": 2
   }
 ]
