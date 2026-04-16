@@ -54,7 +54,7 @@ dispatcher:
     cleanup();
   });
 
-  it("rejects empty hands_off", async () => {
+  it("rejects empty hands_off with specific message", async () => {
     const path = writeYaml(
       "no-handsoff.yaml",
       `
@@ -68,11 +68,28 @@ projects:
     hands_off: []
 `,
     );
-    await expect(loadProjectsYaml(path)).rejects.toThrow("hands_off");
+    await expect(loadProjectsYaml(path)).rejects.toThrow("must not be empty");
     cleanup();
   });
 
-  it("rejects missing engineer_command", async () => {
+  it("rejects missing hands_off with 'required but missing'", async () => {
+    const path = writeYaml(
+      "missing-handsoff.yaml",
+      `
+projects:
+  - id: bad
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow("required but missing");
+    cleanup();
+  });
+
+  it("rejects missing engineer_command with 'required but missing'", async () => {
     const path = writeYaml(
       "no-eng.yaml",
       `
@@ -86,7 +103,43 @@ projects:
       - x
 `,
     );
-    await expect(loadProjectsYaml(path)).rejects.toThrow("engineer_command");
+    await expect(loadProjectsYaml(path)).rejects.toThrow("required but missing");
+    cleanup();
+  });
+
+  it("rejects wrong-type priority with 'got string'", async () => {
+    const path = writeYaml(
+      "bad-priority.yaml",
+      `
+projects:
+  - id: bad
+    path: /tmp/test
+    priority: "high"
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow("got string");
+    cleanup();
+  });
+
+  it("rejects non-integer cycle_budget_minutes", async () => {
+    const path = writeYaml(
+      "bad-budget.yaml",
+      `
+projects:
+  - id: bad
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 2.5
+    hands_off: [x]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow("must be an integer");
     cleanup();
   });
 
@@ -115,7 +168,7 @@ projects:
     cleanup();
   });
 
-  it("rejects invalid work_detection mode", async () => {
+  it("rejects invalid work_detection with actual value", async () => {
     const path = writeYaml(
       "bad-wd.yaml",
       `
@@ -130,7 +183,7 @@ projects:
     hands_off: [x]
 `,
     );
-    await expect(loadProjectsYaml(path)).rejects.toThrow("work_detection");
+    await expect(loadProjectsYaml(path)).rejects.toThrow('got "magic"');
     cleanup();
   });
 });

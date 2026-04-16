@@ -20,7 +20,7 @@
   {
     "id": "gs-004",
     "title": "Improve error messages in projects.ts validation for missing fields",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
