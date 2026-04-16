@@ -75,6 +75,9 @@ workflow applies.)
 - [[2026-04-15]] — pivot session (home PC, evening, Opus 4.6).
   Phase 0 design pass, Polsia deep-dive, Phase 1 plan, all 5
   open questions resolved, future directions captured.
+- [[2026-04-16]] — first build session (work PC, morning, Opus
+  4.6). Phase 1 code landed, dogfooding setup, 7+ verified
+  autonomous cycles, 121+ tests, 3 bugs found and fixed.
 
 ## Conventions for working in this folder
 
@@ -129,12 +132,33 @@ the `.md` files; the vault is just a viewer convention.
   unchanged; Obsidian and Claude Code coexist on the same source
   files
 
-## Phase status (2026-04-15)
+## Phase 1 code (`src/`, `tests/`, `scripts/`)
 
-- **Phase 0 (current):** Design docs for the open-source pivot.
-  No code yet. Adding new design files happens here.
-- **Phase 1 (next):** Sequential MVP for catalogdna with
-  verification gate. Will happen in a future build session.
+Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
+
+- `src/cli.ts` — CLI entry point (session, cycle, status, stop/start, log)
+- `src/session.ts` — session loop with budget management and chaining
+- `src/cycle.ts` — cycle orchestration (engineer → verify → review → audit)
+- `src/dispatcher.ts` — priority × staleness picker, override file, chaining rules
+- `src/engineer.ts` — subprocess wrapper for engineer_command
+- `src/verification.ts` — independent verification gate (Hard Rule #6)
+- `src/reviewer.ts` — spawn claude -p reviewer, parse JSON verdict
+- `src/prompts/reviewer.ts` — Q2 reviewer prompt template
+- `src/audit.ts` — append-only PROGRESS.jsonl writer (Hard Rule #9)
+- `src/state.ts` — atomic file writes, fleet/project state
+- `src/projects.ts` — projects.yaml parser + validator
+- `src/safety.ts` — STOP file, clean-tree check, hands-off, concurrency detection
+- `src/work_detection.ts` — Q1 chaining logic (bot_tasks.md + tasks.json)
+- `src/types.ts` — shared type definitions
+- `scripts/run_bot.sh` — worktree-isolated bot launcher
+- `tests/` — 121+ tests across 11 files
+
+## Phase status (2026-04-16)
+
+- **Phase 0:** Design docs complete (2026-04-15).
+- **Phase 1 (current):** Sequential MVP built and dogfooding.
+  GeneralStaff is its own first test project. 7+ verified
+  autonomous cycles completed. 121+ tests passing.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it
