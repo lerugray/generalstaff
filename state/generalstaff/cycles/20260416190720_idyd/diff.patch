@@ -1,0 +1,95 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 3e9ed9a..02cb573 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -134,7 +134,7 @@
+   {
+     "id": "gs-048",
+     "title": "Add a test for extractChangedFiles in cycle.ts — verify it handles renames (diff --git a/old b/new), binary files, and files with spaces in their names",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index 78fd027..ae08afa 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -31,6 +31,77 @@ describe("extractChangedFiles", () => {
+     const diff = "diff --git a/old-name.ts b/new-name.ts\n";
+     expect(extractChangedFiles(diff)).toEqual(["new-name.ts"]);
+   });
++
++  it("handles renamed files across directories", () => {
++    const diff = [
++      "diff --git a/src/old/foo.ts b/src/new/foo.ts",
++      "similarity index 100%",
++      "rename from src/old/foo.ts",
++      "rename to src/new/foo.ts",
++    ].join("\n");
++    expect(extractChangedFiles(diff)).toEqual(["src/new/foo.ts"]);
++  });
++
++  it("handles binary files", () => {
++    const diff = [
++      "diff --git a/assets/image.png b/assets/image.png",
++      "index e69de29..d41d8cd 100644",
++      "Binary files a/assets/image.png and b/assets/image.png differ",
++    ].join("\n");
++    expect(extractChangedFiles(diff)).toEqual(["assets/image.png"]);
++  });
++
++  it("handles new binary files", () => {
++    const diff = [
++      "diff --git a/logo.png b/logo.png",
++      "new file mode 100644",
++      "index 0000000..d41d8cd",
++      "Binary files /dev/null and b/logo.png differ",
++    ].join("\n");
++    expect(extractChangedFiles(diff)).toEqual(["logo.png"]);
++  });
++
++  it("handles files with spaces in their names", () => {
++    const diff = [
++      "diff --git a/docs/my notes.md b/docs/my notes.md",
++      "index abc..def 100644",
++      "--- a/docs/my notes.md",
++      "+++ b/docs/my notes.md",
++      "@@ -1 +1 @@",
++      "-old",
++      "+new",
++    ].join("\n");
++    expect(extractChangedFiles(diff)).toEqual(["docs/my notes.md"]);
++  });
++
++  it("handles renames where both names contain spaces", () => {
++    const diff = "diff --git a/old name.ts b/new name.ts\n";
++    expect(extractChangedFiles(diff)).toEqual(["new name.ts"]);
++  });
++
++  it("handles a mixed diff with text, binary, and spaced filenames", () => {
++    const diff = [
++      "diff --git a/src/main.ts b/src/main.ts",
++      "--- a/src/main.ts",
++      "+++ b/src/main.ts",
++      "@@ -1 +1 @@",
++      "-a",
++      "+b",
++      "diff --git a/assets/icon.png b/assets/icon.png",
++      "Binary files a/assets/icon.png and b/assets/icon.png differ",
++      "diff --git a/docs/release notes.md b/docs/release notes.md",
++      "--- a/docs/release notes.md",
++      "+++ b/docs/release notes.md",
++      "@@ -1 +1 @@",
++      "-x",
++      "+y",
++    ].join("\n");
++    expect(extractChangedFiles(diff)).toEqual([
++      "src/main.ts",
++      "assets/icon.png",
++      "docs/release notes.md",
++    ]);
++  });
+ });
+ 
+ describe("executeCycle", () => {
