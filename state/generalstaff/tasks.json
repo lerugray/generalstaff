@@ -68,7 +68,7 @@
   {
     "id": "gs-037",
     "title": "In dispatcher.ts, add a function estimateSessionPlan(projects, fleet, budgetMinutes) that returns a preview of which projects would be picked and how many cycles each would get, without executing anything. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

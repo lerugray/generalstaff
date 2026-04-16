@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { scoreProjects, shouldChain, pickNextProject } from "../src/dispatcher";
+import { scoreProjects, shouldChain, pickNextProject, estimateSessionPlan } from "../src/dispatcher";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
@@ -282,6 +282,99 @@ describe("pickNextProject", () => {
     expect(result).not.toBeNull();
     expect(result!.project.id).toBe("proj-a");
     expect(result!.reason).toContain("picker");
+  });
+});
+
+describe("estimateSessionPlan", () => {
+  it("returns an empty plan when budget is too small for any cycle", () => {
+    const projects = [
+      makeProject({ id: "a", priority: 1, cycle_budget_minutes: 60 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 10);
+    expect(plan.total_cycles).toBe(0);
+    expect(plan.picks).toEqual([]);
+    expect(plan.budget_used_minutes).toBe(0);
+    expect(plan.budget_remaining_minutes).toBe(10);
+    expect(plan.per_project).toEqual([{ project_id: "a", cycle_count: 0 }]);
+  });
+
+  it("fills budget with a single project when only one is registered", () => {
+    const projects = [
+      makeProject({ id: "solo", priority: 1, cycle_budget_minutes: 25 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 120);
+    // Each cycle uses 25 + 5 = 30 min → 4 cycles in 120 min
+    expect(plan.total_cycles).toBe(4);
+    expect(plan.budget_used_minutes).toBe(120);
+    expect(plan.budget_remaining_minutes).toBe(0);
+    expect(plan.picks.map((p) => p.project_id)).toEqual(["solo", "solo", "solo", "solo"]);
+    expect(plan.picks.map((p) => p.start_minute)).toEqual([0, 30, 60, 90]);
+    expect(plan.per_project).toEqual([{ project_id: "solo", cycle_count: 4 }]);
+  });
+
+  it("rotates between projects of equal priority", () => {
+    const projects = [
+      makeProject({ id: "a", priority: 1, cycle_budget_minutes: 25 }),
+      makeProject({ id: "b", priority: 1, cycle_budget_minutes: 25 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 120);
+    // 4 cycles total, should alternate between a and b
+    expect(plan.total_cycles).toBe(4);
+    const counts = new Map(plan.per_project.map((p) => [p.project_id, p.cycle_count]));
+    expect(counts.get("a")).toBe(2);
+    expect(counts.get("b")).toBe(2);
+  });
+
+  it("prefers higher priority project when mixing", () => {
+    const projects = [
+      makeProject({ id: "hi", priority: 1, cycle_budget_minutes: 25 }),
+      makeProject({ id: "lo", priority: 10, cycle_budget_minutes: 25 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 120);
+    const counts = new Map(plan.per_project.map((p) => [p.project_id, p.cycle_count]));
+    expect(counts.get("hi")).toBeGreaterThan(counts.get("lo") ?? 0);
+    // First pick should be the higher priority project
+    expect(plan.picks[0].project_id).toBe("hi");
+  });
+
+  it("respects maxCyclesPerProject cap", () => {
+    const projects = [
+      makeProject({ id: "a", priority: 1, cycle_budget_minutes: 25 }),
+      makeProject({ id: "b", priority: 10, cycle_budget_minutes: 25 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 300, 2);
+    const counts = new Map(plan.per_project.map((p) => [p.project_id, p.cycle_count]));
+    expect(counts.get("a")).toBeLessThanOrEqual(2);
+    expect(counts.get("b")).toBeLessThanOrEqual(2);
+  });
+
+  it("stops when budget cannot fit another cycle", () => {
+    const projects = [
+      makeProject({ id: "a", priority: 1, cycle_budget_minutes: 60 }),
+    ];
+    // 125 min budget: first cycle takes 65 min, second would take 65 more = 130 > 125
+    const plan = estimateSessionPlan(projects, makeFleet(), 125);
+    expect(plan.total_cycles).toBe(1);
+    expect(plan.budget_used_minutes).toBe(65);
+    expect(plan.budget_remaining_minutes).toBe(60);
+  });
+
+  it("does not mutate the input fleet state", () => {
+    const fleet = makeFleet({
+      a: { total_cycles: 5, last_cycle_at: "2026-01-01T00:00:00.000Z" },
+    });
+    const fleetBefore = JSON.parse(JSON.stringify(fleet));
+    const projects = [makeProject({ id: "a", priority: 1, cycle_budget_minutes: 25 })];
+    estimateSessionPlan(projects, fleet, 60);
+    expect(fleet).toEqual(fleetBefore);
+  });
+
+  it("returns empty plan when projects list is empty", () => {
+    const plan = estimateSessionPlan([], makeFleet(), 120);
+    expect(plan.total_cycles).toBe(0);
+    expect(plan.picks).toEqual([]);
+    expect(plan.per_project).toEqual([]);
+    expect(plan.budget_remaining_minutes).toBe(120);
   });
 });
 
