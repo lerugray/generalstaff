@@ -16,7 +16,7 @@ function printUsage() {
 Usage:
   generalstaff session [--budget=<minutes>]   Run a session (multiple cycles)
   generalstaff cycle --project=<id>           Run one cycle on a project
-  generalstaff status                         Show fleet state
+  generalstaff status [--json]                 Show fleet state
   generalstaff stop                           Create STOP file (halt dispatcher)
   generalstaff start                          Remove STOP file (allow dispatch)
   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
@@ -78,20 +78,41 @@ switch (command) {
   }
 
   case "status": {
+    const { values: statusValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        json: { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
     const projects = await loadProjects();
     const fleet = await loadFleetState();
-    console.log("=== GeneralStaff Fleet Status ===\n");
-    console.log(`STOP file: ${(await isStopFilePresent()) ? "PRESENT (halted)" : "absent (ready)"}`);
-    console.log(`Registered projects: ${projects.length}\n`);
-    for (const p of projects) {
-      const state = fleet.projects[p.id];
-      console.log(`  ${p.id} (priority ${p.priority})`);
-      if (state) {
-        console.log(`    Last cycle: ${state.last_cycle_at ?? "never"}`);
-        console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
-        console.log(`    Total cycles: ${state.total_cycles}`);
-      } else {
-        console.log(`    No cycles yet`);
+    const stopped = await isStopFilePresent();
+
+    if (statusValues.json) {
+      const output = {
+        stopped,
+        projects: projects.map((p) => ({
+          id: p.id,
+          priority: p.priority,
+          state: fleet.projects[p.id] ?? null,
+        })),
+      };
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      console.log("=== GeneralStaff Fleet Status ===\n");
+      console.log(`STOP file: ${stopped ? "PRESENT (halted)" : "absent (ready)"}`);
+      console.log(`Registered projects: ${projects.length}\n`);
+      for (const p of projects) {
+        const state = fleet.projects[p.id];
+        console.log(`  ${p.id} (priority ${p.priority})`);
+        if (state) {
+          console.log(`    Last cycle: ${state.last_cycle_at ?? "never"}`);
+          console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
+          console.log(`    Total cycles: ${state.total_cycles}`);
+        } else {
+          console.log(`    No cycles yet`);
+        }
       }
     }
     break;

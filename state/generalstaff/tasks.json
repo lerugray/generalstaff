@@ -24,7 +24,7 @@
   {
     "id": "gs-013",
     "title": "Add --json flag to the CLI status command that outputs fleet state as JSON instead of formatted text",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
