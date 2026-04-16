@@ -1,0 +1,174 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index 44cf37e..0089943 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -211,7 +211,34 @@ export async function loadCycleHistory(
+   }));
+ }
+ 
+-export function printHistoryTable(rows: CycleHistoryRow[]): void {
++const ANSI = {
++  reset: "\x1b[0m",
++  green: "\x1b[32m",
++  red: "\x1b[31m",
++  yellow: "\x1b[33m",
++  gray: "\x1b[90m",
++} as const;
++
++export function colorizeOutcome(outcome: string, useColor: boolean): string {
++  if (!useColor) return outcome;
++  switch (outcome) {
++    case "verified":
++      return `${ANSI.green}${outcome}${ANSI.reset}`;
++    case "verification_failed":
++      return `${ANSI.red}${outcome}${ANSI.reset}`;
++    case "verified_weak":
++      return `${ANSI.yellow}${outcome}${ANSI.reset}`;
++    case "cycle_skipped":
++      return `${ANSI.gray}${outcome}${ANSI.reset}`;
++    default:
++      return outcome;
++  }
++}
++
++export function printHistoryTable(
++  rows: CycleHistoryRow[],
++  useColor: boolean = Boolean(process.stdout.isTTY),
++): void {
+   if (rows.length === 0) {
+     console.log("No cycle history found.");
+     return;
+@@ -233,12 +260,25 @@ export function printHistoryTable(rows: CycleHistoryRow[]): void {
+   console.log(headerLine);
+   console.log(separator);
+   for (const row of rows) {
+-    console.log(keys.map((k) => pad(row[k], widths[k])).join("  "));
++    // Pad first using raw text so column widths stay correct, then colorize the outcome cell.
++    const cells = keys.map((k) => {
++      const padded = pad(row[k], widths[k]);
++      if (k === "outcome" && useColor) {
++        const colored = colorizeOutcome(row[k], true);
++        return padded.replace(row[k], colored);
++      }
++      return padded;
++    });
++    console.log(cells.join("  "));
+   }
+ }
+ 
+-export function printHistoryCompact(rows: CycleHistoryRow[]): void {
++export function printHistoryCompact(
++  rows: CycleHistoryRow[],
++  useColor: boolean = Boolean(process.stdout.isTTY),
++): void {
+   for (const row of rows) {
+-    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${row.outcome}\t${row.duration}\t${row.sha_range}`);
++    const outcome = colorizeOutcome(row.outcome, useColor);
++    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${outcome}\t${row.duration}\t${row.sha_range}`);
+   }
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 46ba730..3cc1e06 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -104,7 +104,7 @@
+   {
+     "id": "gs-043",
+     "title": "In the history command output, add ANSI color codes: green for verified, red for verification_failed, yellow for verified_weak, gray for cycle_skipped. Only colorize when stdout is a TTY.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index a0a0bc3..830ab7e 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome } from "../src/audit";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
+@@ -356,3 +356,80 @@ describe("printHistoryCompact", () => {
+     expect(fields[5]).toBe("aaa..bbb");
+   });
+ });
++
++describe("colorizeOutcome", () => {
++  it("returns the raw outcome when useColor is false", () => {
++    expect(colorizeOutcome("verified", false)).toBe("verified");
++    expect(colorizeOutcome("verification_failed", false)).toBe("verification_failed");
++    expect(colorizeOutcome("verified_weak", false)).toBe("verified_weak");
++    expect(colorizeOutcome("cycle_skipped", false)).toBe("cycle_skipped");
++    expect(colorizeOutcome("anything_else", false)).toBe("anything_else");
++  });
++
++  it("wraps known outcomes in the right ANSI codes when useColor is true", () => {
++    expect(colorizeOutcome("verified", true)).toBe("\x1b[32mverified\x1b[0m");
++    expect(colorizeOutcome("verification_failed", true)).toBe("\x1b[31mverification_failed\x1b[0m");
++    expect(colorizeOutcome("verified_weak", true)).toBe("\x1b[33mverified_weak\x1b[0m");
++    expect(colorizeOutcome("cycle_skipped", true)).toBe("\x1b[90mcycle_skipped\x1b[0m");
++  });
++
++  it("leaves unknown outcomes uncolored even when useColor is true", () => {
++    expect(colorizeOutcome("mystery", true)).toBe("mystery");
++  });
++});
++
++describe("printHistoryTable colorization", () => {
++  const rows = [
++    { cycle_id: "c1", project: "p1", outcome: "verified", duration: "1m", sha_range: "a..b", timestamp: "2026-04-16 12:00:00Z" },
++    { cycle_id: "c2", project: "p2", outcome: "verification_failed", duration: "2m", sha_range: "c..d", timestamp: "2026-04-16 12:01:00Z" },
++    { cycle_id: "c3", project: "p3", outcome: "verified_weak", duration: "3m", sha_range: "e..f", timestamp: "2026-04-16 12:02:00Z" },
++    { cycle_id: "c4", project: "p4", outcome: "cycle_skipped", duration: "0s", sha_range: "g..h", timestamp: "2026-04-16 12:03:00Z" },
++  ];
++
++  it("emits no ANSI escapes when useColor is false", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryTable(rows, false)));
++    for (const line of lines) {
++      expect(line).not.toContain("\x1b[");
++    }
++  });
++
++  it("emits the expected ANSI color per outcome when useColor is true", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryTable(rows, true)));
++    // header + separator + 4 rows
++    expect(lines).toHaveLength(6);
++    expect(lines[2]).toContain("\x1b[32mverified\x1b[0m");
++    expect(lines[3]).toContain("\x1b[31mverification_failed\x1b[0m");
++    expect(lines[4]).toContain("\x1b[33mverified_weak\x1b[0m");
++    expect(lines[5]).toContain("\x1b[90mcycle_skipped\x1b[0m");
++  });
++
++  it("preserves column alignment when colorizing", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryTable(rows, true)));
++    // Strip ANSI codes; padded line length should match the header line length.
++    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
++    const headerLen = lines[0].length;
++    for (let i = 2; i < lines.length; i++) {
++      expect(stripAnsi(lines[i]).length).toBe(headerLen);
++    }
++  });
++});
++
++describe("printHistoryCompact colorization", () => {
++  const rows = [
++    { cycle_id: "c1", project: "p1", outcome: "verified", duration: "1m", sha_range: "a..b", timestamp: "2026-04-16 12:00:00Z" },
++    { cycle_id: "c2", project: "p2", outcome: "verification_failed", duration: "2m", sha_range: "c..d", timestamp: "2026-04-16 12:01:00Z" },
++  ];
++
++  it("emits no ANSI escapes when useColor is false", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, false)));
++    for (const line of lines) {
++      expect(line).not.toContain("\x1b[");
++    }
++  });
++
++  it("colorizes the outcome field when useColor is true", async () => {
++    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, true)));
++    expect(lines[0].split("\t")[3]).toBe("\x1b[32mverified\x1b[0m");
++    expect(lines[1].split("\t")[3]).toBe("\x1b[31mverification_failed\x1b[0m");
++  });
++});
