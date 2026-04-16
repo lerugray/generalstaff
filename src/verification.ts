@@ -34,7 +34,9 @@ export async function runVerification(
   cycleId: string,
   config?: DispatcherConfig,
   dryRun: boolean = false,
+  cwdOverride?: string,
 ): Promise<VerificationResult> {
+  const cwd = cwdOverride ?? project.path;
   const cycDir = ensureCycleDir(project.id, cycleId, config);
   const logPath = join(cycDir, "verification.log");
 
@@ -92,12 +94,12 @@ export async function runVerification(
     const logStream = createWriteStream(logPath, { flags: "w" });
     logStream.write(`=== GeneralStaff Verification Gate ===\n`);
     logStream.write(`Command: ${project.verification_command}\n`);
-    logStream.write(`CWD: ${project.path}\n`);
+    logStream.write(`CWD: ${cwd}\n`);
     logStream.write(`Started: ${new Date().toISOString()}\n`);
     logStream.write(`${"=".repeat(40)}\n\n`);
 
     const child = spawn("bash", ["-c", project.verification_command], {
-      cwd: project.path,
+      cwd,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });

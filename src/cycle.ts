@@ -38,12 +38,31 @@ function generateCycleId(): string {
   return `${ts}_${rand}`;
 }
 
-async function getGitSha(projectPath: string): Promise<string> {
+async function getGitSha(
+  projectPath: string,
+  ref: string = "HEAD",
+): Promise<string> {
   try {
-    const result = await $`git -C ${projectPath} rev-parse HEAD`.text();
+    const result = await $`git -C ${projectPath} rev-parse ${ref}`.text();
     return result.trim();
   } catch {
     return "unknown";
+  }
+}
+
+function worktreePath(project: ProjectConfig): string {
+  return join(project.path, ".bot-worktree");
+}
+
+async function cleanupWorktree(project: ProjectConfig): Promise<void> {
+  const wt = worktreePath(project);
+  if (existsSync(wt)) {
+    try {
+      await $`git -C ${project.path} worktree remove ${wt} --force`.quiet();
+    } catch {
+      // Best-effort cleanup
+      console.log("Warning: could not remove worktree, may need manual cleanup");
+    }
   }
 }
 
@@ -106,7 +125,31 @@ async function detectMarkedDoneTasks(
     }
   }
 
-  return "(Task detection not applicable for this work_detection mode)";
+  if (project.work_detection === "tasks_json") {
+    // Check tasks.json diff for status changes to "done"
+    try {
+      const diff =
+        await $`git -C ${project.path} diff ${startSha} ${endSha} -- state/${project.id}/tasks.json`.text();
+      if (!diff.trim()) return "(tasks.json not modified)";
+
+      // Extract lines where status changed to "done"
+      const doneLines = diff
+        .split("\n")
+        .filter((l) => l.startsWith("+") && /"status":\s*"done"/.test(l));
+
+      if (doneLines.length === 0) return "(No tasks newly marked done)";
+
+      // Try to extract task titles from context
+      const addedLines = diff
+        .split("\n")
+        .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+      return addedLines.map((l) => l.slice(1).trim()).join("\n");
+    } catch {
+      return "(Could not read tasks.json diff)";
+    }
+  }
+
+  return "(Unknown work_detection mode)";
 }
 
 async function findSessionNote(
@@ -173,12 +216,18 @@ export async function executeCycle(
     return skipResult(cycleId, project.id, startedAt, treeCheck.reason!);
   }
 
-  // 2. Capture start SHA
-  const cycleStartSha = await getGitSha(project.path);
+  // 2. Capture start SHA on the bot's branch (not HEAD/master)
+  const branch = project.branch;
+  const branchExists =
+    (await getGitSha(project.path, branch)) !== "unknown";
+  const cycleStartSha = branchExists
+    ? await getGitSha(project.path, branch)
+    : await getGitSha(project.path); // fallback to HEAD if branch doesn't exist yet
   await appendProgress(project.id, "cycle_start", {
     start_sha: cycleStartSha,
+    branch,
   }, cycleId);
-  console.log(`Start SHA: ${cycleStartSha.slice(0, 8)}`);
+  console.log(`Start SHA (${branch}): ${cycleStartSha.slice(0, 8)}`);
 
   // 3. Engineer step
   console.log(`Running engineer: ${project.engineer_command}`);
@@ -188,10 +237,11 @@ export async function executeCycle(
       `${engineerResult.durationSeconds.toFixed(0)}s`,
   );
 
-  // 4. Capture end SHA
-  const cycleEndSha = await getGitSha(project.path);
+  // 4. Capture end SHA on the bot's branch
+  const cycleEndSha = await getGitSha(project.path, branch);
+  console.log(`End SHA (${branch}): ${cycleEndSha.slice(0, 8)}`);
 
-  // 5. Diff capture
+  // 5. Diff capture (between branch SHAs — works regardless of which dir we're in)
   const fullDiff = await getGitDiff(project.path, cycleStartSha, cycleEndSha);
   const diffStat = await getGitDiffStat(
     project.path,
@@ -208,13 +258,23 @@ export async function executeCycle(
   await appendProgress(project.id, "diff_summary", {
     start_sha: cycleStartSha,
     end_sha: cycleEndSha,
+    branch,
     files_changed: diffStat,
     diff_length: fullDiff.length,
   }, cycleId);
 
   // 6. Independent verification gate
-  console.log("Running verification gate...");
-  const verResult = await runVerification(project, cycleId, config, dryRun);
+  //    Run in the worktree if it exists (tests the bot's code, not master)
+  const wt = worktreePath(project);
+  const verCwd = existsSync(wt) ? wt : undefined;
+  if (verCwd) {
+    console.log(`Running verification gate in worktree: ${wt}`);
+  } else {
+    console.log("Running verification gate...");
+  }
+  const verResult = await runVerification(
+    project, cycleId, config, dryRun, verCwd,
+  );
   console.log(
     `Verification: ${verResult.outcome} (exit ${verResult.exitCode})`,
   );
@@ -238,6 +298,8 @@ export async function executeCycle(
     // ok
   }
 
+  // Reviewer runs in worktree if available (so it can read the bot's files)
+  const reviewerCwd = existsSync(wt) ? wt : undefined;
   console.log("Running reviewer agent...");
   const reviewerResult = await runReviewer(
     project,
@@ -255,6 +317,7 @@ export async function executeCycle(
     },
     config,
     dryRun,
+    reviewerCwd,
   );
   console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
   if (reviewerResult.parseError) {
@@ -313,6 +376,9 @@ export async function executeCycle(
   projState.last_cycle_at = endedAt;
   projState.cycles_this_session += 1;
   await saveProjectState(projState, config);
+
+  // 10. Clean up worktree (dispatcher owns the lifecycle)
+  await cleanupWorktree(project);
 
   return {
     cycle_id: cycleId,

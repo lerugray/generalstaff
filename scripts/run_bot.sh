@@ -24,17 +24,12 @@ echo "Branch: $BRANCH"
 echo "Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "================================="
 
-# --- Cleanup on exit ---
-cleanup() {
-  echo ""
-  echo "Cleaning up worktree..."
-  cd "$PROJECT_ROOT"
-  if [ -d "$WORKTREE_DIR" ]; then
-    git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
-  fi
-  echo "Worktree removed. Bot launcher exiting."
-}
-trap cleanup EXIT
+# NOTE: The worktree is intentionally NOT cleaned up here.
+# The dispatcher (cycle.ts) manages worktree lifecycle:
+#   1. Engineer creates/uses the worktree (this script)
+#   2. Dispatcher runs verification IN the worktree
+#   3. Dispatcher cleans up the worktree after review
+# This ensures verification tests the bot's code, not master.
 
 # --- Ensure bot/work branch exists ---
 if ! git -C "$PROJECT_ROOT" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then

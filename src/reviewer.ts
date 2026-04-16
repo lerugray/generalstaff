@@ -35,6 +35,7 @@ export async function runReviewer(
   promptParams: ReviewerPromptParams,
   config?: DispatcherConfig,
   dryRun: boolean = false,
+  cwdOverride?: string,
 ): Promise<ReviewerResult> {
   const prompt = buildReviewerPrompt(promptParams);
 
@@ -83,7 +84,7 @@ export async function runReviewer(
   }
 
   // Spawn claude -p
-  const rawResponse = await spawnClaude(prompt, project.path);
+  const rawResponse = await spawnClaude(prompt, cwdOverride ?? project.path);
 
   await writeCycleFile(
     project.id,
