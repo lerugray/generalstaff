@@ -12,6 +12,7 @@ import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
 import { loadTasks, pendingTasks, addTask } from "./tasks";
+import { buildFleetSummary, countTests, formatSummary } from "./summary";
 
 const VERSION = "0.0.1";
 
@@ -52,6 +53,10 @@ Usage:
 
   generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
+
+  generalstaff summary [--no-tests]                       Dashboard: cycles, outcomes, duration, tasks, tests
+    Example: generalstaff summary                       # one-screen fleet overview
+    Example: generalstaff summary --no-tests            # skip scanning tests/ dir
 
   generalstaff doctor                                     Check prerequisites (bun, git, claude)
     Example: generalstaff doctor
@@ -228,6 +233,22 @@ switch (command) {
     } else {
       printHistoryTable(rows);
     }
+    break;
+  }
+
+  case "summary": {
+    const { values: summaryValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        "no-tests": { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
+    const summary = await buildFleetSummary();
+    const tests = summaryValues["no-tests"]
+      ? null
+      : countTests(resolve("tests"));
+    console.log(formatSummary(summary, tests));
     break;
   }
 

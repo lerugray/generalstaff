@@ -122,7 +122,7 @@
   {
     "id": "gs-046",
     "title": "Add a generalstaff summary command to cli.ts that prints a one-screen overview: total cycles across all projects, verified/failed/skipped counts, total duration, test count (run bun test --reporter=json to get count), and tasks remaining. Like a dashboard snapshot.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
