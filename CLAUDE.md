@@ -89,9 +89,23 @@ design docs committed to the repo).**
 The following context is relevant for all future GeneralStaff
 sessions regardless of which machine they run on, and is
 captured here specifically so git carries it between the home
-and work PCs. (Mirror copies also live in the memory/ directory
-on the home PC for local convenience; git is the authoritative
-cross-machine source.)
+and work PCs.
+
+**Memory discipline (Ray, 2026-04-16):** the `~/.claude/projects/
+.../memory/` directory is **per-machine, local-only**. It is NOT
+a mirror of cross-machine context — duplication wastes context and
+risks drift. The rule is:
+
+- **Cross-machine context → this file (or another committed
+  design doc).** Git carries it. Auto-loaded every session.
+- **Local-only context → `~/.claude/memory/`.** E.g. things
+  specific to this PC's paths, transient local state, personal
+  notes that shouldn't be public. Do not put anything here that
+  a work-PC session would also need.
+
+When you're about to save a memory, ask: "would the work-PC
+session need this?" If yes, save it here in CLAUDE.md (or a
+committed doc) instead.
 
 ### Ray's workflow conventions
 
@@ -139,6 +153,32 @@ Calibrate future sessions accordingly:
   They have real users and real stakes. Any GeneralStaff work
   against them needs to be safe and reversible, not just
   interesting.
+
+### Test-project constraints
+
+When GeneralStaff needs a second registered project (to prove the
+dispatcher's generality on something other than itself), the
+candidate set is narrow:
+
+- **catalogdna is off-limits as a GeneralStaff test target.** Ray
+  has parallel interactive work there, and the app is at a
+  sensitive stage around new-user onboarding that needs his
+  steady hand. Do not propose registering catalogdna as a second
+  project for GeneralStaff to manage, regardless of how
+  convenient the proximity seems. This probably applies to any
+  Ray project with real users — confirm before suggesting.
+- **gamr is the planned scratch test project.** Ray's old idea
+  (~10 years ago): "Tinder for gamers, but strictly platonic" —
+  matching people for gaming partners, nearby or remote. Ray
+  himself calls it a "dumb idea now." That is the point. We pick
+  a deliberately mediocre idea to hold product-viability constant
+  and LOW while we measure the dispatcher's generality on a
+  non-self project. Do NOT drift into trying to make gamr "good"
+  as a product — that defeats the experimental design. Evaluate
+  gamr cycles by dispatcher behavior (verification gate rigor,
+  hands-off enforcement, cycle-to-cycle compounding), not by
+  whether the features are shippable. Web version preferred
+  over mobile for scaffolding simplicity.
 
 ## Hammerstein context
 
