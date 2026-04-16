@@ -806,3 +806,4 @@
 {"timestamp":"2026-04-16T22:22:41.569Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":120,"dry_run":true,"registered_projects":["generalstaff"]}}
 {"timestamp":"2026-04-16T22:22:41.740Z","event":"cycle_skipped","cycle_id":"20260416222241_wmnf","project_id":"generalstaff","data":{"reason":"Uncommitted changes in C:/Users/rweis/OneDrive/Documents/GeneralStaff:\n?? scripts/run_session.bat"}}
 {"timestamp":"2026-04-16T22:22:41.742Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":0,"total_cycles":1,"total_verified":0,"total_failed":0}}
+{"timestamp":"2026-04-16T22:46:12.635Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":90,"dry_run":false,"registered_projects":["generalstaff"]}}
