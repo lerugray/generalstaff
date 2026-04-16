@@ -62,14 +62,14 @@ async function autoCommitState(
 ): Promise<void> {
   try {
     const root = getRootDir();
-    // Stage state artifacts (fleet_state.json + state/ + digests/)
-    await $`git -C ${root} add state/ fleet_state.json digests/ 2>/dev/null`.quiet();
-    // Check if there's anything to commit
-    const status = await $`git -C ${root} diff --cached --quiet`.quiet().then(
-      () => false,
-      () => true,
-    );
-    if (status) {
+    // Stage state artifacts — use pathspec that won't error on ignored/missing paths
+    await $`git -C ${root} add --ignore-errors state/`.quiet().nothrow();
+    // Check if there's anything staged
+    const hasStagedChanges = await $`git -C ${root} diff --cached --quiet`
+      .quiet()
+      .nothrow()
+      .then((r) => r.exitCode !== 0);
+    if (hasStagedChanges) {
       await $`git -C ${root} commit -m ${"state: cycle " + cycleId.slice(0, 12) + " — " + outcome}`.quiet();
     }
   } catch {

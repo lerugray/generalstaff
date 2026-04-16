@@ -1,0 +1,171 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 304a423..fd1b3a4 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -14,7 +14,7 @@
+   {
+     "id": "gs-003",
+     "title": "Add engineer module test: dry-run produces expected log output",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/engineer.test.ts b/tests/engineer.test.ts
+new file mode 100644
+index 0000000..1c28b6d
+--- /dev/null
++++ b/tests/engineer.test.ts
+@@ -0,0 +1,152 @@
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import { runEngineer } from "../src/engineer";
++import { setRootDir, readCycleFile } from "../src/state";
++import { join } from "path";
++import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
++import type { ProjectConfig } from "../src/types";
++
++const TEST_DIR = join(import.meta.dir, "fixtures", "engineer_test");
++
++function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
++  return {
++    id: "test-proj",
++    path: TEST_DIR,
++    priority: 1,
++    engineer_command: "echo 'doing work'",
++    verification_command: "test 1 -eq 1",
++    cycle_budget_minutes: 30,
++    work_detection: "tasks_json",
++    concurrency_detection: "none",
++    branch: "bot/work",
++    auto_merge: false,
++    hands_off: ["CLAUDE.md"],
++    ...overrides,
++  };
++}
++
++beforeEach(() => {
++  mkdirSync(TEST_DIR, { recursive: true });
++  setRootDir(TEST_DIR);
++});
++
++afterEach(() => {
++  rmSync(TEST_DIR, { recursive: true, force: true });
++});
++
++describe("engineer module", () => {
++  describe("dry runs", () => {
++    it("returns exitCode 0 and zero duration", async () => {
++      const project = makeProject();
++      const result = await runEngineer(project, "cycle-001", undefined, true);
++
++      expect(result.exitCode).toBe(0);
++      expect(result.durationSeconds).toBe(0);
++      expect(result.timedOut).toBe(false);
++    });
++
++    it("writes dry-run log with the command", async () => {
++      const project = makeProject({ engineer_command: "claude --budget 30" });
++      const result = await runEngineer(project, "cycle-002", undefined, true);
++
++      const logContent = await readCycleFile("test-proj", "cycle-002", "engineer.log");
++      expect(logContent).not.toBeNull();
++      expect(logContent!).toContain("[DRY RUN]");
++      expect(logContent!).toContain("claude --budget 30");
++    });
++
++    it("does not execute the command in dry-run mode", async () => {
++      // A command that would fail if actually run
++      const project = makeProject({ engineer_command: "exit 1" });
++      const result = await runEngineer(project, "cycle-003", undefined, true);
++
++      expect(result.exitCode).toBe(0);
++      expect(result.timedOut).toBe(false);
++    });
++
++    it("includes logPath pointing to cycle directory", async () => {
++      const project = makeProject();
++      const result = await runEngineer(project, "cycle-004", undefined, true);
++
++      expect(result.logPath).toContain("cycle-004");
++      expect(result.logPath).toContain("engineer.log");
++    });
++  });
++
++  describe("audit trail", () => {
++    it("writes progress entries for dry-run engineer invocation", async () => {
++      const project = makeProject({ engineer_command: "echo test" });
++      await runEngineer(project, "cycle-010", undefined, true);
++
++      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
++      expect(existsSync(progressPath)).toBe(true);
++
++      const lines = readFileSync(progressPath, "utf8").trim().split("\n");
++      const events = lines.map((l) => JSON.parse(l));
++
++      const invokedEvent = events.find((e: { event: string }) => e.event === "engineer_invoked");
++      const completedEvent = events.find((e: { event: string }) => e.event === "engineer_completed");
++
++      expect(invokedEvent).toBeDefined();
++      expect(invokedEvent.data.command).toBe("echo test");
++      expect(invokedEvent.data.dry_run).toBe(true);
++
++      expect(completedEvent).toBeDefined();
++      expect(completedEvent.data.exit_code).toBe(0);
++      expect(completedEvent.data.dry_run).toBe(true);
++      expect(completedEvent.data.duration_seconds).toBe(0);
++    });
++
++    it("records cycle_budget_minutes in invoked event", async () => {
++      const project = makeProject({ cycle_budget_minutes: 45 });
++      await runEngineer(project, "cycle-011", undefined, true);
++
++      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
++      const lines = readFileSync(progressPath, "utf8").trim().split("\n");
++      const events = lines.map((l) => JSON.parse(l));
++
++      const invokedEvent = events.find((e: { event: string }) => e.event === "engineer_invoked");
++      expect(invokedEvent.data.cycle_budget_minutes).toBe(45);
++    });
++  });
++
++  describe("real runs", () => {
++    it("returns exit code from command", async () => {
++      const project = makeProject({ engineer_command: "echo hello" });
++      const result = await runEngineer(project, "cycle-020");
++
++      expect(result.exitCode).toBe(0);
++      expect(result.timedOut).toBe(false);
++      expect(result.durationSeconds).toBeGreaterThanOrEqual(0);
++    });
++
++    it("captures non-zero exit code", async () => {
++      const project = makeProject({ engineer_command: "exit 42" });
++      const result = await runEngineer(project, "cycle-021");
++
++      expect(result.exitCode).toBe(42);
++      expect(result.timedOut).toBe(false);
++    });
++
++    it("writes log with header and footer", async () => {
++      const project = makeProject({ engineer_command: "echo 'test output'" });
++      const result = await runEngineer(project, "cycle-022");
++
++      expect(existsSync(result.logPath)).toBe(true);
++      const logContent = readFileSync(result.logPath, "utf8");
++      expect(logContent).toContain("GeneralStaff Engineer");
++      expect(logContent).toContain("echo 'test output'");
++      expect(logContent).toContain("Exit code: 0");
++    });
++
++    it("expands ${cycle_budget_minutes} in command", async () => {
++      const project = makeProject({
++        engineer_command: "echo budget=${cycle_budget_minutes}",
++        cycle_budget_minutes: 25,
++      });
++      const result = await runEngineer(project, "cycle-023");
++
++      const logContent = readFileSync(result.logPath, "utf8");
++      expect(logContent).toContain("Command: echo budget=25");
++    });
++  });
++});
