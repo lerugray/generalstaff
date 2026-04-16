@@ -17,19 +17,44 @@ function printUsage() {
   console.log(`generalstaff v${VERSION}
 
 Usage:
-  generalstaff session [--budget=<minutes>]   Run a session (multiple cycles)
-  generalstaff cycle --project=<id>           Run one cycle on a project
-  generalstaff status [--json]                 Show fleet state
-  generalstaff projects                        List registered projects
-  generalstaff init <path> [--id=<id>]         Scaffold state dir for a new project
-  generalstaff stop                           Create STOP file (halt dispatcher)
-  generalstaff start                          Remove STOP file (allow dispatch)
+  generalstaff session [--budget=<minutes>] [--dry-run]   Run a session (multiple cycles)
+    Example: generalstaff session --budget=480          # overnight 8-hour run
+    Example: generalstaff session --dry-run             # preview without committing
+
+  generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
+    Example: generalstaff cycle --project=myapp
+    Example: generalstaff cycle --project=myapp --dry-run
+
+  generalstaff status [--json]                            Show fleet state
+    Example: generalstaff status
+    Example: generalstaff status --json                 # machine-readable output
+
+  generalstaff projects                                   List registered projects
+    Example: generalstaff projects
+
+  generalstaff init <path> [--id=<id>]                    Scaffold state dir for a new project
+    Example: generalstaff init ./myapp
+    Example: generalstaff init ../other-repo --id=other
+
+  generalstaff stop                                       Create STOP file (halt dispatcher)
+    Example: generalstaff stop                          # halt before next cycle
+
+  generalstaff start                                      Remove STOP file (allow dispatch)
+    Example: generalstaff start                         # resume after a stop
+
   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact]
-                                         Cycle history (compact: tab-delimited, no headers)
-  generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
-  generalstaff doctor                         Check prerequisites (bun, git, claude)
-  generalstaff --version                      Show version
-  generalstaff --help                         Show this help`);
+                                                          Cycle history (compact: tab-delimited, no headers)
+    Example: generalstaff history --lines=50
+    Example: generalstaff history --project=myapp --format=compact
+
+  generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
+    Example: generalstaff log --project=myapp --lines=50
+
+  generalstaff doctor                                     Check prerequisites (bun, git, claude)
+    Example: generalstaff doctor
+
+  generalstaff --version                                  Show version
+  generalstaff --help                                     Show this help`);
 }
 
 const args = process.argv.slice(2);
