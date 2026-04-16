@@ -117,7 +117,9 @@ export function isBotRunning(project: ProjectConfig): BotRunningResult {
   // Generic worktree check — works for any project using .bot-worktree
   if (project.concurrency_detection === "worktree") {
     const worktreePath = join(project.path, ".bot-worktree");
-    if (existsSync(worktreePath)) {
+    // A real git worktree has a .git file; an empty leftover dir doesn't
+    const gitMarker = join(worktreePath, ".git");
+    if (existsSync(worktreePath) && existsSync(gitMarker)) {
       const stat = statSync(worktreePath);
       const ageMin = (Date.now() - stat.mtimeMs) / 60_000;
       if (ageMin < 10) {

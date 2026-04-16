@@ -176,9 +176,10 @@ describe("isBotRunning", () => {
 
   // --- Worktree detection mode (single-signal: .bot-worktree only) ---
 
-  it("worktree mode: detects fresh .bot-worktree as running", () => {
+  it("worktree mode: detects fresh .bot-worktree with .git marker as running", () => {
     const worktree = join(FIXTURES, "proj", ".bot-worktree");
     mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, ".git"), "gitdir: ../../.git/worktrees/bot\n");
     const result = isBotRunning(
       makeProject({ concurrency_detection: "worktree" }),
     );
@@ -186,9 +187,16 @@ describe("isBotRunning", () => {
     expect(result.reason).toContain(".bot-worktree");
   });
 
+  it("worktree mode: ignores empty .bot-worktree without .git marker", () => {
+    const worktree = join(FIXTURES, "proj", ".bot-worktree");
+    mkdirSync(worktree, { recursive: true });
+    expect(isBotRunning(makeProject({ concurrency_detection: "worktree" }))).toEqual({ running: false });
+  });
+
   it("worktree mode: ignores stale .bot-worktree (>10 min old)", () => {
     const worktree = join(FIXTURES, "proj", ".bot-worktree");
     mkdirSync(worktree, { recursive: true });
+    writeFileSync(join(worktree, ".git"), "gitdir: ../../.git/worktrees/bot\n");
     setAge(worktree, 15);
     expect(
       isBotRunning(makeProject({ concurrency_detection: "worktree" })),
