@@ -1,6 +1,9 @@
-import { describe, expect, it } from "bun:test";
-import { scoreProjects, shouldChain } from "../src/dispatcher";
-import type { FleetState, ProjectConfig, CycleResult } from "../src/types";
+import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { scoreProjects, shouldChain, pickNextProject } from "../src/dispatcher";
+import { setRootDir } from "../src/state";
+import { join } from "path";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import type { FleetState, ProjectConfig, CycleResult, DispatcherConfig } from "../src/types";
 
 function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
@@ -79,6 +82,145 @@ describe("scoreProjects", () => {
 
     const scores = scoreProjects(projects, fleet);
     expect(scores[0].project.id).toBe("high-pri");
+  });
+});
+
+const TEST_DIR = join(import.meta.dir, "fixtures", "dispatcher_test");
+
+function makeConfig(overrides: Partial<DispatcherConfig> = {}): DispatcherConfig {
+  return {
+    state_dir: "state",
+    fleet_state_file: "fleet_state.json",
+    stop_file: "STOP",
+    override_file: "next_project.txt",
+    picker: "priority_staleness",
+    max_cycles_per_project_per_session: 3,
+    log_dir: "logs",
+    digest_dir: "digests",
+    ...overrides,
+  };
+}
+
+function makeFleet(projects: Record<string, Partial<FleetState["projects"][string]>> = {}): FleetState {
+  const built: FleetState["projects"] = {};
+  for (const [id, overrides] of Object.entries(projects)) {
+    built[id] = {
+      last_cycle_at: null,
+      last_cycle_outcome: null,
+      total_cycles: 0,
+      total_verified: 0,
+      total_failed: 0,
+      accumulated_minutes: 0,
+      ...overrides,
+    };
+  }
+  return { version: 1, updated_at: new Date().toISOString(), projects: built };
+}
+
+describe("pickNextProject", () => {
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    setRootDir(TEST_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("respects override file (next_project.txt)", async () => {
+    const config = makeConfig();
+    writeFileSync(join(TEST_DIR, "next_project.txt"), "proj-b\n", "utf8");
+
+    const projects = [
+      makeProject({ id: "proj-a", priority: 1 }),
+      makeProject({ id: "proj-b", priority: 5 }),
+    ];
+    const fleet = makeFleet();
+
+    const result = await pickNextProject(projects, config, fleet);
+    expect(result).not.toBeNull();
+    expect(result!.project.id).toBe("proj-b");
+    expect(result!.reason).toContain("override");
+    expect(result!.reason).toContain("next_project.txt");
+  });
+
+  it("skips override if project is in skipProjectIds", async () => {
+    const config = makeConfig();
+    writeFileSync(join(TEST_DIR, "next_project.txt"), "proj-a\n", "utf8");
+
+    const projects = [
+      makeProject({ id: "proj-a", priority: 1 }),
+      makeProject({ id: "proj-b", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+
+    const result = await pickNextProject(projects, config, fleet, new Set(["proj-a"]));
+    expect(result).not.toBeNull();
+    // Should fall through to picker since override project is skipped
+    expect(result!.project.id).toBe("proj-b");
+    expect(result!.reason).toContain("picker");
+  });
+
+  it("falls back to priority x staleness picker when no override file exists", async () => {
+    const config = makeConfig();
+    // No override file created
+
+    const projects = [
+      makeProject({ id: "low-pri", priority: 5 }),
+      makeProject({ id: "high-pri", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+
+    const result = await pickNextProject(projects, config, fleet);
+    expect(result).not.toBeNull();
+    expect(result!.project.id).toBe("high-pri");
+    expect(result!.reason).toContain("picker");
+    expect(result!.reason).toContain("priority=1");
+  });
+
+  it("prefers staler project when priorities are equal", async () => {
+    const config = makeConfig();
+
+    const projects = [
+      makeProject({ id: "fresh", priority: 1 }),
+      makeProject({ id: "stale", priority: 1 }),
+    ];
+    const fleet = makeFleet({
+      fresh: { last_cycle_at: new Date().toISOString() },
+      // stale has no entry → maximum staleness
+    });
+
+    const result = await pickNextProject(projects, config, fleet);
+    expect(result).not.toBeNull();
+    expect(result!.project.id).toBe("stale");
+  });
+
+  it("returns null when all projects are skipped", async () => {
+    const config = makeConfig();
+
+    const projects = [
+      makeProject({ id: "proj-a", priority: 1 }),
+      makeProject({ id: "proj-b", priority: 2 }),
+    ];
+    const fleet = makeFleet();
+
+    const result = await pickNextProject(projects, config, fleet, new Set(["proj-a", "proj-b"]));
+    expect(result).toBeNull();
+  });
+
+  it("ignores empty override file", async () => {
+    const config = makeConfig();
+    writeFileSync(join(TEST_DIR, "next_project.txt"), "  \n", "utf8");
+
+    const projects = [
+      makeProject({ id: "proj-a", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+
+    const result = await pickNextProject(projects, config, fleet);
+    expect(result).not.toBeNull();
+    expect(result!.project.id).toBe("proj-a");
+    expect(result!.reason).toContain("picker");
   });
 });
 
