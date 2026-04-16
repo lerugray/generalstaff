@@ -46,7 +46,7 @@
   {
     "id": "gs-025",
     "title": "Add a generalstaff history command to cli.ts that shows a compact table of recent cycles across all projects: cycle_id (truncated), project, outcome, duration, and SHA range — pulled from PROGRESS.jsonl",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
