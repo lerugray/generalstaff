@@ -61,8 +61,9 @@ Usage:
 
   generalstaff doctor                                     Check prerequisites (bun, git, claude)
     Example: generalstaff doctor
-  generalstaff clean [--keep=N]                           Remove stale worktrees + prune old cycles
+  generalstaff clean [--keep=N] [--log-days=N]            Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
+    Example: generalstaff clean --log-days=7             # delete logs older than 7 days
 
   generalstaff task list --project=<id>                   Show pending tasks for a project
     Example: generalstaff task list --project=myapp
@@ -265,11 +266,15 @@ switch (command) {
       args: args.slice(1),
       options: {
         keep: { type: "string", default: "20" },
+        "log-days": { type: "string", default: "30" },
       },
       allowPositionals: false,
     });
     console.log("=== GeneralStaff Clean ===\n");
-    await runClean(parseInt(cleanValues.keep!, 10));
+    await runClean(
+      parseInt(cleanValues.keep!, 10),
+      parseInt(cleanValues["log-days"]!, 10),
+    );
     break;
   }
 
