@@ -18,6 +18,61 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
   }
 }
 
+export async function countRemainingWork(
+  project: ProjectConfig,
+): Promise<number> {
+  switch (project.work_detection) {
+    case "catalogdna_bot_tasks":
+      return catalogdnaCountRemaining(project.path);
+    case "tasks_json":
+      return greenfieldCountRemaining(project.id);
+    default:
+      return 0;
+  }
+}
+
+export async function catalogdnaCountRemaining(
+  catalogdnaPath: string,
+): Promise<number> {
+  const botTasksPath = join(catalogdnaPath, "bot_tasks.md");
+  if (!existsSync(botTasksPath)) return 0;
+
+  let content: string;
+  try {
+    content = await readFile(botTasksPath, "utf8");
+  } catch {
+    return 0;
+  }
+
+  const sections = content.split(/^## /m);
+  let totalUnchecked = 0;
+  for (const section of sections) {
+    const firstLine = section.split("\n")[0] ?? "";
+    if (!/^P[0-3]\b/.test(firstLine)) continue;
+    if (/COMPLETED|SKIP/i.test(firstLine)) continue;
+    const unchecked = (section.match(/^- \[ \]/gm) ?? []).length;
+    totalUnchecked += unchecked;
+  }
+  return totalUnchecked;
+}
+
+export async function greenfieldCountRemaining(
+  projectId: string,
+): Promise<number> {
+  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
+  if (!existsSync(tasksPath)) return 0;
+
+  try {
+    const raw = await readFile(tasksPath, "utf8");
+    const tasks = JSON.parse(raw) as Array<{ status: string }>;
+    return tasks.filter(
+      (t) => t.status !== "done" && t.status !== "skipped",
+    ).length;
+  } catch {
+    return 0;
+  }
+}
+
 export async function catalogdnaHasMoreWork(
   catalogdnaPath: string,
 ): Promise<boolean> {
