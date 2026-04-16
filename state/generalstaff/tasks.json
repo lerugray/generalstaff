@@ -116,7 +116,7 @@
   {
     "id": "gs-045",
     "title": "In audit.ts, add a function summarizeCosts that counts reviewer_invoked events from PROGRESS.jsonl and estimates total token usage based on prompt_length. Wire into the history --format=compact output as an optional column.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]

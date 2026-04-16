@@ -276,9 +276,113 @@ export function printHistoryTable(
 export function printHistoryCompact(
   rows: CycleHistoryRow[],
   useColor: boolean = Boolean(process.stdout.isTTY),
+  costs?: Record<string, CycleCostSummary>,
 ): void {
   for (const row of rows) {
     const outcome = colorizeOutcome(row.outcome, useColor);
-    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${outcome}\t${row.duration}\t${row.sha_range}`);
+    const base = `${row.timestamp}\t${row.project}\t${row.cycle_id}\t${outcome}\t${row.duration}\t${row.sha_range}`;
+    if (costs) {
+      const c = costs[row.cycle_id];
+      const invocations = c?.reviewer_invocations ?? 0;
+      const tokens = c?.estimated_tokens ?? 0;
+      console.log(`${base}\t${invocations}\t${tokens}`);
+    } else {
+      console.log(base);
+    }
   }
+}
+
+// --- Cost summarization (reviewer_invoked token estimates) ---
+
+// Rough heuristic: 1 token ≈ 4 characters of prompt text. This is Anthropic's
+// published ballpark for English; good enough for a "how expensive is this
+// project getting" signal without pretending to be exact.
+const CHARS_PER_TOKEN = 4;
+
+export interface CycleCostSummary {
+  cycle_id: string;
+  reviewer_invocations: number;
+  prompt_chars: number;
+  estimated_tokens: number;
+}
+
+export interface CostsSummary {
+  reviewer_invocations: number;
+  prompt_chars: number;
+  estimated_tokens: number;
+  by_cycle: Record<string, CycleCostSummary>;
+}
+
+function estimateTokens(chars: number): number {
+  return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
+async function readReviewerInvoked(filePath: string): Promise<ProgressEntry[]> {
+  if (!existsSync(filePath)) return [];
+  const content = await readFile(filePath, "utf8");
+  const out: ProgressEntry[] = [];
+  for (const line of content.trim().split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (isProgressEntry(parsed) && parsed.event === "reviewer_invoked") {
+        out.push(parsed);
+      }
+    } catch { /* skip malformed */ }
+  }
+  return out;
+}
+
+// Keyed by the same 12-char cycle_id prefix used in CycleHistoryRow so the
+// map can be handed straight to printHistoryCompact without re-keying.
+export async function summarizeCosts(
+  projectId?: string,
+): Promise<CostsSummary> {
+  const stateDir = join(getRootDir(), "state");
+  if (!existsSync(stateDir)) {
+    return { reviewer_invocations: 0, prompt_chars: 0, estimated_tokens: 0, by_cycle: {} };
+  }
+
+  const { readdirSync } = require("fs");
+  const entries: ProgressEntry[] = [];
+
+  if (projectId) {
+    entries.push(...(await readReviewerInvoked(join(stateDir, projectId, "PROGRESS.jsonl"))));
+  } else {
+    for (const dir of readdirSync(stateDir)) {
+      entries.push(...(await readReviewerInvoked(join(stateDir, dir, "PROGRESS.jsonl"))));
+    }
+  }
+
+  const byCycle: Record<string, CycleCostSummary> = {};
+  let totalChars = 0;
+
+  for (const e of entries) {
+    const fullId = e.cycle_id ?? "?";
+    const key = fullId.slice(0, 12);
+    const rawLen = e.data.prompt_length;
+    const chars = typeof rawLen === "number" && rawLen >= 0 ? rawLen : 0;
+    totalChars += chars;
+
+    const existing = byCycle[key];
+    if (existing) {
+      existing.reviewer_invocations += 1;
+      existing.prompt_chars += chars;
+      existing.estimated_tokens = estimateTokens(existing.prompt_chars);
+    } else {
+      byCycle[key] = {
+        cycle_id: key,
+        reviewer_invocations: 1,
+        prompt_chars: chars,
+        estimated_tokens: estimateTokens(chars),
+      };
+    }
+  }
+
+  return {
+    reviewer_invocations: entries.length,
+    prompt_chars: totalChars,
+    estimated_tokens: estimateTokens(totalChars),
+    by_cycle: byCycle,
+  };
 }
