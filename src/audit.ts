@@ -241,3 +241,9 @@ export function printHistoryTable(rows: CycleHistoryRow[]): void {
     console.log(keys.map((k) => pad(row[k], widths[k])).join("  "));
   }
 }
+
+export function printHistoryCompact(rows: CycleHistoryRow[]): void {
+  for (const row of rows) {
+    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${row.outcome}\t${row.duration}\t${row.sha_range}`);
+  }
+}

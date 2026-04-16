@@ -161,9 +161,16 @@ export async function runSession(options: SessionOptions) {
 
   // Log session end for each project
   for (const p of projects) {
+    const projectResults = allResults.filter((r) => r.project_id === p.id);
     await appendProgress(p.id, "session_end", {
       duration_minutes: Math.round(elapsed),
-      total_cycles: allResults.filter((r) => r.project_id === p.id).length,
+      total_cycles: projectResults.length,
+      total_verified: projectResults.filter(
+        (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
+      ).length,
+      total_failed: projectResults.filter(
+        (r) => r.final_outcome === "verification_failed",
+      ).length,
     });
   }
 

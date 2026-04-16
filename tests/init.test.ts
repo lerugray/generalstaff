@@ -102,6 +102,51 @@ describe("init command", () => {
     expect(result.stderr).toContain("already exists");
   });
 
+  it("sanitizes special characters in derived project ID", async () => {
+    const result = await runCli(["init", "/tmp/My Project @v2!"], TEST_DIR);
+    expect(result.exitCode).toBe(0);
+
+    // Special chars replaced with hyphens, lowercased
+    const expected = "my-project--v2-";
+    expect(existsSync(join(TEST_DIR, "state", expected))).toBe(true);
+    expect(result.stdout).toContain(`id: ${expected}`);
+  });
+
+  it("does not overwrite existing files when state dir already exists", async () => {
+    // First init
+    await runCli(["init", "/tmp/my-project", "--id=existing"], TEST_DIR);
+
+    const missionPath = join(TEST_DIR, "state", "existing", "MISSION.md");
+    const originalContent = readFileSync(missionPath, "utf8");
+
+    // Second init should fail without touching files
+    const result = await runCli(
+      ["init", "/tmp/different-path", "--id=existing"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("already exists");
+
+    // Original file must be unchanged
+    const afterContent = readFileSync(missionPath, "utf8");
+    expect(afterContent).toBe(originalContent);
+  });
+
+  it("creates parent state directory if it does not exist", async () => {
+    // Remove the state dir entirely so mkdirSync must create it
+    const stateDir = join(TEST_DIR, "state");
+    rmSync(stateDir, { recursive: true, force: true });
+    expect(existsSync(stateDir)).toBe(false);
+
+    const result = await runCli(
+      ["init", "/tmp/fresh-project", "--id=freshproj"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(stateDir, "freshproj", "MISSION.md"))).toBe(true);
+    expect(existsSync(join(stateDir, "freshproj", "tasks.json"))).toBe(true);
+  });
+
   it("fails if no path is provided", async () => {
     const result = await runCli(["init"], TEST_DIR);
     expect(result.exitCode).toBe(1);

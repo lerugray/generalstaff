@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "../src/audit";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
@@ -201,6 +201,26 @@ describe("tailProgressLog", () => {
   });
 });
 
+describe("session_end entries", () => {
+  it("stores total_verified and total_failed alongside total_cycles and duration_minutes", async () => {
+    await appendProgress("proj-sess", "session_end", {
+      duration_minutes: 15,
+      total_cycles: 4,
+      total_verified: 3,
+      total_failed: 1,
+    });
+
+    const filePath = join(TEST_DIR, "state", "proj-sess", "PROGRESS.jsonl");
+    const content = readFileSync(filePath, "utf8");
+    const entry = JSON.parse(content.trim());
+    expect(entry.event).toBe("session_end");
+    expect(entry.data.duration_minutes).toBe(15);
+    expect(entry.data.total_cycles).toBe(4);
+    expect(entry.data.total_verified).toBe(3);
+    expect(entry.data.total_failed).toBe(1);
+  });
+});
+
 describe("loadCycleHistory", () => {
   it("returns empty array when no state directory exists", async () => {
     const stateDir = join(TEST_DIR, "state");
@@ -306,5 +326,33 @@ describe("printHistoryTable", () => {
     expect(lines[2]).toContain("myproj");
     expect(lines[2]).toContain("verified");
     expect(lines[2]).toContain("2m");
+  });
+});
+
+describe("printHistoryCompact", () => {
+  it("outputs nothing when rows is empty", async () => {
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact([])));
+    expect(lines).toHaveLength(0);
+  });
+
+  it("outputs one tab-delimited line per row with no headers", async () => {
+    const rows = [
+      { cycle_id: "cycle-abc123", project: "myproj", outcome: "verified", duration: "2m", sha_range: "aaa..bbb", timestamp: "2026-04-16 12:00:00Z" },
+      { cycle_id: "cycle-def456", project: "other", outcome: "failed", duration: "45s", sha_range: "ccc..ddd", timestamp: "2026-04-16 12:05:00Z" },
+    ];
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows)));
+    expect(lines).toHaveLength(2);
+    // No header keywords
+    expect(lines[0]).not.toContain("CYCLE");
+    expect(lines[0]).not.toContain("PROJECT");
+    // Tab-delimited fields
+    const fields = lines[0].split("\t");
+    expect(fields).toHaveLength(6);
+    expect(fields[0]).toBe("2026-04-16 12:00:00Z");
+    expect(fields[1]).toBe("myproj");
+    expect(fields[2]).toBe("cycle-abc123");
+    expect(fields[3]).toBe("verified");
+    expect(fields[4]).toBe("2m");
+    expect(fields[5]).toBe("aaa..bbb");
   });
 });

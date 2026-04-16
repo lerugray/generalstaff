@@ -39,19 +39,19 @@
   {
     "id": "gs-028",
     "title": "Add a --format=compact flag to the history command that outputs one line per cycle (no headers, no borders) suitable for piping to grep/awk. Default stays as the current table format.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-029",
     "title": "In session.ts, add a session summary to PROGRESS.jsonl at session end that includes total_cycles, total_verified, total_failed, and duration_minutes — useful for the history command and digest.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-030",
     "title": "Add test coverage for the init command edge cases: project ID with special characters is sanitized, init on an already-initialized project warns but doesn't overwrite, init creates parent directories if needed.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
