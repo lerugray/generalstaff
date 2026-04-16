@@ -104,7 +104,7 @@
   {
     "id": "gs-043",
     "title": "In the history command output, add ANSI color codes: green for verified, red for verification_failed, yellow for verified_weak, gray for cycle_skipped. Only colorize when stdout is a TTY.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
