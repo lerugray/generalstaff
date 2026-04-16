@@ -132,6 +132,8 @@ export async function greenfieldHasMoreWork(
 export async function gitIssuesCountRemaining(
   projectPath: string,
 ): Promise<number> {
+  // Use GIT_CEILING_DIRECTORIES to prevent walking up to parent repos
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: join(projectPath, "..") };
   const result = spawnSync(
     "git",
     ["log", "--oneline", "origin/master..HEAD"],
@@ -140,6 +142,7 @@ export async function gitIssuesCountRemaining(
       encoding: "utf8",
       timeout: 10_000,
       stdio: ["ignore", "pipe", "ignore"],
+      env,
     },
   );
   if (result.status !== 0 || typeof result.stdout !== "string") return 0;
