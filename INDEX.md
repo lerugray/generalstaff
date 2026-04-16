@@ -39,8 +39,13 @@ workflow applies.)
   verification gate + scope-match Reviewer + open audit log.
   Includes the open-source-shaped `engineer_command` /
   `verification_command` abstractions, session-level cycle
-  chaining, and a 5-question resolution list for the next build
-  session
+  chaining, and state-lives-in-GeneralStaff safety architecture
+- [[PHASE-1-RESOLUTIONS-2026-04-15]] — **resolutions for the 5
+  Phase 1 open questions**. Work-detection logic (Q1), Reviewer
+  prompt template (Q2), concurrent-run detection (Q3), first
+  test window Thursday 2026-04-16 (Q4), state directory location
+  outside catalogdna for cross-project safety (Q5). Read
+  alongside PHASE-1-PLAN before executing the next build session
 - [[PHASE-1-SKETCH-2026-04-15]] — original sketch (SUPERSEDED
   2026-04-15 evening; preserved for historical context, includes
   the from-scratch architecture that the deep-dive on catalogdna

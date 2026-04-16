@@ -370,6 +370,28 @@ paths the CLI uses (Hard Rule #2 relaxation constraint).
 └── ... (rest of project)
 ```
 
+> **Refinement (2026-04-15 evening):** The per-project
+> `.generalstaff/` layout shown above — with state living
+> INSIDE each managed project — was the original
+> nightcrawler-inspired pattern. It was **refined for Phase 1**
+> so that state lives in **GeneralStaff's own directory** under
+> `state/${project_id}/` rather than inside each managed project.
+>
+> **Why:** cross-project contamination safety. With the original
+> layout, an accidental `git add -A` in catalogdna could pull
+> GeneralStaff state into catalogdna's public repo. The new
+> layout makes that structurally impossible because GeneralStaff
+> never writes files into managed projects' working trees at all.
+> The Engineer subprocess (`bash run_bot.sh`) still writes to
+> catalogdna's `bot/work` branch — that's catalogdna's own bot
+> doing its own thing — but GeneralStaff itself doesn't.
+>
+> See `PHASE-1-RESOLUTIONS-2026-04-15.md` §Q5 for the full
+> rationale and the new layout. The v1 layout above is preserved
+> as historical context (per the append-only design convention);
+> the `state/${project_id}/` layout supersedes it for
+> implementation.
+
 ### Verification gate spec
 
 After the Engineer agent finishes, the dispatcher (not the model)
