@@ -128,7 +128,7 @@
   {
     "id": "gs-047",
     "title": "In projects.ts, add a validateHandsOff function that checks each hands_off pattern against the project's actual file tree (git ls-files) and warns about patterns that don't match anything — helps users catch typos in their hands-off config. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
