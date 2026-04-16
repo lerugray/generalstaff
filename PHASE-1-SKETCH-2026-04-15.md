@@ -1,10 +1,29 @@
 # Phase 1 Sketch — 2026-04-15
 
-**Status:** Brief sketch, not a full plan. Captures the key
-decisions for Phase 1 implementation so the next build session can
-start without re-thinking. A full step-by-step `PHASE-1-PLAN.md`
-should be written at the start of the next session before any code
-lands.
+> **SUPERSEDED 2026-04-15 evening** by [PHASE-1-PLAN-2026-04-15.md](PHASE-1-PLAN-2026-04-15.md).
+>
+> After a deep-dive on catalogdna's existing bot infrastructure
+> (`run_bot.sh`, `run_bot_publish.sh`, `CLAUDE-AUTONOMOUS.md`,
+> `bot_tasks.md`), it became clear that GeneralStaff Phase 1 should
+> **wrap** catalogdna's bot rather than replace it. catalogdna's
+> bot already has worktrees, auto-publish, heartbeats, Phase A/B
+> clever-lazy protocol, sub-agent delegation, and a chrome-review
+> loop. GeneralStaff Phase 1 layers three new things on top —
+> independent verification gate, scope-match Reviewer, open audit
+> log — without rebuilding the bot.
+>
+> This file is preserved for historical context and the original
+> reasoning that led to the deep-dive. **Read
+> [PHASE-1-PLAN-2026-04-15.md](PHASE-1-PLAN-2026-04-15.md)
+> instead** for the current Phase 1 implementation plan.
+
+---
+
+**Status (historical):** Brief sketch, not a full plan. Captures
+the key decisions for Phase 1 implementation so the next build
+session can start without re-thinking. A full step-by-step
+`PHASE-1-PLAN.md` should be written at the start of the next
+session before any code lands.
 
 **Phase 1 goal:** Sequential MVP — dispatcher reads `projects.yaml`,
 picks catalogdna, runs Planner→Engineer→Reviewer chain on it, runs
