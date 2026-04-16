@@ -13,6 +13,7 @@ import {
   loadFleetState,
   saveFleetState,
   updateProjectFleetState,
+  getRootDir,
 } from "./state";
 import { appendProgress } from "./audit";
 import { runEngineer } from "./engineer";
@@ -52,6 +53,29 @@ async function getGitSha(
 
 function worktreePath(project: ProjectConfig): string {
   return join(project.path, ".bot-worktree");
+}
+
+async function autoCommitState(
+  project: ProjectConfig,
+  cycleId: string,
+  outcome: CycleOutcome,
+): Promise<void> {
+  try {
+    const root = getRootDir();
+    // Stage state artifacts (fleet_state.json + state/ + digests/)
+    await $`git -C ${root} add state/ fleet_state.json digests/ 2>/dev/null`.quiet();
+    // Check if there's anything to commit
+    const status = await $`git -C ${root} diff --cached --quiet`.quiet().then(
+      () => false,
+      () => true,
+    );
+    if (status) {
+      await $`git -C ${root} commit -m ${"state: cycle " + cycleId.slice(0, 12) + " — " + outcome}`.quiet();
+    }
+  } catch {
+    // Non-fatal — state commit is convenience, not critical
+    console.log("Warning: could not auto-commit state artifacts");
+  }
 }
 
 async function cleanupWorktree(project: ProjectConfig): Promise<void> {
@@ -379,6 +403,9 @@ export async function executeCycle(
 
   // 10. Clean up worktree (dispatcher owns the lifecycle)
   await cleanupWorktree(project);
+
+  // 11. Auto-commit state artifacts so the tree stays clean for chaining
+  await autoCommitState(project, cycleId, finalOutcome);
 
   return {
     cycle_id: cycleId,
