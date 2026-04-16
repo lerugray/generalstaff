@@ -28,7 +28,7 @@
   {
     "id": "gs-022",
     "title": "In cycle.ts, add empty-diff detection for the verification gate too — if diff is empty, skip verification (not just reviewer). Currently we skip reviewer but still run bun test on unchanged code.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

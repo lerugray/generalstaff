@@ -307,11 +307,11 @@ export async function executeCycle(
     diff_length: fullDiff.length,
   }, cycleId);
 
-  // 6b. Skip reviewer if diff is empty — no API call needed
+  // 6b. Skip verification and reviewer if diff is empty — nothing to test or review
   if (!fullDiff.trim()) {
     const finalOutcome: CycleOutcome = "verified_weak";
-    const reason = "empty diff, no work to review";
-    console.log(`\nSkipping reviewer: ${reason}`);
+    const reason = "empty diff, skipping verification and reviewer";
+    console.log(`\nSkipping verification and reviewer: ${reason}`);
 
     const endedAt = new Date().toISOString();
     console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
