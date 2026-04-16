@@ -34,7 +34,7 @@
   {
     "id": "gs-023",
     "title": "Add a generalstaff init command to cli.ts that takes a project path, creates state/<id>/ with MISSION.md template and empty tasks.json, and prints a projects.yaml snippet the user can paste in",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
