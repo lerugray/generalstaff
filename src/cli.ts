@@ -7,7 +7,7 @@ import { runSingleCycle } from "./cycle";
 import { loadFleetState } from "./state";
 import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
-import { tailProgressLog } from "./audit";
+import { tailProgressLog, loadCycleHistory, printHistoryTable } from "./audit";
 import { initProject } from "./init";
 
 const VERSION = "0.0.1";
@@ -23,6 +23,7 @@ Usage:
   generalstaff init <path> [--id=<id>]         Scaffold state dir for a new project
   generalstaff stop                           Create STOP file (halt dispatcher)
   generalstaff start                          Remove STOP file (allow dispatch)
+  generalstaff history [--project=<id>] [--lines=<n>]  Compact cycle history table
   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
   generalstaff --version                      Show version
   generalstaff --help                         Show this help`);
@@ -160,6 +161,23 @@ switch (command) {
       allowPositionals: false,
     });
     await tailProgressLog(values.project, parseInt(values.lines!, 10));
+    break;
+  }
+
+  case "history": {
+    const { values: historyValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+        lines: { type: "string", default: "20" },
+      },
+      allowPositionals: false,
+    });
+    const rows = await loadCycleHistory(
+      historyValues.project,
+      parseInt(historyValues.lines!, 10),
+    );
+    printHistoryTable(rows);
     break;
   }
 
