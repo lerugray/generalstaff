@@ -6,6 +6,30 @@ import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
 import type { CycleResult } from "../src/types";
 import type { SessionPlanEstimate } from "../src/dispatcher";
 
+async function runHelperSubprocess(helperName: string): Promise<{
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  result: Record<string, unknown>;
+}> {
+  const helperPath = join(import.meta.dir, "helpers", helperName);
+  const proc = Bun.spawn(["bun", "run", helperPath], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const exitCode = await proc.exited;
+  const stdout = await new Response(proc.stdout).text();
+  const stderr = await new Response(proc.stderr).text();
+  const lastLine = stdout.trim().split("\n").pop() ?? "{}";
+  let result: Record<string, unknown> = {};
+  try {
+    result = JSON.parse(lastLine);
+  } catch {
+    // leave empty if no JSON line
+  }
+  return { exitCode, stdout, stderr, result };
+}
+
 const TEST_DIR = join(import.meta.dir, "fixtures", "digest_test");
 
 beforeEach(() => {
@@ -235,4 +259,37 @@ describe("formatSessionPlanPreview", () => {
     expect(out).toContain("Project");
     expect(out).toContain("Cycles");
   });
+});
+
+describe("runSession safeguards", () => {
+  it("exits after 3 consecutive empty-diff cycles", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_empty_cycle_guard.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(3);
+    expect(result.result_count).toBe(3);
+  }, 30_000);
+
+  it("adds capped projects to the skip set", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_capped_projects_skipped.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    // 2 cycles run before cap fires
+    expect(result.execute_cycle_calls).toBe(2);
+    expect(result.result_count).toBe(2);
+    // pickNextProject called twice: once initially (empty skip set),
+    // once after cap (skip set contains the capped project id)
+    const snapshots = result.pick_skip_snapshots as string[][];
+    expect(snapshots.length).toBeGreaterThanOrEqual(2);
+    expect(snapshots[0]).toEqual([]);
+    expect(snapshots[snapshots.length - 1]).toContain("test-proj");
+  }, 30_000);
 });
