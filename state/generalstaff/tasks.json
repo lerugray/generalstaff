@@ -4,7 +4,7 @@
   { "id": "gs-003", "title": "Add engineer module test", "status": "done", "priority": 2 },
   { "id": "gs-004", "title": "Improve error messages in projects.ts", "status": "done", "priority": 3 },
   { "id": "gs-005", "title": "Add CLI test", "status": "done", "priority": 2 },
-  { "id": "gs-006", "title": "Add work_detection test for in_progress", "status": "done", "priority": 1 },
+  { "id": "gs-006", "title": "Add work_detection test", "status": "done", "priority": 1 },
   { "id": "gs-007", "title": "Add isBotRunning catalogdna test", "status": "done", "priority": 1 },
   { "id": "gs-008", "title": "Add parseReviewerResponse test", "status": "done", "priority": 1 },
   { "id": "gs-009", "title": "Add atomic write safety test", "status": "done", "priority": 2 },
@@ -19,39 +19,44 @@
   { "id": "gs-018", "title": "Add projects CLI command", "status": "done", "priority": 2 },
   { "id": "gs-019", "title": "Add log --lines test", "status": "done", "priority": 2 },
   { "id": "gs-020", "title": "Add type guards", "status": "done", "priority": 3 },
-  { "id": "gs-021", "title": "Programmatic hands-off check in cycle.ts", "status": "done", "priority": 1 },
+  { "id": "gs-021", "title": "Programmatic hands-off check", "status": "done", "priority": 1 },
   { "id": "gs-022", "title": "Skip verification on empty diff", "status": "done", "priority": 1 },
   { "id": "gs-023", "title": "Add init command", "status": "done", "priority": 1 },
   { "id": "gs-024", "title": "Validate project paths during load", "status": "done", "priority": 2 },
   { "id": "gs-025", "title": "Add history command", "status": "done", "priority": 2 },
+  { "id": "gs-026", "title": "Add doctor command", "status": "done", "priority": 1 },
+  { "id": "gs-027", "title": "Improve engineer spawn error messages", "status": "done", "priority": 1 },
+  { "id": "gs-028", "title": "Add history --format=compact", "status": "done", "priority": 2 },
+  { "id": "gs-029", "title": "Session summary in PROGRESS.jsonl", "status": "done", "priority": 2 },
+  { "id": "gs-030", "title": "Init command edge case tests", "status": "done", "priority": 2 },
   {
-    "id": "gs-026",
-    "title": "Add a generalstaff doctor command to cli.ts that checks prerequisites: bun --version, git --version, claude --version. Print pass/fail for each with the detected version. Exit 1 if any missing.",
-    "status": "done",
+    "id": "gs-031",
+    "title": "Add a generalstaff clean command to cli.ts that removes stale .bot-worktree directories and optionally prunes old cycle artifacts (keep last N cycles per project, default 20). Wire it up with --keep=N flag.",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-027",
-    "title": "In engineer.ts, improve error output when engineer_command fails to spawn (e.g., command not found, script not executable). Currently the spawn error is logged but the message is generic. Include the command that failed and suggest common fixes.",
-    "status": "done",
+    "id": "gs-032",
+    "title": "Add usage examples to each CLI command's help output — e.g., session shows 'generalstaff session --budget=480  # overnight 8-hour run', cycle shows 'generalstaff cycle --project=myapp --dry-run'. Update the main --help too.",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-028",
-    "title": "Add a --format=compact flag to the history command that outputs one line per cycle (no headers, no borders) suitable for piping to grep/awk. Default stays as the current table format.",
-    "status": "done",
+    "id": "gs-033",
+    "title": "In dispatcher.ts, add a tiebreaker to scoreProjects: when two projects have the same score, prefer the one with fewer total_cycles (spread work more evenly). Add a test for this behavior.",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-029",
-    "title": "In session.ts, add a session summary to PROGRESS.jsonl at session end that includes total_cycles, total_verified, total_failed, and duration_minutes — useful for the history command and digest.",
-    "status": "done",
+    "id": "gs-034",
+    "title": "In session.ts, if a cycle returns verification_failed, log a one-line summary to stderr with the reason so the user sees it even when output is scrolling. Add test.",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-030",
-    "title": "Add test coverage for the init command edge cases: project ID with special characters is sanitized, init on an already-initialized project warns but doesn't overwrite, init creates parent directories if needed.",
-    "status": "done",
+    "id": "gs-035",
+    "title": "Add a test that validates the full CLI help output includes all registered commands: session, cycle, status, stop, start, log, projects, init, history, doctor, clean. Ensures new commands don't get forgotten in help text.",
+    "status": "pending",
     "priority": 2
   }
 ]
