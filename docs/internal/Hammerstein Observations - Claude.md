@@ -261,3 +261,120 @@ has seen in other projects, that would be evidence that either
 per-project bot work, or (b) the framework doesn't generalize
 to fleet-level orchestration the same way it does to
 single-project bots. Either finding would be valuable.
+
+### [interactive Claude — 2026-04-16, first build session + dogfooding]
+
+Four observations from the first session that produced working
+code and ran live cycles. The design-to-execution transition
+surfaced things that design alone could not.
+
+**1. Dogfooding validates "bring your own imagination" from the
+inside out.**
+
+Ray's decision to make GeneralStaff its own first test project
+instead of catalogdna was a "bring your own imagination" move
+applied reflexively. The dispatcher doesn't care what project it
+manages — it runs cycles, verifies work, logs results. The
+project's own imagination (what tasks to assign, what "good"
+looks like) comes from the backlog and the test suite, not from
+the dispatcher. The fact that the dispatcher can build itself
+without any special-casing proves the abstraction is real, not
+theoretical.
+
+This also means the dogfooding feedback loop is tighter than any
+external project would provide: bugs in the dispatcher are
+surfaced BY the dispatcher running against the dispatcher's own
+code. The branch-awareness bug (observation #2) was found this
+way — the dispatcher's own cycle exposed a flaw in the
+dispatcher's own cycle orchestration.
+
+Counter-observation: dogfooding can create a false sense of
+generality. A tool that works well on itself might fail on
+structurally different projects (monorepo layouts, non-TypeScript
+stacks, projects with external service dependencies). The second
+test project (whenever it comes) is the real generality test.
+If the dispatcher needs significant changes to manage a project
+that isn't itself, that's evidence the Phase 1 abstractions were
+shaped too closely around the dogfood case.
+
+**2. The branch-awareness bug is the "initial negatives shift"
+in real time.**
+
+Ray's observation from the 2026-04-15 log — that initial
+negative signals are expected in new projects and tend to shift
+as the project matures — played out within a single session.
+Cycle 1 produced a negative (empty diff, reviewer correctly
+flagged nothing to verify). The bug was identified, diagnosed,
+and fixed within one cycle. Cycle 2 onward: all verified. The
+negative shifted in under an hour.
+
+This is the fastest instance of the pattern in Ray's
+cross-project data. catalogdna took runs 10-15 to shift from
+heavy negatives to stable execution. GeneralStaff did it in one
+cycle. Possible explanations: (a) the framework knowledge was
+already encoded in the design docs from catalogdna's experience,
+so the starting point was higher; (b) dogfooding creates a
+tighter feedback loop than cross-project management; (c) the
+bug was genuinely simple. Probably all three.
+
+Testable prediction: the NEXT set of negatives (gs-006 through
+gs-010 or beyond) will be harder to fix than the branch-awareness
+bug, because the easy plumbing issues are now resolved. If
+cycles 6-10 are all clean verified with no new bugs surfaced,
+that's either evidence the plumbing is solid or evidence the
+tasks aren't exercising enough of the system. Track which.
+
+**3. The reviewer agent maintained integrity under bad input.**
+
+When the dispatcher fed the reviewer an empty diff (due to the
+branch-awareness bug), the reviewer did not false-positive. It
+said "nothing to verify" and returned a verdict that reflected
+reality. This is the verification gate working exactly as
+designed: it caught a false completion (the engineer "finished"
+but the diff was empty) instead of rubber-stamping it.
+
+This matters because Polsia's #1 failure mode (per the
+2026-04-15 analysis) is false completions — the bot marks work
+done without verifying. GeneralStaff's reviewer, on its very
+first cycle, demonstrated the opposite behavior: it refused to
+verify work that wasn't actually present. The gate held even
+when the input was garbage.
+
+Counter-observation: this was an easy case. An empty diff is
+obviously wrong. The harder test is when the diff contains
+plausible-looking but subtly incorrect code — code that passes
+tests but introduces a latent bug, or code that technically
+satisfies the task description but violates an unstated
+convention. The reviewer needs to catch THOSE cases to be a
+real differentiator. 5 cycles is too few to know if it can.
+Track the first time the reviewer lets something through that
+it shouldn't have.
+
+**4. Five verified cycles with zero false positives is a data
+point, not proof.**
+
+5/5 bot tasks completed with clean verified verdicts. The
+verification gate never false-positived. This is good, but the
+sample size is small and the tasks were straightforward (test
+coverage and code quality improvements on a young codebase).
+The real test of the verification gate comes when: (a) the
+tasks are harder (architectural changes, cross-module
+refactoring, performance optimization); (b) the codebase is
+larger (more surface area for subtle breakage); (c) the
+engineer makes a mistake that passes tests but is wrong for
+other reasons.
+
+For now, the 5/5 record establishes a baseline. The metric to
+track going forward is not "what percentage of cycles verify"
+but "when the gate DOES reject, was the rejection correct?"
+A gate that verifies everything is useless — it's just
+rubber-stamping. The gate's value is proven by true negatives
+(correct rejections), not by true positives (correct
+verifications). We need cycles where the engineer fails and
+the reviewer catches it. Until that happens, the gate is
+promising but unproven on the hard cases.
+
+Testable prediction: within the first 20 cycles, the reviewer
+will reject at least one task that the engineer submitted as
+complete. If it doesn't, either the tasks are too easy or the
+reviewer's threshold is too low. Both would need adjustment.
