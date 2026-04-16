@@ -121,6 +121,18 @@ describe("greenfieldHasMoreWork", () => {
     expect(await greenfieldHasMoreWork("all-done")).toBe(false);
   });
 
+  it("returns true when tasks include in_progress items", async () => {
+    writeFixture(
+      "state/in-prog/tasks.json",
+      JSON.stringify([
+        { id: "1", title: "Task 1", status: "done", priority: 1 },
+        { id: "2", title: "Task 2", status: "in_progress", priority: 2 },
+        { id: "3", title: "Task 3", status: "skipped", priority: 3 },
+      ]),
+    );
+    expect(await greenfieldHasMoreWork("in-prog")).toBe(true);
+  });
+
   it("returns false when tasks.json doesn't exist", async () => {
     expect(await greenfieldHasMoreWork("nonexistent")).toBe(false);
   });
