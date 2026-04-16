@@ -86,7 +86,7 @@
   {
     "id": "gs-040",
     "title": "Add a projects.test.ts test that validates warnProjectPaths with a real git repo (use the GeneralStaff repo itself as the valid path) and a non-git directory",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
