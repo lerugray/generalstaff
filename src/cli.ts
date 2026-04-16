@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "util";
-import { basename, resolve } from "path";
+import { existsSync } from "fs";
+import { basename, join, resolve } from "path";
 import { runSession } from "./session";
 import { runSingleCycle } from "./cycle";
-import { loadFleetState, getProjectSummary } from "./state";
+import { loadFleetState, getProjectSummary, getRootDir } from "./state";
 import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
@@ -68,6 +69,9 @@ Usage:
   generalstaff task add --project=<id> [--priority=N] <title>
                                                           Append a new task to tasks.json
     Example: generalstaff task add --project=myapp "Fix login bug"
+
+  generalstaff version                                    Show version + environment info (for bug reports)
+    Example: generalstaff version                       # includes bun version, platform, projects.yaml path
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -324,6 +328,18 @@ switch (command) {
       );
       process.exit(1);
     }
+    break;
+  }
+
+  case "version": {
+    const projectsYamlPath = join(getRootDir(), "projects.yaml");
+    const projectsYamlFound = existsSync(projectsYamlPath);
+    console.log(`generalstaff v${VERSION}`);
+    console.log(`bun:           ${Bun.version}`);
+    console.log(`platform:      ${process.platform} ${process.arch}`);
+    console.log(
+      `projects.yaml: ${projectsYamlPath}${projectsYamlFound ? "" : " (not found)"}`,
+    );
     break;
   }
 

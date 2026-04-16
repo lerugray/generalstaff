@@ -370,6 +370,48 @@ dispatcher:
     });
   });
 
+  describe("version command", () => {
+    const VERSION_TEST_DIR = join(import.meta.dir, "fixtures", "version_cmd_test");
+
+    beforeEach(() => {
+      mkdirSync(VERSION_TEST_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(VERSION_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("prints version, bun, platform, and projects.yaml path", async () => {
+      const result = await runCli(["version"], VERSION_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff v0.0.1");
+      expect(result.stdout).toContain("bun:");
+      expect(result.stdout).toContain(Bun.version);
+      expect(result.stdout).toContain("platform:");
+      expect(result.stdout).toContain(process.platform);
+      expect(result.stdout).toContain("projects.yaml:");
+    });
+
+    it("flags missing projects.yaml with '(not found)'", async () => {
+      const result = await runCli(["version"], VERSION_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("(not found)");
+    });
+
+    it("omits '(not found)' when projects.yaml exists", async () => {
+      writeFileSync(join(VERSION_TEST_DIR, "projects.yaml"), "projects: []\n");
+      const result = await runCli(["version"], VERSION_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain("(not found)");
+      expect(result.stdout).toContain(join(VERSION_TEST_DIR, "projects.yaml"));
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("generalstaff version");
+    });
+  });
+
   describe("help completeness", () => {
     it("lists all registered commands in help output", async () => {
       const result = await runCli(["--help"]);

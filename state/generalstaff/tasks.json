@@ -146,7 +146,7 @@
   {
     "id": "gs-050",
     "title": "Add a generalstaff version command (separate from --version flag) that shows version, bun version, platform, and projects.yaml location. Useful for bug reports.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]
