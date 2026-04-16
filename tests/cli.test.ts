@@ -80,6 +80,70 @@ describe("CLI", () => {
     });
   });
 
+  describe("projects", () => {
+    const PROJECTS_TEST_DIR = join(import.meta.dir, "fixtures", "projects_cmd_test");
+
+    const PROJECTS_YAML = `
+projects:
+  - id: alpha
+    path: /tmp/alpha
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+  - id: beta
+    path: /tmp/beta
+    priority: 3
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 45
+    branch: main
+    hands_off:
+      - README.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(PROJECTS_TEST_DIR, { recursive: true });
+      writeFileSync(join(PROJECTS_TEST_DIR, "projects.yaml"), PROJECTS_YAML);
+    });
+
+    afterEach(() => {
+      rmSync(PROJECTS_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("lists all registered projects with key fields", async () => {
+      const result = await runCli(["projects"], PROJECTS_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("alpha");
+      expect(result.stdout).toContain("/tmp/alpha");
+      expect(result.stdout).toContain("priority: 1");
+      expect(result.stdout).toContain("30 min");
+      expect(result.stdout).toContain("bot/work");
+      expect(result.stdout).toContain("beta");
+      expect(result.stdout).toContain("/tmp/beta");
+      expect(result.stdout).toContain("priority: 3");
+      expect(result.stdout).toContain("45 min");
+      expect(result.stdout).toContain("main");
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("projects");
+    });
+  });
+
   describe("status --json", () => {
     const STATUS_TEST_DIR = join(import.meta.dir, "fixtures", "status_json_test");
 

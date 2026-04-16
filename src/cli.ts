@@ -17,6 +17,7 @@ Usage:
   generalstaff session [--budget=<minutes>]   Run a session (multiple cycles)
   generalstaff cycle --project=<id>           Run one cycle on a project
   generalstaff status [--json]                 Show fleet state
+  generalstaff projects                        List registered projects
   generalstaff stop                           Create STOP file (halt dispatcher)
   generalstaff start                          Remove STOP file (allow dispatch)
   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
@@ -113,6 +114,22 @@ switch (command) {
         } else {
           console.log(`    No cycles yet`);
         }
+      }
+    }
+    break;
+  }
+
+  case "projects": {
+    const projects = await loadProjects();
+    if (projects.length === 0) {
+      console.log("No projects registered.");
+    } else {
+      for (const p of projects) {
+        console.log(`${p.id}`);
+        console.log(`  path:     ${p.path}`);
+        console.log(`  priority: ${p.priority}`);
+        console.log(`  budget:   ${p.cycle_budget_minutes} min`);
+        console.log(`  branch:   ${p.branch}`);
       }
     }
     break;
