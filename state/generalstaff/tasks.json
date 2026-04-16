@@ -5,38 +5,43 @@
   { "id": "gs-004", "title": "Improve error messages in projects.ts validation for missing fields", "status": "done", "priority": 3 },
   { "id": "gs-005", "title": "Add CLI test: --version, --help, unknown command exit codes", "status": "done", "priority": 2 },
   { "id": "gs-006", "title": "Add work_detection test: greenfield tasks with in_progress status should count as remaining work", "status": "done", "priority": 1 },
-  { "id": "gs-007", "title": "Add safety module test: isBotRunning with catalogdna detection mode using fixture files for .bot-worktree, bot_status.md, and heartbeat sentinels", "status": "done", "priority": 1 },
-  { "id": "gs-008", "title": "Add reviewer module test: parseReviewerResponse handles raw JSON, fenced JSON, JSON with surrounding prose, and malformed responses", "status": "done", "priority": 1 },
-  { "id": "gs-009", "title": "Add state module test: atomic write safety — concurrent writes don't corrupt STATE.json (write tmp then rename)", "status": "done", "priority": 2 },
-  { "id": "gs-010", "title": "Add audit module test: tailProgressLog formats entries correctly across multiple projects", "status": "done", "priority": 2 },
+  { "id": "gs-007", "title": "Add safety module test: isBotRunning with catalogdna detection mode using fixture files", "status": "done", "priority": 1 },
+  { "id": "gs-008", "title": "Add reviewer module test: parseReviewerResponse handles various formats", "status": "done", "priority": 1 },
+  { "id": "gs-009", "title": "Add state module test: atomic write safety", "status": "done", "priority": 2 },
+  { "id": "gs-010", "title": "Add audit module test: tailProgressLog formats entries correctly", "status": "done", "priority": 2 },
+  { "id": "gs-011", "title": "Skip reviewer agent when diff is empty", "status": "done", "priority": 1 },
+  { "id": "gs-012", "title": "Auto-update bot/work to HEAD before engineer", "status": "done", "priority": 1 },
+  { "id": "gs-013", "title": "Add --json flag to CLI status command", "status": "done", "priority": 2 },
+  { "id": "gs-014", "title": "Add digest writer tests", "status": "done", "priority": 2 },
+  { "id": "gs-015", "title": "Add dispatcher pickNextProject tests with override file", "status": "done", "priority": 2 },
   {
-    "id": "gs-011",
-    "title": "Skip reviewer agent when diff is empty — no API call needed, log cycle_end with reason 'empty diff, no work to review' and outcome verified_weak",
-    "status": "done",
+    "id": "gs-016",
+    "title": "Add safety test: isBotRunning with worktree detection mode — fresh .bot-worktree triggers, stale ignores, no .bot-worktree returns false",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-012",
-    "title": "In cycle.ts, before running the engineer, update the bot/work branch to match the current HEAD so the bot always starts from the latest code (git branch -f bot/work HEAD)",
-    "status": "done",
+    "id": "gs-017",
+    "title": "In cycle.ts, if engineer exits non-zero still run verification and reviewer to capture what happened — currently the cycle continues regardless but add a test proving this behavior",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-013",
-    "title": "Add --json flag to the CLI status command that outputs fleet state as JSON instead of formatted text",
-    "status": "done",
+    "id": "gs-018",
+    "title": "Add a generalstaff projects command to cli.ts that lists registered projects with id, path, priority, cycle_budget_minutes, and branch",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-014",
-    "title": "Add digest writer test: verify digest file is created with correct markdown format including cycle outcomes and SHA ranges",
-    "status": "done",
+    "id": "gs-019",
+    "title": "Add --lines flag test for the log command — verify it respects the limit and defaults to 20",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-015",
-    "title": "Add dispatcher test: pickNextProject respects override file (next_project.txt) and falls back to priority x staleness picker",
-    "status": "done",
-    "priority": 2
+    "id": "gs-020",
+    "title": "Add type guard functions for ReviewerResponse and ProgressEntry in types.ts — validate shapes at parse boundaries instead of trusting JSON.parse casts",
+    "status": "pending",
+    "priority": 3
   }
 ]

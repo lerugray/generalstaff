@@ -20,6 +20,7 @@ const VALID_WORK_DETECTION: WorkDetectionMode[] = [
 
 const VALID_CONCURRENCY_DETECTION: ConcurrencyDetectionMode[] = [
   "catalogdna",
+  "worktree",
   "none",
 ];
 

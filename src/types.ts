@@ -30,7 +30,7 @@ export type CycleOutcome = ReviewerVerdict | "cycle_skipped";
 // --- projects.yaml schema ---
 
 export type WorkDetectionMode = "catalogdna_bot_tasks" | "tasks_json";
-export type ConcurrencyDetectionMode = "catalogdna" | "none";
+export type ConcurrencyDetectionMode = "catalogdna" | "worktree" | "none";
 
 export interface ProjectConfig {
   id: string;

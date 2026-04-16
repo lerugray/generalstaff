@@ -110,6 +110,27 @@ export function matchesHandsOff(
 // --- Concurrent-run detection (Q3: three-signal check) ---
 
 export function isBotRunning(project: ProjectConfig): BotRunningResult {
+  if (project.concurrency_detection === "none") {
+    return { running: false };
+  }
+
+  // Generic worktree check — works for any project using .bot-worktree
+  if (project.concurrency_detection === "worktree") {
+    const worktreePath = join(project.path, ".bot-worktree");
+    if (existsSync(worktreePath)) {
+      const stat = statSync(worktreePath);
+      const ageMin = (Date.now() - stat.mtimeMs) / 60_000;
+      if (ageMin < 10) {
+        return {
+          running: true,
+          reason: `.bot-worktree exists, modified ${ageMin.toFixed(0)} min ago`,
+        };
+      }
+    }
+    return { running: false };
+  }
+
+  // catalogdna-specific: three-signal check
   if (project.concurrency_detection !== "catalogdna") {
     return { running: false };
   }
