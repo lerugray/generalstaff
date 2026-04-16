@@ -182,7 +182,7 @@
   {
     "id": "gs-056",
     "title": "In src/clean.ts, add a log-rotation step: delete files in logs/ older than N days (N configurable via --log-days=<n> flag, default 30). Surface count of deleted files in the clean output. Add tests covering files on both sides of the threshold and a custom --log-days override.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
