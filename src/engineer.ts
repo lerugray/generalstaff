@@ -121,14 +121,42 @@ export async function runEngineer(
     child.on("error", async (err) => {
       clearTimeout(timer);
       const durationSeconds = (Date.now() - startTime) / 1000;
-      logStream.write(`\n=== SPAWN ERROR: ${err.message} ===\n`);
+
+      const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+      const isPermission = (err as NodeJS.ErrnoException).code === "EACCES";
+
+      logStream.write(`\n=== SPAWN ERROR ===\n`);
+      logStream.write(`Command: ${command}\n`);
+      logStream.write(`CWD: ${project.path}\n`);
+      logStream.write(`Error: ${err.message}\n`);
+      if (isNotFound) {
+        logStream.write(
+          `\nThe command could not be found. Common fixes:\n` +
+          `  - Ensure 'bash' is installed and in PATH\n` +
+          `  - Check that the engineer_command in projects.yaml is correct\n` +
+          `  - Run 'generalstaff doctor' to verify prerequisites\n`,
+        );
+      } else if (isPermission) {
+        logStream.write(
+          `\nPermission denied. Common fixes:\n` +
+          `  - Make the script executable: chmod +x <script>\n` +
+          `  - Check file ownership and permissions in ${project.path}\n`,
+        );
+      }
       logStream.end();
+
+      console.error(
+        `[generalstaff] engineer spawn failed for ${project.id}: ${err.message}` +
+        (isNotFound ? " (command not found — run 'generalstaff doctor' to check prerequisites)" : "") +
+        (isPermission ? " (permission denied — check script is executable)" : ""),
+      );
 
       await appendProgress(project.id, "engineer_completed", {
         exit_code: null,
         duration_seconds: Math.round(durationSeconds),
         timed_out: false,
         error: err.message,
+        command,
       }, cycleId);
 
       resolve({
