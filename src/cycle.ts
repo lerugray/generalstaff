@@ -52,6 +52,24 @@ async function getGitSha(
   }
 }
 
+// Count commits reachable from `branch` but not from `base`.
+// Returns 0 if branch missing, base missing, or branch fully merged into base.
+async function countCommitsAhead(
+  projectPath: string,
+  branch: string,
+  base: string,
+): Promise<number> {
+  try {
+    const out = await $`git -C ${projectPath} rev-list --count ${base}..${branch}`
+      .quiet()
+      .text();
+    const n = parseInt(out.trim(), 10);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function worktreePath(project: ProjectConfig): string {
   return join(project.path, ".bot-worktree");
 }
@@ -289,8 +307,56 @@ export async function executeCycle(
     return skipResult(cycleId, project.id, startedAt, treeCheck.reason!);
   }
 
-  // 2. Reset bot branch to HEAD so the engineer starts from the latest code
+  // 2. Before resetting bot branch to HEAD, check whether it has unmerged
+  //    work. `branch -f <branch> HEAD` is destructive — without this guard,
+  //    a verified cycle's commits sit on bot/work, then the next cycle starts
+  //    and overwrites them, leaving the work orphaned in the reflog and
+  //    never integrated into master. (Discovered 2026-04-16, observation run
+  //    cycles 1-3 all reimplemented gs-056 because of this gap.)
   const branch = project.branch;
+  const branchSha = await getGitSha(project.path, branch);
+  if (branchSha !== "unknown") {
+    const unmerged = await countCommitsAhead(project.path, branch, "HEAD");
+    if (unmerged > 0) {
+      if (project.auto_merge) {
+        // Opt-in: fast-forward-or-merge bot's prior verified work into HEAD
+        // before resetting. Use --no-ff so the merge is always legible in
+        // the history even when a fast-forward would work.
+        console.log(
+          `Auto-merging ${unmerged} commit(s) from ${branch} into HEAD...`,
+        );
+        try {
+          const msg = `Merge branch '${branch}' (auto, ${unmerged} cycle-commit(s))`;
+          await $`git -C ${project.path} merge --no-ff ${branch} -m ${msg}`.quiet();
+          console.log(`Merged ${branch} into HEAD.`);
+        } catch {
+          const reason =
+            `auto-merge of ${branch} into HEAD failed — ` +
+            `manual intervention required (likely a conflict with interactive work on master)`;
+          console.log(`\nERROR: ${reason}\n`);
+          await appendProgress(project.id, "cycle_skipped", {
+            reason,
+          }, cycleId);
+          return skipResult(cycleId, project.id, startedAt, reason);
+        }
+      } else {
+        // auto_merge: false — default per Hard Rule #4. Do NOT overwrite work.
+        const reason =
+          `${branch} has ${unmerged} unmerged commit(s) ahead of HEAD; ` +
+          `resetting would destroy that work. Merge manually ` +
+          `(git -C ${project.path} merge --no-ff ${branch}) or set ` +
+          `auto_merge: true in projects.yaml for project ${project.id}.`;
+        console.log(`\nERROR: ${reason}\n`);
+        await appendProgress(project.id, "cycle_skipped", {
+          reason,
+        }, cycleId);
+        return skipResult(cycleId, project.id, startedAt, reason);
+      }
+    }
+  }
+
+  // Now safe to reset — either branch was clean of unmerged work, didn't
+  // exist, or we just merged it in above.
   try {
     await $`git -C ${project.path} branch -f ${branch} HEAD`.quiet();
     console.log(`Branch ${branch} reset to HEAD`);
