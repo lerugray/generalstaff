@@ -110,7 +110,7 @@
   {
     "id": "gs-044",
     "title": "Add a session.test.ts test that validates the empty-cycle guard exits after 3 consecutive empty diffs, and that capped projects get added to the skip set",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
