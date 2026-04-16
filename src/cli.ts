@@ -7,7 +7,7 @@ import { runSingleCycle } from "./cycle";
 import { loadFleetState } from "./state";
 import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
-import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "./audit";
+import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -44,10 +44,11 @@ Usage:
   generalstaff start                                      Remove STOP file (allow dispatch)
     Example: generalstaff start                         # resume after a stop
 
-  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact]
+  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
                                                           Cycle history (compact: tab-delimited, no headers)
     Example: generalstaff history --lines=50
     Example: generalstaff history --project=myapp --format=compact
+    Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
 
   generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
@@ -209,6 +210,7 @@ switch (command) {
         project: { type: "string" },
         lines: { type: "string", default: "20" },
         format: { type: "string", default: "table" },
+        costs: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -217,7 +219,12 @@ switch (command) {
       parseInt(historyValues.lines!, 10),
     );
     if (historyValues.format === "compact") {
-      printHistoryCompact(rows);
+      if (historyValues.costs) {
+        const summary = await summarizeCosts(historyValues.project);
+        printHistoryCompact(rows, undefined, summary.by_cycle);
+      } else {
+        printHistoryCompact(rows);
+      }
     } else {
       printHistoryTable(rows);
     }

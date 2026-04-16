@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts } from "../src/audit";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
@@ -411,6 +411,126 @@ describe("printHistoryTable colorization", () => {
     for (let i = 2; i < lines.length; i++) {
       expect(stripAnsi(lines[i]).length).toBe(headerLen);
     }
+  });
+});
+
+describe("summarizeCosts", () => {
+  it("returns zero totals when state directory is missing", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    rmSync(stateDir, { recursive: true, force: true });
+    const summary = await summarizeCosts();
+    expect(summary.reviewer_invocations).toBe(0);
+    expect(summary.prompt_chars).toBe(0);
+    expect(summary.estimated_tokens).toBe(0);
+    expect(summary.by_cycle).toEqual({});
+  });
+
+  it("returns zero totals when project has no PROGRESS.jsonl", async () => {
+    const summary = await summarizeCosts("nonexistent");
+    expect(summary.reviewer_invocations).toBe(0);
+    expect(summary.by_cycle).toEqual({});
+  });
+
+  it("counts reviewer_invoked events and sums prompt_length", async () => {
+    await appendProgress("proj-cost", "cycle_start", { start_sha: "a" }, "cycle-aaa111222333");
+    await appendProgress("proj-cost", "reviewer_invoked", { prompt_length: 400, dry_run: false }, "cycle-aaa111222333");
+    await appendProgress("proj-cost", "reviewer_invoked", { prompt_length: 800, dry_run: false }, "cycle-bbb444555666");
+
+    const summary = await summarizeCosts("proj-cost");
+    expect(summary.reviewer_invocations).toBe(2);
+    expect(summary.prompt_chars).toBe(1200);
+    // 1200 chars / 4 = 300 tokens
+    expect(summary.estimated_tokens).toBe(300);
+  });
+
+  it("keys by_cycle with the 12-char cycle prefix used in history rows", async () => {
+    await appendProgress("proj-cost", "reviewer_invoked", { prompt_length: 100 }, "cycle-aaa111222333extra");
+    const summary = await summarizeCosts("proj-cost");
+    // Key is the first 12 chars of the full cycle_id, matching CycleHistoryRow.cycle_id.
+    expect(Object.keys(summary.by_cycle)).toEqual(["cycle-aaa111"]);
+    expect(summary.by_cycle["cycle-aaa111"].reviewer_invocations).toBe(1);
+    expect(summary.by_cycle["cycle-aaa111"].prompt_chars).toBe(100);
+    expect(summary.by_cycle["cycle-aaa111"].estimated_tokens).toBe(25);
+  });
+
+  it("merges multiple reviewer_invoked events on the same cycle", async () => {
+    // A cycle that retries the reviewer will emit reviewer_invoked more than once.
+    await appendProgress("proj-retry", "reviewer_invoked", { prompt_length: 500 }, "cycle-ret111222333");
+    await appendProgress("proj-retry", "reviewer_invoked", { prompt_length: 700 }, "cycle-ret111222333");
+
+    const summary = await summarizeCosts("proj-retry");
+    expect(summary.by_cycle["cycle-ret111"].reviewer_invocations).toBe(2);
+    expect(summary.by_cycle["cycle-ret111"].prompt_chars).toBe(1200);
+    expect(summary.by_cycle["cycle-ret111"].estimated_tokens).toBe(300);
+  });
+
+  it("aggregates across projects when projectId is undefined", async () => {
+    await appendProgress("proj-x", "reviewer_invoked", { prompt_length: 400 }, "cycle-xxx111222333");
+    await appendProgress("proj-y", "reviewer_invoked", { prompt_length: 200 }, "cycle-yyy111222333");
+
+    const summary = await summarizeCosts();
+    expect(summary.reviewer_invocations).toBe(2);
+    expect(summary.prompt_chars).toBe(600);
+    expect(summary.estimated_tokens).toBe(150);
+    expect(Object.keys(summary.by_cycle)).toHaveLength(2);
+  });
+
+  it("ignores non-reviewer_invoked events", async () => {
+    await appendProgress("proj-mix", "cycle_start", { start_sha: "a" }, "cycle-mix111222333");
+    await appendProgress("proj-mix", "engineer_invoked", { cmd: "test" }, "cycle-mix111222333");
+    await appendProgress("proj-mix", "cycle_end", { outcome: "verified" }, "cycle-mix111222333");
+
+    const summary = await summarizeCosts("proj-mix");
+    expect(summary.reviewer_invocations).toBe(0);
+    expect(summary.prompt_chars).toBe(0);
+  });
+
+  it("tolerates missing or non-numeric prompt_length", async () => {
+    await appendProgress("proj-bad", "reviewer_invoked", { dry_run: true }, "cycle-bad111222333");
+    await appendProgress("proj-bad", "reviewer_invoked", { prompt_length: "not a number" }, "cycle-bad111222333");
+
+    const summary = await summarizeCosts("proj-bad");
+    expect(summary.reviewer_invocations).toBe(2);
+    expect(summary.prompt_chars).toBe(0);
+    expect(summary.estimated_tokens).toBe(0);
+  });
+});
+
+describe("printHistoryCompact with costs column", () => {
+  const rows = [
+    { cycle_id: "cycle-abc123", project: "myproj", outcome: "verified", duration: "1m", sha_range: "aaa..bbb", timestamp: "2026-04-16 12:00:00Z" },
+    { cycle_id: "cycle-def456", project: "myproj", outcome: "verified", duration: "2m", sha_range: "ccc..ddd", timestamp: "2026-04-16 12:05:00Z" },
+  ];
+
+  it("adds invocations and tokens columns when costs map is provided", async () => {
+    const costs = {
+      "cycle-abc123": { cycle_id: "cycle-abc123", reviewer_invocations: 1, prompt_chars: 400, estimated_tokens: 100 },
+      "cycle-def456": { cycle_id: "cycle-def456", reviewer_invocations: 2, prompt_chars: 800, estimated_tokens: 200 },
+    };
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, false, costs)));
+    expect(lines).toHaveLength(2);
+    const first = lines[0].split("\t");
+    expect(first).toHaveLength(8);
+    expect(first[6]).toBe("1");   // invocations
+    expect(first[7]).toBe("100"); // estimated tokens
+    const second = lines[1].split("\t");
+    expect(second[6]).toBe("2");
+    expect(second[7]).toBe("200");
+  });
+
+  it("emits 0/0 for rows with no matching cost entry", async () => {
+    const costs = {
+      "cycle-abc123": { cycle_id: "cycle-abc123", reviewer_invocations: 1, prompt_chars: 400, estimated_tokens: 100 },
+    };
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, false, costs)));
+    const second = lines[1].split("\t");
+    expect(second[6]).toBe("0");
+    expect(second[7]).toBe("0");
+  });
+
+  it("preserves 6-field output when costs argument is omitted", async () => {
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, false)));
+    expect(lines[0].split("\t")).toHaveLength(6);
   });
 });
 
