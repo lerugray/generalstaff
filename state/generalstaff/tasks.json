@@ -19,34 +19,39 @@
   { "id": "gs-018", "title": "Add projects CLI command", "status": "done", "priority": 2 },
   { "id": "gs-019", "title": "Add log --lines test", "status": "done", "priority": 2 },
   { "id": "gs-020", "title": "Add type guards", "status": "done", "priority": 3 },
+  { "id": "gs-021", "title": "Programmatic hands-off check in cycle.ts", "status": "done", "priority": 1 },
+  { "id": "gs-022", "title": "Skip verification on empty diff", "status": "done", "priority": 1 },
+  { "id": "gs-023", "title": "Add init command", "status": "done", "priority": 1 },
+  { "id": "gs-024", "title": "Validate project paths during load", "status": "done", "priority": 2 },
+  { "id": "gs-025", "title": "Add history command", "status": "done", "priority": 2 },
   {
-    "id": "gs-021",
-    "title": "In cycle.ts, add programmatic hands-off violation check after diff capture — compare changed files against hands_off patterns using matchesHandsOff from safety.ts. If any violations found, skip reviewer and set outcome to verification_failed with the violation list. Saves an API call.",
-    "status": "done",
+    "id": "gs-026",
+    "title": "Add a generalstaff doctor command to cli.ts that checks prerequisites: bun --version, git --version, claude --version. Print pass/fail for each with the detected version. Exit 1 if any missing.",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-022",
-    "title": "In cycle.ts, add empty-diff detection for the verification gate too — if diff is empty, skip verification (not just reviewer). Currently we skip reviewer but still run bun test on unchanged code.",
-    "status": "done",
+    "id": "gs-027",
+    "title": "In engineer.ts, improve error output when engineer_command fails to spawn (e.g., command not found, script not executable). Currently the spawn error is logged but the message is generic. Include the command that failed and suggest common fixes.",
+    "status": "pending",
     "priority": 1
   },
   {
-    "id": "gs-023",
-    "title": "Add a generalstaff init command to cli.ts that takes a project path, creates state/<id>/ with MISSION.md template and empty tasks.json, and prints a projects.yaml snippet the user can paste in",
-    "status": "done",
-    "priority": 1
-  },
-  {
-    "id": "gs-024",
-    "title": "In projects.ts, validate that project path exists on disk and is a git repo (git rev-parse --git-dir) during loadProjectsYaml — emit a clear warning but don't fail, so projects.yaml can be portable across machines",
-    "status": "done",
+    "id": "gs-028",
+    "title": "Add a --format=compact flag to the history command that outputs one line per cycle (no headers, no borders) suitable for piping to grep/awk. Default stays as the current table format.",
+    "status": "pending",
     "priority": 2
   },
   {
-    "id": "gs-025",
-    "title": "Add a generalstaff history command to cli.ts that shows a compact table of recent cycles across all projects: cycle_id (truncated), project, outcome, duration, and SHA range — pulled from PROGRESS.jsonl",
-    "status": "done",
+    "id": "gs-029",
+    "title": "In session.ts, add a session summary to PROGRESS.jsonl at session end that includes total_cycles, total_verified, total_failed, and duration_minutes — useful for the history command and digest.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-030",
+    "title": "Add test coverage for the init command edge cases: project ID with special characters is sanitized, init on an already-initialized project warns but doesn't overwrite, init creates parent directories if needed.",
+    "status": "pending",
     "priority": 2
   }
 ]

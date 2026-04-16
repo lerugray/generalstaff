@@ -84,8 +84,13 @@ async function cleanupWorktree(project: ProjectConfig): Promise<void> {
     try {
       await $`git -C ${project.path} worktree remove ${wt} --force`.quiet();
     } catch {
-      // Best-effort cleanup
-      console.log("Warning: could not remove worktree, may need manual cleanup");
+      // git worktree remove may fail if already pruned
+    }
+    // Belt-and-suspenders: rm the directory if git left it behind
+    // (happens when worktree was already detached but dir remains)
+    if (existsSync(wt)) {
+      const { rmSync } = require("fs");
+      try { rmSync(wt, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
   }
 }
