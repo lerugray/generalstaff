@@ -93,6 +93,12 @@ export interface ProjectState {
 
 // --- Cycle ---
 
+export interface DiffStats {
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface CycleResult {
   cycle_id: string;
   project_id: string;
@@ -105,6 +111,7 @@ export interface CycleResult {
   reviewer_verdict: ReviewerVerdict;
   final_outcome: CycleOutcome;
   reason: string;
+  diff_stats?: DiffStats;
 }
 
 // --- PROGRESS.jsonl entry types ---

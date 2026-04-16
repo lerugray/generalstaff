@@ -152,7 +152,7 @@
   {
     "id": "gs-051",
     "title": "In cycle.ts, add a diffSummaryStats function that parses the diff to count files changed, insertions, and deletions. Include these stats in the cycle_end PROGRESS entry and the digest output. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
