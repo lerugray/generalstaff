@@ -291,6 +291,10 @@ export async function writeDigest(
     content += `- **Outcome:** ${r.final_outcome}\n`;
     content += `- **Reason:** ${r.reason}\n`;
     content += `- **SHA:** ${r.cycle_start_sha.slice(0, 8)} → ${r.cycle_end_sha.slice(0, 8)}\n`;
+    if (r.diff_stats) {
+      const s = r.diff_stats;
+      content += `- **Diff:** ${s.files_changed} file(s), +${s.insertions}/-${s.deletions}\n`;
+    }
     content += `- **Engineer exit:** ${r.engineer_exit_code}\n`;
     content += `- **Verification:** ${r.verification_outcome}\n`;
     content += `- **Reviewer:** ${r.reviewer_verdict}\n\n`;

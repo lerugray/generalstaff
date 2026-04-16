@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "path";
 import { $ } from "bun";
-import { extractChangedFiles } from "../src/cycle";
+import { extractChangedFiles, diffSummaryStats } from "../src/cycle";
 
 describe("extractChangedFiles", () => {
   it("extracts file paths from a unified diff", () => {
@@ -101,6 +101,107 @@ describe("extractChangedFiles", () => {
       "assets/icon.png",
       "docs/release notes.md",
     ]);
+  });
+});
+
+describe("diffSummaryStats", () => {
+  it("returns zeroes for empty diff", () => {
+    expect(diffSummaryStats("")).toEqual({
+      files_changed: 0,
+      insertions: 0,
+      deletions: 0,
+    });
+  });
+
+  it("counts insertions, deletions, and files across a multi-file diff", () => {
+    const diff = [
+      "diff --git a/src/main.ts b/src/main.ts",
+      "index abc..def 100644",
+      "--- a/src/main.ts",
+      "+++ b/src/main.ts",
+      "@@ -1,3 +1,4 @@",
+      " context line",
+      "-removed line",
+      "+added line one",
+      "+added line two",
+      "diff --git a/README.md b/README.md",
+      "--- a/README.md",
+      "+++ b/README.md",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+
+    expect(diffSummaryStats(diff)).toEqual({
+      files_changed: 2,
+      insertions: 3,
+      deletions: 2,
+    });
+  });
+
+  it("ignores the +++/--- file-header lines when counting", () => {
+    const diff = [
+      "diff --git a/a.ts b/a.ts",
+      "--- a/a.ts",
+      "+++ b/a.ts",
+      "@@ -1 +1 @@",
+      "-x",
+      "+y",
+    ].join("\n");
+
+    expect(diffSummaryStats(diff)).toEqual({
+      files_changed: 1,
+      insertions: 1,
+      deletions: 1,
+    });
+  });
+
+  it("counts a pure-add diff with no deletions", () => {
+    const diff = [
+      "diff --git a/new.ts b/new.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/new.ts",
+      "@@ -0,0 +1,3 @@",
+      "+line one",
+      "+line two",
+      "+line three",
+    ].join("\n");
+
+    expect(diffSummaryStats(diff)).toEqual({
+      files_changed: 1,
+      insertions: 3,
+      deletions: 0,
+    });
+  });
+
+  it("treats a rename-only diff as one file with zero insertions/deletions", () => {
+    const diff = [
+      "diff --git a/old-name.ts b/new-name.ts",
+      "similarity index 100%",
+      "rename from old-name.ts",
+      "rename to new-name.ts",
+    ].join("\n");
+
+    expect(diffSummaryStats(diff)).toEqual({
+      files_changed: 1,
+      insertions: 0,
+      deletions: 0,
+    });
+  });
+
+  it("counts binary files as changed without any +/- lines", () => {
+    const diff = [
+      "diff --git a/assets/icon.png b/assets/icon.png",
+      "index e69de29..d41d8cd 100644",
+      "Binary files a/assets/icon.png and b/assets/icon.png differ",
+    ].join("\n");
+
+    expect(diffSummaryStats(diff)).toEqual({
+      files_changed: 1,
+      insertions: 0,
+      deletions: 0,
+    });
   });
 });
 

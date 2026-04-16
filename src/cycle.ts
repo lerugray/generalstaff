@@ -28,6 +28,7 @@ import type {
   CycleOutcome,
   ReviewerVerdict,
   SingleCycleOptions,
+  DiffStats,
 } from "./types";
 
 function generateCycleId(): string {
@@ -136,6 +137,31 @@ export function extractChangedFiles(diff: string): string[] {
     }
   }
   return files;
+}
+
+export function diffSummaryStats(diff: string): DiffStats {
+  if (!diff) {
+    return { files_changed: 0, insertions: 0, deletions: 0 };
+  }
+  let insertions = 0;
+  let deletions = 0;
+  const files = new Set<string>();
+  for (const line of diff.split("\n")) {
+    const fileMatch = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (fileMatch) {
+      files.add(fileMatch[1]);
+      continue;
+    }
+    // Skip file headers; count only hunk body lines.
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) insertions++;
+    else if (line.startsWith("-")) deletions++;
+  }
+  return {
+    files_changed: files.size,
+    insertions,
+    deletions,
+  };
 }
 
 async function detectMarkedDoneTasks(
@@ -317,6 +343,7 @@ export async function executeCycle(
     const finalOutcome: CycleOutcome = "verified_weak";
     const reason = "empty diff, skipping verification and reviewer";
     console.log(`\nSkipping verification and reviewer: ${reason}`);
+    const emptyStats: DiffStats = { files_changed: 0, insertions: 0, deletions: 0 };
 
     const endedAt = new Date().toISOString();
     console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
@@ -329,6 +356,7 @@ export async function executeCycle(
       engineer_exit_code: engineerResult.exitCode,
       verification_outcome: "weak",
       reviewer_verdict: "verified_weak",
+      diff_stats: emptyStats,
       duration_seconds: Math.round(
         (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
       ),
@@ -364,10 +392,12 @@ export async function executeCycle(
       reviewer_verdict: "verified_weak",
       final_outcome: finalOutcome,
       reason,
+      diff_stats: emptyStats,
     };
   }
 
   // 6c. Check for hands-off violations — skip verification + reviewer if found
+  const diffStats = diffSummaryStats(fullDiff);
   const changedFiles = extractChangedFiles(fullDiff);
   const handsOffViolations: Array<{ file: string; pattern: string }> = [];
   for (const file of changedFiles) {
@@ -397,6 +427,7 @@ export async function executeCycle(
       verification_outcome: "failed",
       reviewer_verdict: "verification_failed",
       hands_off_violations: handsOffViolations,
+      diff_stats: diffStats,
       duration_seconds: Math.round(
         (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
       ),
@@ -432,6 +463,7 @@ export async function executeCycle(
       reviewer_verdict: "verification_failed",
       final_outcome: finalOutcome,
       reason,
+      diff_stats: diffStats,
     };
   }
 
@@ -529,6 +561,7 @@ export async function executeCycle(
     engineer_exit_code: engineerResult.exitCode,
     verification_outcome: verResult.outcome,
     reviewer_verdict: reviewerResult.verdict,
+    diff_stats: diffStats,
     duration_seconds: Math.round(
       (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
     ),
@@ -567,6 +600,7 @@ export async function executeCycle(
     reviewer_verdict: reviewerResult.verdict,
     final_outcome: finalOutcome,
     reason,
+    diff_stats: diffStats,
   };
 }
 
