@@ -1,0 +1,154 @@
+import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { runVerification } from "../src/verification";
+import { setRootDir, readCycleFile } from "../src/state";
+import { join } from "path";
+import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+import type { ProjectConfig } from "../src/types";
+
+const TEST_DIR = join(import.meta.dir, "fixtures", "verification_test");
+
+function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+  return {
+    id: "test-proj",
+    path: TEST_DIR,
+    priority: 1,
+    engineer_command: "echo engineer",
+    verification_command: "test 1 -eq 1",
+    cycle_budget_minutes: 30,
+    work_detection: "tasks_json",
+    concurrency_detection: "none",
+    branch: "bot/work",
+    auto_merge: false,
+    hands_off: ["CLAUDE.md"],
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  mkdirSync(TEST_DIR, { recursive: true });
+  setRootDir(TEST_DIR);
+});
+
+afterEach(() => {
+  rmSync(TEST_DIR, { recursive: true, force: true });
+});
+
+describe("verification gate", () => {
+  describe("real runs", () => {
+    it("returns passed when command exits 0", async () => {
+      const project = makeProject({ verification_command: "test 1 -eq 1" });
+      const result = await runVerification(project, "cycle-001");
+
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+      expect(result.durationSeconds).toBeGreaterThanOrEqual(0);
+      expect(existsSync(result.logPath)).toBe(true);
+    });
+
+    it("returns failed when command exits non-zero", async () => {
+      const project = makeProject({ verification_command: "test 1 -eq 2" });
+      const result = await runVerification(project, "cycle-002");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it("returns weak for no-op command: true", async () => {
+      const project = makeProject({ verification_command: "true" });
+      const result = await runVerification(project, "cycle-003");
+
+      expect(result.outcome).toBe("weak");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("returns weak for no-op command: :", async () => {
+      const project = makeProject({ verification_command: ":" });
+      const result = await runVerification(project, "cycle-004");
+
+      expect(result.outcome).toBe("weak");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("returns weak for no-op command: echo", async () => {
+      const project = makeProject({ verification_command: "echo hello" });
+      const result = await runVerification(project, "cycle-005");
+
+      expect(result.outcome).toBe("weak");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("writes verification log with command output", async () => {
+      const project = makeProject({ verification_command: "test 1 -eq 1" });
+      const result = await runVerification(project, "cycle-006");
+
+      const logContent = readFileSync(result.logPath, "utf8");
+      expect(logContent).toContain("GeneralStaff Verification Gate");
+      expect(logContent).toContain("test 1 -eq 1");
+      expect(logContent).toContain("Exit code: 0");
+    });
+
+  });
+
+  describe("dry runs", () => {
+    it("returns passed for real command in dry-run mode", async () => {
+      const project = makeProject({ verification_command: "test 1 -eq 1" });
+      const result = await runVerification(project, "cycle-010", undefined, true);
+
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+      expect(result.durationSeconds).toBe(0);
+    });
+
+    it("returns weak for no-op command in dry-run mode", async () => {
+      const project = makeProject({ verification_command: "true" });
+      const result = await runVerification(project, "cycle-011", undefined, true);
+
+      expect(result.outcome).toBe("weak");
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("writes dry-run log file", async () => {
+      const project = makeProject({ verification_command: "bun test" });
+      const result = await runVerification(project, "cycle-012", undefined, true);
+
+      const logContent = await readCycleFile("test-proj", "cycle-012", "verification.log");
+      expect(logContent).not.toBeNull();
+      expect(logContent!).toContain("[DRY RUN]");
+      expect(logContent!).toContain("bun test");
+    });
+
+    it("does not execute the command in dry-run mode", async () => {
+      // A command that would fail if actually run
+      const project = makeProject({ verification_command: "exit 1" });
+      const result = await runVerification(project, "cycle-013", undefined, true);
+
+      // Dry run always reports passed (exit 1 is a noop match, but "exit 1" != "exit 0")
+      // "exit 1" doesn't match any NOOP_COMMANDS, so dry run returns "passed"
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe("audit trail", () => {
+    it("writes progress entries for verification", async () => {
+      const project = makeProject({ verification_command: "test 1 -eq 1" });
+      await runVerification(project, "cycle-020");
+
+      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+      expect(existsSync(progressPath)).toBe(true);
+
+      const lines = readFileSync(progressPath, "utf8").trim().split("\n");
+      const events = lines.map((l) => JSON.parse(l));
+
+      const runEvent = events.find((e: { event: string }) => e.event === "verification_run");
+      const outcomeEvent = events.find((e: { event: string }) => e.event === "verification_outcome");
+
+      expect(runEvent).toBeDefined();
+      expect(runEvent.data.command).toBe("test 1 -eq 1");
+
+      expect(outcomeEvent).toBeDefined();
+      expect(outcomeEvent.data.outcome).toBe("passed");
+      expect(outcomeEvent.data.exit_code).toBe(0);
+    });
+  });
+});
