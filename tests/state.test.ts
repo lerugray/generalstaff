@@ -207,7 +207,7 @@ describe("atomic write safety", () => {
   });
 
   it("overwrite preserves structure after content change", async () => {
-    // Write initial state, then overwrite with different data.
+    // Write initial state, verify it, then overwrite with different data.
     // The file must reflect only the second write — no bleed-through.
     const state1 = {
       project_id: "overwrite-proj",
@@ -218,6 +218,10 @@ describe("atomic write safety", () => {
       cycles_this_session: 100,
     };
     await saveProjectState(state1);
+
+    // Verify first write landed
+    const check1 = await loadProjectState("overwrite-proj");
+    expect(check1.current_cycle_id).toBe("first");
 
     const state2 = {
       ...state1,
