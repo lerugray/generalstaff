@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { loadProjectsYaml, warnProjectPaths } from "../src/projects";
+import {
+  loadProjectsYaml,
+  validateHandsOff,
+  warnProjectPaths,
+} from "../src/projects";
 import { join } from "path";
 import { tmpdir } from "os";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
@@ -283,3 +287,75 @@ projects:
     cleanup();
   });
 });
+
+describe("validateHandsOff", () => {
+  const repoRoot = join(import.meta.dir, "..");
+
+  it("warns when a pattern matches no tracked files", () => {
+    const warnings = validateHandsOff(
+      fakeProject({
+        id: "typo",
+        path: repoRoot,
+        hands_off: ["src/projects.ts", "src/no_such_file_xyz.ts"],
+      }),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].projectId).toBe("typo");
+    expect(warnings[0].message).toContain("no_such_file_xyz.ts");
+    expect(warnings[0].message).toContain("matches no tracked files");
+  });
+
+  it("returns no warnings when all patterns match tracked files", () => {
+    const warnings = validateHandsOff(
+      fakeProject({
+        id: "ok",
+        path: repoRoot,
+        hands_off: ["src/projects.ts", "src/**", "*.md"],
+      }),
+    );
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("skips validation (no warnings) when path does not exist", () => {
+    const warnings = validateHandsOff(
+      fakeProject({
+        id: "missing",
+        path: "/nonexistent/path/that/does/not/exist",
+        hands_off: ["definitely_not_there"],
+      }),
+    );
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("skips validation (no warnings) when path is not a git repo", () => {
+    const tmpDir = join(tmpdir(), "gs-validate-handsoff-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    try {
+      const warnings = validateHandsOff(
+        fakeProject({
+          id: "no-git",
+          path: tmpDir,
+          hands_off: ["definitely_not_there"],
+        }),
+      );
+      expect(warnings).toHaveLength(0);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports one warning per unmatched pattern", () => {
+    const warnings = validateHandsOff(
+      fakeProject({
+        id: "multi",
+        path: repoRoot,
+        hands_off: ["bogus_one.xyz", "bogus_two.xyz", "src/projects.ts"],
+      }),
+    );
+    expect(warnings).toHaveLength(2);
+    const patterns = warnings.map((w) => w.message);
+    expect(patterns.some((m) => m.includes("bogus_one.xyz"))).toBe(true);
+    expect(patterns.some((m) => m.includes("bogus_two.xyz"))).toBe(true);
+  });
+});
+

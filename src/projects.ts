@@ -6,6 +6,7 @@ import { join } from "path";
 import { spawnSync } from "child_process";
 import { parse as parseYaml } from "yaml";
 import { getRootDir } from "./state";
+import { matchesHandsOff } from "./safety";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -228,6 +229,40 @@ export function warnProjectPaths(
       warnings.push({
         projectId: p.id,
         message: `path "${p.path}" exists but is not a git repository`,
+      });
+    }
+  }
+  return warnings;
+}
+
+function listGitFiles(dirPath: string): string[] | null {
+  const result = spawnSync("git", ["ls-files"], {
+    cwd: dirPath,
+    encoding: "utf8",
+    timeout: 15_000,
+    maxBuffer: 50 * 1024 * 1024,
+  });
+  if (result.status !== 0) return null;
+  return result.stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
+export function validateHandsOff(project: ProjectConfig): ProjectWarning[] {
+  const warnings: ProjectWarning[] = [];
+  if (!existsSync(project.path)) return warnings;
+  if (!isGitRepo(project.path)) return warnings;
+
+  const files = listGitFiles(project.path);
+  if (files === null) return warnings;
+
+  for (const pattern of project.hands_off) {
+    const matched = files.some((f) => matchesHandsOff(f, [pattern]) !== null);
+    if (!matched) {
+      warnings.push({
+        projectId: project.id,
+        message: `hands_off pattern "${pattern}" matches no tracked files — possible typo`,
       });
     }
   }
