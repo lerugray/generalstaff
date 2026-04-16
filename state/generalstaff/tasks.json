@@ -58,5 +58,8 @@
     "title": "Add a test that validates the full CLI help output includes all registered commands: session, cycle, status, stop, start, log, projects, init, history, doctor, clean. Ensures new commands don't get forgotten in help text.",
     "status": "done",
     "priority": 2
-  }
+  },
+  { "id": "gs-test-a", "title": "Dummy task A for session chaining test", "status": "pending", "priority": 1 },
+  { "id": "gs-test-b", "title": "Dummy task B for session chaining test", "status": "pending", "priority": 1 },
+  { "id": "gs-test-c", "title": "Dummy task C for session chaining test", "status": "pending", "priority": 1 }
 ]
