@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { loadProjectsYaml } from "../src/projects";
+import { loadProjectsYaml, warnProjectPaths } from "../src/projects";
 import { join } from "path";
+import { tmpdir } from "os";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
+import type { ProjectConfig } from "../src/types";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 
@@ -184,6 +186,80 @@ projects:
 `,
     );
     await expect(loadProjectsYaml(path)).rejects.toThrow('got "magic"');
+    cleanup();
+  });
+});
+
+function fakeProject(overrides: Partial<ProjectConfig>): ProjectConfig {
+  return {
+    id: "test",
+    path: "/tmp/test",
+    priority: 1,
+    engineer_command: "echo",
+    verification_command: "echo",
+    cycle_budget_minutes: 30,
+    work_detection: "tasks_json",
+    concurrency_detection: "none",
+    branch: "bot/work",
+    auto_merge: false,
+    hands_off: ["x"],
+    ...overrides,
+  };
+}
+
+describe("warnProjectPaths", () => {
+  it("warns when path does not exist on disk", () => {
+    const warnings = warnProjectPaths([
+      fakeProject({ id: "missing", path: "/nonexistent/path/that/does/not/exist" }),
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].projectId).toBe("missing");
+    expect(warnings[0].message).toContain("does not exist");
+  });
+
+  it("warns when path exists but is not a git repo", () => {
+    // Use a temp dir outside the repo so git rev-parse won't find a parent .git
+    const tmpDir = join(tmpdir(), "gs-test-not-a-repo-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    try {
+      const warnings = warnProjectPaths([
+        fakeProject({ id: "no-git", path: tmpDir }),
+      ]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0].projectId).toBe("no-git");
+      expect(warnings[0].message).toContain("not a git repository");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns no warnings for a valid git repo", () => {
+    // The generalstaff repo itself is a valid git repo
+    const repoRoot = join(import.meta.dir, "..");
+    const warnings = warnProjectPaths([
+      fakeProject({ id: "valid-repo", path: repoRoot }),
+    ]);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("does not throw — loadProjectsYaml succeeds with non-existent path", async () => {
+    const path = writeYaml(
+      "missing-path.yaml",
+      `
+projects:
+  - id: ghost
+    path: /this/path/does/not/exist/anywhere
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+`,
+    );
+    // Should resolve without throwing — warnings go to console.warn
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects).toHaveLength(1);
+    expect(yaml.projects[0].id).toBe("ghost");
     cleanup();
   });
 });
