@@ -170,7 +170,7 @@ export async function runSession(options: SessionOptions) {
   return allResults;
 }
 
-async function writeDigest(
+export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
   config: { digest_dir: string },
