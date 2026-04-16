@@ -30,13 +30,13 @@
   {
     "id": "gs-014",
     "title": "Add digest writer test: verify digest file is created with correct markdown format including cycle outcomes and SHA ranges",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-015",
     "title": "Add dispatcher test: pickNextProject respects override file (next_project.txt) and falls back to priority x staleness picker",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
