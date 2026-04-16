@@ -118,5 +118,35 @@
     "title": "In audit.ts, add a function summarizeCosts that counts reviewer_invoked events from PROGRESS.jsonl and estimates total token usage based on prompt_length. Wire into the history --format=compact output as an optional column.",
     "status": "done",
     "priority": 3
+  },
+  {
+    "id": "gs-046",
+    "title": "Add a generalstaff summary command to cli.ts that prints a one-screen overview: total cycles across all projects, verified/failed/skipped counts, total duration, test count (run bun test --reporter=json to get count), and tasks remaining. Like a dashboard snapshot.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-047",
+    "title": "In projects.ts, add a validateHandsOff function that checks each hands_off pattern against the project's actual file tree (git ls-files) and warns about patterns that don't match anything — helps users catch typos in their hands-off config. Add test.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-048",
+    "title": "Add a test for extractChangedFiles in cycle.ts — verify it handles renames (diff --git a/old b/new), binary files, and files with spaces in their names",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-049",
+    "title": "In state.ts, add a getProjectSummary function that aggregates fleet state + project state + remaining tasks into a single object. Use it in the status --json output for richer data. Add test.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-050",
+    "title": "Add a generalstaff version command (separate from --version flag) that shows version, bun version, platform, and projects.yaml location. Useful for bug reports.",
+    "status": "pending",
+    "priority": 3
   }
 ]
