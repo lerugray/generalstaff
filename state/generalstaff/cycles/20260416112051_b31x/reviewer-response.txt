@@ -1,0 +1,9 @@
+{
+  "verdict": "verified",
+  "reason": "[DRY RUN] Simulated verification pass",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [],
+  "silent_failures": [],
+  "notes": "Dry run — no actual review performed"
+}

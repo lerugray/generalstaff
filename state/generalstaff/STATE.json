@@ -1,8 +1,8 @@
 {
   "project_id": "generalstaff",
   "current_cycle_id": null,
-  "last_cycle_id": null,
-  "last_cycle_outcome": null,
-  "last_cycle_at": null,
-  "cycles_this_session": 0
+  "last_cycle_id": "20260416112051_b31x",
+  "last_cycle_outcome": "verified",
+  "last_cycle_at": "2026-04-16T11:20:51.855Z",
+  "cycles_this_session": 1
 }
