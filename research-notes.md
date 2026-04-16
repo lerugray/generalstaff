@@ -157,3 +157,17 @@ digest" file per project is faster to triage.
 - Continuous-Claude-v3 repo: github.com/parcadei/Continuous-Claude-v3
 - Claude Code Hooks reference: code.claude.com/docs/en/hooks
 - 12 lifecycle events guide: claudefa.st/blog/tools/hooks/hooks-guide
+
+## 2026-04-16 — Reference repos researched
+
+**agent-swarm** (desplega-ai/agent-swarm, 351 stars, TS) — Lead/worker pattern with Docker. Steal: PreToolUse hooks for hands-off enforcement, PreCompact goal injection, tool loop detection, session summarization via Haiku.
+
+**lean-ctx** (yvgude/lean-ctx, 632 stars, Rust) — MCP context compressor, 60-99% token savings. Steal: strip comments/whitespace from diffs before reviewer prompt, signature/outline mode for unchanged files, codebook deduplication.
+
+**pi-autoresearch** (davebcn87/pi-autoresearch, 4.8K stars, TS) — Autonomous optimization loop. Steal: session resume via append-only log + narrative doc (HANDOFF.md pattern), confidence scoring with MAD, backpressure checks as non-fatal gate, finalize-to-branches for human handoff.
+
+**API-mega-list** (cporter202/API-mega-list, 4K stars) — API aggregator. Telegram Bot API is simple HTTP POST, no SDK needed (~15 lines). Also consider ntfy.sh (zero-auth push) and Discord webhooks as alternatives.
+
+**no-as-a-service** (hotheadhacker/no-as-a-service, 7K stars) — Joke API proving "bring your own imagination" works. Simple idea + clean execution = community adoption. Good example of project-motivation neutrality.
+
+**logo-creator MCP** — https://mcpmarket.com/tools/skills/logo-creator-1 — MCP tool for project logos, useful for Phase 7 branding with kriegspiel theme.
