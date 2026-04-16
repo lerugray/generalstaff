@@ -6,6 +6,7 @@ import { appendFile, readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { getRootDir } from "./state";
 import { isProgressEntry, type ProgressEntry, type ProgressEventType } from "./types";
+import { formatDuration } from "./format";
 
 export interface CycleHistoryRow {
   cycle_id: string;
@@ -148,14 +149,6 @@ function formatData(
   }
 }
 
-function formatDuration(seconds: unknown): string {
-  if (typeof seconds !== "number" || isNaN(seconds)) return "?";
-  if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return s > 0 ? `${m}m${s}s` : `${m}m`;
-}
-
 function shaRange(startSha: unknown, endSha: unknown): string {
   const start = typeof startSha === "string" ? startSha.slice(0, 7) : "?";
   const end = typeof endSha === "string" ? endSha.slice(0, 7) : "?";
@@ -210,7 +203,9 @@ export async function loadCycleHistory(
     cycle_id: (e.cycle_id ?? "?").slice(0, 12),
     project: e.project_id ?? "?",
     outcome: String(e.data.outcome ?? "?"),
-    duration: formatDuration(e.data.duration_seconds),
+    duration: typeof e.data.duration_seconds === "number"
+      ? formatDuration(e.data.duration_seconds)
+      : "?",
     sha_range: shaRange(e.data.start_sha, e.data.end_sha),
     timestamp: e.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z"),
   }));

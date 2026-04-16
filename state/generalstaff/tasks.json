@@ -74,7 +74,7 @@
   {
     "id": "gs-038",
     "title": "Add a formatDuration helper function to a new src/format.ts module that converts seconds to human-readable strings (45s, 2m30s, 1h15m). Use it in history and digest output. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
