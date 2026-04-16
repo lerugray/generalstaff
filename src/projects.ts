@@ -3,6 +3,7 @@
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import { parse as parseYaml } from "yaml";
 import { getRootDir } from "./state";
 import type {
@@ -197,6 +198,42 @@ function validateDispatcher(
   };
 }
 
+function isGitRepo(dirPath: string): boolean {
+  const result = spawnSync("git", ["rev-parse", "--git-dir"], {
+    cwd: dirPath,
+    stdio: ["ignore", "ignore", "ignore"],
+    timeout: 5_000,
+  });
+  return result.status === 0;
+}
+
+export type ProjectWarning = {
+  projectId: string;
+  message: string;
+};
+
+export function warnProjectPaths(
+  projects: ProjectConfig[],
+): ProjectWarning[] {
+  const warnings: ProjectWarning[] = [];
+  for (const p of projects) {
+    if (!existsSync(p.path)) {
+      warnings.push({
+        projectId: p.id,
+        message: `path "${p.path}" does not exist on this machine — skipping git check`,
+      });
+      continue;
+    }
+    if (!isGitRepo(p.path)) {
+      warnings.push({
+        projectId: p.id,
+        message: `path "${p.path}" exists but is not a git repository`,
+      });
+    }
+  }
+  return warnings;
+}
+
 export async function loadProjectsYaml(
   yamlPath?: string,
 ): Promise<ProjectsYaml> {
@@ -227,6 +264,12 @@ export async function loadProjectsYaml(
       throw new Error(`Duplicate project id: "${p.id}"`);
     }
     ids.add(p.id);
+  }
+
+  // Validate project paths exist and are git repos (warn only, don't fail)
+  const warnings = warnProjectPaths(projects);
+  for (const w of warnings) {
+    console.warn(`[generalstaff] warning: project "${w.projectId}": ${w.message}`);
   }
 
   return { projects, dispatcher };
