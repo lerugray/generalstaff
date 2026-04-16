@@ -27,13 +27,13 @@
   {
     "id": "gs-026",
     "title": "Add a generalstaff doctor command to cli.ts that checks prerequisites: bun --version, git --version, claude --version. Print pass/fail for each with the detected version. Exit 1 if any missing.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
     "id": "gs-027",
     "title": "In engineer.ts, improve error output when engineer_command fails to spawn (e.g., command not found, script not executable). Currently the spawn error is logged but the message is generic. Include the command that failed and suggest common fixes.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
