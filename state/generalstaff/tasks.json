@@ -200,7 +200,7 @@
   {
     "id": "gs-059",
     "title": "In src/summary.ts, add a Disk Usage section to the fleet summary dashboard: total bytes in logs/, digests/, and state/. Use formatBytes for display. Handle missing directories (0 B). Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

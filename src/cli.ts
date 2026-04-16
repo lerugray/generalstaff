@@ -13,7 +13,12 @@ import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
 import { loadTasks, pendingTasks, addTask } from "./tasks";
-import { buildFleetSummary, countTests, formatSummary } from "./summary";
+import {
+  buildFleetSummary,
+  computeDiskUsage,
+  countTests,
+  formatSummary,
+} from "./summary";
 
 const VERSION = "0.0.1";
 
@@ -256,7 +261,8 @@ switch (command) {
     const tests = summaryValues["no-tests"]
       ? null
       : countTests(resolve("tests"));
-    console.log(formatSummary(summary, tests));
+    const disk = computeDiskUsage();
+    console.log(formatSummary(summary, tests, disk));
     break;
   }
 

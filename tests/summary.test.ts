@@ -3,6 +3,7 @@ import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import {
   buildFleetSummary,
+  computeDiskUsage,
   countTests,
   formatSummary,
 } from "../src/summary";
@@ -267,5 +268,68 @@ describe("formatSummary", () => {
       null,
     );
     expect(out).not.toContain("Verified-weak");
+  });
+
+  it("renders Disk Usage section when disk is provided", () => {
+    const out = formatSummary(baseSummary, null, {
+      logs: 2048,
+      digests: 1024,
+      state: 512,
+      total: 2048 + 1024 + 512,
+    });
+    expect(out).toContain("Disk Usage:");
+    expect(out).toContain("logs/:         2.0 KB");
+    expect(out).toContain("digests/:      1.0 KB");
+    expect(out).toContain("state/:        512 B");
+    expect(out).toContain("Total:         3.5 KB");
+  });
+
+  it("omits Disk Usage section when disk is null or undefined", () => {
+    expect(formatSummary(baseSummary, null)).not.toContain("Disk Usage");
+    expect(formatSummary(baseSummary, null, null)).not.toContain("Disk Usage");
+  });
+});
+
+describe("computeDiskUsage", () => {
+  it("returns all zeros when none of the directories exist", () => {
+    const d = computeDiskUsage(join(TEST_DIR, "no-such-root"));
+    expect(d.logs).toBe(0);
+    expect(d.digests).toBe(0);
+    expect(d.state).toBe(0);
+    expect(d.total).toBe(0);
+  });
+
+  it("sums file sizes across logs/, digests/, and state/ including nested files", () => {
+    const root = join(TEST_DIR, "du-root");
+    mkdirSync(join(root, "logs"), { recursive: true });
+    mkdirSync(join(root, "digests"), { recursive: true });
+    mkdirSync(join(root, "state", "alpha", "cycles"), { recursive: true });
+
+    writeFileSync(join(root, "logs", "a.log"), "x".repeat(100));
+    writeFileSync(join(root, "logs", "b.log"), "x".repeat(50));
+    writeFileSync(join(root, "digests", "d.md"), "x".repeat(200));
+    writeFileSync(join(root, "state", "alpha", "STATE.json"), "x".repeat(10));
+    writeFileSync(
+      join(root, "state", "alpha", "cycles", "c1.txt"),
+      "x".repeat(5),
+    );
+
+    const d = computeDiskUsage(root);
+    expect(d.logs).toBe(150);
+    expect(d.digests).toBe(200);
+    expect(d.state).toBe(15);
+    expect(d.total).toBe(365);
+  });
+
+  it("treats a partially-missing tree as 0 for absent directories", () => {
+    const root = join(TEST_DIR, "du-partial");
+    mkdirSync(join(root, "state"), { recursive: true });
+    writeFileSync(join(root, "state", "s.json"), "x".repeat(42));
+
+    const d = computeDiskUsage(root);
+    expect(d.logs).toBe(0);
+    expect(d.digests).toBe(0);
+    expect(d.state).toBe(42);
+    expect(d.total).toBe(42);
   });
 });
