@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "Diff adds `task list` and `task add` CLI subcommands with supporting module and tests, matching the sole marked-done task gs-042; verification passed with 259 tests and no hands-off files were touched.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-042: Add a generalstaff task command to cli.ts with subcommands: 'task list --project=<id>' shows pending tasks, 'task add --project=<id> <title>' appends a new task to tasks.json. Include tests.",
+      "evidence": "src/cli.ts gains a `task` case with `list` and `sub` branches wired to loadTasks/pendingTasks/addTask; new src/tasks.ts implements those helpers with tasks.json read/write; tests/tasks.test.ts covers the module and CLI end-to-end; help text updated; gs-042 status flipped to done in state/generalstaff/tasks.json.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification command `bun test && bun x tsc --noEmit` exited 0 with 259 passing tests. No hands-off paths touched. tasks.json change is the engineer marking its own task done, which is expected."
+}
