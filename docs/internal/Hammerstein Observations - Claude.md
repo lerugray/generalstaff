@@ -378,3 +378,140 @@ Testable prediction: within the first 20 cycles, the reviewer
 will reject at least one task that the engineer submitted as
 complete. If it doesn't, either the tasks are too easy or the
 reviewer's threshold is too low. Both would need adjustment.
+
+### [interactive Claude — 2026-04-16, full-day build session]
+
+Four observations from the afternoon portion of a 10-hour
+session (53 tasks, 35+ autonomous cycles, 327 tests, 23 source
+modules). The morning observations above covered cycles 1-12.
+These cover the full arc through cycle 35+ and what the
+completed session reveals about the framework.
+
+**1. The dispatcher architecture IS a context management
+strategy.**
+
+Each cycle's `claude -p` gets fresh context, does work, exits.
+The orchestrator only sees results via git. This is why the 1M
+context session lasted 10 hours without compacting — the heavy
+work was delegated out of the main context. The interactive
+session handled task design, backlog loading, merge decisions,
+and bug diagnosis. The expensive work (reading source files,
+writing tests, implementing features) happened in disposable
+sub-contexts that were discarded after each cycle.
+
+This is Hammerstein-as-architecture at the infrastructure level.
+The clever-lazy move isn't just "delegate work to the bot" — it's
+"delegate work in a way that keeps the orchestrator's context
+clean." The dispatcher pattern solves two problems simultaneously:
+(a) the bot gets fresh context for each task (no stale
+assumptions from previous cycles), and (b) the orchestrator
+avoids context bloat from accumulated implementation details.
+
+Counter-observation: this only works because git is the
+communication channel. If the orchestrator needed to pass
+context directly to the engineer (e.g., "here's what I learned
+from the last 5 cycles"), the context savings would evaporate.
+The architectural constraint — communication only via commits
+and diffs — is load-bearing. Any future feature that requires
+richer inter-cycle context (e.g., "the engineer should know
+about the bug found in the previous cycle") would break this
+property. Track whether that need arises and how it's handled.
+
+**2. Misdiagnosis is the expensive failure mode.**
+
+We attributed cycles 21-23 failing to "classifier blocking Bash"
+when it was actually stale git worktree registrations on Windows.
+Three cycles wasted before reading the actual error message.
+The framework's "log negatives aggressively" rule exists
+precisely to prevent this — but only works if you read the logs,
+not just the symptoms.
+
+The cost of misdiagnosis is not just the wasted cycles. It's
+the wasted TRUST. If you attribute failures to the wrong cause,
+your fixes address the wrong thing, and the real problem persists.
+The worktree registration issue would have continued causing
+failures indefinitely if we'd kept "fixing" the classifier.
+
+Testable prediction: the next time a cycle fails for a
+non-obvious reason, the first diagnosis will be wrong. This is
+not pessimism — it's the base rate. Complex systems fail in
+complex ways, and the most available explanation (the one that
+matches recent experience) is usually not the actual cause. The
+framework's counter-measure is the audit log: read the actual
+error, not your theory about the error.
+
+**3. 50 tasks in one session is the cross-project compounding
+prediction confirmed.**
+
+Ray noted in his Hammerstein entry that GeneralStaff inherited
+patterns from catalogdna's 22 runs and hit maturity in one
+session. This is the first empirical evidence that the
+Hammerstein framework compounds ACROSS projects, not just within
+them.
+
+The mechanism: codified rules (hands-off lists, verification
+gates, worktree isolation) transfer as architecture, not as
+instructions. catalogdna's bot learned over 22 runs that worktree
+isolation prevents branch conflicts. That learning was encoded
+into GeneralStaff's design docs before the first line of code
+was written. The 53 tasks in one session are built on top of 22
+runs of accumulated wisdom from another project.
+
+This is the framework's compounding function operating at one
+level higher than previously observed. Within a project, the
+compounding is: run N's failures become run N+1's rules. Across
+projects, the compounding is: project A's mature rules become
+project B's starting architecture. The starting point is higher,
+so the initial-negatives phase is shorter, and productive
+output begins sooner.
+
+Counter-observation: this could be a sample-size-of-one
+artifact. GeneralStaff inherited from catalogdna, and both are
+TypeScript projects managed by the same person with the same
+model. The cross-project compounding hypothesis is only
+meaningful if it holds for a structurally different project
+(different language, different domain, different operator). The
+second project Ray adds to GeneralStaff's fleet (probably
+catalogdna itself) will partially test this, but a true test
+requires a project where the inherited rules might NOT apply.
+
+**4. The verification gate's false-positive rate is zero.**
+
+Across 35+ cycles, the gate never approved bad work (no false
+positives) and correctly rejected hands-off violations and test
+failures (3 true negatives). The false-positive rate is the
+number that matters for trust — a gate with false negatives
+(missed bad work) is useless, but a gate with false positives
+(rejected good work) is merely annoying. Zero false positives
+after 35 cycles is the trust-building metric.
+
+The 3 true negatives are individually important:
+- Two reviewer.ts hands-off violations: the engineer modified a
+  file on the hands-off list, and the gate caught it. Both were
+  subsequently approved by human review (the changes were fine,
+  but the gate was right to flag them — the policy existed for
+  a reason).
+- One verification gate failure from worktree state: the test
+  environment was in a bad state, and the gate correctly refused
+  to verify work it couldn't confirm.
+
+The zero false-positive record also means the gate has NOT been
+tested under adversarial conditions. All 35+ cycles involved a
+cooperative engineer (Claude following instructions). The gate's
+robustness against a model that's actively trying to sneak bad
+work through — the stupid-industrious failure mode — is still
+untested. The experimental data (Hammerstein experiments,
+2026-04-15 entry) suggests this is a ~2% base rate, so it may
+take 50+ cycles to encounter naturally. But the gate's value
+is precisely in catching that tail, so the absence of a natural
+test is not evidence of robustness.
+
+Testable prediction: the first false negative (bad work that
+the gate approves) will involve a change that passes all tests
+but violates an unstated convention or introduces a latent bug
+that only manifests under conditions the test suite doesn't
+cover. This is the class of failure that Boolean verification
+(tests pass/fail) cannot catch. If it happens within the next
+50 cycles, track whether a structural fix is possible or
+whether it reveals a fundamental limitation of test-based
+verification.
