@@ -17,31 +17,31 @@
   {
     "id": "gs-016",
     "title": "Add safety test: isBotRunning with worktree detection mode — fresh .bot-worktree triggers, stale ignores, no .bot-worktree returns false",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
     "id": "gs-017",
     "title": "In cycle.ts, if engineer exits non-zero still run verification and reviewer to capture what happened — currently the cycle continues regardless but add a test proving this behavior",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
     "id": "gs-018",
     "title": "Add a generalstaff projects command to cli.ts that lists registered projects with id, path, priority, cycle_budget_minutes, and branch",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-019",
     "title": "Add --lines flag test for the log command — verify it respects the limit and defaults to 20",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-020",
     "title": "Add type guard functions for ReviewerResponse and ProgressEntry in types.ts — validate shapes at parse boundaries instead of trusting JSON.parse casts",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]
