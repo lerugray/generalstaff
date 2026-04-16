@@ -14,7 +14,7 @@
   {
     "id": "gs-003",
     "title": "Add engineer module test: dry-run produces expected log output",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
