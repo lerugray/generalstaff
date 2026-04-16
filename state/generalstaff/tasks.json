@@ -80,7 +80,7 @@
   {
     "id": "gs-039",
     "title": "In work_detection.ts, add a function countRemainingWork(project) that returns the number of pending tasks (not just boolean hasMoreWork). Use it in the session summary output. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

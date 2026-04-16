@@ -13,6 +13,7 @@ import { isStopFilePresent } from "./safety";
 import { executeCycle } from "./cycle";
 import { pickNextProject, shouldChain } from "./dispatcher";
 import { formatDuration } from "./format";
+import { countRemainingWork } from "./work_detection";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
 export async function runSession(options: SessionOptions) {
@@ -195,9 +196,12 @@ export async function runSession(options: SessionOptions) {
     const skipped = projectResults.filter(
       (r) => r.final_outcome === "cycle_skipped",
     ).length;
+    const project = projects.find((p) => p.id === projectId);
+    const remaining = project ? await countRemainingWork(project) : 0;
     console.log(
       `  ${projectId}: ${count} cycle(s) — ` +
-        `${verified} verified, ${failed} failed, ${skipped} skipped`,
+        `${verified} verified, ${failed} failed, ${skipped} skipped ` +
+        `(${remaining} task(s) remaining)`,
     );
   }
 
