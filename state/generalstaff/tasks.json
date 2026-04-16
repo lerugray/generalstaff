@@ -208,5 +208,47 @@
     "title": "Add a test pinning formatBytes behavior for fractional sub-KB inputs (e.g. 1023.5 bytes). Either keep current behavior (returns '1023.5 B') and add an explicit test documenting it, or change the implementation to floor sub-KB values and update existing tests accordingly. Include a comment in format.ts explaining the chosen convention.",
     "status": "done",
     "priority": 3
+  },
+  {
+    "id": "gs-061",
+    "title": "Add a 'generalstaff digest --list' subcommand that enumerates all digest files in digests/ with their date, total cycles, and verified/failed/skipped breakdown (parsed from the digest markdown). If no digests exist, print a clear message. Sort newest first. Add tests covering empty dir, one digest, and multiple digests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-062",
+    "title": "In the 'history' command, add --since=YYYYMMDD and --until=YYYYMMDD filter flags that filter cycles by started_at. Reject malformed date input with a clear error (not a silent empty result). Add tests covering valid ranges, out-of-range filters, and malformed input.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-063",
+    "title": "Add --format=json to 'generalstaff summary' that emits the FleetSummary object as JSON (same data as the text dashboard, machine-readable). Include tests verifying JSON parses and matches the text output's counts.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-064",
+    "title": "Add CLI subcommand 'generalstaff task done --project=<id> --task=<task-id>' to mark a single task as done without hand-editing tasks.json. Error if project or task not found. Print a notice (don't error) if already done. Add tests for success, not-found, already-done.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-065",
+    "title": "In tasks.ts loadTasks, surface JSON parse errors instead of silently returning an empty list (current behavior misleads users into thinking there's 'no work' when really their tasks.json is malformed). On parse failure, log a clear error with the file path and rethrow or return a typed failure. Update callers to handle the new failure mode gracefully. Add tests covering malformed JSON, empty file, and valid-but-not-array structure.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-066",
+    "title": "Add --max-cycles=N flag to 'generalstaff session' as an alternative stopping condition alongside --budget. If both specified, stop at whichever hits first. Log which limit triggered ('max-cycles' vs 'budget'). Add tests covering max-cycles-hits-first, budget-hits-first, and default (only --budget).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-067",
+    "title": "In audit.ts summarizeCosts, add per-project breakdown of reviewer_invoked events (currently aggregated across fleet). Return { byProject: Record<string, {invocations, estTokens}>, total: {...} }. Wire into 'history --costs' output as an extra column when --project is not specified. Add tests.",
+    "status": "pending",
+    "priority": 3
   }
 ]
