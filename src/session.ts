@@ -12,6 +12,7 @@ import { appendProgress } from "./audit";
 import { isStopFilePresent } from "./safety";
 import { executeCycle } from "./cycle";
 import { pickNextProject, shouldChain } from "./dispatcher";
+import { formatDuration } from "./format";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
 export async function runSession(options: SessionOptions) {
@@ -241,7 +242,7 @@ export async function writeDigest(
 
   let content = `# GeneralStaff Session Digest\n\n`;
   content += `**Date:** ${new Date().toISOString()}\n`;
-  content += `**Duration:** ${durationMinutes.toFixed(1)} min\n`;
+  content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
   content += `**Cycles:** ${results.length}\n\n`;
 
   for (const r of results) {

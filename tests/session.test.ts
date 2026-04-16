@@ -53,7 +53,7 @@ describe("writeDigest", () => {
     const content = readFileSync(join(digestDir, files[0]), "utf8");
 
     expect(content).toContain("# GeneralStaff Session Digest");
-    expect(content).toContain("**Duration:** 12.5 min");
+    expect(content).toContain("**Duration:** 12m30s");
     expect(content).toContain("**Cycles:** 2");
     expect(content).toMatch(/\*\*Date:\*\* \d{4}-\d{2}-\d{2}T/);
   });
