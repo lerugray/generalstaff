@@ -287,6 +287,61 @@ export async function executeCycle(
     diff_length: fullDiff.length,
   }, cycleId);
 
+  // 5b. Skip reviewer if diff is empty — no API call needed
+  if (!fullDiff.trim()) {
+    const finalOutcome: CycleOutcome = "verified_weak";
+    const reason = "empty diff, no work to review";
+    console.log(`\nSkipping reviewer: ${reason}`);
+
+    const endedAt = new Date().toISOString();
+    console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
+
+    await appendProgress(project.id, "cycle_end", {
+      outcome: finalOutcome,
+      reason,
+      start_sha: cycleStartSha,
+      end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "weak",
+      reviewer_verdict: "verified_weak",
+      duration_seconds: Math.round(
+        (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+      ),
+    }, cycleId);
+
+    // Update state
+    const fleet = await loadFleetState(config);
+    const durationMinutes =
+      (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
+    updateProjectFleetState(fleet, project.id, finalOutcome, durationMinutes);
+    await saveFleetState(fleet, config);
+
+    const projState = await loadProjectState(project.id, config);
+    projState.current_cycle_id = null;
+    projState.last_cycle_id = cycleId;
+    projState.last_cycle_outcome = finalOutcome;
+    projState.last_cycle_at = endedAt;
+    projState.cycles_this_session += 1;
+    await saveProjectState(projState, config);
+
+    await cleanupWorktree(project);
+    await autoCommitState(project, cycleId, finalOutcome);
+
+    return {
+      cycle_id: cycleId,
+      project_id: project.id,
+      started_at: startedAt,
+      ended_at: endedAt,
+      cycle_start_sha: cycleStartSha,
+      cycle_end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "weak",
+      reviewer_verdict: "verified_weak",
+      final_outcome: finalOutcome,
+      reason,
+    };
+  }
+
   // 6. Independent verification gate
   //    Run in the worktree if it exists (tests the bot's code, not master)
   const wt = worktreePath(project);
