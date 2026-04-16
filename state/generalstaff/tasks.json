@@ -18,7 +18,7 @@
   {
     "id": "gs-012",
     "title": "In cycle.ts, before running the engineer, update the bot/work branch to match the current HEAD so the bot always starts from the latest code (git branch -f bot/work HEAD)",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
