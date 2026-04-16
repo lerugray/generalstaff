@@ -242,6 +242,26 @@ describe("warnProjectPaths", () => {
     expect(warnings).toHaveLength(0);
   });
 
+  it("reports per-project warnings when given a mix of valid git repo and non-git dir", () => {
+    const repoRoot = join(import.meta.dir, "..");
+    const tmpDir = join(tmpdir(), "gs-test-mixed-" + Date.now());
+    mkdirSync(tmpDir, { recursive: true });
+    try {
+      const warnings = warnProjectPaths([
+        fakeProject({ id: "valid", path: repoRoot }),
+        fakeProject({ id: "not-git", path: tmpDir }),
+        fakeProject({ id: "missing", path: "/nope/nada/none" }),
+      ]);
+      expect(warnings).toHaveLength(2);
+      const byId = Object.fromEntries(warnings.map((w) => [w.projectId, w.message]));
+      expect(byId["not-git"]).toContain("not a git repository");
+      expect(byId["missing"]).toContain("does not exist");
+      expect(byId["valid"]).toBeUndefined();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not throw — loadProjectsYaml succeeds with non-existent path", async () => {
     const path = writeYaml(
       "missing-path.yaml",
