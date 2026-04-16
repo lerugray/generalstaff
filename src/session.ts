@@ -75,6 +75,8 @@ export async function runSession(options: SessionOptions) {
 
   let currentProject: ProjectConfig | null = null;
   let pickReason: string = "";
+  let consecutiveEmptyCycles = 0;
+  const MAX_CONSECUTIVE_EMPTY = 3;
 
   while (remainingMinutes() > 0) {
     // Check STOP file
@@ -121,6 +123,20 @@ export async function runSession(options: SessionOptions) {
     const count = (cyclesPerProject.get(currentProject.id) ?? 0) + 1;
     cyclesPerProject.set(currentProject.id, count);
 
+    // Guard against runaway empty cycles
+    if (result.final_outcome === "verified_weak" &&
+        result.reason?.includes("empty diff")) {
+      consecutiveEmptyCycles++;
+      if (consecutiveEmptyCycles >= MAX_CONSECUTIVE_EMPTY) {
+        console.log(
+          `\n${MAX_CONSECUTIVE_EMPTY} consecutive empty cycles — ending session.`,
+        );
+        break;
+      }
+    } else {
+      consecutiveEmptyCycles = 0;
+    }
+
     // Alert on verification failure
     if (result.final_outcome === "verification_failed") {
       console.error(
@@ -149,6 +165,10 @@ export async function runSession(options: SessionOptions) {
       // Stay on same project
     } else {
       console.log(`Not chaining: ${chainDecision.reason}`);
+      // If cap reached, skip this project for the rest of the session
+      if (chainDecision.reason === "per-project cycle cap reached") {
+        skippedProjects.add(currentProject.id);
+      }
       currentProject = null; // will pick next project
     }
   }
