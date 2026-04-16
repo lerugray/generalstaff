@@ -48,7 +48,13 @@ export function scoreProjects(
         reason: `priority=${p.priority}, staleness=${staleness.toFixed(1)}d`,
       };
     })
-    .sort((a, b) => b.score - a.score); // highest score first
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score; // highest score first
+      // Tiebreaker: prefer project with fewer total_cycles (spread work evenly)
+      const aCycles = fleet.projects[a.project.id]?.total_cycles ?? 0;
+      const bCycles = fleet.projects[b.project.id]?.total_cycles ?? 0;
+      return aCycles - bCycles;
+    });
 }
 
 // --- Override file ---

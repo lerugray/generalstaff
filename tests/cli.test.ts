@@ -369,4 +369,18 @@ dispatcher:
       expect(outputLines[19]).toContain("c-024");
     });
   });
+
+  describe("help completeness", () => {
+    it("lists all registered commands in help output", async () => {
+      const result = await runCli(["--help"]);
+      const help = result.stdout;
+      const expectedCommands = [
+        "session", "cycle", "status", "stop", "start",
+        "log", "projects", "init", "history", "doctor", "clean",
+      ];
+      for (const cmd of expectedCommands) {
+        expect(help).toContain(`generalstaff ${cmd}`);
+      }
+    });
+  });
 });

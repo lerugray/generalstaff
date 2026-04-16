@@ -104,6 +104,13 @@ export async function runSession(options: SessionOptions) {
     const count = (cyclesPerProject.get(currentProject.id) ?? 0) + 1;
     cyclesPerProject.set(currentProject.id, count);
 
+    // Alert on verification failure
+    if (result.final_outcome === "verification_failed") {
+      console.error(
+        `[FAILED] ${currentProject.id} cycle ${result.cycle_id.slice(0, 12)}: ${result.reason}`,
+      );
+    }
+
     // Handle skipped cycles
     if (result.final_outcome === "cycle_skipped") {
       skippedProjects.add(currentProject.id);

@@ -83,6 +83,67 @@ describe("scoreProjects", () => {
     const scores = scoreProjects(projects, fleet);
     expect(scores[0].project.id).toBe("high-pri");
   });
+
+  it("tiebreaks equal scores by preferring fewer total_cycles", () => {
+    const fleet: FleetState = {
+      version: 1,
+      updated_at: new Date().toISOString(),
+      projects: {
+        busy: {
+          last_cycle_at: null,
+          last_cycle_outcome: null,
+          total_cycles: 10,
+          total_verified: 10,
+          total_failed: 0,
+          accumulated_minutes: 100,
+        },
+        quiet: {
+          last_cycle_at: null,
+          last_cycle_outcome: null,
+          total_cycles: 2,
+          total_verified: 2,
+          total_failed: 0,
+          accumulated_minutes: 20,
+        },
+      },
+    };
+
+    const projects = [
+      makeProject({ id: "busy", priority: 1 }),
+      makeProject({ id: "quiet", priority: 1 }),
+    ];
+
+    const scores = scoreProjects(projects, fleet);
+    expect(scores[0].score).toBe(scores[1].score);
+    expect(scores[0].project.id).toBe("quiet");
+    expect(scores[1].project.id).toBe("busy");
+  });
+
+  it("treats missing fleet entry as zero cycles for tiebreaker", () => {
+    const fleet: FleetState = {
+      version: 1,
+      updated_at: new Date().toISOString(),
+      projects: {
+        known: {
+          last_cycle_at: null,
+          last_cycle_outcome: null,
+          total_cycles: 5,
+          total_verified: 5,
+          total_failed: 0,
+          accumulated_minutes: 50,
+        },
+      },
+    };
+
+    const projects = [
+      makeProject({ id: "known", priority: 1 }),
+      makeProject({ id: "newcomer", priority: 1 }),
+    ];
+
+    const scores = scoreProjects(projects, fleet);
+    expect(scores[0].score).toBe(scores[1].score);
+    expect(scores[0].project.id).toBe("newcomer");
+  });
 });
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "dispatcher_test");

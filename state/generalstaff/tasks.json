@@ -44,19 +44,19 @@
   {
     "id": "gs-033",
     "title": "In dispatcher.ts, add a tiebreaker to scoreProjects: when two projects have the same score, prefer the one with fewer total_cycles (spread work more evenly). Add a test for this behavior.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-034",
     "title": "In session.ts, if a cycle returns verification_failed, log a one-line summary to stderr with the reason so the user sees it even when output is scrolling. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-035",
     "title": "Add a test that validates the full CLI help output includes all registered commands: session, cycle, status, stop, start, log, projects, init, history, doctor, clean. Ensures new commands don't get forgotten in help text.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
