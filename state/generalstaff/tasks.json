@@ -140,7 +140,7 @@
   {
     "id": "gs-049",
     "title": "In state.ts, add a getProjectSummary function that aggregates fleet state + project state + remaining tasks into a single object. Use it in the status --json output for richer data. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

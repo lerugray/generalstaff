@@ -12,9 +12,11 @@ import {
   readCycleFile,
   writeStateFile,
   readStateFile,
+  getProjectSummary,
 } from "../src/state";
+import type { ProjectConfig } from "../src/types";
 import { join } from "path";
-import { mkdirSync, rmSync, existsSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "state_test");
 
@@ -233,5 +235,80 @@ describe("atomic write safety", () => {
     const loaded = await loadProjectState("overwrite-proj");
     expect(loaded.current_cycle_id).toBe("second");
     expect(loaded.cycles_this_session).toBe(200);
+  });
+});
+
+describe("getProjectSummary", () => {
+  function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+    return {
+      id: "summary-proj",
+      path: TEST_DIR,
+      priority: 2,
+      engineer_command: "echo engineer",
+      verification_command: "echo verify",
+      cycle_budget_minutes: 15,
+      work_detection: "tasks_json",
+      concurrency_detection: "none",
+      branch: "bot/work",
+      auto_merge: false,
+      hands_off: [],
+      ...overrides,
+    };
+  }
+
+  it("returns defaults when no state files exist", async () => {
+    const project = makeProject();
+    const fleet = await loadFleetState();
+
+    const summary = await getProjectSummary(project, fleet);
+    expect(summary.id).toBe("summary-proj");
+    expect(summary.priority).toBe(2);
+    expect(summary.state).toBeNull();
+    expect(summary.project_state.project_id).toBe("summary-proj");
+    expect(summary.project_state.cycles_this_session).toBe(0);
+    expect(summary.remaining_tasks).toBe(0);
+  });
+
+  it("aggregates fleet state, project state, and remaining tasks", async () => {
+    const project = makeProject({ id: "agg-proj", priority: 1 });
+
+    const fleet = await loadFleetState();
+    updateProjectFleetState(fleet, "agg-proj", "verified", 12);
+    updateProjectFleetState(fleet, "agg-proj", "verification_failed", 5);
+    await saveFleetState(fleet);
+
+    await saveProjectState({
+      project_id: "agg-proj",
+      current_cycle_id: null,
+      last_cycle_id: "cycle-xyz",
+      last_cycle_outcome: "verification_failed",
+      last_cycle_at: "2026-04-16T00:00:00.000Z",
+      cycles_this_session: 3,
+    });
+
+    const tasksDir = join(TEST_DIR, "state", "agg-proj");
+    mkdirSync(tasksDir, { recursive: true });
+    writeFileSync(
+      join(tasksDir, "tasks.json"),
+      JSON.stringify([
+        { id: "t1", status: "pending", priority: 1, title: "a" },
+        { id: "t2", status: "done", priority: 2, title: "b" },
+        { id: "t3", status: "pending", priority: 3, title: "c" },
+        { id: "t4", status: "skipped", priority: 4, title: "d" },
+      ]),
+    );
+
+    const reloadedFleet = await loadFleetState();
+    const summary = await getProjectSummary(project, reloadedFleet);
+
+    expect(summary.id).toBe("agg-proj");
+    expect(summary.priority).toBe(1);
+    expect(summary.state).not.toBeNull();
+    expect(summary.state?.total_cycles).toBe(2);
+    expect(summary.state?.total_verified).toBe(1);
+    expect(summary.state?.total_failed).toBe(1);
+    expect(summary.project_state.last_cycle_id).toBe("cycle-xyz");
+    expect(summary.project_state.cycles_this_session).toBe(3);
+    expect(summary.remaining_tasks).toBe(2);
   });
 });
