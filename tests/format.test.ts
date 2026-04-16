@@ -60,6 +60,13 @@ describe("formatBytes", () => {
     expect(formatBytes(1023)).toBe("1023 B");
   });
 
+  it("floors fractional sub-kilobyte values (gs-060 convention)", () => {
+    expect(formatBytes(1023.5)).toBe("1023 B");
+    expect(formatBytes(999.9)).toBe("999 B");
+    expect(formatBytes(0.4)).toBe("0 B");
+    expect(formatBytes(1.99)).toBe("1 B");
+  });
+
   it("renders kilobytes with one decimal place", () => {
     expect(formatBytes(1024)).toBe("1.0 KB");
     expect(formatBytes(1536)).toBe("1.5 KB");

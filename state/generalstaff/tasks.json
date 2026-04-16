@@ -206,7 +206,7 @@
   {
     "id": "gs-060",
     "title": "Add a test pinning formatBytes behavior for fractional sub-KB inputs (e.g. 1023.5 bytes). Either keep current behavior (returns '1023.5 B') and add an explicit test documenting it, or change the implementation to floor sub-KB values and update existing tests accordingly. Include a comment in format.ts explaining the chosen convention.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]
