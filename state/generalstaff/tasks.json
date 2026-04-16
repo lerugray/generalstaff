@@ -32,19 +32,19 @@
   {
     "id": "gs-006",
     "title": "Add work_detection test: greenfield tasks with in_progress status should count as remaining work",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
     "id": "gs-007",
     "title": "Add safety module test: isBotRunning with catalogdna detection mode using fixture files for .bot-worktree, bot_status.md, and heartbeat sentinels",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
     "id": "gs-008",
     "title": "Add reviewer module test: parseReviewerResponse handles raw JSON, fenced JSON, JSON with surrounding prose, and malformed responses",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
