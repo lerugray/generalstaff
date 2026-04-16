@@ -7,6 +7,15 @@ import { join, dirname } from "path";
 import { getRootDir } from "./state";
 import { isProgressEntry, type ProgressEntry, type ProgressEventType } from "./types";
 
+export interface CycleHistoryRow {
+  cycle_id: string;
+  project: string;
+  outcome: string;
+  duration: string;
+  sha_range: string;
+  timestamp: string;
+}
+
 function progressPath(projectId: string): string {
   return join(getRootDir(), "state", projectId, "PROGRESS.jsonl");
 }
@@ -136,5 +145,99 @@ function formatData(
       return `reason=${data.reason ?? "?"}`;
     default:
       return JSON.stringify(data).slice(0, 100);
+  }
+}
+
+function formatDuration(seconds: unknown): string {
+  if (typeof seconds !== "number" || isNaN(seconds)) return "?";
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s > 0 ? `${m}m${s}s` : `${m}m`;
+}
+
+function shaRange(startSha: unknown, endSha: unknown): string {
+  const start = typeof startSha === "string" ? startSha.slice(0, 7) : "?";
+  const end = typeof endSha === "string" ? endSha.slice(0, 7) : "?";
+  return start === end ? start : `${start}..${end}`;
+}
+
+export async function loadCycleHistory(
+  projectId: string | undefined,
+  limit: number = 20,
+): Promise<CycleHistoryRow[]> {
+  const stateDir = join(getRootDir(), "state");
+  if (!existsSync(stateDir)) return [];
+
+  const entries: ProgressEntry[] = [];
+  const { readdirSync } = require("fs");
+
+  if (projectId) {
+    const filePath = join(stateDir, projectId, "PROGRESS.jsonl");
+    if (!existsSync(filePath)) return [];
+    const content = await readFile(filePath, "utf8");
+    for (const line of content.trim().split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
+          entries.push(parsed);
+        }
+      } catch { /* skip malformed */ }
+    }
+  } else {
+    for (const dir of readdirSync(stateDir)) {
+      const filePath = join(stateDir, dir, "PROGRESS.jsonl");
+      if (!existsSync(filePath)) continue;
+      const content = await readFile(filePath, "utf8");
+      for (const line of content.trim().split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line);
+          if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
+            entries.push(parsed);
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+  }
+
+  entries.sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+
+  return entries.slice(-limit).map((e) => ({
+    cycle_id: (e.cycle_id ?? "?").slice(0, 12),
+    project: e.project_id ?? "?",
+    outcome: String(e.data.outcome ?? "?"),
+    duration: formatDuration(e.data.duration_seconds),
+    sha_range: shaRange(e.data.start_sha, e.data.end_sha),
+    timestamp: e.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z"),
+  }));
+}
+
+export function printHistoryTable(rows: CycleHistoryRow[]): void {
+  if (rows.length === 0) {
+    console.log("No cycle history found.");
+    return;
+  }
+
+  // Column widths — compute dynamically from data
+  const headers = { cycle_id: "CYCLE", project: "PROJECT", outcome: "OUTCOME", duration: "DURATION", sha_range: "SHA RANGE", timestamp: "TIMESTAMP" } as const;
+  const keys = ["cycle_id", "project", "outcome", "duration", "sha_range", "timestamp"] as const;
+
+  const widths: Record<string, number> = {};
+  for (const k of keys) {
+    widths[k] = Math.max(headers[k].length, ...rows.map((r) => r[k].length));
+  }
+
+  const pad = (s: string, w: number) => s.padEnd(w);
+  const headerLine = keys.map((k) => pad(headers[k], widths[k])).join("  ");
+  const separator = keys.map((k) => "-".repeat(widths[k])).join("  ");
+
+  console.log(headerLine);
+  console.log(separator);
+  for (const row of rows) {
+    console.log(keys.map((k) => pad(row[k], widths[k])).join("  "));
   }
 }

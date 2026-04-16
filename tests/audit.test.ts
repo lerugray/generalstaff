@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable } from "../src/audit";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
@@ -198,5 +198,113 @@ describe("tailProgressLog", () => {
     expect(lines[0]).toContain("session_start");
     // No bracket-delimited cycle id
     expect(lines[0]).not.toMatch(/\[.*\]/);
+  });
+});
+
+describe("loadCycleHistory", () => {
+  it("returns empty array when no state directory exists", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    rmSync(stateDir, { recursive: true, force: true });
+    const rows = await loadCycleHistory(undefined);
+    expect(rows).toEqual([]);
+  });
+
+  it("returns empty array when project has no PROGRESS.jsonl", async () => {
+    const rows = await loadCycleHistory("nonexistent");
+    expect(rows).toEqual([]);
+  });
+
+  it("extracts cycle_end events into history rows", async () => {
+    await appendProgress("proj-hist", "cycle_start", { start_sha: "aaa111bbb" }, "cycle-abc123def456");
+    await appendProgress("proj-hist", "engineer_completed", { exit_code: 0, duration_seconds: 30 }, "cycle-abc123def456");
+    await appendProgress("proj-hist", "cycle_end", {
+      outcome: "verified",
+      reason: "tests pass",
+      start_sha: "aaa111bbb",
+      end_sha: "ccc333ddd",
+      duration_seconds: 120,
+    }, "cycle-abc123def456");
+
+    const rows = await loadCycleHistory("proj-hist");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("cycle-abc123");
+    expect(rows[0].project).toBe("proj-hist");
+    expect(rows[0].outcome).toBe("verified");
+    expect(rows[0].duration).toBe("2m");
+    expect(rows[0].sha_range).toBe("aaa111b..ccc333d");
+  });
+
+  it("merges entries from multiple projects sorted by timestamp", async () => {
+    await appendProgress("proj-a", "cycle_end", {
+      outcome: "verified", start_sha: "aaa", end_sha: "bbb", duration_seconds: 60,
+    }, "c-a1");
+    await new Promise((r) => setTimeout(r, 10));
+    await appendProgress("proj-b", "cycle_end", {
+      outcome: "verification_failed", start_sha: "ccc", end_sha: "ddd", duration_seconds: 45,
+    }, "c-b1");
+
+    const rows = await loadCycleHistory(undefined);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].project).toBe("proj-a");
+    expect(rows[1].project).toBe("proj-b");
+    expect(rows[1].outcome).toBe("verification_failed");
+  });
+
+  it("respects the limit parameter", async () => {
+    for (let i = 0; i < 5; i++) {
+      await appendProgress("proj-lim", "cycle_end", {
+        outcome: "verified", start_sha: `s${i}`, end_sha: `e${i}`, duration_seconds: i * 10,
+      }, `c-${i}`);
+    }
+
+    const rows = await loadCycleHistory("proj-lim", 3);
+    expect(rows).toHaveLength(3);
+    // Should be the last 3 (indices 2, 3, 4)
+    expect(rows[0].cycle_id).toStartWith("c-2");
+    expect(rows[2].cycle_id).toStartWith("c-4");
+  });
+
+  it("formats duration as seconds when under 60s", async () => {
+    await appendProgress("proj-dur", "cycle_end", {
+      outcome: "verified", start_sha: "a", end_sha: "b", duration_seconds: 45,
+    }, "c-1");
+
+    const rows = await loadCycleHistory("proj-dur");
+    expect(rows[0].duration).toBe("45s");
+  });
+
+  it("shows same SHA when start equals end", async () => {
+    await appendProgress("proj-same", "cycle_end", {
+      outcome: "verified_weak", start_sha: "abc1234", end_sha: "abc1234", duration_seconds: 5,
+    }, "c-1");
+
+    const rows = await loadCycleHistory("proj-same");
+    expect(rows[0].sha_range).toBe("abc1234");
+  });
+});
+
+describe("printHistoryTable", () => {
+  it("prints 'No cycle history found.' when rows is empty", async () => {
+    const lines = await captureLog(() => Promise.resolve(printHistoryTable([])));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No cycle history found.");
+  });
+
+  it("prints a header, separator, and data rows", async () => {
+    const rows = [
+      { cycle_id: "cycle-abc123", project: "myproj", outcome: "verified", duration: "2m", sha_range: "aaa..bbb", timestamp: "2026-04-16 12:00:00Z" },
+    ];
+    const lines = await captureLog(() => Promise.resolve(printHistoryTable(rows)));
+    expect(lines).toHaveLength(3); // header + separator + 1 data row
+    expect(lines[0]).toContain("CYCLE");
+    expect(lines[0]).toContain("PROJECT");
+    expect(lines[0]).toContain("OUTCOME");
+    expect(lines[0]).toContain("DURATION");
+    expect(lines[0]).toContain("SHA RANGE");
+    expect(lines[1]).toMatch(/^[-\s]+$/);
+    expect(lines[2]).toContain("cycle-abc123");
+    expect(lines[2]).toContain("myproj");
+    expect(lines[2]).toContain("verified");
+    expect(lines[2]).toContain("2m");
   });
 });

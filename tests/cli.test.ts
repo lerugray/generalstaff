@@ -250,6 +250,81 @@ dispatcher:
     });
   });
 
+  describe("history", () => {
+    const HISTORY_TEST_DIR = join(import.meta.dir, "fixtures", "history_cmd_test");
+
+    function makeCycleEnd(i: number, project: string): string {
+      return JSON.stringify({
+        timestamp: `2026-04-16T12:${String(i).padStart(2, "0")}:00.000Z`,
+        event: "cycle_end",
+        cycle_id: `cycle-${String(i).padStart(3, "0")}abcdef`,
+        project_id: project,
+        data: {
+          outcome: i % 2 === 0 ? "verified" : "verification_failed",
+          start_sha: `aaa${i}000111`,
+          end_sha: `bbb${i}000222`,
+          duration_seconds: 60 + i * 10,
+        },
+      });
+    }
+
+    beforeEach(() => {
+      mkdirSync(join(HISTORY_TEST_DIR, "state", "proj-alpha"), { recursive: true });
+      mkdirSync(join(HISTORY_TEST_DIR, "state", "proj-beta"), { recursive: true });
+      const alphaLines = Array.from({ length: 5 }, (_, i) => makeCycleEnd(i, "proj-alpha")).join("\n") + "\n";
+      const betaLines = Array.from({ length: 3 }, (_, i) => makeCycleEnd(i + 10, "proj-beta")).join("\n") + "\n";
+      writeFileSync(join(HISTORY_TEST_DIR, "state", "proj-alpha", "PROGRESS.jsonl"), alphaLines);
+      writeFileSync(join(HISTORY_TEST_DIR, "state", "proj-beta", "PROGRESS.jsonl"), betaLines);
+    });
+
+    afterEach(() => {
+      rmSync(HISTORY_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("shows a table with header and data rows across all projects", async () => {
+      const result = await runCli(["history"], HISTORY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("CYCLE");
+      expect(result.stdout).toContain("PROJECT");
+      expect(result.stdout).toContain("OUTCOME");
+      expect(result.stdout).toContain("proj-alpha");
+      expect(result.stdout).toContain("proj-beta");
+      // 8 data rows (5 alpha + 3 beta) + header + separator = 10 lines
+      const lines = result.stdout.trim().split("\n");
+      expect(lines).toHaveLength(10);
+    });
+
+    it("filters by --project", async () => {
+      const result = await runCli(["history", "--project=proj-beta"], HISTORY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("proj-beta");
+      expect(result.stdout).not.toContain("proj-alpha");
+      const lines = result.stdout.trim().split("\n");
+      expect(lines).toHaveLength(5); // header + separator + 3 data rows
+    });
+
+    it("respects --lines limit", async () => {
+      const result = await runCli(["history", "--lines=2"], HISTORY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const lines = result.stdout.trim().split("\n");
+      expect(lines).toHaveLength(4); // header + separator + 2 data rows
+    });
+
+    it("shows 'No cycle history' when state dir is empty", async () => {
+      const emptyDir = join(import.meta.dir, "fixtures", "history_empty_test");
+      mkdirSync(emptyDir, { recursive: true });
+      const result = await runCli(["history"], emptyDir);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No cycle history found.");
+      rmSync(emptyDir, { recursive: true, force: true });
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("history");
+    });
+  });
+
   describe("log --lines", () => {
     const LOG_TEST_DIR = join(import.meta.dir, "fixtures", "log_lines_test");
 
