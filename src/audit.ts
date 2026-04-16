@@ -211,7 +211,34 @@ export async function loadCycleHistory(
   }));
 }
 
-export function printHistoryTable(rows: CycleHistoryRow[]): void {
+const ANSI = {
+  reset: "\x1b[0m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  yellow: "\x1b[33m",
+  gray: "\x1b[90m",
+} as const;
+
+export function colorizeOutcome(outcome: string, useColor: boolean): string {
+  if (!useColor) return outcome;
+  switch (outcome) {
+    case "verified":
+      return `${ANSI.green}${outcome}${ANSI.reset}`;
+    case "verification_failed":
+      return `${ANSI.red}${outcome}${ANSI.reset}`;
+    case "verified_weak":
+      return `${ANSI.yellow}${outcome}${ANSI.reset}`;
+    case "cycle_skipped":
+      return `${ANSI.gray}${outcome}${ANSI.reset}`;
+    default:
+      return outcome;
+  }
+}
+
+export function printHistoryTable(
+  rows: CycleHistoryRow[],
+  useColor: boolean = Boolean(process.stdout.isTTY),
+): void {
   if (rows.length === 0) {
     console.log("No cycle history found.");
     return;
@@ -233,12 +260,25 @@ export function printHistoryTable(rows: CycleHistoryRow[]): void {
   console.log(headerLine);
   console.log(separator);
   for (const row of rows) {
-    console.log(keys.map((k) => pad(row[k], widths[k])).join("  "));
+    // Pad first using raw text so column widths stay correct, then colorize the outcome cell.
+    const cells = keys.map((k) => {
+      const padded = pad(row[k], widths[k]);
+      if (k === "outcome" && useColor) {
+        const colored = colorizeOutcome(row[k], true);
+        return padded.replace(row[k], colored);
+      }
+      return padded;
+    });
+    console.log(cells.join("  "));
   }
 }
 
-export function printHistoryCompact(rows: CycleHistoryRow[]): void {
+export function printHistoryCompact(
+  rows: CycleHistoryRow[],
+  useColor: boolean = Boolean(process.stdout.isTTY),
+): void {
   for (const row of rows) {
-    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${row.outcome}\t${row.duration}\t${row.sha_range}`);
+    const outcome = colorizeOutcome(row.outcome, useColor);
+    console.log(`${row.timestamp}\t${row.project}\t${row.cycle_id}\t${outcome}\t${row.duration}\t${row.sha_range}`);
   }
 }
