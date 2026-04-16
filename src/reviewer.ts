@@ -5,11 +5,12 @@ import { spawn } from "child_process";
 import { writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
 import { buildReviewerPrompt, type ReviewerPromptParams } from "./prompts/reviewer";
-import type {
-  ProjectConfig,
-  DispatcherConfig,
-  ReviewerVerdict,
-  ReviewerResponse,
+import {
+  isReviewerResponse,
+  type ProjectConfig,
+  type DispatcherConfig,
+  type ReviewerVerdict,
+  type ReviewerResponse,
 } from "./types";
 
 export interface ReviewerResult {
@@ -175,8 +176,8 @@ export function parseReviewerResponse(raw: string): {
 
   // Try direct parse first
   try {
-    const parsed = JSON.parse(trimmed) as ReviewerResponse;
-    if (isValidVerdict(parsed.verdict)) {
+    const parsed = JSON.parse(trimmed);
+    if (isReviewerResponse(parsed)) {
       return { verdict: parsed.verdict, response: parsed, parseError: null };
     }
   } catch {
@@ -187,8 +188,8 @@ export function parseReviewerResponse(raw: string): {
   const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) {
     try {
-      const parsed = JSON.parse(fenceMatch[1]) as ReviewerResponse;
-      if (isValidVerdict(parsed.verdict)) {
+      const parsed = JSON.parse(fenceMatch[1]);
+      if (isReviewerResponse(parsed)) {
         return { verdict: parsed.verdict, response: parsed, parseError: null };
       }
     } catch {
@@ -200,8 +201,8 @@ export function parseReviewerResponse(raw: string): {
   const braceMatch = trimmed.match(/\{[\s\S]*\}/);
   if (braceMatch) {
     try {
-      const parsed = JSON.parse(braceMatch[0]) as ReviewerResponse;
-      if (isValidVerdict(parsed.verdict)) {
+      const parsed = JSON.parse(braceMatch[0]);
+      if (isReviewerResponse(parsed)) {
         return { verdict: parsed.verdict, response: parsed, parseError: null };
       }
     } catch {
@@ -215,8 +216,4 @@ export function parseReviewerResponse(raw: string): {
     response: DEFAULT_FAILED_RESPONSE,
     parseError: `Could not parse reviewer response as JSON. Raw response starts with: ${trimmed.slice(0, 200)}`,
   };
-}
-
-function isValidVerdict(v: unknown): v is ReviewerVerdict {
-  return v === "verified" || v === "verified_weak" || v === "verification_failed";
 }
