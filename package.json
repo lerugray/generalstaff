@@ -1,0 +1,22 @@
+{
+  "name": "generalstaff",
+  "version": "0.0.1",
+  "description": "Open-source autonomous engineering dispatcher with verification gates",
+  "type": "module",
+  "bin": {
+    "generalstaff": "./src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test",
+    "typecheck": "bun x tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.12",
+    "typescript": "^5.8.3"
+  },
+  "license": "MIT"
+}
