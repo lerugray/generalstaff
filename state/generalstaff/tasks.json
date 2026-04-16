@@ -22,7 +22,7 @@
   {
     "id": "gs-021",
     "title": "In cycle.ts, add programmatic hands-off violation check after diff capture — compare changed files against hands_off patterns using matchesHandsOff from safety.ts. If any violations found, skip reviewer and set outcome to verification_failed with the violation list. Saves an API call.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

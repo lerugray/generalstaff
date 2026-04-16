@@ -19,7 +19,7 @@ import { appendProgress } from "./audit";
 import { runEngineer } from "./engineer";
 import { runVerification } from "./verification";
 import { runReviewer } from "./reviewer";
-import { isStopFilePresent, isWorkingTreeClean, isBotRunning } from "./safety";
+import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
 import { loadProjectsYaml, findProject } from "./projects";
 import type {
   ProjectConfig,
@@ -120,6 +120,17 @@ async function getGitDiffStat(
   } catch {
     return "";
   }
+}
+
+export function extractChangedFiles(diff: string): string[] {
+  const files: string[] = [];
+  for (const line of diff.split("\n")) {
+    const match = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (match) {
+      files.push(match[1]);
+    }
+  }
+  return files;
 }
 
 async function detectMarkedDoneTasks(
@@ -346,6 +357,74 @@ export async function executeCycle(
       engineer_exit_code: engineerResult.exitCode,
       verification_outcome: "weak",
       reviewer_verdict: "verified_weak",
+      final_outcome: finalOutcome,
+      reason,
+    };
+  }
+
+  // 6c. Check for hands-off violations — skip verification + reviewer if found
+  const changedFiles = extractChangedFiles(fullDiff);
+  const handsOffViolations: Array<{ file: string; pattern: string }> = [];
+  for (const file of changedFiles) {
+    const pattern = matchesHandsOff(file, project.hands_off);
+    if (pattern) {
+      handsOffViolations.push({ file, pattern });
+    }
+  }
+
+  if (handsOffViolations.length > 0) {
+    const finalOutcome: CycleOutcome = "verification_failed";
+    const violationList = handsOffViolations
+      .map((v) => `${v.file} (matched ${v.pattern})`)
+      .join(", ");
+    const reason = `hands-off violation: ${violationList}`;
+    console.log(`\nHands-off violation detected: ${reason}`);
+
+    const endedAt = new Date().toISOString();
+    console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
+
+    await appendProgress(project.id, "cycle_end", {
+      outcome: finalOutcome,
+      reason,
+      start_sha: cycleStartSha,
+      end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "failed",
+      reviewer_verdict: "verification_failed",
+      hands_off_violations: handsOffViolations,
+      duration_seconds: Math.round(
+        (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+      ),
+    }, cycleId);
+
+    // Update state
+    const fleet = await loadFleetState(config);
+    const durationMinutes =
+      (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
+    updateProjectFleetState(fleet, project.id, finalOutcome, durationMinutes);
+    await saveFleetState(fleet, config);
+
+    const projState = await loadProjectState(project.id, config);
+    projState.current_cycle_id = null;
+    projState.last_cycle_id = cycleId;
+    projState.last_cycle_outcome = finalOutcome;
+    projState.last_cycle_at = endedAt;
+    projState.cycles_this_session += 1;
+    await saveProjectState(projState, config);
+
+    await cleanupWorktree(project);
+    await autoCommitState(project, cycleId, finalOutcome);
+
+    return {
+      cycle_id: cycleId,
+      project_id: project.id,
+      started_at: startedAt,
+      ended_at: endedAt,
+      cycle_start_sha: cycleStartSha,
+      cycle_end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "failed",
+      reviewer_verdict: "verification_failed",
       final_outcome: finalOutcome,
       reason,
     };
