@@ -63,6 +63,19 @@ workflow applies.)
 - [[research-notes]] — verbatim findings on nightcrawler,
   parallel-cc, Polsia, Continuous-Claude-v3 (append-only, dated)
 
+## Hammerstein logs (`docs/internal/`)
+
+- [[Hammerstein Observations Log]] — Ray's first-person
+  reflective log (append-only, hands-off for autonomous bots)
+- [[Hammerstein Observations - Claude]] — Claude/bot-side
+  observations (interactive sessions + future autonomous runs)
+
+## Session history (`docs/sessions/`)
+
+- [[2026-04-15]] — pivot session (home PC, evening, Opus 4.6).
+  Phase 0 design pass, Polsia deep-dive, Phase 1 plan, all 5
+  open questions resolved, future directions captured.
+
 ## Conventions for working in this folder
 
 - [[CLAUDE]] — instructions for future Claude sessions in this
