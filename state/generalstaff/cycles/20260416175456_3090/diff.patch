@@ -1,0 +1,270 @@
+diff --git a/src/session.ts b/src/session.ts
+index fbd840d..b7ea2f7 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -13,6 +13,7 @@ import { isStopFilePresent } from "./safety";
+ import { executeCycle } from "./cycle";
+ import { pickNextProject, shouldChain } from "./dispatcher";
+ import { formatDuration } from "./format";
++import { countRemainingWork } from "./work_detection";
+ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+ 
+ export async function runSession(options: SessionOptions) {
+@@ -195,9 +196,12 @@ export async function runSession(options: SessionOptions) {
+     const skipped = projectResults.filter(
+       (r) => r.final_outcome === "cycle_skipped",
+     ).length;
++    const project = projects.find((p) => p.id === projectId);
++    const remaining = project ? await countRemainingWork(project) : 0;
+     console.log(
+       `  ${projectId}: ${count} cycle(s) — ` +
+-        `${verified} verified, ${failed} failed, ${skipped} skipped`,
++        `${verified} verified, ${failed} failed, ${skipped} skipped ` +
++        `(${remaining} task(s) remaining)`,
+     );
+   }
+ 
+diff --git a/src/work_detection.ts b/src/work_detection.ts
+index 832ed0e..139137b 100644
+--- a/src/work_detection.ts
++++ b/src/work_detection.ts
+@@ -18,6 +18,61 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
+   }
+ }
+ 
++export async function countRemainingWork(
++  project: ProjectConfig,
++): Promise<number> {
++  switch (project.work_detection) {
++    case "catalogdna_bot_tasks":
++      return catalogdnaCountRemaining(project.path);
++    case "tasks_json":
++      return greenfieldCountRemaining(project.id);
++    default:
++      return 0;
++  }
++}
++
++export async function catalogdnaCountRemaining(
++  catalogdnaPath: string,
++): Promise<number> {
++  const botTasksPath = join(catalogdnaPath, "bot_tasks.md");
++  if (!existsSync(botTasksPath)) return 0;
++
++  let content: string;
++  try {
++    content = await readFile(botTasksPath, "utf8");
++  } catch {
++    return 0;
++  }
++
++  const sections = content.split(/^## /m);
++  let totalUnchecked = 0;
++  for (const section of sections) {
++    const firstLine = section.split("\n")[0] ?? "";
++    if (!/^P[0-3]\b/.test(firstLine)) continue;
++    if (/COMPLETED|SKIP/i.test(firstLine)) continue;
++    const unchecked = (section.match(/^- \[ \]/gm) ?? []).length;
++    totalUnchecked += unchecked;
++  }
++  return totalUnchecked;
++}
++
++export async function greenfieldCountRemaining(
++  projectId: string,
++): Promise<number> {
++  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
++  if (!existsSync(tasksPath)) return 0;
++
++  try {
++    const raw = await readFile(tasksPath, "utf8");
++    const tasks = JSON.parse(raw) as Array<{ status: string }>;
++    return tasks.filter(
++      (t) => t.status !== "done" && t.status !== "skipped",
++    ).length;
++  } catch {
++    return 0;
++  }
++}
++
+ export async function catalogdnaHasMoreWork(
+   catalogdnaPath: string,
+ ): Promise<boolean> {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index c7c3884..c936c8b 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -80,7 +80,7 @@
+   {
+     "id": "gs-039",
+     "title": "In work_detection.ts, add a function countRemainingWork(project) that returns the number of pending tasks (not just boolean hasMoreWork). Use it in the session summary output. Add test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/work_detection.test.ts b/tests/work_detection.test.ts
+index 6802340..7afacca 100644
+--- a/tests/work_detection.test.ts
++++ b/tests/work_detection.test.ts
+@@ -1,5 +1,12 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { catalogdnaHasMoreWork, greenfieldHasMoreWork } from "../src/work_detection";
++import {
++  catalogdnaHasMoreWork,
++  greenfieldHasMoreWork,
++  catalogdnaCountRemaining,
++  greenfieldCountRemaining,
++  countRemainingWork,
++} from "../src/work_detection";
++import type { ProjectConfig } from "../src/types";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { writeFileSync, mkdirSync, rmSync } from "fs";
+@@ -137,3 +144,146 @@ describe("greenfieldHasMoreWork", () => {
+     expect(await greenfieldHasMoreWork("nonexistent")).toBe(false);
+   });
+ });
++
++describe("catalogdnaCountRemaining", () => {
++  it("counts unchecked items across P0-P3 sections", async () => {
++    const projectPath = join(FIXTURES, "count-a");
++    writeFixture(
++      "count-a/bot_tasks.md",
++      `# Bot Tasks
++
++## P0 — Critical
++- [ ] First
++- [ ] Second
++- [x] Done
++
++## P1 — High
++- [ ] Third
++
++## Phase A — should not count
++- [ ] Ignore me
++`,
++    );
++    expect(await catalogdnaCountRemaining(projectPath)).toBe(3);
++  });
++
++  it("returns 0 when all items are checked", async () => {
++    const projectPath = join(FIXTURES, "count-b");
++    writeFixture(
++      "count-b/bot_tasks.md",
++      `# Bot Tasks
++
++## P0
++- [x] Done
++- [x] Also done
++`,
++    );
++    expect(await catalogdnaCountRemaining(projectPath)).toBe(0);
++  });
++
++  it("skips COMPLETED sections", async () => {
++    const projectPath = join(FIXTURES, "count-c");
++    writeFixture(
++      "count-c/bot_tasks.md",
++      `# Bot Tasks
++
++## P0 — COMPLETED
++- [ ] ignored
++
++## P1
++- [ ] counted
++`,
++    );
++    expect(await catalogdnaCountRemaining(projectPath)).toBe(1);
++  });
++
++  it("returns 0 when file doesn't exist", async () => {
++    expect(
++      await catalogdnaCountRemaining(join(FIXTURES, "nope")),
++    ).toBe(0);
++  });
++});
++
++describe("greenfieldCountRemaining", () => {
++  it("counts tasks that are not done or skipped", async () => {
++    writeFixture(
++      "state/count-green/tasks.json",
++      JSON.stringify([
++        { id: "1", status: "done" },
++        { id: "2", status: "pending" },
++        { id: "3", status: "in_progress" },
++        { id: "4", status: "skipped" },
++        { id: "5", status: "pending" },
++      ]),
++    );
++    expect(await greenfieldCountRemaining("count-green")).toBe(3);
++  });
++
++  it("returns 0 when all tasks are done or skipped", async () => {
++    writeFixture(
++      "state/count-done/tasks.json",
++      JSON.stringify([
++        { id: "1", status: "done" },
++        { id: "2", status: "skipped" },
++      ]),
++    );
++    expect(await greenfieldCountRemaining("count-done")).toBe(0);
++  });
++
++  it("returns 0 when tasks.json doesn't exist", async () => {
++    expect(await greenfieldCountRemaining("nonexistent")).toBe(0);
++  });
++
++  it("returns 0 when JSON is malformed", async () => {
++    writeFixture("state/count-bad/tasks.json", "{ not json");
++    expect(await greenfieldCountRemaining("count-bad")).toBe(0);
++  });
++});
++
++describe("countRemainingWork", () => {
++  function makeProject(
++    overrides: Partial<ProjectConfig> & Pick<ProjectConfig, "work_detection">,
++  ): ProjectConfig {
++    return {
++      id: "proj",
++      path: FIXTURES,
++      priority: 1,
++      engineer_command: "",
++      verification_command: "",
++      cycle_budget_minutes: 10,
++      concurrency_detection: "none",
++      branch: "bot/work",
++      auto_merge: false,
++      hands_off: [],
++      ...overrides,
++    };
++  }
++
++  it("dispatches to catalogdna mode", async () => {
++    const projectPath = join(FIXTURES, "dispatch-cat");
++    writeFixture(
++      "dispatch-cat/bot_tasks.md",
++      `## P0\n- [ ] a\n- [ ] b\n`,
++    );
++    const project = makeProject({
++      work_detection: "catalogdna_bot_tasks",
++      path: projectPath,
++    });
++    expect(await countRemainingWork(project)).toBe(2);
++  });
++
++  it("dispatches to tasks_json mode", async () => {
++    writeFixture(
++      "state/dispatch-green/tasks.json",
++      JSON.stringify([
++        { id: "1", status: "pending" },
++        { id: "2", status: "done" },
++      ]),
++    );
++    const project = makeProject({
++      id: "dispatch-green",
++      work_detection: "tasks_json",
++    });
++    expect(await countRemainingWork(project)).toBe(1);
++  });
++});
