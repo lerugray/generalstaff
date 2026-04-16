@@ -74,7 +74,71 @@ an explicit `RULE-RELAXATION-<date>.md` log file documenting why.**
 - The folder is also an **Obsidian vault** — see `INDEX.md` for
   the map of content. Cross-PC sync uses **git** (the folder lives
   in a OneDrive path but OneDrive sync is not relied on). The
-  folder is not yet a git repo as of 2026-04-15.
+  repo is at `github.com/lerugray/generalstaff` (private) as of
+  2026-04-15 evening.
+
+## Session context (persistence across machines)
+
+Ray syncs between home and work PCs via git (not OneDrive). The
+`~/.claude/projects/.../memory/` memory system on either machine
+does NOT sync automatically — memory lives in `.claude` which is
+per-machine. **Context that needs to persist across machines
+must live in the project wiki itself (this file or one of the
+design docs committed to the repo).**
+
+The following context is relevant for all future GeneralStaff
+sessions regardless of which machine they run on, and is
+captured here specifically so git carries it between the home
+and work PCs. (Mirror copies also live in the memory/ directory
+on the home PC for local convenience; git is the authoritative
+cross-machine source.)
+
+### Ray's workflow conventions
+
+- **Git, not OneDrive, for cross-machine sync.** The GeneralStaff
+  folder lives in `OneDrive\Documents\` but OneDrive sync is not
+  relied on. Ray commits + pushes on one machine, pulls on the
+  other. Don't assume OneDrive handles anything.
+- **Private repo at `github.com/lerugray/generalstaff`.** Push
+  before switching machines.
+- **Default branch is `master`**, not `main`. Ray's git
+  convention. Don't rename.
+- **Model routing:** Ray has detailed provider routing rules in
+  `~/.claude/CLAUDE.md` (Gemini for summaries, OpenRouter Qwen
+  for code delegation, Ollama for tiny tasks, Claude for
+  high-stakes work). GeneralStaff Phase 2+ inherits these rules
+  via `provider_config.yaml` per
+  `FUTURE-DIRECTIONS-2026-04-15.md` §2.
+
+### Project stakes (why this isn't just a hobby)
+
+GeneralStaff, catalogdna, and Retrogaze are Ray's dev-adjacent
+portfolio. He's primarily a game designer, currently working a
+minimum wage day job, and uses these projects to build a profile
+as a vibecoder and open paths to better opportunities. He
+acknowledged this on 2026-04-15 evening: *"if it helps build my
+profile at all, launch one of my ideas or leads to some kind of
+better opportunity down the road other than my minimum wage
+job, it will be worth it."*
+
+Calibrate future sessions accordingly:
+
+- **Shipping matters more than perfecting.** A soft-launched
+  Phase 1 in public view is more valuable to Ray's career than
+  a perfect Phase 5 that no one sees. When choosing between
+  "ship it rougher but real" and "polish it more," default to
+  the former.
+- **The open-source story is load-bearing.** The GitHub presence,
+  README framing, and the ability to show concrete shipped work
+  all matter more than they would for a pure hobby project.
+- **But the Hard Rules still matter.** Career stakes don't
+  override scope discipline. The goal is real work that ships,
+  not vaporware dressed up as portfolio material. The
+  anti-slop architecture *is* the portfolio piece.
+- **Don't treat catalogdna or Retrogaze as speculative testbeds.**
+  They have real users and real stakes. Any GeneralStaff work
+  against them needs to be safe and reversible, not just
+  interesting.
 
 ## Hammerstein context
 

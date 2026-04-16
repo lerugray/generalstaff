@@ -31,6 +31,13 @@ workflow applies.)
 - [[UI-VISION-2026-04-15]] — kriegspiel/command-room theme for
   the eventual local UI (Phase 5.5+, captured early so the
   vision doesn't get lost)
+- [[FUTURE-DIRECTIONS-2026-04-15]] — end-of-session chat capture
+  of ideas that go beyond Phase 1: simulation/Kriegspiel mode
+  (Phase 12+), multi-provider LLM routing (Phase 2+),
+  budget-per-bot with spend guards (Phase 10+), "bring your own
+  imagination" framing (applied to README), Retrogaze as
+  preferred Phase 3 second project, and the market observation
+  on why nobody else has built this yet
 
 ## Implementation planning
 
