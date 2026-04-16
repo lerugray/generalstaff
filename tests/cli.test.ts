@@ -518,6 +518,100 @@ projects:
     });
   });
 
+  describe("digest command", () => {
+    const DIGEST_TEST_DIR = join(import.meta.dir, "fixtures", "digest_cmd_test");
+    const DIGEST_DIR = join(DIGEST_TEST_DIR, "digests");
+
+    beforeEach(() => {
+      mkdirSync(DIGEST_DIR, { recursive: true });
+      writeFileSync(
+        join(DIGEST_TEST_DIR, "projects.yaml"),
+        `projects:
+  - id: x
+    path: /tmp/x
+    priority: 1
+    engineer_command: e
+    verification_command: v
+    cycle_budget_minutes: 10
+    hands_off:
+      - CLAUDE.md
+`,
+      );
+    });
+
+    afterEach(() => {
+      rmSync(DIGEST_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("prints clear message when no digests exist", async () => {
+      rmSync(DIGEST_DIR, { recursive: true, force: true });
+      const result = await runCli(["digest", "--latest"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No digests found");
+    });
+
+    it("prints clear message when digests dir is empty", async () => {
+      const result = await runCli(["digest", "--latest"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No digests found");
+    });
+
+    it("prints the most recent digest with --latest", async () => {
+      writeFileSync(join(DIGEST_DIR, "digest_20260415_100000.md"), "OLD DIGEST\n");
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_150000.md"), "NEW DIGEST\n");
+      const result = await runCli(["digest", "--latest"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("NEW DIGEST");
+      expect(result.stdout).not.toContain("OLD DIGEST");
+    });
+
+    it("defaults to --latest when no flag is given", async () => {
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_150000.md"), "ONLY DIGEST\n");
+      const result = await runCli(["digest"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("ONLY DIGEST");
+    });
+
+    it("prints the first digest from a given date", async () => {
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), "MORNING\n");
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), "EVENING\n");
+      writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), "DAY BEFORE\n");
+      const result = await runCli(["digest", "--date=20260416"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("MORNING");
+      expect(result.stdout).not.toContain("EVENING");
+      expect(result.stdout).not.toContain("DAY BEFORE");
+    });
+
+    it("reports when no digest exists for a given date", async () => {
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), "X\n");
+      const result = await runCli(["digest", "--date=20260101"], DIGEST_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No digests found for date 20260101");
+    });
+
+    it("rejects malformed --date", async () => {
+      writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), "X\n");
+      const result = await runCli(["digest", "--date=2026-04-16"], DIGEST_TEST_DIR);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("YYYYMMDD");
+    });
+
+    it("rejects combining --latest and --date", async () => {
+      const result = await runCli(
+        ["digest", "--latest", "--date=20260416"],
+        DIGEST_TEST_DIR,
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("mutually exclusive");
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("generalstaff digest");
+    });
+  });
+
   describe("help completeness", () => {
     it("lists all registered commands in help output", async () => {
       const result = await runCli(["--help"]);

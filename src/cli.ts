@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "util";
-import { existsSync } from "fs";
+import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { runSession } from "./session";
 import { runSingleCycle } from "./cycle";
 import { loadFleetState, getProjectSummary, getRootDir } from "./state";
-import { loadProjects, loadProjectsYaml } from "./projects";
+import { loadProjects, loadProjectsYaml, loadDispatcherConfig } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
 import { initProject } from "./init";
@@ -70,6 +70,10 @@ Usage:
   generalstaff task add --project=<id> [--priority=N] <title>
                                                           Append a new task to tasks.json
     Example: generalstaff task add --project=myapp "Fix login bug"
+
+  generalstaff digest [--latest] [--date=YYYYMMDD]        Print a session digest to stdout
+    Example: generalstaff digest --latest                # most recent digest
+    Example: generalstaff digest --date=20260416         # first digest from that day
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
@@ -336,6 +340,48 @@ switch (command) {
       );
       process.exit(1);
     }
+    break;
+  }
+
+  case "digest": {
+    const { values: digestValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        latest: { type: "boolean", default: false },
+        date: { type: "string" },
+      },
+      allowPositionals: false,
+    });
+    if (digestValues.latest && digestValues.date) {
+      console.error("Error: --latest and --date are mutually exclusive");
+      process.exit(1);
+    }
+    const dispatcher = await loadDispatcherConfig();
+    const digestDir = resolve(getRootDir(), dispatcher.digest_dir);
+    const files = existsSync(digestDir)
+      ? readdirSync(digestDir)
+          .filter((f) => /^digest_\d{8}_\d{6}\.md$/.test(f))
+          .sort()
+      : [];
+    if (files.length === 0) {
+      console.log("No digests found.");
+      break;
+    }
+    let chosen: string | undefined;
+    if (digestValues.date) {
+      if (!/^\d{8}$/.test(digestValues.date)) {
+        console.error("Error: --date must be in YYYYMMDD format");
+        process.exit(1);
+      }
+      chosen = files.find((f) => f.startsWith(`digest_${digestValues.date}_`));
+      if (!chosen) {
+        console.log(`No digests found for date ${digestValues.date}.`);
+        break;
+      }
+    } else {
+      chosen = files[files.length - 1];
+    }
+    process.stdout.write(readFileSync(join(digestDir, chosen), "utf8"));
     break;
   }
 
