@@ -170,13 +170,13 @@
   {
     "id": "gs-054",
     "title": "Add a test for the session plan preview (estimateSessionPlan) with multiple projects at different priorities — verify the picker alternates correctly and respects the per-project cap",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-055",
     "title": "In format.ts, add a formatBytes helper (1024 -> 1.0 KB, 1048576 -> 1.0 MB) for displaying diff sizes and log file sizes in the history and summary commands. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]

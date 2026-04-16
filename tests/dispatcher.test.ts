@@ -376,6 +376,43 @@ describe("estimateSessionPlan", () => {
     expect(plan.per_project).toEqual([]);
     expect(plan.budget_remaining_minutes).toBe(120);
   });
+
+  it("with three mixed-priority projects and a per-project cap, picks in priority order and stops at the cap", () => {
+    // Three projects at different priorities; ample budget so the cap
+    // (not the budget) is what bounds the cycle count.
+    const projects = [
+      makeProject({ id: "p1", priority: 1, cycle_budget_minutes: 25 }),
+      makeProject({ id: "p2", priority: 2, cycle_budget_minutes: 25 }),
+      makeProject({ id: "p3", priority: 3, cycle_budget_minutes: 25 }),
+    ];
+    const plan = estimateSessionPlan(projects, makeFleet(), 1000, 2);
+
+    // Cap = 2 per project × 3 projects = 6 total cycles
+    const counts = new Map(
+      plan.per_project.map((p) => [p.project_id, p.cycle_count]),
+    );
+    expect(counts.get("p1")).toBe(2);
+    expect(counts.get("p2")).toBe(2);
+    expect(counts.get("p3")).toBe(2);
+    expect(plan.total_cycles).toBe(6);
+
+    // Unrun projects win on staleness; among them highest priority wins first.
+    // Once all have run once, staleness is ~equal so priority alone rotates.
+    // Expected sequence: p1, p2, p3, p1, p2, p3.
+    expect(plan.picks.map((p) => p.project_id)).toEqual([
+      "p1",
+      "p2",
+      "p3",
+      "p1",
+      "p2",
+      "p3",
+    ]);
+
+    // Start minutes should be strictly increasing by 30 (25 cycle + 5 overhead)
+    expect(plan.picks.map((p) => p.start_minute)).toEqual([
+      0, 30, 60, 90, 120, 150,
+    ]);
+  });
 });
 
 describe("shouldChain", () => {
