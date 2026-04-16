@@ -515,3 +515,129 @@ cover. This is the class of failure that Boolean verification
 50 cycles, track whether a structural fix is possible or
 whether it reveals a fundamental limitation of test-based
 verification.
+
+### [interactive Claude — 2026-04-16, home-PC observation run: dispatcher-level stupid+industrious caught]
+
+One observation — the richest of the project so far. The first
+home-PC observation run surfaced a **dispatcher-level**
+stupid+industrious failure that 35+ work-PC cycles had been
+silently masking.
+
+**What happened.** Three cycles of an observation session. All
+three "verified" by the reviewer. All three diffs correctly
+implemented gs-056 (log rotation in `clean.ts` + tests). The
+verification gate did exactly its job: each diff matched its
+task, was verified, and was rubber-stamped correctly.
+
+But zero of the three cycles' code reached `master`. Each cycle's
+engineer commit was **orphaned**. Git reflog shows `7e11b93`,
+`84333cf`, `319bb65` — three commits on `bot/work`, only one
+(the last) reachable from any branch, and none of them from
+`master`. The verified work existed, then was garbage-collected.
+
+**Root cause.** `cycle.ts` line 295 (before the fix):
+```
+await $`git -C ${project.path} branch -f ${branch} HEAD`.quiet();
+```
+This is the gs-012 "auto-update bot/work to HEAD" feature. It
+runs at the **start** of each cycle to give the engineer a fresh
+base. The implicit assumption: the prior cycle's bot-work has
+already been merged into `HEAD`. But no code anywhere in the
+dispatcher performs that merge. On the work PC, the merges were
+happening manually (the "Merge branch 'bot/work'" commits in
+work-PC git log are not programmatic — they're Ray or interactive
+Claude doing it by hand between cycles). On a fresh home-PC
+session with zero manual merges, three consecutive cycles
+reimplemented gs-056 because each commit got overwritten by the
+next cycle's reset.
+
+**This is the Hammerstein framework applied at the wrong layer.**
+The project's design effort has been focused on preventing the
+*engineer* (the per-cycle `claude -p` subprocess) from being
+stupid+industrious. Hard Rules 1, 5, 6, 7, and 9 are all
+engineer-level structural guards: hands-off lists, verification
+gate, scope match. Those rules worked. The engineer was clever
+and industrious — it wrote correct, verified code three times.
+
+The failure was one layer up: the **dispatcher itself** was
+stupid+industrious. It confidently ran cycles end-to-end —
+picking projects, spawning engineers, running verification,
+recording verdicts — and threw the output away. The reviewer
+verdicts were correct. The cycle-end PROGRESS entries were
+correct. The per-cycle digests were correct. Every component
+was doing its declared job. But the **orchestration contract
+had a silent hole** between "cycle ends" and "next cycle begins,"
+and no single component owned closing it.
+
+Industriousness without judgment again. Damage compounding
+again. This time the bot wasn't the offender — the bot's
+manager was.
+
+**How it was caught: dogfooding, specifically a fresh-machine
+dogfood run.** The home-PC session is the first time GeneralStaff
+has run against itself in a fresh state with no human-in-the-loop
+merging. The work-PC 35+ cycles didn't catch this because Ray was
+actively interactive — "let me commit this" and "let me merge
+that" masked the gap. The moment we tried to use the system as
+it's actually intended to be used (observation run, then overnight
+unattended), the silent hole became a loud hole. This is the
+"initial-negatives shift" pattern from Ray's 2026-04-15 log
+playing out at the framework layer: a new use-case (unattended
+cross-machine operation) surfaced a new failure class
+(orchestration integration), which is now fixed.
+
+**The fix is itself a Hammerstein structural guard.** The new
+`countCommitsAhead` check in `cycle.ts` is a Boolean gate: before
+destroying `bot/work`, verify it's already merged. If not:
+- `auto_merge: true` — merge it, preserving the work.
+- `auto_merge: false` — refuse to proceed, surface the problem
+  with exact remediation instructions.
+
+Either branch is *clever*-lazy: neither path silently destroys
+work. The dispatcher can no longer be industrious-without-
+judgment about `bot/work`. The same architectural pattern as
+the verification gate — replace a prompt/convention with a
+Boolean in code — applied one layer up.
+
+**What this predicts.** There are probably more "silent holes"
+of this shape in the dispatcher. The verification gate is at
+cycle-level. The hands-off list is at file-level. But there's
+no explicit structural guard for **orchestration integrity**
+— the guarantee that verified work actually lands where it's
+supposed to. This bug was the first such hole; it is unlikely
+to be the last. Candidates to audit next:
+- Does `session_end` ensure all verified cycles' work is on
+  master before writing the digest? (currently no check)
+- Does `auto-commit state` ever commit a stale state file that
+  overwrites concurrent bot work? (possibly — needs audit)
+- Does a mid-session STOP file + restart preserve
+  partially-completed cycle state? (unknown, never tested)
+
+Each of those is a potential stupid+industrious failure mode
+at the dispatcher layer, hiding behind components that each
+individually work.
+
+**Counter-observation.** One possible alternative reading: this
+isn't a framework failure, it's just a normal bug that the dogfood
+cycle caught. Dogfooding catches bugs — that's not a
+Hammerstein-specific insight. Counter-counter: what's
+Hammerstein-specific is **why the bug was invisible for 35+
+cycles**. It wasn't a latent race condition or a rare
+concurrency issue — it was a structural gap that fired on every
+cycle. The work-PC session's 100% masking rate came from the
+human compensating for the bug constantly without ever noticing
+they were compensating. That's the signature of a framework-layer
+failure: a thing that "works" only because a person is
+invisibly load-bearing in the loop. Take the person out (as
+unattended overnight operation does) and the gap becomes
+obvious. Hammerstein's diagnostic — "you think it's working, but
+the thing that's actually working is your own presence" — is
+what we tested tonight, and it returned the predicted negative.
+
+**Measurable outcome:** 3/3 cycles verified by the gate with
+0 false positives. 3/3 cycles' work correctly preserved after
+the fix + manual recovery merge. 1 new structural guard
+(cycle.ts `countCommitsAhead`) added. 1 new Hard-Rule-#4
+opt-in (dogfood `auto_merge: true`) after 35+ clean cycles.
+337 tests passing. Framework operating as designed, once the
+hole is visible.
