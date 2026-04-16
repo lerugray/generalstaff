@@ -11,10 +11,37 @@ import {
 import { appendProgress } from "./audit";
 import { isStopFilePresent } from "./safety";
 import { executeCycle } from "./cycle";
-import { pickNextProject, shouldChain } from "./dispatcher";
+import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
+import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration } from "./format";
 import { countRemainingWork } from "./work_detection";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+
+export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
+  const lines: string[] = [];
+  lines.push("=== Session Plan Preview ===");
+  if (plan.total_cycles === 0) {
+    lines.push("No cycles fit in the budget.");
+    lines.push("");
+    return lines.join("\n");
+  }
+  lines.push(
+    `Total: ${plan.total_cycles} cycle(s), ` +
+      `${plan.budget_used_minutes} min used, ` +
+      `${plan.budget_remaining_minutes} min remaining`,
+  );
+  const maxIdLen = Math.max(
+    7, // "Project".length
+    ...plan.per_project.map((p) => p.project_id.length),
+  );
+  lines.push(`  ${"Project".padEnd(maxIdLen)}  Cycles`);
+  lines.push(`  ${"-".repeat(maxIdLen)}  ------`);
+  for (const p of plan.per_project) {
+    lines.push(`  ${p.project_id.padEnd(maxIdLen)}  ${p.cycle_count}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
 
 export async function runSession(options: SessionOptions) {
   const { budgetMinutes, dryRun } = options;
@@ -29,6 +56,16 @@ export async function runSession(options: SessionOptions) {
   const { projects } = yaml;
   const config = yaml.dispatcher;
   const fleet = await loadFleetState(config);
+
+  if (!dryRun && projects.length > 0) {
+    const plan = estimateSessionPlan(
+      projects,
+      fleet,
+      budgetMinutes,
+      config.max_cycles_per_project_per_session,
+    );
+    console.log(formatSessionPlanPreview(plan));
+  }
 
   // Reset per-session cycle counts
   for (const p of projects) {

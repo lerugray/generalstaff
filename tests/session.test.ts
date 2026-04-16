@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { writeDigest } from "../src/session";
+import { writeDigest, formatSessionPlanPreview } from "../src/session";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
 import type { CycleResult } from "../src/types";
+import type { SessionPlanEstimate } from "../src/dispatcher";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "digest_test");
 
@@ -141,5 +142,97 @@ describe("writeDigest", () => {
     expect(content).toContain("**Cycles:** 0");
     // No cycle sections
     expect(content).not.toContain("##");
+  });
+});
+
+function makePlan(overrides: Partial<SessionPlanEstimate> = {}): SessionPlanEstimate {
+  return {
+    picks: [],
+    per_project: [],
+    total_cycles: 0,
+    budget_used_minutes: 0,
+    budget_remaining_minutes: 0,
+    ...overrides,
+  };
+}
+
+describe("formatSessionPlanPreview", () => {
+  it("includes a header", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [{ project_id: "a", start_minute: 0, duration_minutes: 30 }],
+        per_project: [{ project_id: "a", cycle_count: 1 }],
+        total_cycles: 1,
+        budget_used_minutes: 30,
+        budget_remaining_minutes: 90,
+      }),
+    );
+    expect(out).toContain("=== Session Plan Preview ===");
+  });
+
+  it("shows total cycles and budget usage", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [
+          { project_id: "a", start_minute: 0, duration_minutes: 30 },
+          { project_id: "b", start_minute: 30, duration_minutes: 30 },
+        ],
+        per_project: [
+          { project_id: "a", cycle_count: 1 },
+          { project_id: "b", cycle_count: 1 },
+        ],
+        total_cycles: 2,
+        budget_used_minutes: 60,
+        budget_remaining_minutes: 60,
+      }),
+    );
+    expect(out).toContain("Total: 2 cycle(s)");
+    expect(out).toContain("60 min used");
+    expect(out).toContain("60 min remaining");
+  });
+
+  it("renders a per-project row for each project", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [
+          { project_id: "catalogdna", start_minute: 0, duration_minutes: 30 },
+        ],
+        per_project: [
+          { project_id: "catalogdna", cycle_count: 3 },
+          { project_id: "retrogaze", cycle_count: 1 },
+        ],
+        total_cycles: 4,
+        budget_used_minutes: 120,
+        budget_remaining_minutes: 0,
+      }),
+    );
+    expect(out).toContain("catalogdna");
+    expect(out).toContain("retrogaze");
+    // Verify the counts appear next to project ids
+    expect(out).toMatch(/catalogdna\s+3/);
+    expect(out).toMatch(/retrogaze\s+1/);
+  });
+
+  it("reports empty plan when no cycles fit the budget", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        budget_remaining_minutes: 10,
+      }),
+    );
+    expect(out).toContain("No cycles fit in the budget.");
+  });
+
+  it("includes Project and Cycles column headers when non-empty", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [{ project_id: "x", start_minute: 0, duration_minutes: 30 }],
+        per_project: [{ project_id: "x", cycle_count: 1 }],
+        total_cycles: 1,
+        budget_used_minutes: 30,
+        budget_remaining_minutes: 0,
+      }),
+    );
+    expect(out).toContain("Project");
+    expect(out).toContain("Cycles");
   });
 });
