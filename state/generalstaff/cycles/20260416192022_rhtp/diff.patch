@@ -1,0 +1,113 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index ce057ed..b79a002 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1,10 +1,11 @@
+ #!/usr/bin/env bun
+ 
+ import { parseArgs } from "util";
+-import { basename, resolve } from "path";
++import { existsSync } from "fs";
++import { basename, join, resolve } from "path";
+ import { runSession } from "./session";
+ import { runSingleCycle } from "./cycle";
+-import { loadFleetState, getProjectSummary } from "./state";
++import { loadFleetState, getProjectSummary, getRootDir } from "./state";
+ import { loadProjects } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
+@@ -69,6 +70,9 @@ Usage:
+                                                           Append a new task to tasks.json
+     Example: generalstaff task add --project=myapp "Fix login bug"
+ 
++  generalstaff version                                    Show version + environment info (for bug reports)
++    Example: generalstaff version                       # includes bun version, platform, projects.yaml path
++
+   generalstaff --version                                  Show version
+   generalstaff --help                                     Show this help`);
+ }
+@@ -327,6 +331,18 @@ switch (command) {
+     break;
+   }
+ 
++  case "version": {
++    const projectsYamlPath = join(getRootDir(), "projects.yaml");
++    const projectsYamlFound = existsSync(projectsYamlPath);
++    console.log(`generalstaff v${VERSION}`);
++    console.log(`bun:           ${Bun.version}`);
++    console.log(`platform:      ${process.platform} ${process.arch}`);
++    console.log(
++      `projects.yaml: ${projectsYamlPath}${projectsYamlFound ? "" : " (not found)"}`,
++    );
++    break;
++  }
++
+   case "init": {
+     const { values: initValues, positionals: initPositionals } = parseArgs({
+       args: args.slice(1),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 8a61e76..cf3a994 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -146,7 +146,7 @@
+   {
+     "id": "gs-050",
+     "title": "Add a generalstaff version command (separate from --version flag) that shows version, bun version, platform, and projects.yaml location. Useful for bug reports.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   }
+ ]
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index b15f043..b916f01 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -370,6 +370,48 @@ dispatcher:
+     });
+   });
+ 
++  describe("version command", () => {
++    const VERSION_TEST_DIR = join(import.meta.dir, "fixtures", "version_cmd_test");
++
++    beforeEach(() => {
++      mkdirSync(VERSION_TEST_DIR, { recursive: true });
++    });
++
++    afterEach(() => {
++      rmSync(VERSION_TEST_DIR, { recursive: true, force: true });
++    });
++
++    it("prints version, bun, platform, and projects.yaml path", async () => {
++      const result = await runCli(["version"], VERSION_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff v0.0.1");
++      expect(result.stdout).toContain("bun:");
++      expect(result.stdout).toContain(Bun.version);
++      expect(result.stdout).toContain("platform:");
++      expect(result.stdout).toContain(process.platform);
++      expect(result.stdout).toContain("projects.yaml:");
++    });
++
++    it("flags missing projects.yaml with '(not found)'", async () => {
++      const result = await runCli(["version"], VERSION_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("(not found)");
++    });
++
++    it("omits '(not found)' when projects.yaml exists", async () => {
++      writeFileSync(join(VERSION_TEST_DIR, "projects.yaml"), "projects: []\n");
++      const result = await runCli(["version"], VERSION_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).not.toContain("(not found)");
++      expect(result.stdout).toContain(join(VERSION_TEST_DIR, "projects.yaml"));
++    });
++
++    it("is listed in --help output", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.stdout).toContain("generalstaff version");
++    });
++  });
++
+   describe("help completeness", () => {
+     it("lists all registered commands in help output", async () => {
+       const result = await runCli(["--help"]);

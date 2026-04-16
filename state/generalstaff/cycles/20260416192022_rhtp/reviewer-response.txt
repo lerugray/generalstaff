@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "Diff cleanly implements gs-050 version command with tests, help update, and task status flip; verification passed with 309/309 tests.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-050: Add a generalstaff version command (separate from --version flag) that shows version, bun version, platform, and projects.yaml location",
+      "evidence": "src/cli.ts adds a new `version` case printing VERSION, Bun.version, process.platform/arch, and projects.yaml path with (not found) marker; help text updated; tests/cli.test.ts adds 4 tests covering output fields, missing/present projects.yaml, and help listing; tasks.json status flipped pending→done",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Hands-off list includes projects.yaml but the diff only references it as a path string — it is not modified. Test fixture directory is under tests/fixtures/ which is not hands-off."
+}
