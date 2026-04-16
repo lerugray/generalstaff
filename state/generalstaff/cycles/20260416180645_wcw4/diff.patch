@@ -1,0 +1,186 @@
+diff --git a/src/session.ts b/src/session.ts
+index b7ea2f7..403ba73 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -11,11 +11,38 @@ import {
+ import { appendProgress } from "./audit";
+ import { isStopFilePresent } from "./safety";
+ import { executeCycle } from "./cycle";
+-import { pickNextProject, shouldChain } from "./dispatcher";
++import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
++import type { SessionPlanEstimate } from "./dispatcher";
+ import { formatDuration } from "./format";
+ import { countRemainingWork } from "./work_detection";
+ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+ 
++export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
++  const lines: string[] = [];
++  lines.push("=== Session Plan Preview ===");
++  if (plan.total_cycles === 0) {
++    lines.push("No cycles fit in the budget.");
++    lines.push("");
++    return lines.join("\n");
++  }
++  lines.push(
++    `Total: ${plan.total_cycles} cycle(s), ` +
++      `${plan.budget_used_minutes} min used, ` +
++      `${plan.budget_remaining_minutes} min remaining`,
++  );
++  const maxIdLen = Math.max(
++    7, // "Project".length
++    ...plan.per_project.map((p) => p.project_id.length),
++  );
++  lines.push(`  ${"Project".padEnd(maxIdLen)}  Cycles`);
++  lines.push(`  ${"-".repeat(maxIdLen)}  ------`);
++  for (const p of plan.per_project) {
++    lines.push(`  ${p.project_id.padEnd(maxIdLen)}  ${p.cycle_count}`);
++  }
++  lines.push("");
++  return lines.join("\n");
++}
++
+ export async function runSession(options: SessionOptions) {
+   const { budgetMinutes, dryRun } = options;
+   const sessionStart = Date.now();
+@@ -30,6 +57,16 @@ export async function runSession(options: SessionOptions) {
+   const config = yaml.dispatcher;
+   const fleet = await loadFleetState(config);
+ 
++  if (!dryRun && projects.length > 0) {
++    const plan = estimateSessionPlan(
++      projects,
++      fleet,
++      budgetMinutes,
++      config.max_cycles_per_project_per_session,
++    );
++    console.log(formatSessionPlanPreview(plan));
++  }
++
+   // Reset per-session cycle counts
+   for (const p of projects) {
+     const state = await loadProjectState(p.id, config);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 3b9d8c5..0dd1e01 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -92,7 +92,7 @@
+   {
+     "id": "gs-041",
+     "title": "Wire estimateSessionPlan into the session command — before running cycles, print a preview table showing which projects will be picked and how many cycles each gets. Only show when not --dry-run. Add to session output.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 7f6918c..a83b89e 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -1,9 +1,10 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { writeDigest } from "../src/session";
++import { writeDigest, formatSessionPlanPreview } from "../src/session";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
+ import type { CycleResult } from "../src/types";
++import type { SessionPlanEstimate } from "../src/dispatcher";
+ 
+ const TEST_DIR = join(import.meta.dir, "fixtures", "digest_test");
+ 
+@@ -143,3 +144,95 @@ describe("writeDigest", () => {
+     expect(content).not.toContain("##");
+   });
+ });
++
++function makePlan(overrides: Partial<SessionPlanEstimate> = {}): SessionPlanEstimate {
++  return {
++    picks: [],
++    per_project: [],
++    total_cycles: 0,
++    budget_used_minutes: 0,
++    budget_remaining_minutes: 0,
++    ...overrides,
++  };
++}
++
++describe("formatSessionPlanPreview", () => {
++  it("includes a header", () => {
++    const out = formatSessionPlanPreview(
++      makePlan({
++        picks: [{ project_id: "a", start_minute: 0, duration_minutes: 30 }],
++        per_project: [{ project_id: "a", cycle_count: 1 }],
++        total_cycles: 1,
++        budget_used_minutes: 30,
++        budget_remaining_minutes: 90,
++      }),
++    );
++    expect(out).toContain("=== Session Plan Preview ===");
++  });
++
++  it("shows total cycles and budget usage", () => {
++    const out = formatSessionPlanPreview(
++      makePlan({
++        picks: [
++          { project_id: "a", start_minute: 0, duration_minutes: 30 },
++          { project_id: "b", start_minute: 30, duration_minutes: 30 },
++        ],
++        per_project: [
++          { project_id: "a", cycle_count: 1 },
++          { project_id: "b", cycle_count: 1 },
++        ],
++        total_cycles: 2,
++        budget_used_minutes: 60,
++        budget_remaining_minutes: 60,
++      }),
++    );
++    expect(out).toContain("Total: 2 cycle(s)");
++    expect(out).toContain("60 min used");
++    expect(out).toContain("60 min remaining");
++  });
++
++  it("renders a per-project row for each project", () => {
++    const out = formatSessionPlanPreview(
++      makePlan({
++        picks: [
++          { project_id: "catalogdna", start_minute: 0, duration_minutes: 30 },
++        ],
++        per_project: [
++          { project_id: "catalogdna", cycle_count: 3 },
++          { project_id: "retrogaze", cycle_count: 1 },
++        ],
++        total_cycles: 4,
++        budget_used_minutes: 120,
++        budget_remaining_minutes: 0,
++      }),
++    );
++    expect(out).toContain("catalogdna");
++    expect(out).toContain("retrogaze");
++    // Verify the counts appear next to project ids
++    expect(out).toMatch(/catalogdna\s+3/);
++    expect(out).toMatch(/retrogaze\s+1/);
++  });
++
++  it("reports empty plan when no cycles fit the budget", () => {
++    const out = formatSessionPlanPreview(
++      makePlan({
++        budget_remaining_minutes: 10,
++      }),
++    );
++    expect(out).toContain("No cycles fit in the budget.");
++  });
++
++  it("includes Project and Cycles column headers when non-empty", () => {
++    const out = formatSessionPlanPreview(
++      makePlan({
++        picks: [{ project_id: "x", start_minute: 0, duration_minutes: 30 }],
++        per_project: [{ project_id: "x", cycle_count: 1 }],
++        total_cycles: 1,
++        budget_used_minutes: 30,
++        budget_remaining_minutes: 0,
++      }),
++    );
++    expect(out).toContain("Project");
++    expect(out).toContain("Cycles");
++  });
++});
