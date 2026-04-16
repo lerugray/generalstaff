@@ -38,9 +38,14 @@ if ! git -C "$PROJECT_ROOT" rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
 fi
 
 # --- Create worktree ---
+# Prune stale worktree registrations (git tracks worktrees internally
+# even after the directory is deleted — on Windows rm can fail silently)
+git -C "$PROJECT_ROOT" worktree prune 2>/dev/null || true
+
 if [ -d "$WORKTREE_DIR" ]; then
   echo "Stale worktree found — removing..."
   git -C "$PROJECT_ROOT" worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
+  rm -rf "$WORKTREE_DIR" 2>/dev/null || true
 fi
 
 echo "Creating worktree at $WORKTREE_DIR on $BRANCH..."
