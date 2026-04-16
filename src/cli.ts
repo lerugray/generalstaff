@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "util";
+import { basename, resolve } from "path";
 import { runSession } from "./session";
 import { runSingleCycle } from "./cycle";
 import { loadFleetState } from "./state";
 import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog } from "./audit";
+import { initProject } from "./init";
 
 const VERSION = "0.0.1";
 
@@ -18,6 +20,7 @@ Usage:
   generalstaff cycle --project=<id>           Run one cycle on a project
   generalstaff status [--json]                 Show fleet state
   generalstaff projects                        List registered projects
+  generalstaff init <path> [--id=<id>]         Scaffold state dir for a new project
   generalstaff stop                           Create STOP file (halt dispatcher)
   generalstaff start                          Remove STOP file (allow dispatch)
   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
@@ -157,6 +160,25 @@ switch (command) {
       allowPositionals: false,
     });
     await tailProgressLog(values.project, parseInt(values.lines!, 10));
+    break;
+  }
+
+  case "init": {
+    const { values: initValues, positionals: initPositionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        id: { type: "string" },
+      },
+      allowPositionals: true,
+    });
+    const projectPath = initPositionals[0];
+    if (!projectPath) {
+      console.error("Error: project path is required\n  Usage: generalstaff init <path> [--id=<id>]");
+      process.exit(1);
+    }
+    const resolvedPath = resolve(projectPath);
+    const projectId = initValues.id ?? basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+    await initProject(projectId, resolvedPath);
     break;
   }
 
