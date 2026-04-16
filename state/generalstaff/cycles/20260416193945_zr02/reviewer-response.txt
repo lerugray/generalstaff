@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "Diff adds the `config` command to cli.ts with a corresponding test suite and marks gs-052 done; verification passed with exit code 0 and no hands-off patterns are touched.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-052: Add a generalstaff config command to cli.ts that pretty-prints the current projects.yaml config (parsed and validated) — shows each project with all resolved defaults. Useful for debugging config issues. Add test.",
+      "evidence": "src/cli.ts adds a new `config` case that calls loadProjectsYaml() and pretty-prints each project with all resolved defaults (priority, cycle_budget_minutes, work_detection, concurrency_detection, branch, auto_merge, hands_off, notes) plus a dispatcher section; help text is updated; tests/cli.test.ts adds a 5-test `config command` describe block covering defaults, explicit overrides, dispatcher section, invalid-config exit, and help listing; tasks.json status flipped pending→done.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification ran `bun test && bun x tsc --noEmit` with 320 pass / 0 fail and exit 0. Diff is tightly scoped to cli.ts, the test file, and the task status flip — all directly supporting gs-052."
+}
