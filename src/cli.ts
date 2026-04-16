@@ -10,6 +10,7 @@ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
+import { runClean } from "./clean";
 
 const VERSION = "0.0.1";
 
@@ -52,6 +53,8 @@ Usage:
 
   generalstaff doctor                                     Check prerequisites (bun, git, claude)
     Example: generalstaff doctor
+  generalstaff clean [--keep=N]                           Remove stale worktrees + prune old cycles
+    Example: generalstaff clean --keep=10
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -216,6 +219,19 @@ switch (command) {
 
   case "doctor": {
     await runDoctor();
+    break;
+  }
+
+  case "clean": {
+    const { values: cleanValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        keep: { type: "string", default: "20" },
+      },
+      allowPositionals: false,
+    });
+    console.log("=== GeneralStaff Clean ===\n");
+    await runClean(parseInt(cleanValues.keep!, 10));
     break;
   }
 
