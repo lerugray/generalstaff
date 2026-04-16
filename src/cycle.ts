@@ -54,7 +54,7 @@ async function getGitSha(
 
 // Count commits reachable from `branch` but not from `base`.
 // Returns 0 if branch missing, base missing, or branch fully merged into base.
-async function countCommitsAhead(
+export async function countCommitsAhead(
   projectPath: string,
   branch: string,
   base: string,

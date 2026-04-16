@@ -1,6 +1,7 @@
 // GeneralStaff — session module (build step 14)
 // Outer loop: time budget → pick project → cycle → chain or rotate → repeat
 
+import { $ } from "bun";
 import { loadProjectsYaml } from "./projects";
 import {
   loadFleetState,
@@ -10,7 +11,7 @@ import {
 } from "./state";
 import { appendProgress } from "./audit";
 import { isStopFilePresent } from "./safety";
-import { executeCycle } from "./cycle";
+import { executeCycle, countCommitsAhead } from "./cycle";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
 import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration } from "./format";
@@ -216,6 +217,33 @@ export async function runSession(options: SessionOptions) {
         skippedProjects.add(currentProject.id);
       }
       currentProject = null; // will pick next project
+    }
+  }
+
+  // Session-end merge: for any project with auto_merge=true that has
+  // verified work sitting on its bot branch, merge it into HEAD now.
+  // Without this, the final cycle's work waits on bot/work until the
+  // next session's first cycle picks it up via the cycle.ts path —
+  // cosmetically confusing because the digest says N verified while
+  // master only reflects N-1. Safe: anything on bot/work here has
+  // already passed the per-cycle verification gate.
+  for (const p of projects) {
+    if (!p.auto_merge) continue;
+    if (!cyclesPerProject.has(p.id)) continue;
+    try {
+      const unmerged = await countCommitsAhead(p.path, p.branch, "HEAD");
+      if (unmerged > 0) {
+        console.log(
+          `Session end: auto-merging ${unmerged} commit(s) from ${p.branch} into HEAD (${p.id})...`,
+        );
+        const msg = `Merge branch '${p.branch}' (session-end auto, ${unmerged} cycle-commit(s))`;
+        await $`git -C ${p.path} merge --no-ff ${p.branch} -m ${msg}`.quiet();
+        console.log(`Merged ${p.branch} into HEAD.`);
+      }
+    } catch {
+      console.log(
+        `Warning: session-end merge of ${p.branch} failed for ${p.id} — manual merge required`,
+      );
     }
   }
 

@@ -43,6 +43,10 @@ mock.module("../../src/projects", () => ({
 }));
 
 mock.module("../../src/cycle", () => ({
+  // session.ts imports countCommitsAhead for the session-end auto-merge.
+  // auto_merge=false here, so the code path is never taken, but the
+  // import must still resolve in the mocked module.
+  countCommitsAhead: async () => 0,
   executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
     executeCycleCalls++;
     const now = new Date().toISOString();
