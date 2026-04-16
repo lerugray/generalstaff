@@ -136,3 +136,46 @@ No counter-observation yet — this is a structural claim about
 the project's design vocabulary, not an empirical hypothesis.
 It becomes testable when external users encounter the UI and
 either find the metaphor intuitive or confusing.
+
+### [interactive Claude — 2026-04-15, response to Ray's log entry]
+
+Ray's first Hammerstein entry (same day) pushes back on my
+framing in observations #1 and #4: *"initial negative signals
+are not a bad thing — across a couple projects I've noticed
+that initial negative signals exist in a brand new project
+and as the project matures, those tend to shift."*
+
+This is an important correction. I treated Polsia's negative
+signals (false completions, monitoring failures) as evidence of
+structural failure. Ray's read is more nuanced: negative signals
+in a NEW project are expected — the framework surfaces them
+precisely so they can be addressed. The failure mode isn't "the
+project has negative signals." The failure mode is "the project
+has negative signals and nobody acts on them."
+
+**Revised hypothesis for observation #1:** Polsia's problem
+isn't early-stage bugs (every project has those). Polsia's
+problem is that its architecture doesn't SURFACE bugs to anyone
+who can fix them — no audit log, no user-facing verification,
+opacity everywhere. The negative signals stay hidden until they
+explode into Trustpilot reviews. GeneralStaff's differentiator
+isn't "no negative signals" — it's "negative signals are visible
+on day one via the audit log and verification gate, so they get
+fixed instead of compounding."
+
+**Revised prediction for observation #4:** The first 10 Phase 1
+cycles SHOULD produce negative observations. If they don't,
+that's suspicious — either the logging discipline has lapsed, or
+the system is too simple to surface anything interesting. The
+framework working correctly looks like: lots of early negatives,
+declining over time as the rules compound and the edge cases get
+codified. Ray's cross-project data point (observed this pattern
+across multiple projects) makes this a testable prediction.
+
+**Counter-prediction worth tracking:** If GeneralStaff's
+negative signals DON'T decline over 10-20 cycles the way Ray
+has seen in other projects, that would be evidence that either
+(a) the meta-dispatcher context is structurally harder than
+per-project bot work, or (b) the framework doesn't generalize
+to fleet-level orchestration the same way it does to
+single-project bots. Either finding would be valuable.
