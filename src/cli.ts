@@ -9,6 +9,7 @@ import { loadProjects } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable } from "./audit";
 import { initProject } from "./init";
+import { runDoctor } from "./doctor";
 
 const VERSION = "0.0.1";
 
@@ -25,6 +26,7 @@ Usage:
   generalstaff start                          Remove STOP file (allow dispatch)
   generalstaff history [--project=<id>] [--lines=<n>]  Compact cycle history table
   generalstaff log [--project=<id>]           Tail PROGRESS.jsonl
+  generalstaff doctor                         Check prerequisites (bun, git, claude)
   generalstaff --version                      Show version
   generalstaff --help                         Show this help`);
 }
@@ -178,6 +180,11 @@ switch (command) {
       parseInt(historyValues.lines!, 10),
     );
     printHistoryTable(rows);
+    break;
+  }
+
+  case "doctor": {
+    await runDoctor();
     break;
   }
 
