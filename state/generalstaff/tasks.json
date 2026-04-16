@@ -40,7 +40,7 @@
   {
     "id": "gs-024",
     "title": "In projects.ts, validate that project path exists on disk and is a git repo (git rev-parse --git-dir) during loadProjectsYaml — emit a clear warning but don't fail, so projects.yaml can be portable across machines",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
