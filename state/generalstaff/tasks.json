@@ -194,7 +194,7 @@
   {
     "id": "gs-058",
     "title": "In src/session.ts, improve live console output between cycles: after each cycle, print 'Cycle N completed: <project> — <outcome>' and the remaining budget in minutes (use formatDuration). Makes interactive observation of long sessions readable. Add a test that captures stderr/stdout and asserts the format.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
