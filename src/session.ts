@@ -162,6 +162,13 @@ export async function runSession(options: SessionOptions) {
     const count = (cyclesPerProject.get(currentProject.id) ?? 0) + 1;
     cyclesPerProject.set(currentProject.id, count);
 
+    // Live progress between cycles — makes long sessions readable
+    const remainingStr = formatDuration(Math.max(0, remainingMinutes()) * 60);
+    console.log(
+      `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
+        `${result.final_outcome} (${remainingStr} remaining)`,
+    );
+
     // Guard against runaway empty cycles
     if (result.final_outcome === "verified_weak" &&
         result.reason?.includes("empty diff")) {
