@@ -163,7 +163,7 @@ async function spawnClaude(prompt: string, cwd: string): Promise<string> {
   });
 }
 
-function parseReviewerResponse(raw: string): {
+export function parseReviewerResponse(raw: string): {
   verdict: ReviewerVerdict;
   response: ReviewerResponse | null;
   parseError: string | null;
