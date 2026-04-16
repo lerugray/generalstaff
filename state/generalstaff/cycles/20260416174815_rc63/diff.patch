@@ -1,0 +1,165 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index 5e6082e..44cf37e 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -6,6 +6,7 @@ import { appendFile, readFile } from "fs/promises";
+ import { join, dirname } from "path";
+ import { getRootDir } from "./state";
+ import { isProgressEntry, type ProgressEntry, type ProgressEventType } from "./types";
++import { formatDuration } from "./format";
+ 
+ export interface CycleHistoryRow {
+   cycle_id: string;
+@@ -148,14 +149,6 @@ function formatData(
+   }
+ }
+ 
+-function formatDuration(seconds: unknown): string {
+-  if (typeof seconds !== "number" || isNaN(seconds)) return "?";
+-  if (seconds < 60) return `${seconds}s`;
+-  const m = Math.floor(seconds / 60);
+-  const s = seconds % 60;
+-  return s > 0 ? `${m}m${s}s` : `${m}m`;
+-}
+-
+ function shaRange(startSha: unknown, endSha: unknown): string {
+   const start = typeof startSha === "string" ? startSha.slice(0, 7) : "?";
+   const end = typeof endSha === "string" ? endSha.slice(0, 7) : "?";
+@@ -210,7 +203,9 @@ export async function loadCycleHistory(
+     cycle_id: (e.cycle_id ?? "?").slice(0, 12),
+     project: e.project_id ?? "?",
+     outcome: String(e.data.outcome ?? "?"),
+-    duration: formatDuration(e.data.duration_seconds),
++    duration: typeof e.data.duration_seconds === "number"
++      ? formatDuration(e.data.duration_seconds)
++      : "?",
+     sha_range: shaRange(e.data.start_sha, e.data.end_sha),
+     timestamp: e.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z"),
+   }));
+diff --git a/src/format.ts b/src/format.ts
+new file mode 100644
+index 0000000..058aeda
+--- /dev/null
++++ b/src/format.ts
+@@ -0,0 +1,15 @@
++// GeneralStaff — formatting helpers
++
++export function formatDuration(seconds: number): string {
++  if (!Number.isFinite(seconds) || seconds < 0) return "?";
++  const total = Math.floor(seconds);
++  if (total < 60) return `${total}s`;
++  if (total < 3600) {
++    const m = Math.floor(total / 60);
++    const s = total % 60;
++    return s > 0 ? `${m}m${s}s` : `${m}m`;
++  }
++  const h = Math.floor(total / 3600);
++  const m = Math.floor((total % 3600) / 60);
++  return m > 0 ? `${h}h${m}m` : `${h}h`;
++}
+diff --git a/src/session.ts b/src/session.ts
+index 1a36507..fbd840d 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -12,6 +12,7 @@ import { appendProgress } from "./audit";
+ import { isStopFilePresent } from "./safety";
+ import { executeCycle } from "./cycle";
+ import { pickNextProject, shouldChain } from "./dispatcher";
++import { formatDuration } from "./format";
+ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+ 
+ export async function runSession(options: SessionOptions) {
+@@ -241,7 +242,7 @@ export async function writeDigest(
+ 
+   let content = `# GeneralStaff Session Digest\n\n`;
+   content += `**Date:** ${new Date().toISOString()}\n`;
+-  content += `**Duration:** ${durationMinutes.toFixed(1)} min\n`;
++  content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
+   content += `**Cycles:** ${results.length}\n\n`;
+ 
+   for (const r of results) {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 89def17..c7c3884 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -74,7 +74,7 @@
+   {
+     "id": "gs-038",
+     "title": "Add a formatDuration helper function to a new src/format.ts module that converts seconds to human-readable strings (45s, 2m30s, 1h15m). Use it in history and digest output. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/format.test.ts b/tests/format.test.ts
+new file mode 100644
+index 0000000..652598e
+--- /dev/null
++++ b/tests/format.test.ts
+@@ -0,0 +1,53 @@
++import { describe, it, expect } from "bun:test";
++import { formatDuration } from "../src/format";
++
++describe("formatDuration", () => {
++  it("renders sub-minute values as seconds", () => {
++    expect(formatDuration(0)).toBe("0s");
++    expect(formatDuration(1)).toBe("1s");
++    expect(formatDuration(45)).toBe("45s");
++    expect(formatDuration(59)).toBe("59s");
++  });
++
++  it("renders minutes-only when seconds component is zero", () => {
++    expect(formatDuration(60)).toBe("1m");
++    expect(formatDuration(120)).toBe("2m");
++    expect(formatDuration(600)).toBe("10m");
++  });
++
++  it("renders minutes with seconds when both are nonzero", () => {
++    expect(formatDuration(90)).toBe("1m30s");
++    expect(formatDuration(150)).toBe("2m30s");
++    expect(formatDuration(3599)).toBe("59m59s");
++  });
++
++  it("renders hours-only when minutes component is zero", () => {
++    expect(formatDuration(3600)).toBe("1h");
++    expect(formatDuration(7200)).toBe("2h");
++  });
++
++  it("renders hours with minutes when both are nonzero", () => {
++    expect(formatDuration(3660)).toBe("1h1m");
++    expect(formatDuration(4500)).toBe("1h15m");
++    expect(formatDuration(7380)).toBe("2h3m");
++  });
++
++  it("drops remainder seconds once minutes or hours are shown", () => {
++    // 1h 15m 30s — seconds are dropped at hour granularity
++    expect(formatDuration(4530)).toBe("1h15m");
++    // 2m 30.9s — fractional floored
++    expect(formatDuration(150.9)).toBe("2m30s");
++  });
++
++  it("floors fractional sub-minute seconds", () => {
++    expect(formatDuration(45.9)).toBe("45s");
++    expect(formatDuration(0.4)).toBe("0s");
++  });
++
++  it("returns ? for invalid inputs", () => {
++    expect(formatDuration(-1)).toBe("?");
++    expect(formatDuration(NaN)).toBe("?");
++    expect(formatDuration(Infinity)).toBe("?");
++    expect(formatDuration(-Infinity)).toBe("?");
++  });
++});
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 6dc3e0c..7f6918c 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -53,7 +53,7 @@ describe("writeDigest", () => {
+     const content = readFileSync(join(digestDir, files[0]), "utf8");
+ 
+     expect(content).toContain("# GeneralStaff Session Digest");
+-    expect(content).toContain("**Duration:** 12.5 min");
++    expect(content).toContain("**Duration:** 12m30s");
+     expect(content).toContain("**Cycles:** 2");
+     expect(content).toMatch(/\*\*Date:\*\* \d{4}-\d{2}-\d{2}T/);
+   });
