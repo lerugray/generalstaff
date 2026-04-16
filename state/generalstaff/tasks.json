@@ -92,7 +92,7 @@
   {
     "id": "gs-041",
     "title": "Wire estimateSessionPlan into the session command — before running cycles, print a preview table showing which projects will be picked and how many cycles each gets. Only show when not --dry-run. Add to session output.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
