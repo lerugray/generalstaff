@@ -5,7 +5,7 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRootDir } from "./state";
 import { isProgressEntry, type ProgressEntry } from "./types";
-import { formatDuration } from "./format";
+import { formatBytes, formatDuration } from "./format";
 
 export interface OutcomeCounts {
   verified: number;
@@ -27,6 +27,51 @@ export interface FleetSummary {
 export interface TestCounts {
   files: number;
   cases: number;
+}
+
+export interface DiskUsage {
+  logs: number;
+  digests: number;
+  state: number;
+  total: number;
+}
+
+function dirSizeBytes(dir: string): number {
+  if (!existsSync(dir)) return 0;
+  let total = 0;
+  const stack: string[] = [dir];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    let entries: string[];
+    try {
+      entries = readdirSync(cur);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      const full = join(cur, name);
+      let st;
+      try {
+        st = statSync(full);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) {
+        stack.push(full);
+      } else if (st.isFile()) {
+        total += st.size;
+      }
+    }
+  }
+  return total;
+}
+
+export function computeDiskUsage(rootDir?: string): DiskUsage {
+  const root = rootDir ?? getRootDir();
+  const logs = dirSizeBytes(join(root, "logs"));
+  const digests = dirSizeBytes(join(root, "digests"));
+  const state = dirSizeBytes(join(root, "state"));
+  return { logs, digests, state, total: logs + digests + state };
 }
 
 async function readCycleEnds(filePath: string): Promise<ProgressEntry[]> {
@@ -183,6 +228,7 @@ function pct(n: number, total: number): string {
 export function formatSummary(
   summary: FleetSummary,
   tests: TestCounts | null,
+  disk?: DiskUsage | null,
 ): string {
   const lines: string[] = [];
   lines.push("=== GeneralStaff Fleet Summary ===");
@@ -223,6 +269,14 @@ export function formatSummary(
     lines.push("Tests:");
     lines.push(`  Files:         ${tests.files}`);
     lines.push(`  Cases:         ${tests.cases}`);
+  }
+  if (disk) {
+    lines.push("");
+    lines.push("Disk Usage:");
+    lines.push(`  logs/:         ${formatBytes(disk.logs)}`);
+    lines.push(`  digests/:      ${formatBytes(disk.digests)}`);
+    lines.push(`  state/:        ${formatBytes(disk.state)}`);
+    lines.push(`  Total:         ${formatBytes(disk.total)}`);
   }
   return lines.join("\n");
 }
