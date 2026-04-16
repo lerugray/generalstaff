@@ -249,4 +249,49 @@ dispatcher:
       expect(() => JSON.parse(result.stdout)).toThrow();
     });
   });
+
+  describe("log --lines", () => {
+    const LOG_TEST_DIR = join(import.meta.dir, "fixtures", "log_lines_test");
+
+    function makeEntry(i: number): string {
+      return JSON.stringify({
+        timestamp: `2026-04-16T12:${String(i).padStart(2, "0")}:00.000Z`,
+        event: "cycle_start",
+        cycle_id: `c-${String(i).padStart(3, "0")}`,
+        project_id: "proj-log",
+        data: { start_sha: `sha${i}` },
+      });
+    }
+
+    beforeEach(() => {
+      mkdirSync(join(LOG_TEST_DIR, "state", "proj-log"), { recursive: true });
+      // Write 25 entries so we can test default (20) and explicit limits
+      const lines = Array.from({ length: 25 }, (_, i) => makeEntry(i)).join("\n") + "\n";
+      writeFileSync(join(LOG_TEST_DIR, "state", "proj-log", "PROGRESS.jsonl"), lines);
+    });
+
+    afterEach(() => {
+      rmSync(LOG_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("--lines=5 shows exactly 5 entries", async () => {
+      const result = await runCli(["log", "--project=proj-log", "--lines=5"], LOG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const outputLines = result.stdout.trim().split("\n");
+      expect(outputLines).toHaveLength(5);
+      // Should be the last 5 entries (indices 20-24)
+      expect(outputLines[0]).toContain("c-020");
+      expect(outputLines[4]).toContain("c-024");
+    });
+
+    it("defaults to 20 lines when --lines is omitted", async () => {
+      const result = await runCli(["log", "--project=proj-log"], LOG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const outputLines = result.stdout.trim().split("\n");
+      expect(outputLines).toHaveLength(20);
+      // Should be the last 20 entries (indices 5-24)
+      expect(outputLines[0]).toContain("c-005");
+      expect(outputLines[19]).toContain("c-024");
+    });
+  });
 });
