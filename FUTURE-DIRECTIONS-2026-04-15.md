@@ -177,6 +177,63 @@ GeneralStaff should inherit the same lean ordering:
 The rules live in one place (Ray's global config) and flow
 through to GeneralStaff by convention.
 
+### Tier taxonomy + implementation order (2026-04-16 update)
+
+After the first live home-PC observation run (and the dispatcher
+bug caught in it), the three provider tiers firm up as:
+
+| Tier                              | Role                                | Provider                              | Why                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hot path — capability             | Engineer                            | Claude (Anthropic API) — for now      | Needs tool use, long context, strong coding. Swap later (aider-with-Qwen, opencode-with-Qwen) as a *separate* experiment.                                                |
+| Structured I/O — judgment matters | Reviewer                            | OpenRouter Qwen3 Coder (paid, cheap)  | Pure prompt-in, JSON-out. Quality matters; Qwen3 Coder handles structured output cleanly. Fires every cycle — savings compound.                                          |
+| Tiny tasks — quality-tolerant     | Digest / summary / classification   | Ollama (local — Llama 3 8B on home PC)| Zero rate limit, free, offline. Never on the hot path. Good enough for one-line summaries where taste is low-stakes.                                                     |
+
+**Ollama-tier candidates in GeneralStaff specifically:**
+
+- Digest narrative line (currently templated "N cycles, X verified,
+  Y failed") — replace with a one-shot Ollama summary of what
+  actually happened this session, grounded in the PROGRESS.jsonl.
+- Per-cycle one-line PROGRESS description (what the bot did in
+  human-readable form) — currently inferred from the commit
+  message; could be a cleaner summary via Ollama.
+- Backlog task classifier — if we ever add tagging (e.g. labeling
+  each task as "test-coverage" / "feature" / "fix" / "refactor"),
+  that's a 50-token classification problem. Ollama territory.
+
+**Priority stack (cheapest-to-ship first):**
+
+1. **Reviewer → OpenRouter Qwen3 Coder paid.** Single subprocess
+   swap in `src/reviewer.ts`. Biggest per-cycle saving. Lowest
+   risk — the reviewer's contract is already structured JSON
+   validated by the dispatcher, so the provider doesn't need to
+   "understand" anything new; it just needs to follow the prompt
+   schema. ~1 session of work including a dual-run comparison
+   (Claude vs Qwen on the same 10 cycles' diffs) to sanity-check
+   that Qwen's verdicts match Claude's on a sample before we
+   commit the swap.
+2. **Ollama tier for summarization / classification.** Nice
+   polish, no hot-path impact. Opt-in per site. Can ship
+   incrementally — one Ollama task at a time (digest narrative
+   first, because it's the most visible).
+3. **Engineer → aider or opencode with Qwen.** Highest risk,
+   highest reward. Deserves its own branch of dogfooding with
+   a known-bad throwaway project (gamr, when it exists). Do
+   NOT bundle with the reviewer swap — mixing experiments
+   violates the one-variable-at-a-time principle that made
+   the cycle-reset bug discoverable in the first place.
+
+**Practical rollout context (2026-04-16):**
+
+- Ray topped up OpenRouter with $10 that day — enough for
+  thousands of reviewer calls at Qwen3 Coder 30B's $0.07/$0.27
+  per-M pricing. The reviewer swap is safely inside budget
+  even across multi-week overnight runs.
+- Ollama is already installed on the home PC (Llama 3 8B). No
+  new infrastructure required for tier 3 — just wiring.
+- Engineer swap is blocked on agent-harness selection (aider vs
+  opencode vs custom). That's a research task, not an
+  implementation task. Not tonight's work.
+
 ---
 
 ## 3. Budget-per-Bot with Spend Guards (Phase 10+)
