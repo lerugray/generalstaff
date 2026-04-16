@@ -201,6 +201,26 @@ describe("tailProgressLog", () => {
   });
 });
 
+describe("session_end entries", () => {
+  it("stores total_verified and total_failed alongside total_cycles and duration_minutes", async () => {
+    await appendProgress("proj-sess", "session_end", {
+      duration_minutes: 15,
+      total_cycles: 4,
+      total_verified: 3,
+      total_failed: 1,
+    });
+
+    const filePath = join(TEST_DIR, "state", "proj-sess", "PROGRESS.jsonl");
+    const content = readFileSync(filePath, "utf8");
+    const entry = JSON.parse(content.trim());
+    expect(entry.event).toBe("session_end");
+    expect(entry.data.duration_minutes).toBe(15);
+    expect(entry.data.total_cycles).toBe(4);
+    expect(entry.data.total_verified).toBe(3);
+    expect(entry.data.total_failed).toBe(1);
+  });
+});
+
 describe("loadCycleHistory", () => {
   it("returns empty array when no state directory exists", async () => {
     const stateDir = join(TEST_DIR, "state");
