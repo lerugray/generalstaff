@@ -188,7 +188,7 @@
   {
     "id": "gs-057",
     "title": "Add a 'generalstaff digest' command to cli.ts that cats a digest file to stdout. Support --latest (most recent file in digests/) and --date=YYYYMMDD (first digest from that day). If no digests exist, print a clear message. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
