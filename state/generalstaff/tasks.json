@@ -148,5 +148,35 @@
     "title": "Add a generalstaff version command (separate from --version flag) that shows version, bun version, platform, and projects.yaml location. Useful for bug reports.",
     "status": "done",
     "priority": 3
+  },
+  {
+    "id": "gs-051",
+    "title": "In cycle.ts, add a diffSummaryStats function that parses the diff to count files changed, insertions, and deletions. Include these stats in the cycle_end PROGRESS entry and the digest output. Add test.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-052",
+    "title": "Add a generalstaff config command to cli.ts that pretty-prints the current projects.yaml config (parsed and validated) — shows each project with all resolved defaults. Useful for debugging config issues. Add test.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-053",
+    "title": "In work_detection.ts, add support for a third work_detection mode 'git_issues' that counts open issues on the project's git remote via 'git log --oneline origin/master..HEAD' as a proxy for pending work. Add test with mock.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-054",
+    "title": "Add a test for the session plan preview (estimateSessionPlan) with multiple projects at different priorities — verify the picker alternates correctly and respects the per-project cap",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-055",
+    "title": "In format.ts, add a formatBytes helper (1024 -> 1.0 KB, 1048576 -> 1.0 MB) for displaying diff sizes and log file sizes in the history and summary commands. Add tests.",
+    "status": "pending",
+    "priority": 3
   }
 ]
