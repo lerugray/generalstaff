@@ -412,6 +412,112 @@ dispatcher:
     });
   });
 
+  describe("config command", () => {
+    const CONFIG_TEST_DIR = join(import.meta.dir, "fixtures", "config_cmd_test");
+
+    const CONFIG_YAML = `
+projects:
+  - id: alpha
+    path: /tmp/alpha
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md
+      - scripts/
+    notes: |
+      First line of notes.
+      Second line of notes.
+  - id: beta
+    path: /tmp/beta
+    priority: 2
+    engineer_command: "run"
+    verification_command: "test"
+    cycle_budget_minutes: 45
+    work_detection: catalogdna_bot_tasks
+    concurrency_detection: worktree
+    branch: custom/branch
+    auto_merge: true
+    hands_off:
+      - README.md
+`;
+
+    beforeEach(() => {
+      mkdirSync(CONFIG_TEST_DIR, { recursive: true });
+      writeFileSync(join(CONFIG_TEST_DIR, "projects.yaml"), CONFIG_YAML);
+    });
+
+    afterEach(() => {
+      rmSync(CONFIG_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("pretty-prints all projects with resolved defaults", async () => {
+      const result = await runCli(["config"], CONFIG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("=== GeneralStaff Config ===");
+      expect(result.stdout).toContain("Projects: 2");
+
+      // alpha uses defaults
+      expect(result.stdout).toContain("[alpha]");
+      expect(result.stdout).toContain("/tmp/alpha");
+      expect(result.stdout).toContain("priority:             1");
+      expect(result.stdout).toContain("cycle_budget_minutes: 30");
+      expect(result.stdout).toContain("echo engineer");
+      expect(result.stdout).toContain("echo verify");
+      // Defaults resolved:
+      expect(result.stdout).toContain("work_detection:       tasks_json");
+      expect(result.stdout).toContain("concurrency_detection:none");
+      expect(result.stdout).toContain("branch:               bot/work");
+      expect(result.stdout).toContain("auto_merge:           false");
+      expect(result.stdout).toContain("hands_off (2):");
+      expect(result.stdout).toContain("- CLAUDE.md");
+      expect(result.stdout).toContain("- scripts/");
+      expect(result.stdout).toContain("First line of notes.");
+      expect(result.stdout).toContain("Second line of notes.");
+    });
+
+    it("shows explicit non-default values when set", async () => {
+      const result = await runCli(["config"], CONFIG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("[beta]");
+      expect(result.stdout).toContain("work_detection:       catalogdna_bot_tasks");
+      expect(result.stdout).toContain("concurrency_detection:worktree");
+      expect(result.stdout).toContain("branch:               custom/branch");
+      expect(result.stdout).toContain("auto_merge:           true");
+    });
+
+    it("includes dispatcher section with resolved defaults", async () => {
+      const result = await runCli(["config"], CONFIG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("[dispatcher]");
+      expect(result.stdout).toContain("picker:                            priority_x_staleness");
+      expect(result.stdout).toContain("max_cycles_per_project_per_session:3");
+      expect(result.stdout).toContain("state_dir:");
+      expect(result.stdout).toContain("fleet_state_file:");
+      expect(result.stdout).toContain("stop_file:");
+      expect(result.stdout).toContain("log_dir:");
+      expect(result.stdout).toContain("digest_dir:");
+    });
+
+    it("exits non-zero on invalid config", async () => {
+      const BAD_DIR = join(import.meta.dir, "fixtures", "config_bad_test");
+      mkdirSync(BAD_DIR, { recursive: true });
+      writeFileSync(
+        join(BAD_DIR, "projects.yaml"),
+        "projects:\n  - id: x\n    path: /tmp/x\n    priority: 1\n    engineer_command: e\n    verification_command: v\n    cycle_budget_minutes: 10\n    hands_off: []\n",
+      );
+      const result = await runCli(["config"], BAD_DIR);
+      expect(result.exitCode).not.toBe(0);
+      rmSync(BAD_DIR, { recursive: true, force: true });
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("generalstaff config");
+    });
+  });
+
   describe("help completeness", () => {
     it("lists all registered commands in help output", async () => {
       const result = await runCli(["--help"]);

@@ -6,7 +6,7 @@ import { basename, join, resolve } from "path";
 import { runSession } from "./session";
 import { runSingleCycle } from "./cycle";
 import { loadFleetState, getProjectSummary, getRootDir } from "./state";
-import { loadProjects } from "./projects";
+import { loadProjects, loadProjectsYaml } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
 import { initProject } from "./init";
@@ -72,6 +72,9 @@ Usage:
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
+
+  generalstaff config                                     Pretty-print the parsed+validated projects.yaml (with resolved defaults)
+    Example: generalstaff config                        # useful for debugging config issues
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -340,6 +343,47 @@ switch (command) {
     console.log(
       `projects.yaml: ${projectsYamlPath}${projectsYamlFound ? "" : " (not found)"}`,
     );
+    break;
+  }
+
+  case "config": {
+    const yaml = await loadProjectsYaml();
+    console.log("=== GeneralStaff Config ===\n");
+    console.log(`Projects: ${yaml.projects.length}\n`);
+    for (const p of yaml.projects) {
+      console.log(`[${p.id}]`);
+      console.log(`  path:                 ${p.path}`);
+      console.log(`  priority:             ${p.priority}`);
+      console.log(`  cycle_budget_minutes: ${p.cycle_budget_minutes}`);
+      console.log(`  engineer_command:     ${p.engineer_command}`);
+      console.log(`  verification_command: ${p.verification_command}`);
+      console.log(`  work_detection:       ${p.work_detection}`);
+      console.log(`  concurrency_detection:${p.concurrency_detection}`);
+      console.log(`  branch:               ${p.branch}`);
+      console.log(`  auto_merge:           ${p.auto_merge}`);
+      console.log(`  hands_off (${p.hands_off.length}):`);
+      for (const h of p.hands_off) {
+        console.log(`    - ${h}`);
+      }
+      if (p.notes) {
+        const lines = p.notes.split("\n").filter((l) => l.length > 0);
+        console.log(`  notes:`);
+        for (const line of lines) {
+          console.log(`    ${line}`);
+        }
+      }
+      console.log();
+    }
+    console.log("[dispatcher]");
+    const d = yaml.dispatcher;
+    console.log(`  state_dir:                         ${d.state_dir}`);
+    console.log(`  fleet_state_file:                  ${d.fleet_state_file}`);
+    console.log(`  stop_file:                         ${d.stop_file}`);
+    console.log(`  override_file:                     ${d.override_file}`);
+    console.log(`  picker:                            ${d.picker}`);
+    console.log(`  max_cycles_per_project_per_session:${d.max_cycles_per_project_per_session}`);
+    console.log(`  log_dir:                           ${d.log_dir}`);
+    console.log(`  digest_dir:                        ${d.digest_dir}`);
     break;
   }
 

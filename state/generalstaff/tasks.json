@@ -158,7 +158,7 @@
   {
     "id": "gs-052",
     "title": "Add a generalstaff config command to cli.ts that pretty-prints the current projects.yaml config (parsed and validated) — shows each project with all resolved defaults. Useful for debugging config issues. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
