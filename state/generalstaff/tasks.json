@@ -36,7 +36,7 @@
   {
     "id": "gs-015",
     "title": "Add dispatcher test: pickNextProject respects override file (next_project.txt) and falls back to priority x staleness picker",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
