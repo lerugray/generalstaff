@@ -50,13 +50,13 @@
   {
     "id": "gs-009",
     "title": "Add state module test: atomic write safety — concurrent writes don't corrupt STATE.json (write tmp then rename)",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
     "id": "gs-010",
     "title": "Add audit module test: tailProgressLog formats entries correctly across multiple projects",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
