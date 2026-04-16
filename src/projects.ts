@@ -18,6 +18,7 @@ import type {
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
   "catalogdna_bot_tasks",
   "tasks_json",
+  "git_issues",
 ];
 
 const VALID_CONCURRENCY_DETECTION: ConcurrencyDetectionMode[] = [

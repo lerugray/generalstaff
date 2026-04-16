@@ -164,7 +164,7 @@
   {
     "id": "gs-053",
     "title": "In work_detection.ts, add support for a third work_detection mode 'git_issues' that counts open issues on the project's git remote via 'git log --oneline origin/master..HEAD' as a proxy for pending work. Add test with mock.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

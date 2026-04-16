@@ -5,11 +5,14 @@ import {
   catalogdnaCountRemaining,
   greenfieldCountRemaining,
   countRemainingWork,
+  gitIssuesCountRemaining,
+  gitIssuesHasMoreWork,
 } from "../src/work_detection";
 import type { ProjectConfig } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
+import { spawnSync } from "child_process";
 
 const FIXTURES = join(import.meta.dir, "fixtures", "work_detection");
 
@@ -240,6 +243,91 @@ describe("greenfieldCountRemaining", () => {
   });
 });
 
+function git(cwd: string, args: string[]) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} failed (exit ${result.status}): ${result.stderr}`,
+    );
+  }
+  return result.stdout;
+}
+
+function setupRepoWithUpstream(name: string, commitsAhead: number): string {
+  const remoteDir = join(FIXTURES, `${name}-remote.git`);
+  const workDir = join(FIXTURES, name);
+  mkdirSync(remoteDir, { recursive: true });
+  mkdirSync(workDir, { recursive: true });
+
+  // Bare upstream repo (acts as "origin")
+  git(remoteDir, ["init", "--bare", "--initial-branch=master"]);
+
+  // Working repo with one shared commit pushed upstream
+  git(workDir, ["init", "--initial-branch=master"]);
+  git(workDir, ["config", "user.email", "test@test.com"]);
+  git(workDir, ["config", "user.name", "Test"]);
+  writeFileSync(join(workDir, "README.md"), "initial\n");
+  git(workDir, ["add", "README.md"]);
+  git(workDir, ["commit", "-m", "initial"]);
+  git(workDir, ["remote", "add", "origin", remoteDir]);
+  git(workDir, ["push", "origin", "master"]);
+
+  // Add commits that are ahead of origin/master
+  for (let i = 0; i < commitsAhead; i++) {
+    writeFileSync(join(workDir, `file-${i}.txt`), `change ${i}\n`);
+    git(workDir, ["add", `file-${i}.txt`]);
+    git(workDir, ["commit", "-m", `change ${i}`]);
+  }
+
+  return workDir;
+}
+
+describe("gitIssuesCountRemaining", () => {
+  it("counts commits ahead of origin/master", async () => {
+    const workDir = setupRepoWithUpstream("git-ahead-3", 3);
+    expect(await gitIssuesCountRemaining(workDir)).toBe(3);
+  });
+
+  it("returns 0 when HEAD is at origin/master", async () => {
+    const workDir = setupRepoWithUpstream("git-ahead-0", 0);
+    expect(await gitIssuesCountRemaining(workDir)).toBe(0);
+  });
+
+  it("returns 0 when origin/master is missing (no remote)", async () => {
+    const workDir = join(FIXTURES, "git-no-remote");
+    mkdirSync(workDir, { recursive: true });
+    git(workDir, ["init", "--initial-branch=master"]);
+    git(workDir, ["config", "user.email", "test@test.com"]);
+    git(workDir, ["config", "user.name", "Test"]);
+    writeFileSync(join(workDir, "f.txt"), "x\n");
+    git(workDir, ["add", "f.txt"]);
+    git(workDir, ["commit", "-m", "only commit"]);
+    expect(await gitIssuesCountRemaining(workDir)).toBe(0);
+  });
+
+  it("returns 0 when path is not a git repo", async () => {
+    const notRepo = join(FIXTURES, "not-a-repo");
+    mkdirSync(notRepo, { recursive: true });
+    expect(await gitIssuesCountRemaining(notRepo)).toBe(0);
+  });
+});
+
+describe("gitIssuesHasMoreWork", () => {
+  it("returns true when commits are ahead of origin/master", async () => {
+    const workDir = setupRepoWithUpstream("git-has-2", 2);
+    expect(await gitIssuesHasMoreWork(workDir)).toBe(true);
+  });
+
+  it("returns false when no commits are ahead", async () => {
+    const workDir = setupRepoWithUpstream("git-has-0", 0);
+    expect(await gitIssuesHasMoreWork(workDir)).toBe(false);
+  });
+});
+
 describe("countRemainingWork", () => {
   function makeProject(
     overrides: Partial<ProjectConfig> & Pick<ProjectConfig, "work_detection">,
@@ -285,5 +373,14 @@ describe("countRemainingWork", () => {
       work_detection: "tasks_json",
     });
     expect(await countRemainingWork(project)).toBe(1);
+  });
+
+  it("dispatches to git_issues mode", async () => {
+    const workDir = setupRepoWithUpstream("dispatch-git", 2);
+    const project = makeProject({
+      work_detection: "git_issues",
+      path: workDir,
+    });
+    expect(await countRemainingWork(project)).toBe(2);
   });
 });
