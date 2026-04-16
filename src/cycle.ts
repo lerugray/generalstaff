@@ -215,6 +215,13 @@ async function detectMarkedDoneTasks(
     }
   }
 
+  if (project.work_detection === "git_issues") {
+    // git_issues mode tracks pending work as commits ahead of origin/master.
+    // There is no per-cycle "task done" signal — work is removed when commits
+    // are merged upstream.
+    return "(git_issues mode: no per-cycle task tracking)";
+  }
+
   return "(Unknown work_detection mode)";
 }
 

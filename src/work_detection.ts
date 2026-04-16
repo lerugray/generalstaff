@@ -4,6 +4,7 @@
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import { getRootDir } from "./state";
 import type { ProjectConfig } from "./types";
 
@@ -13,6 +14,8 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
       return catalogdnaHasMoreWork(project.path);
     case "tasks_json":
       return greenfieldHasMoreWork(project.id);
+    case "git_issues":
+      return gitIssuesHasMoreWork(project.path);
     default:
       return false; // unknown mode: fail-safe, no chaining
   }
@@ -26,6 +29,8 @@ export async function countRemainingWork(
       return catalogdnaCountRemaining(project.path);
     case "tasks_json":
       return greenfieldCountRemaining(project.id);
+    case "git_issues":
+      return gitIssuesCountRemaining(project.path);
     default:
       return 0;
   }
@@ -119,4 +124,31 @@ export async function greenfieldHasMoreWork(
   } catch {
     return false; // malformed: fail-safe
   }
+}
+
+// git_issues mode: counts commits ahead of origin/master as a proxy for
+// pending work. Useful for projects where bot work lands on a branch and
+// is considered "pending" until merged into the upstream master.
+export async function gitIssuesCountRemaining(
+  projectPath: string,
+): Promise<number> {
+  const result = spawnSync(
+    "git",
+    ["log", "--oneline", "origin/master..HEAD"],
+    {
+      cwd: projectPath,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+    },
+  );
+  if (result.status !== 0 || typeof result.stdout !== "string") return 0;
+  const lines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
+  return lines.length;
+}
+
+export async function gitIssuesHasMoreWork(
+  projectPath: string,
+): Promise<boolean> {
+  return (await gitIssuesCountRemaining(projectPath)) > 0;
 }
