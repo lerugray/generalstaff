@@ -62,7 +62,7 @@
   {
     "id": "gs-036",
     "title": "Add a session.test.ts with tests for the writeDigest function: verify it creates the digest file, includes all cycle results, formats SHA ranges, and handles empty results array",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
