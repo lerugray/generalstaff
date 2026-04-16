@@ -59,7 +59,34 @@
     "status": "done",
     "priority": 2
   },
-  { "id": "gs-test-a", "title": "Dummy task A for session chaining test", "status": "pending", "priority": 1 },
-  { "id": "gs-test-b", "title": "Dummy task B for session chaining test", "status": "pending", "priority": 1 },
-  { "id": "gs-test-c", "title": "Dummy task C for session chaining test", "status": "pending", "priority": 1 }
+  {
+    "id": "gs-036",
+    "title": "Add a session.test.ts with tests for the writeDigest function: verify it creates the digest file, includes all cycle results, formats SHA ranges, and handles empty results array",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-037",
+    "title": "In dispatcher.ts, add a function estimateSessionPlan(projects, fleet, budgetMinutes) that returns a preview of which projects would be picked and how many cycles each would get, without executing anything. Add test.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-038",
+    "title": "Add a formatDuration helper function to a new src/format.ts module that converts seconds to human-readable strings (45s, 2m30s, 1h15m). Use it in history and digest output. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-039",
+    "title": "In work_detection.ts, add a function countRemainingWork(project) that returns the number of pending tasks (not just boolean hasMoreWork). Use it in the session summary output. Add test.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-040",
+    "title": "Add a projects.test.ts test that validates warnProjectPaths with a real git repo (use the GeneralStaff repo itself as the valid path) and a non-git directory",
+    "status": "pending",
+    "priority": 2
+  }
 ]
