@@ -30,7 +30,7 @@
   {
     "id": "gs-014",
     "title": "Add digest writer test: verify digest file is created with correct markdown format including cycle outcomes and SHA ranges",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
