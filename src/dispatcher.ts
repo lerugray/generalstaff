@@ -107,6 +107,108 @@ export async function pickNextProject(
   return null; // no eligible project
 }
 
+// --- Session plan estimate (preview) ---
+
+export interface SessionPlanPick {
+  project_id: string;
+  start_minute: number;
+  duration_minutes: number;
+}
+
+export interface SessionPlanPerProject {
+  project_id: string;
+  cycle_count: number;
+}
+
+export interface SessionPlanEstimate {
+  picks: SessionPlanPick[];
+  per_project: SessionPlanPerProject[];
+  total_cycles: number;
+  budget_used_minutes: number;
+  budget_remaining_minutes: number;
+}
+
+export function estimateSessionPlan(
+  projects: ProjectConfig[],
+  fleet: FleetState,
+  budgetMinutes: number,
+  maxCyclesPerProject: number = Infinity,
+): SessionPlanEstimate {
+  // Deep clone fleet so simulation does not mutate the caller's state
+  const simFleet: FleetState = {
+    version: fleet.version,
+    updated_at: fleet.updated_at,
+    projects: Object.fromEntries(
+      Object.entries(fleet.projects).map(([id, s]) => [id, { ...s }]),
+    ),
+  };
+  for (const p of projects) {
+    if (!simFleet.projects[p.id]) {
+      simFleet.projects[p.id] = {
+        last_cycle_at: null,
+        last_cycle_outcome: null,
+        total_cycles: 0,
+        total_verified: 0,
+        total_failed: 0,
+        accumulated_minutes: 0,
+      };
+    }
+  }
+
+  const picks: SessionPlanPick[] = [];
+  const perCount = new Map<string, number>();
+  const capped = new Set<string>();
+  let elapsed = 0;
+
+  while (elapsed < budgetMinutes) {
+    const eligible = projects.filter((p) => !capped.has(p.id));
+    if (eligible.length === 0) break;
+
+    const scored = scoreProjects(eligible, simFleet);
+    const top = scored[0];
+    if (!top) break;
+
+    const needed = top.project.cycle_budget_minutes + 5;
+    if (elapsed + needed > budgetMinutes) break;
+
+    picks.push({
+      project_id: top.project.id,
+      start_minute: elapsed,
+      duration_minutes: needed,
+    });
+    elapsed += needed;
+
+    const count = (perCount.get(top.project.id) ?? 0) + 1;
+    perCount.set(top.project.id, count);
+
+    // Reset staleness for the just-run project so the picker can rotate
+    const state = simFleet.projects[top.project.id];
+    if (state) {
+      state.last_cycle_at = new Date().toISOString();
+      state.total_cycles += 1;
+    }
+
+    if (count >= maxCyclesPerProject) {
+      capped.add(top.project.id);
+    }
+  }
+
+  const perProject: SessionPlanPerProject[] = projects
+    .map((p) => ({
+      project_id: p.id,
+      cycle_count: perCount.get(p.id) ?? 0,
+    }))
+    .sort((a, b) => b.cycle_count - a.cycle_count);
+
+  return {
+    picks,
+    per_project: perProject,
+    total_cycles: picks.length,
+    budget_used_minutes: elapsed,
+    budget_remaining_minutes: budgetMinutes - elapsed,
+  };
+}
+
 // --- Chaining decision (Q1) ---
 
 export interface ChainingDecision {
