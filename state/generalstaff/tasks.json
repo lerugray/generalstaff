@@ -98,7 +98,7 @@
   {
     "id": "gs-042",
     "title": "Add a generalstaff task command to cli.ts with subcommands: 'task list --project=<id>' shows pending tasks, 'task add --project=<id> <title>' appends a new task to tasks.json. Include tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
