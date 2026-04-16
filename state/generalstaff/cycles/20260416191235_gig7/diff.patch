@@ -1,0 +1,195 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 47cfb0c..ce057ed 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -4,7 +4,7 @@ import { parseArgs } from "util";
+ import { basename, resolve } from "path";
+ import { runSession } from "./session";
+ import { runSingleCycle } from "./cycle";
+-import { loadFleetState } from "./state";
++import { loadFleetState, getProjectSummary } from "./state";
+ import { loadProjects } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
+@@ -139,14 +139,10 @@ switch (command) {
+     const stopped = await isStopFilePresent();
+ 
+     if (statusValues.json) {
+-      const output = {
+-        stopped,
+-        projects: projects.map((p) => ({
+-          id: p.id,
+-          priority: p.priority,
+-          state: fleet.projects[p.id] ?? null,
+-        })),
+-      };
++      const summaries = await Promise.all(
++        projects.map((p) => getProjectSummary(p, fleet)),
++      );
++      const output = { stopped, projects: summaries };
+       console.log(JSON.stringify(output, null, 2));
+     } else {
+       console.log("=== GeneralStaff Fleet Status ===\n");
+diff --git a/src/state.ts b/src/state.ts
+index 4b104b0..e99f9af 100644
+--- a/src/state.ts
++++ b/src/state.ts
+@@ -5,14 +5,24 @@
+ import { existsSync, mkdirSync } from "fs";
+ import { readFile, writeFile, rename, unlink } from "fs/promises";
+ import { join, dirname } from "path";
++import { countRemainingWork } from "./work_detection";
+ import type {
+   FleetState,
+   ProjectState,
+   ProjectFleetState,
+   CycleOutcome,
+   DispatcherConfig,
++  ProjectConfig,
+ } from "./types";
+ 
++export interface ProjectSummary {
++  id: string;
++  priority: number;
++  state: ProjectFleetState | null;
++  project_state: ProjectState;
++  remaining_tasks: number;
++}
++
+ let _rootDir: string | null = null;
+ 
+ export function setRootDir(dir: string) {
+@@ -165,6 +175,24 @@ export async function saveProjectState(
+   await atomicWrite(filePath, JSON.stringify(state, null, 2) + "\n");
+ }
+ 
++export async function getProjectSummary(
++  project: ProjectConfig,
++  fleet: FleetState,
++  config?: DispatcherConfig,
++): Promise<ProjectSummary> {
++  const [projectState, remaining] = await Promise.all([
++    loadProjectState(project.id, config),
++    countRemainingWork(project),
++  ]);
++  return {
++    id: project.id,
++    priority: project.priority,
++    state: fleet.projects[project.id] ?? null,
++    project_state: projectState,
++    remaining_tasks: remaining,
++  };
++}
++
+ // --- Cycle directory setup ---
+ 
+ export function ensureCycleDir(
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 02cb573..8a61e76 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -140,7 +140,7 @@
+   {
+     "id": "gs-049",
+     "title": "In state.ts, add a getProjectSummary function that aggregates fleet state + project state + remaining tasks into a single object. Use it in the status --json output for richer data. Add test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/state.test.ts b/tests/state.test.ts
+index 6273040..db40fbd 100644
+--- a/tests/state.test.ts
++++ b/tests/state.test.ts
+@@ -12,9 +12,11 @@ import {
+   readCycleFile,
+   writeStateFile,
+   readStateFile,
++  getProjectSummary,
+ } from "../src/state";
++import type { ProjectConfig } from "../src/types";
+ import { join } from "path";
+-import { mkdirSync, rmSync, existsSync } from "fs";
++import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+ 
+ const TEST_DIR = join(import.meta.dir, "fixtures", "state_test");
+ 
+@@ -235,3 +237,78 @@ describe("atomic write safety", () => {
+     expect(loaded.cycles_this_session).toBe(200);
+   });
+ });
++
++describe("getProjectSummary", () => {
++  function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
++    return {
++      id: "summary-proj",
++      path: TEST_DIR,
++      priority: 2,
++      engineer_command: "echo engineer",
++      verification_command: "echo verify",
++      cycle_budget_minutes: 15,
++      work_detection: "tasks_json",
++      concurrency_detection: "none",
++      branch: "bot/work",
++      auto_merge: false,
++      hands_off: [],
++      ...overrides,
++    };
++  }
++
++  it("returns defaults when no state files exist", async () => {
++    const project = makeProject();
++    const fleet = await loadFleetState();
++
++    const summary = await getProjectSummary(project, fleet);
++    expect(summary.id).toBe("summary-proj");
++    expect(summary.priority).toBe(2);
++    expect(summary.state).toBeNull();
++    expect(summary.project_state.project_id).toBe("summary-proj");
++    expect(summary.project_state.cycles_this_session).toBe(0);
++    expect(summary.remaining_tasks).toBe(0);
++  });
++
++  it("aggregates fleet state, project state, and remaining tasks", async () => {
++    const project = makeProject({ id: "agg-proj", priority: 1 });
++
++    const fleet = await loadFleetState();
++    updateProjectFleetState(fleet, "agg-proj", "verified", 12);
++    updateProjectFleetState(fleet, "agg-proj", "verification_failed", 5);
++    await saveFleetState(fleet);
++
++    await saveProjectState({
++      project_id: "agg-proj",
++      current_cycle_id: null,
++      last_cycle_id: "cycle-xyz",
++      last_cycle_outcome: "verification_failed",
++      last_cycle_at: "2026-04-16T00:00:00.000Z",
++      cycles_this_session: 3,
++    });
++
++    const tasksDir = join(TEST_DIR, "state", "agg-proj");
++    mkdirSync(tasksDir, { recursive: true });
++    writeFileSync(
++      join(tasksDir, "tasks.json"),
++      JSON.stringify([
++        { id: "t1", status: "pending", priority: 1, title: "a" },
++        { id: "t2", status: "done", priority: 2, title: "b" },
++        { id: "t3", status: "pending", priority: 3, title: "c" },
++        { id: "t4", status: "skipped", priority: 4, title: "d" },
++      ]),
++    );
++
++    const reloadedFleet = await loadFleetState();
++    const summary = await getProjectSummary(project, reloadedFleet);
++
++    expect(summary.id).toBe("agg-proj");
++    expect(summary.priority).toBe(1);
++    expect(summary.state).not.toBeNull();
++    expect(summary.state?.total_cycles).toBe(2);
++    expect(summary.state?.total_verified).toBe(1);
++    expect(summary.state?.total_failed).toBe(1);
++    expect(summary.project_state.last_cycle_id).toBe("cycle-xyz");
++    expect(summary.project_state.cycles_this_session).toBe(3);
++    expect(summary.remaining_tasks).toBe(2);
++  });
++});
