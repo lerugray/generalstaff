@@ -38,7 +38,7 @@
   {
     "id": "gs-032",
     "title": "Add usage examples to each CLI command's help output — e.g., session shows 'generalstaff session --budget=480  # overnight 8-hour run', cycle shows 'generalstaff cycle --project=myapp --dry-run'. Update the main --help too.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
