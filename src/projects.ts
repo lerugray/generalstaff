@@ -45,55 +45,81 @@ export class ProjectValidationError extends Error {
   }
 }
 
+function requireString(
+  projectId: string,
+  field: string,
+  value: unknown,
+): string {
+  if (value === undefined || value === null) {
+    throw new ProjectValidationError(projectId, field, "is required but missing");
+  }
+  if (typeof value !== "string") {
+    throw new ProjectValidationError(
+      projectId,
+      field,
+      `must be a string, got ${typeof value}`,
+    );
+  }
+  if (value === "") {
+    throw new ProjectValidationError(projectId, field, "must not be empty");
+  }
+  return value;
+}
+
+function requirePositiveInt(
+  projectId: string,
+  field: string,
+  value: unknown,
+): number {
+  if (value === undefined || value === null) {
+    throw new ProjectValidationError(projectId, field, "is required but missing");
+  }
+  if (typeof value !== "number") {
+    throw new ProjectValidationError(
+      projectId,
+      field,
+      `must be a number, got ${typeof value}`,
+    );
+  }
+  if (!Number.isInteger(value)) {
+    throw new ProjectValidationError(
+      projectId,
+      field,
+      `must be an integer, got ${value}`,
+    );
+  }
+  if (value < 1) {
+    throw new ProjectValidationError(
+      projectId,
+      field,
+      `must be a positive integer, got ${value}`,
+    );
+  }
+  return value;
+}
+
 function validateProject(raw: Record<string, unknown>): ProjectConfig {
-  const id = raw.id as string;
-  if (!id || typeof id !== "string") {
-    throw new ProjectValidationError("(unknown)", "id", "must be a non-empty string");
-  }
-
-  const path = raw.path as string;
-  if (!path || typeof path !== "string") {
-    throw new ProjectValidationError(id, "path", "must be a non-empty string");
-  }
-
-  const priority = raw.priority as number;
-  if (typeof priority !== "number" || priority < 1 || !Number.isInteger(priority)) {
-    throw new ProjectValidationError(id, "priority", "must be a positive integer");
-  }
-
-  const engineerCommand = raw.engineer_command as string;
-  if (!engineerCommand || typeof engineerCommand !== "string") {
-    throw new ProjectValidationError(id, "engineer_command", "must be a non-empty string");
-  }
-
-  const verificationCommand = raw.verification_command as string;
-  if (!verificationCommand || typeof verificationCommand !== "string") {
-    throw new ProjectValidationError(
-      id,
-      "verification_command",
-      "must be a non-empty string",
-    );
-  }
-
-  const cycleBudget = raw.cycle_budget_minutes as number;
-  if (
-    typeof cycleBudget !== "number" ||
-    cycleBudget <= 0 ||
-    !Number.isInteger(cycleBudget)
-  ) {
-    throw new ProjectValidationError(
-      id,
-      "cycle_budget_minutes",
-      "must be a positive integer",
-    );
-  }
+  const id = requireString("(unknown)", "id", raw.id);
+  const path = requireString(id, "path", raw.path);
+  const priority = requirePositiveInt(id, "priority", raw.priority);
+  const engineerCommand = requireString(id, "engineer_command", raw.engineer_command);
+  const verificationCommand = requireString(
+    id,
+    "verification_command",
+    raw.verification_command,
+  );
+  const cycleBudget = requirePositiveInt(
+    id,
+    "cycle_budget_minutes",
+    raw.cycle_budget_minutes,
+  );
 
   const workDetection = (raw.work_detection ?? "tasks_json") as WorkDetectionMode;
   if (!VALID_WORK_DETECTION.includes(workDetection)) {
     throw new ProjectValidationError(
       id,
       "work_detection",
-      `must be one of: ${VALID_WORK_DETECTION.join(", ")}`,
+      `must be one of: ${VALID_WORK_DETECTION.join(", ")} — got "${workDetection}"`,
     );
   }
 
@@ -103,19 +129,33 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     throw new ProjectValidationError(
       id,
       "concurrency_detection",
-      `must be one of: ${VALID_CONCURRENCY_DETECTION.join(", ")}`,
+      `must be one of: ${VALID_CONCURRENCY_DETECTION.join(", ")} — got "${concurrencyDetection}"`,
     );
   }
 
   const branch = (raw.branch ?? "bot/work") as string;
   const autoMerge = (raw.auto_merge ?? false) as boolean;
 
-  const handsOff = raw.hands_off as string[] | undefined;
-  if (!Array.isArray(handsOff) || handsOff.length === 0) {
+  const handsOff = raw.hands_off;
+  if (handsOff === undefined || handsOff === null) {
     throw new ProjectValidationError(
       id,
       "hands_off",
-      "must be a non-empty array — Hard Rule #5",
+      "is required but missing — Hard Rule #5 requires a non-empty hands-off list",
+    );
+  }
+  if (!Array.isArray(handsOff)) {
+    throw new ProjectValidationError(
+      id,
+      "hands_off",
+      `must be an array, got ${typeof handsOff}`,
+    );
+  }
+  if (handsOff.length === 0) {
+    throw new ProjectValidationError(
+      id,
+      "hands_off",
+      "must not be empty — Hard Rule #5 requires at least one entry",
     );
   }
 
