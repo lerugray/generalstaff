@@ -132,6 +132,7 @@ export type ProgressEventType =
   | "reviewer_response"
   | "reviewer_verdict"
   | "reviewer_fallback"
+  | "worktree_preflight"
   | "cycle_end"
   | "session_start"
   | "session_end"
