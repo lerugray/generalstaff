@@ -85,6 +85,41 @@ describe("extractChangedFiles", () => {
     expect(extractChangedFiles(diff)).toEqual(["new name.ts"]);
   });
 
+  it("handles an added-only diff (--diff-filter=A) with multiple new files", () => {
+    const diff = [
+      "diff --git a/src/new-module.ts b/src/new-module.ts",
+      "new file mode 100644",
+      "index 0000000..abc1234",
+      "--- /dev/null",
+      "+++ b/src/new-module.ts",
+      "@@ -0,0 +1,3 @@",
+      "+export function foo() {",
+      "+  return 42;",
+      "+}",
+      "diff --git a/docs/guide.md b/docs/guide.md",
+      "new file mode 100644",
+      "index 0000000..def5678",
+      "--- /dev/null",
+      "+++ b/docs/guide.md",
+      "@@ -0,0 +1,2 @@",
+      "+# Guide",
+      "+Hello.",
+      "diff --git a/tests/new.test.ts b/tests/new.test.ts",
+      "new file mode 100644",
+      "index 0000000..9876543",
+      "--- /dev/null",
+      "+++ b/tests/new.test.ts",
+      "@@ -0,0 +1,1 @@",
+      "+import { describe } from 'bun:test';",
+    ].join("\n");
+
+    expect(extractChangedFiles(diff)).toEqual([
+      "src/new-module.ts",
+      "docs/guide.md",
+      "tests/new.test.ts",
+    ]);
+  });
+
   it("handles a mixed diff with text, binary, and spaced filenames", () => {
     const diff = [
       "diff --git a/src/main.ts b/src/main.ts",
