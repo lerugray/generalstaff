@@ -538,4 +538,40 @@ describe("invokeReviewerWithFallback", () => {
     expect(result.rawResponse).toContain("[REVIEWER ERROR]");
     expect(callCount).toBe(1);
   });
+
+  it("falls back from Ollama-unreachable to OpenRouter success", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes("/api/chat")) {
+        throw new TypeError("fetch failed: ECONNREFUSED");
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "openrouter ok" } }] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const fallbackLog: { value: string | null } = { value: null };
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "ollama",
+      fallback: "openrouter",
+      onFallback: (primaryError) => {
+        fallbackLog.value = primaryError;
+      },
+    });
+
+    expect(result.usedFallback).toBe(true);
+    expect(result.rawResponse).toBe("openrouter ok");
+    expect(fallbackLog.value).not.toBeNull();
+    expect(fallbackLog.value).toContain("[REVIEWER ERROR]");
+    expect(fallbackLog.value).toContain("Ollama fetch failed");
+    expect(urls).toEqual([
+      "http://localhost:11434/api/chat",
+      "https://openrouter.ai/api/v1/chat/completions",
+    ]);
+  });
 });
