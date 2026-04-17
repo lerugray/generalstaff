@@ -1,0 +1,177 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index c123f87..44b4769 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -19,7 +19,9 @@ import {
+   createStopFile,
+   removeStopFile,
+   stopForce,
++  stopFilePath,
+   writeSessionPid,
++  readSessionPid,
+   removeSessionPid,
+ } from "./safety";
+ import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
+@@ -95,9 +97,10 @@ Usage:
+     Example: generalstaff init ../other-repo --id=other
+     Example: generalstaff init ./lowprio --priority=3   # seed template task at priority 3
+ 
+-  generalstaff stop [--force]                             Create STOP file (halt dispatcher)
++  generalstaff stop [--force | --status]                  Create STOP file (halt dispatcher)
+     Example: generalstaff stop                          # halt before next cycle
+     Example: generalstaff stop --force                  # also kill the running session process
++    Example: generalstaff stop --status                 # report STOP file + session pid; create/remove nothing
+ 
+   generalstaff start                                      Remove STOP file (allow dispatch)
+     Example: generalstaff start                         # resume after a stop
+@@ -388,9 +391,31 @@ switch (command) {
+   case "stop": {
+     const { values } = parseArgs({
+       args: args.slice(1),
+-      options: { force: { type: "boolean", default: false } },
++      options: {
++        force: { type: "boolean", default: false },
++        status: { type: "boolean", default: false },
++      },
+       allowPositionals: true,
+     });
++    if (values.status && values.force) {
++      console.error("Error: --status and --force are mutually exclusive");
++      process.exit(1);
++    }
++    if (values.status) {
++      const stopPresent = await isStopFilePresent();
++      if (stopPresent) {
++        console.log(`STOP file: present at ${stopFilePath()}`);
++      } else {
++        console.log("STOP file: absent");
++      }
++      const pid = readSessionPid();
++      if (pid !== null) {
++        console.log(`Session pid: ${pid}`);
++      } else {
++        console.log("Session pid: none recorded");
++      }
++      break;
++    }
+     if (values.force) {
+       const result = await stopForce();
+       if (result.pid === null) {
+diff --git a/src/safety.ts b/src/safety.ts
+index 579ba74..470d908 100644
+--- a/src/safety.ts
++++ b/src/safety.ts
+@@ -11,7 +11,7 @@ import { getRootDir } from "./state";
+ 
+ // --- STOP file ---
+ 
+-function stopFilePath(): string {
++export function stopFilePath(): string {
+   return join(getRootDir(), "STOP");
+ }
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9e710be..e99011a 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -874,7 +874,7 @@
+   {
+     "id": "gs-146",
+     "title": "Add a 'generalstaff stop --status' subcommand (or --check flag) in src/cli.ts that prints whether the STOP file is present and the session pid it would target, without creating or removing anything. Output: 'STOP file: present at <path>' or 'STOP file: absent' and 'Session pid: <pid>' or 'Session pid: none recorded'. Useful for scripts that want to sanity-check before running 'stop --force'. Add tests covering stop-present+pid, stop-absent+nopid, and combinations.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index d1fb63c..ca9fe2e 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -463,6 +463,87 @@ dispatcher:
+     });
+   });
+ 
++  describe("stop --status", () => {
++    const STOP_STATUS_DIR = join(import.meta.dir, "fixtures", "stop_status_test");
++
++    beforeEach(() => {
++      mkdirSync(STOP_STATUS_DIR, { recursive: true });
++      mkdirSync(join(STOP_STATUS_DIR, "state"), { recursive: true });
++    });
++
++    afterEach(() => {
++      rmSync(STOP_STATUS_DIR, { recursive: true, force: true });
++    });
++
++    it("reports both absent when no STOP file and no pid file", async () => {
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("STOP file: absent");
++      expect(result.stdout).toContain("Session pid: none recorded");
++      // Confirms it does not create the STOP file as a side effect.
++      expect(result.stdout).not.toContain("present at");
++    });
++
++    it("reports STOP present + pid recorded", async () => {
++      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
++      writeFileSync(join(STOP_STATUS_DIR, "state", "session.pid"), "12345");
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("STOP file: present at");
++      expect(result.stdout).toContain("STOP");
++      expect(result.stdout).toContain("Session pid: 12345");
++    });
++
++    it("reports STOP present + no pid", async () => {
++      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("STOP file: present at");
++      expect(result.stdout).toContain("Session pid: none recorded");
++    });
++
++    it("reports STOP absent + pid recorded", async () => {
++      writeFileSync(join(STOP_STATUS_DIR, "state", "session.pid"), "67890");
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("STOP file: absent");
++      expect(result.stdout).toContain("Session pid: 67890");
++    });
++
++    it("does not create the STOP file as a side effect", async () => {
++      const stopPath = join(STOP_STATUS_DIR, "STOP");
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      // STOP must still be absent on disk after the status check.
++      const { existsSync } = await import("fs");
++      expect(existsSync(stopPath)).toBe(false);
++    });
++
++    it("does not remove the STOP file as a side effect", async () => {
++      const stopPath = join(STOP_STATUS_DIR, "STOP");
++      writeFileSync(stopPath, "");
++      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(0);
++      const { existsSync } = await import("fs");
++      expect(existsSync(stopPath)).toBe(true);
++    });
++
++    it("rejects --status combined with --force", async () => {
++      const result = await runCli(["stop", "--status", "--force"], STOP_STATUS_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--status and --force are mutually exclusive",
++      );
++    });
++
++    it("is advertised in --help output", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("--status");
++      expect(result.stdout).toContain("create/remove nothing");
++    });
++  });
++
+   describe("log --lines", () => {
+     const LOG_TEST_DIR = join(import.meta.dir, "fixtures", "log_lines_test");
+ 
