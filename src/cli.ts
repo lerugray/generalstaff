@@ -32,6 +32,7 @@ import {
   addTask,
   markTaskDone,
   markTaskPending,
+  removeTask,
   countTasks,
   TasksLoadError,
   TaskValidationError,
@@ -134,6 +135,8 @@ Usage:
     Example: generalstaff task add --project=myapp "Fix login bug"
   generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
     Example: generalstaff task done --project=myapp --task=my-042
+  generalstaff task rm --project=<id> --task=<task-id>    Delete a task from tasks.json
+    Example: generalstaff task rm --project=myapp --task=my-042
   generalstaff task count [--project=<id>]                Report pending vs done counts
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
@@ -700,6 +703,49 @@ switch (command) {
       } else {
         console.log(`Marked ${result.task.id} as done: ${result.task.title}`);
       }
+    } else if (sub === "rm") {
+      const { values: rmValues } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          task: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!rmValues.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      if (!rmValues.task) {
+        console.error("Error: --task=<task-id> is required");
+        process.exit(1);
+      }
+      let result;
+      try {
+        result = await removeTask(rmValues.project, rmValues.task);
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (result.kind === "project_not_found") {
+        console.error(
+          `Error: no tasks file for project '${rmValues.project}' (${result.path})`,
+        );
+        process.exit(1);
+      } else if (result.kind === "task_not_found") {
+        console.error(
+          `Error: task '${rmValues.task}' not found in project '${rmValues.project}'`,
+        );
+        if (result.availableIds.length > 0) {
+          console.error(`  Available: ${result.availableIds.join(", ")}`);
+        }
+        process.exit(1);
+      } else {
+        console.log(`Removed ${result.task.id}: ${result.task.title}`);
+      }
     } else if (sub === "count") {
       const { values: countValues } = parseArgs({
         args: args.slice(2),
@@ -735,10 +781,11 @@ switch (command) {
       }
     } else {
       console.error(
-        "Error: task subcommand required (list, add, done, or count)\n" +
+        "Error: task subcommand required (list, add, done, rm, or count)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
           "         generalstaff task done --project=<id> --task=<task-id>\n" +
+          "         generalstaff task rm --project=<id> --task=<task-id>\n" +
           "         generalstaff task count [--project=<id>]",
       );
       process.exit(1);

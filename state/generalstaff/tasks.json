@@ -692,7 +692,7 @@
   {
     "id": "gs-141",
     "title": "Add a 'generalstaff task rm --project=<id> --task=<task-id>' subcommand in src/cli.ts that deletes a task from tasks.json. Mirrors task done/cycle-redo error handling: print 'Error: task X not found' with Available: list, 'Error: no tasks file for project Y' when the project state dir is missing. Implement removeTask in src/tasks.ts returning the same discriminated-union kind as markTaskDone. Include tests for success, task-not-found, project-not-found, and verify the file is rewritten without the removed entry (other tasks preserved).",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
