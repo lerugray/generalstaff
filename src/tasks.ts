@@ -21,6 +21,13 @@ export class TasksLoadError extends Error {
   }
 }
 
+export class TaskValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TaskValidationError";
+  }
+}
+
 export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
   const path = tasksPath(projectId);
   if (!existsSync(path)) return [];
@@ -89,12 +96,16 @@ export async function addTask(
   title: string,
   priority = 2,
 ): Promise<GreenfieldTask> {
+  const trimmed = title.trim();
+  if (!trimmed) {
+    throw new TaskValidationError("task title cannot be empty");
+  }
   const path = tasksPath(projectId);
   const existing = await loadTasks(projectId);
   const prefix = deriveTaskIdPrefix(projectId, existing);
   const task: GreenfieldTask = {
     id: nextTaskId(existing, prefix),
-    title,
+    title: trimmed,
     status: "pending",
     priority,
   };

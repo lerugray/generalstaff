@@ -16,6 +16,7 @@ import {
   addTask,
   markTaskDone,
   TasksLoadError,
+  TaskValidationError,
 } from "../src/tasks";
 import type { GreenfieldTask } from "../src/types";
 
@@ -211,6 +212,33 @@ describe("tasks module", () => {
       const path = join(TEST_DIR, "state", "fresh", "tasks.json");
       expect(existsSync(path)).toBe(true);
     });
+
+    it("rejects an empty title with TaskValidationError", async () => {
+      await expect(addTask("myproj", "")).rejects.toBeInstanceOf(
+        TaskValidationError,
+      );
+      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
+      expect(existsSync(path)).toBe(false);
+    });
+
+    it("rejects a whitespace-only title with TaskValidationError", async () => {
+      await expect(addTask("myproj", "   \t  \n")).rejects.toMatchObject({
+        name: "TaskValidationError",
+        message: "task title cannot be empty",
+      });
+    });
+
+    it("trims surrounding whitespace from a valid title", async () => {
+      const task = await addTask("myproj", "  padded title  ");
+      expect(task.title).toBe("padded title");
+    });
+
+    it("accepts a very long title (>500 chars) at the library layer", async () => {
+      const long = "x".repeat(600);
+      const task = await addTask("myproj", long);
+      expect(task.title).toBe(long);
+      expect(task.title.length).toBe(600);
+    });
   });
 
   describe("markTaskDone", () => {
@@ -351,7 +379,41 @@ describe("CLI task command", () => {
         TEST_DIR,
       );
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("task title is required");
+      expect(result.stderr).toContain("task title cannot be empty");
+    });
+
+    it("errors when title is an empty string", async () => {
+      const result = await runCli(
+        ["task", "add", "--project=proj", ""],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("task title cannot be empty");
+    });
+
+    it("errors when title is whitespace-only", async () => {
+      const result = await runCli(
+        ["task", "add", "--project=proj", "   "],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("task title cannot be empty");
+    });
+
+    it("warns but still adds when title exceeds 500 characters", async () => {
+      const long = "x".repeat(600);
+      const result = await runCli(
+        ["task", "add", "--project=proj", long],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stderr).toContain("600 characters");
+      expect(result.stderr).toContain("over 500");
+      expect(result.stdout).toContain("Added ");
+      const stored = JSON.parse(
+        readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
+      );
+      expect(stored[stored.length - 1].title.length).toBe(600);
     });
 
     it("appends a new task to tasks.json", async () => {

@@ -19,7 +19,14 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
-import { loadTasks, pendingTasks, addTask, markTaskDone, TasksLoadError } from "./tasks";
+import {
+  loadTasks,
+  pendingTasks,
+  addTask,
+  markTaskDone,
+  TasksLoadError,
+  TaskValidationError,
+} from "./tasks";
 import {
   buildFleetSummary,
   computeDiskUsage,
@@ -404,8 +411,15 @@ switch (command) {
       }
       const title = taskPositionals.join(" ").trim();
       if (!title) {
-        console.error("Error: task title is required\n  Usage: generalstaff task add --project=<id> <title>");
+        console.error(
+          "Error: task title cannot be empty\n  Usage: generalstaff task add --project=<id> <title>",
+        );
         process.exit(1);
+      }
+      if (title.length > 500) {
+        console.error(
+          `Warning: task title is ${title.length} characters (over 500); consider shortening.`,
+        );
       }
       let priority = 2;
       if (taskValues.priority !== undefined) {
@@ -420,6 +434,10 @@ switch (command) {
       try {
         task = await addTask(taskValues.project, title, priority);
       } catch (err) {
+        if (err instanceof TaskValidationError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
         if (err instanceof TasksLoadError) {
           console.error(`Error: ${err.message}`);
           process.exit(1);
