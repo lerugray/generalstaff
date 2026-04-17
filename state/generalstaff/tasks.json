@@ -344,7 +344,7 @@
   {
     "id": "gs-083",
     "title": "Add a 'generalstaff digest --latest' flag that prints the absolute path of the most recently modified digest file in digests/, or a clear message if no digest exists. Add tests covering the happy path, empty directory, and filter compatibility with --json/--list.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

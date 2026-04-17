@@ -807,6 +807,90 @@ projects:
         expect(result.stdout.trim()).toBe("null");
       });
     });
+
+    describe("--path", () => {
+      it("prints absolute path of the latest digest", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260415_100000.md"), "OLD\n");
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_150000.md"), "NEW\n");
+        const result = await runCli(["digest", "--latest", "--path"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const out = result.stdout.trim();
+        expect(out).toBe(join(DIGEST_DIR, "digest_20260416_150000.md"));
+        expect(out).not.toContain("NEW");
+      });
+
+      it("prints clear message when digests dir is empty", async () => {
+        const result = await runCli(["digest", "--latest", "--path"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("prints clear message when digests dir does not exist", async () => {
+        rmSync(DIGEST_DIR, { recursive: true, force: true });
+        const result = await runCli(["digest", "--latest", "--path"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("prints path for --date", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), "MORNING\n");
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), "EVENING\n");
+        const result = await runCli(
+          ["digest", "--date=20260416", "--path"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.trim()).toBe(
+          join(DIGEST_DIR, "digest_20260416_090000.md"),
+        );
+      });
+
+      it("prints all paths newest-first with --list", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), "A\n");
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), "B\n");
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), "C\n");
+        const result = await runCli(["digest", "--list", "--path"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const lines = result.stdout.trim().split("\n");
+        expect(lines).toEqual([
+          join(DIGEST_DIR, "digest_20260416_180000.md"),
+          join(DIGEST_DIR, "digest_20260416_090000.md"),
+          join(DIGEST_DIR, "digest_20260415_120000.md"),
+        ]);
+      });
+
+      it("--list --path prints clear message when empty", async () => {
+        const result = await runCli(["digest", "--list", "--path"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("--latest --path --json emits JSON string", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_100000.md"), "X\n");
+        const result = await runCli(
+          ["digest", "--latest", "--path", "--json"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toBe(
+          join(DIGEST_DIR, "digest_20260416_100000.md"),
+        );
+      });
+
+      it("--list --path --json emits JSON array", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), "A\n");
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), "B\n");
+        const result = await runCli(
+          ["digest", "--list", "--path", "--json"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual([
+          join(DIGEST_DIR, "digest_20260416_180000.md"),
+          join(DIGEST_DIR, "digest_20260415_120000.md"),
+        ]);
+      });
+    });
   });
 
   describe("summary --format=json", () => {
