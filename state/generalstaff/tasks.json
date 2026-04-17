@@ -482,7 +482,7 @@
   {
     "id": "gs-106",
     "title": "Add a test for invokeReviewerWithFallback covering the Ollama-unreachable-to-OpenRouter-fallback scenario: primary=ollama returns '[REVIEWER ERROR] Ollama fetch failed...', fallback=openrouter returns a well-formed response, verify final rawResponse is the openrouter content AND the onFallback callback fired with the primary error. Uses mocked fetch.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
