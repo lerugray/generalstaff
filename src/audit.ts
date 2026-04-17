@@ -408,7 +408,14 @@ function estimateTokens(chars: number): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-async function readReviewerInvoked(filePath: string): Promise<ProgressEntry[]> {
+// Load and filter ProgressEntry objects from a single project's PROGRESS.jsonl.
+// Missing file returns []. Malformed lines are skipped silently; entries that
+// don't pass isProgressEntry are discarded before filterFn sees them.
+export async function loadProgressEvents(
+  projectId: string,
+  filterFn: (entry: ProgressEntry) => boolean,
+): Promise<ProgressEntry[]> {
+  const filePath = progressPath(projectId);
   if (!existsSync(filePath)) return [];
   const content = await readFile(filePath, "utf8");
   const out: ProgressEntry[] = [];
@@ -416,7 +423,7 @@ async function readReviewerInvoked(filePath: string): Promise<ProgressEntry[]> {
     if (!line.trim()) continue;
     try {
       const parsed = JSON.parse(line);
-      if (isProgressEntry(parsed) && parsed.event === "reviewer_invoked") {
+      if (isProgressEntry(parsed) && filterFn(parsed)) {
         out.push(parsed);
       }
     } catch { /* skip malformed */ }
@@ -436,12 +443,13 @@ export async function summarizeCosts(
 
   const { readdirSync } = require("fs");
   const entries: ProgressEntry[] = [];
+  const isReviewerInvoked = (e: ProgressEntry) => e.event === "reviewer_invoked";
 
   if (projectId) {
-    entries.push(...(await readReviewerInvoked(join(stateDir, projectId, "PROGRESS.jsonl"))));
+    entries.push(...(await loadProgressEvents(projectId, isReviewerInvoked)));
   } else {
     for (const dir of readdirSync(stateDir)) {
-      entries.push(...(await readReviewerInvoked(join(stateDir, dir, "PROGRESS.jsonl"))));
+      entries.push(...(await loadProgressEvents(dir, isReviewerInvoked)));
     }
   }
 

@@ -326,7 +326,7 @@
   {
     "id": "gs-080",
     "title": "In src/audit.ts, add a function loadProgressEvents(projectId, filterFn) that returns a filtered array of parsed ProgressEntry objects from PROGRESS.jsonl. Use it to refactor existing readCycleEnds/summarizeCosts for consistency. Add tests covering filter matches, empty file, malformed lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
