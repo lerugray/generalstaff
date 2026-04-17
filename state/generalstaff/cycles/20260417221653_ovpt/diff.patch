@@ -1,0 +1,128 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index c123f87..4a48f51 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -114,9 +114,10 @@ Usage:
+     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+     Example: generalstaff history --outcome=verification_failed  # show only failed cycles
+ 
+-  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>] [--since=<ts>]
++  generalstaff log [--project=<id>] [--lines=<n>|--tail] [--level=error] [--grep=<pattern>] [--since=<ts>]
+                                                           Tail PROGRESS.jsonl
+     Example: generalstaff log --project=myapp --lines=50
++    Example: generalstaff log --tail                     # equivalent to --lines=9999, show everything
+     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
+     Example: generalstaff log --grep='verified|weak'     # case-insensitive regex over event + data
+     Example: generalstaff log --since=1h                 # last hour only (also: 30m, 2d, or ISO timestamp)
+@@ -426,13 +427,19 @@ switch (command) {
+       args: args.slice(1),
+       options: {
+         project: { type: "string" },
+-        lines: { type: "string", default: "20" },
++        lines: { type: "string" },
++        tail: { type: "boolean", default: false },
+         level: { type: "string" },
+         grep: { type: "string" },
+         since: { type: "string" },
+       },
+       allowPositionals: false,
+     });
++    if (values.tail && values.lines !== undefined) {
++      console.error("Error: --tail and --lines are mutually exclusive");
++      process.exit(2);
++    }
++    const linesValue = values.tail ? 9999 : parseInt(values.lines ?? "20", 10);
+     if (values.level !== undefined && values.level !== "error") {
+       console.error(`Error: --level must be 'error' (got '${values.level}')`);
+       process.exit(2);
+@@ -455,7 +462,7 @@ switch (command) {
+         process.exit(2);
+       }
+     }
+-    await tailProgressLog(values.project, parseInt(values.lines!, 10), {
++    await tailProgressLog(values.project, linesValue, {
+       level: values.level as "error" | undefined,
+       grep: grepRegex,
+       sinceMs,
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9e710be..39d0faa 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -880,7 +880,7 @@
+   {
+     "id": "gs-147",
+     "title": "Add a 'generalstaff log --tail' alias flag that is equivalent to --lines=9999 — convenience for 'show me everything' without counting. Parse flag in cli.ts log command, when set override the parsed --lines value. If both --tail and --lines=N are passed, error 'Error: --tail and --lines are mutually exclusive'. Add tests covering each combination and verify filter flags (--level, --grep, --since) still compose with --tail.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index d1fb63c..35b3bb2 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -506,6 +506,64 @@ dispatcher:
+       expect(outputLines[0]).toContain("c-005");
+       expect(outputLines[19]).toContain("c-024");
+     });
++
++    it("--tail shows everything (equivalent to --lines=9999)", async () => {
++      const result = await runCli(["log", "--project=proj-log", "--tail"], LOG_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      const outputLines = result.stdout.trim().split("\n");
++      expect(outputLines).toHaveLength(25);
++      expect(outputLines[0]).toContain("c-000");
++      expect(outputLines[24]).toContain("c-024");
++    });
++
++    it("--tail and --lines=N together is rejected as mutually exclusive", async () => {
++      const result = await runCli(
++        ["log", "--project=proj-log", "--tail", "--lines=5"],
++        LOG_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(2);
++      expect(result.stderr).toContain("--tail and --lines are mutually exclusive");
++    });
++
++    it("--tail composes with --grep filter", async () => {
++      // grep is case-insensitive over event + data JSON. Match against start_sha
++      // values 'sha2', 'sha20'..'sha24' → 6 entries (indices 2, 20..24).
++      const result = await runCli(
++        ["log", "--project=proj-log", "--tail", "--grep=sha2"],
++        LOG_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const outputLines = result.stdout.trim().split("\n").filter((l) => l.length > 0);
++      expect(outputLines).toHaveLength(6);
++      expect(outputLines[0]).toContain("c-002");
++      expect(outputLines[5]).toContain("c-024");
++    });
++
++    it("--tail composes with --since filter", async () => {
++      // Entries have timestamps 2026-04-16T12:00..12:24 UTC.
++      // Filter to entries at/after 12:20 → indices 20..24 (5 entries).
++      const result = await runCli(
++        ["log", "--project=proj-log", "--tail", "--since=2026-04-16T12:20:00.000Z"],
++        LOG_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const outputLines = result.stdout.trim().split("\n").filter((l) => l.length > 0);
++      expect(outputLines).toHaveLength(5);
++      expect(outputLines[0]).toContain("c-020");
++      expect(outputLines[4]).toContain("c-024");
++    });
++
++    it("--tail composes with --level=error filter", async () => {
++      const result = await runCli(
++        ["log", "--project=proj-log", "--tail", "--level=error"],
++        LOG_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      // All fixture entries are cycle_start (not error events); expect the
++      // single-project empty-matches message, and no cycle_start lines.
++      expect(result.stdout).toContain("No error-level entries for project");
++      expect(result.stdout).not.toContain("cycle_start");
++    });
+   });
+ 
+   describe("version command", () => {
