@@ -1,0 +1,187 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 8f09b3c..3452686 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -19,7 +19,14 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+-import { loadTasks, pendingTasks, addTask, markTaskDone, TasksLoadError } from "./tasks";
++import {
++  loadTasks,
++  pendingTasks,
++  addTask,
++  markTaskDone,
++  TasksLoadError,
++  TaskValidationError,
++} from "./tasks";
+ import {
+   buildFleetSummary,
+   computeDiskUsage,
+@@ -404,9 +411,16 @@ switch (command) {
+       }
+       const title = taskPositionals.join(" ").trim();
+       if (!title) {
+-        console.error("Error: task title is required\n  Usage: generalstaff task add --project=<id> <title>");
++        console.error(
++          "Error: task title cannot be empty\n  Usage: generalstaff task add --project=<id> <title>",
++        );
+         process.exit(1);
+       }
++      if (title.length > 500) {
++        console.error(
++          `Warning: task title is ${title.length} characters (over 500); consider shortening.`,
++        );
++      }
+       let priority = 2;
+       if (taskValues.priority !== undefined) {
+         const parsed = parseInt(taskValues.priority, 10);
+@@ -420,6 +434,10 @@ switch (command) {
+       try {
+         task = await addTask(taskValues.project, title, priority);
+       } catch (err) {
++        if (err instanceof TaskValidationError) {
++          console.error(`Error: ${err.message}`);
++          process.exit(1);
++        }
+         if (err instanceof TasksLoadError) {
+           console.error(`Error: ${err.message}`);
+           process.exit(1);
+diff --git a/src/tasks.ts b/src/tasks.ts
+index e0f3b84..a142d61 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -21,6 +21,13 @@ export class TasksLoadError extends Error {
+   }
+ }
+ 
++export class TaskValidationError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "TaskValidationError";
++  }
++}
++
+ export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
+   const path = tasksPath(projectId);
+   if (!existsSync(path)) return [];
+@@ -89,12 +96,16 @@ export async function addTask(
+   title: string,
+   priority = 2,
+ ): Promise<GreenfieldTask> {
++  const trimmed = title.trim();
++  if (!trimmed) {
++    throw new TaskValidationError("task title cannot be empty");
++  }
+   const path = tasksPath(projectId);
+   const existing = await loadTasks(projectId);
+   const prefix = deriveTaskIdPrefix(projectId, existing);
+   const task: GreenfieldTask = {
+     id: nextTaskId(existing, prefix),
+-    title,
++    title: trimmed,
+     status: "pending",
+     priority,
+   };
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0a80f7c..a60317b 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -392,7 +392,7 @@
+   {
+     "id": "gs-091",
+     "title": "Validate 'generalstaff task add' input: reject empty titles or whitespace-only titles with a clear error message ('task title cannot be empty') and non-zero exit. Add tests covering valid title, empty string, whitespace-only, and very long titles (accept but warn if over 500 chars).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index 418122e..f2e339c 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -16,6 +16,7 @@ import {
+   addTask,
+   markTaskDone,
+   TasksLoadError,
++  TaskValidationError,
+ } from "../src/tasks";
+ import type { GreenfieldTask } from "../src/types";
+ 
+@@ -211,6 +212,33 @@ describe("tasks module", () => {
+       const path = join(TEST_DIR, "state", "fresh", "tasks.json");
+       expect(existsSync(path)).toBe(true);
+     });
++
++    it("rejects an empty title with TaskValidationError", async () => {
++      await expect(addTask("myproj", "")).rejects.toBeInstanceOf(
++        TaskValidationError,
++      );
++      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
++      expect(existsSync(path)).toBe(false);
++    });
++
++    it("rejects a whitespace-only title with TaskValidationError", async () => {
++      await expect(addTask("myproj", "   \t  \n")).rejects.toMatchObject({
++        name: "TaskValidationError",
++        message: "task title cannot be empty",
++      });
++    });
++
++    it("trims surrounding whitespace from a valid title", async () => {
++      const task = await addTask("myproj", "  padded title  ");
++      expect(task.title).toBe("padded title");
++    });
++
++    it("accepts a very long title (>500 chars) at the library layer", async () => {
++      const long = "x".repeat(600);
++      const task = await addTask("myproj", long);
++      expect(task.title).toBe(long);
++      expect(task.title.length).toBe(600);
++    });
+   });
+ 
+   describe("markTaskDone", () => {
+@@ -351,7 +379,41 @@ describe("CLI task command", () => {
+         TEST_DIR,
+       );
+       expect(result.exitCode).toBe(1);
+-      expect(result.stderr).toContain("task title is required");
++      expect(result.stderr).toContain("task title cannot be empty");
++    });
++
++    it("errors when title is an empty string", async () => {
++      const result = await runCli(
++        ["task", "add", "--project=proj", ""],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("task title cannot be empty");
++    });
++
++    it("errors when title is whitespace-only", async () => {
++      const result = await runCli(
++        ["task", "add", "--project=proj", "   "],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("task title cannot be empty");
++    });
++
++    it("warns but still adds when title exceeds 500 characters", async () => {
++      const long = "x".repeat(600);
++      const result = await runCli(
++        ["task", "add", "--project=proj", long],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stderr).toContain("600 characters");
++      expect(result.stderr).toContain("over 500");
++      expect(result.stdout).toContain("Added ");
++      const stored = JSON.parse(
++        readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
++      );
++      expect(stored[stored.length - 1].title.length).toBe(600);
+     });
+ 
+     it("appends a new task to tasks.json", async () => {
