@@ -1,0 +1,135 @@
+diff --git a/src/notify.ts b/src/notify.ts
+index 23887c2..59c7e0e 100644
+--- a/src/notify.ts
++++ b/src/notify.ts
+@@ -95,9 +95,16 @@ export function formatSessionMessage(p: SessionNotificationParams): string {
+ 
+ /** Telegram sendMessage accepts up to 4096 UTF-8 chars. Truncate with
+  *  a marker so the user knows to read the digest file for the full cut. */
+-function truncateForTelegram(text: string, limit = 3900): string {
++export function truncateForTelegram(text: string, limit = 3900): string {
+   if (text.length <= limit) return text;
+-  return text.slice(0, limit - 20) + "\n\n[...truncated]";
++  let cut = limit - 20;
++  // Avoid splitting a UTF-16 surrogate pair. A high surrogate (0xD800-
++  // 0xDBFF) at the final slice index would be separated from its
++  // trailing low surrogate, producing a lone surrogate that serializes
++  // to invalid UTF-8 bytes when the message is POSTed as JSON.
++  const lastCode = text.charCodeAt(cut - 1);
++  if (lastCode >= 0xd800 && lastCode <= 0xdbff) cut -= 1;
++  return text.slice(0, cut) + "\n\n[...truncated]";
+ }
+ 
+ /** Sends a single message via the Telegram Bot API. Returns void —
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index b0d2fd6..8f14fbd 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -620,7 +620,7 @@
+   {
+     "id": "gs-129",
+     "title": "Add test coverage for src/notify.ts truncateForTelegram: length always <= 3900, marker present, UTF-8 multi-byte chars at boundary don't produce invalid bytes (em-dashes/emoji edge cases).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/notify.test.ts b/tests/notify.test.ts
+index 2b60ac9..2a44ba1 100644
+--- a/tests/notify.test.ts
++++ b/tests/notify.test.ts
+@@ -6,6 +6,7 @@ import {
+   loadTelegramCredentials,
+   notifySessionEnd,
+   sendTelegramMessage,
++  truncateForTelegram,
+   type SessionNotificationParams,
+ } from "../src/notify";
+ 
+@@ -181,6 +182,86 @@ describe("formatSessionMessage", () => {
+   });
+ });
+ 
++describe("truncateForTelegram", () => {
++  it("returns short text unchanged", () => {
++    const text = "hello world";
++    expect(truncateForTelegram(text)).toBe(text);
++  });
++
++  it("returns text exactly at the limit unchanged", () => {
++    const text = "a".repeat(3900);
++    const result = truncateForTelegram(text);
++    expect(result).toBe(text);
++    expect(result.length).toBe(3900);
++  });
++
++  it("truncates text over the limit to no more than 3900 chars", () => {
++    const text = "a".repeat(10000);
++    const result = truncateForTelegram(text);
++    expect(result.length).toBeLessThanOrEqual(3900);
++  });
++
++  it("includes the truncation marker when the input is truncated", () => {
++    const text = "a".repeat(5000);
++    const result = truncateForTelegram(text);
++    expect(result).toContain("[...truncated]");
++  });
++
++  it("omits the truncation marker when the input is short enough", () => {
++    const result = truncateForTelegram("plenty of room");
++    expect(result).not.toContain("[...truncated]");
++  });
++
++  it("respects a custom limit", () => {
++    const result = truncateForTelegram("x".repeat(500), 100);
++    expect(result.length).toBeLessThanOrEqual(100);
++    expect(result).toContain("[...truncated]");
++  });
++
++  it("handles em-dashes at the truncation boundary without corruption", () => {
++    // Em-dash (U+2014) is a single UTF-16 code unit but 3 UTF-8 bytes.
++    // Truncation should still produce a round-trippable UTF-8 string.
++    const text = "—".repeat(5000);
++    const result = truncateForTelegram(text);
++    const roundTripped = Buffer.from(result, "utf8").toString("utf8");
++    expect(roundTripped).toBe(result);
++    expect(result).toContain("[...truncated]");
++  });
++
++  it("does not leave a lone surrogate when an emoji straddles the truncation boundary", () => {
++    // 🎉 (U+1F389) is a surrogate pair in UTF-16: [0xD83C, 0xDF89]. If
++    // truncation lands between the high and low surrogate, the result
++    // contains a lone surrogate that produces U+FFFD (replacement char)
++    // when round-tripped through UTF-8 bytes.
++    //
++    // Construct input so that the default slice position (limit - 20 =
++    // 3880) falls between the two code units of an emoji: pad so the
++    // high surrogate lands at index 3879 and the low at index 3880.
++    const pad = "a".repeat(3879);
++    const text = pad + "🎉".repeat(100);
++    const result = truncateForTelegram(text);
++
++    const roundTripped = Buffer.from(result, "utf8").toString("utf8");
++    expect(roundTripped).toBe(result);
++
++    // No lone surrogate should remain anywhere in the output.
++    for (let i = 0; i < result.length; i++) {
++      const code = result.charCodeAt(i);
++      if (code >= 0xd800 && code <= 0xdbff) {
++        const next = result.charCodeAt(i + 1);
++        expect(next).toBeGreaterThanOrEqual(0xdc00);
++        expect(next).toBeLessThanOrEqual(0xdfff);
++        i++;
++      } else {
++        expect(code < 0xdc00 || code > 0xdfff).toBe(true);
++      }
++    }
++
++    expect(result.length).toBeLessThanOrEqual(3900);
++    expect(result).toContain("[...truncated]");
++  });
++});
++
+ describe("sendTelegramMessage", () => {
+   const originalFetch = globalThis.fetch;
+ 
