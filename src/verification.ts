@@ -15,7 +15,7 @@ import type {
 // Commands that are effectively no-ops — flag as verified_weak
 const NOOP_COMMANDS = ["true", ":", "echo", "exit 0"];
 
-function isNoopCommand(command: string): boolean {
+export function isNoopCommand(command: string): boolean {
   const trimmed = command.trim();
   return NOOP_COMMANDS.some(
     (noop) => trimmed === noop || trimmed.startsWith(noop + " "),
