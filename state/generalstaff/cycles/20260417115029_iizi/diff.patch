@@ -1,0 +1,256 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 7cf0893..3c47511 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -24,6 +24,7 @@ import {
+   pendingTasks,
+   addTask,
+   markTaskDone,
++  countTasks,
+   TasksLoadError,
+   TaskValidationError,
+ } from "./tasks";
+@@ -106,6 +107,9 @@ Usage:
+     Example: generalstaff task add --project=myapp "Fix login bug"
+   generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
+     Example: generalstaff task done --project=myapp --task=my-042
++  generalstaff task count [--project=<id>]                Report pending vs done counts
++    Example: generalstaff task count                     # all projects
++    Example: generalstaff task count --project=myapp     # single project
+ 
+   generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json]
+                                                           Print a session digest to stdout, or list all
+@@ -553,12 +557,46 @@ switch (command) {
+       } else {
+         console.log(`Marked ${result.task.id} as done: ${result.task.title}`);
+       }
++    } else if (sub === "count") {
++      const { values: countValues } = parseArgs({
++        args: args.slice(2),
++        options: { project: { type: "string" } },
++        allowPositionals: false,
++      });
++      let targets: string[];
++      if (countValues.project) {
++        targets = [countValues.project];
++      } else {
++        const all = await loadProjects();
++        if (all.length === 0) {
++          console.log("No projects registered.");
++          break;
++        }
++        targets = all.map((p) => p.id);
++      }
++      for (const id of targets) {
++        let tasks;
++        try {
++          tasks = await loadTasks(id);
++        } catch (err) {
++          if (err instanceof TasksLoadError) {
++            console.error(`Error: ${err.message}`);
++            process.exit(1);
++          }
++          throw err;
++        }
++        const c = countTasks(tasks);
++        console.log(
++          `${id}: ${c.pending} pending, ${c.done} done (${c.total} total)`,
++        );
++      }
+     } else {
+       console.error(
+-        "Error: task subcommand required (list, add, or done)\n" +
++        "Error: task subcommand required (list, add, done, or count)\n" +
+           "  Usage: generalstaff task list --project=<id>\n" +
+           "         generalstaff task add --project=<id> <title>\n" +
+-          "         generalstaff task done --project=<id> --task=<task-id>",
++          "         generalstaff task done --project=<id> --task=<task-id>\n" +
++          "         generalstaff task count [--project=<id>]",
+       );
+       process.exit(1);
+     }
+diff --git a/src/tasks.ts b/src/tasks.ts
+index a142d61..a96be4f 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -53,6 +53,20 @@ export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {
+   return tasks.filter((t) => t.status !== "done" && t.status !== "skipped");
+ }
+ 
++export interface TaskCounts {
++  pending: number;
++  done: number;
++  total: number;
++}
++
++export function countTasks(tasks: GreenfieldTask[]): TaskCounts {
++  return {
++    pending: pendingTasks(tasks).length,
++    done: tasks.filter((t) => t.status === "done").length,
++    total: tasks.length,
++  };
++}
++
+ function escapeRegex(s: string): string {
+   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0310bfb..60e648a 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -422,7 +422,7 @@
+   {
+     "id": "gs-096",
+     "title": "Add a 'generalstaff task count [--project=<id>]' subcommand that reports the number of pending vs done tasks per project (or for all projects when --project is omitted). Output format: 'myproj: 5 pending, 12 done (17 total)'. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index f2e339c..6eb4531 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -15,6 +15,7 @@ import {
+   nextTaskId,
+   addTask,
+   markTaskDone,
++  countTasks,
+   TasksLoadError,
+   TaskValidationError,
+ } from "../src/tasks";
+@@ -241,6 +242,24 @@ describe("tasks module", () => {
+     });
+   });
+ 
++  describe("countTasks", () => {
++    it("returns zeros for an empty list", () => {
++      expect(countTasks([])).toEqual({ pending: 0, done: 0, total: 0 });
++    });
++
++    it("counts pending, done, and total; skipped adds only to total", () => {
++      const tasks: GreenfieldTask[] = [
++        { id: "a-1", title: "A", status: "pending", priority: 1 },
++        { id: "a-2", title: "B", status: "pending", priority: 1 },
++        { id: "a-3", title: "C", status: "in_progress", priority: 1 },
++        { id: "a-4", title: "D", status: "done", priority: 1 },
++        { id: "a-5", title: "E", status: "done", priority: 1 },
++        { id: "a-6", title: "F", status: "skipped", priority: 1 },
++      ];
++      expect(countTasks(tasks)).toEqual({ pending: 3, done: 2, total: 6 });
++    });
++  });
++
+   describe("markTaskDone", () => {
+     it("returns project_not_found when tasks.json is missing", async () => {
+       const result = await markTaskDone("nope", "x-1");
+@@ -534,6 +553,102 @@ describe("CLI task command", () => {
+     });
+   });
+ 
++  describe("task count", () => {
++    it("reports pending, done, and total for a single project", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "pending", priority: 1 },
++        { id: "gs-002", title: "b", status: "in_progress", priority: 1 },
++        { id: "gs-003", title: "c", status: "done", priority: 1 },
++        { id: "gs-004", title: "d", status: "done", priority: 1 },
++        { id: "gs-005", title: "e", status: "skipped", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await runCli(
++        ["task", "count", "--project=proj"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout.trim()).toBe("proj: 2 pending, 2 done (5 total)");
++    });
++
++    it("reports all-zero counts when tasks.json is missing for --project", async () => {
++      const result = await runCli(
++        ["task", "count", "--project=ghost"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout.trim()).toBe("ghost: 0 pending, 0 done (0 total)");
++    });
++
++    it("surfaces malformed JSON as an error", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        "{bad json",
++      );
++      const result = await runCli(
++        ["task", "count", "--project=proj"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("Failed to load tasks");
++    });
++
++    it("counts across all projects when --project is omitted", async () => {
++      const PROJECTS_YAML = `
++projects:
++  - id: proj
++    path: /tmp/proj
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - README.md
++  - id: other
++    path: /tmp/other
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - README.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++      writeFileSync(join(TEST_DIR, "projects.yaml"), PROJECTS_YAML);
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "a", status: "pending", priority: 1 },
++          { id: "gs-002", title: "b", status: "done", priority: 1 },
++        ]),
++      );
++      mkdirSync(join(TEST_DIR, "state", "other"), { recursive: true });
++      writeFileSync(
++        join(TEST_DIR, "state", "other", "tasks.json"),
++        JSON.stringify([
++          { id: "ot-001", title: "x", status: "done", priority: 1 },
++          { id: "ot-002", title: "y", status: "done", priority: 1 },
++          { id: "ot-003", title: "z", status: "pending", priority: 1 },
++        ]),
++      );
++      const result = await runCli(["task", "count"], TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("proj: 1 pending, 1 done (2 total)");
++      expect(result.stdout).toContain("other: 1 pending, 2 done (3 total)");
++    });
++  });
++
+   describe("unknown subcommand", () => {
+     it("errors when no subcommand is given", async () => {
+       const result = await runCli(["task"], TEST_DIR);
+@@ -554,5 +669,6 @@ describe("CLI task command", () => {
+     expect(result.stdout).toContain("task list");
+     expect(result.stdout).toContain("task add");
+     expect(result.stdout).toContain("task done");
++    expect(result.stdout).toContain("task count");
+   });
+ });

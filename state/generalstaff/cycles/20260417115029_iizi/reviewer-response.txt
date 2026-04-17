@@ -1,0 +1,25 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with marked-done tasks, no scope drift, no hands-off violations, and evidence supports task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add a 'verify' command to the CLI that runs all verification tests",
+      "evidence": "Changes in src/cli.ts and src/commands.ts implement the 'verify' command",
+      "confidence": "high"
+    },
+    {
+      "task": "Implement verification logic in src/verify.ts",
+      "evidence": "Changes in src/verify.ts add verification functionality",
+      "confidence": "high"
+    },
+    {
+      "task": "Update the generalstaff task list to mark these tasks as done",
+      "evidence": "Task list shows these items marked as 'done'",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification output shows tests passed, confirming implementation success."
+}
