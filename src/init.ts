@@ -35,10 +35,10 @@ Project path: ${path}
 - What the bot commits (per-project git workflow)
 `;
 
-const YAML_SNIPPET = (id: string, path: string) =>
+const YAML_SNIPPET = (id: string, path: string, priority: number) =>
   `  - id: ${id}
     path: ${path}
-    priority: 2
+    priority: ${priority}
     engineer_command: "<TODO>"
     verification_command: "<TODO>"
     cycle_budget_minutes: 45
@@ -50,10 +50,25 @@ const YAML_SNIPPET = (id: string, path: string) =>
       - CLAUDE.md
       - "<TODO — add real hands-off patterns>"`;
 
+function templateTaskId(projectId: string): string {
+  return `${projectId}-001`;
+}
+
+function templateTask(projectId: string, priority: number) {
+  return {
+    id: templateTaskId(projectId),
+    title: `Describe first task for ${projectId} (edit me or run generalstaff task rm)`,
+    status: "pending" as const,
+    priority,
+  };
+}
+
 export async function initProject(
   projectId: string,
   projectPath: string,
+  options: { priority?: number } = {},
 ): Promise<void> {
+  const priority = options.priority ?? 2;
   const stateDir = join(getRootDir(), "state", projectId);
 
   if (existsSync(stateDir)) {
@@ -69,11 +84,18 @@ export async function initProject(
     MISSION_TEMPLATE(projectId, projectPath),
     "utf8",
   );
-  await writeFile(join(stateDir, "tasks.json"), "[]\n", "utf8");
+  const seeded = [templateTask(projectId, priority)];
+  await writeFile(
+    join(stateDir, "tasks.json"),
+    JSON.stringify(seeded, null, 2) + "\n",
+    "utf8",
+  );
 
   console.log(`Created state/${projectId}/`);
   console.log(`  MISSION.md  — edit to describe bot scope`);
-  console.log(`  tasks.json  — empty task list\n`);
+  console.log(
+    `  tasks.json  — seeded with 1 pending task (${templateTaskId(projectId)}, priority ${priority})\n`,
+  );
   console.log(`Add this to projects.yaml:\n`);
-  console.log(YAML_SNIPPET(projectId, projectPath));
+  console.log(YAML_SNIPPET(projectId, projectPath, priority));
 }

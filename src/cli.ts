@@ -84,9 +84,10 @@ Usage:
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
 
-  generalstaff init <path> [--id=<id>]                    Scaffold state dir for a new project
+  generalstaff init <path> [--id=<id>] [--priority=N]     Scaffold state dir for a new project
     Example: generalstaff init ./myapp
     Example: generalstaff init ../other-repo --id=other
+    Example: generalstaff init ./lowprio --priority=3   # seed template task at priority 3
 
   generalstaff stop [--force]                             Create STOP file (halt dispatcher)
     Example: generalstaff stop                          # halt before next cycle
@@ -1106,17 +1107,27 @@ switch (command) {
       args: args.slice(1),
       options: {
         id: { type: "string" },
+        priority: { type: "string" },
       },
       allowPositionals: true,
     });
     const projectPath = initPositionals[0];
     if (!projectPath) {
-      console.error("Error: project path is required\n  Usage: generalstaff init <path> [--id=<id>]");
+      console.error("Error: project path is required\n  Usage: generalstaff init <path> [--id=<id>] [--priority=N]");
       process.exit(1);
+    }
+    let initPriority = 2;
+    if (initValues.priority !== undefined) {
+      const parsed = parseInt(initValues.priority, 10);
+      if (isNaN(parsed) || parsed < 1 || String(parsed) !== initValues.priority.trim()) {
+        console.error("Error: --priority must be a positive integer");
+        process.exit(1);
+      }
+      initPriority = parsed;
     }
     const resolvedPath = resolve(projectPath);
     const projectId = initValues.id ?? basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
-    await initProject(projectId, resolvedPath);
+    await initProject(projectId, resolvedPath, { priority: initPriority });
     break;
   }
 

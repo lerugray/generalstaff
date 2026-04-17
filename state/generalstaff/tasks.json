@@ -867,7 +867,7 @@
   {
     "id": "gs-145",
     "title": "Improve src/init.ts scaffolding: accept a --priority=N flag (default 2) and emit it into the YAML snippet and into a first 'pending' template task written to tasks.json (instead of the current empty-array content). The template task title should read 'Describe first task for <project_id> (edit me or run generalstaff task rm)' with status pending and the given priority. Rationale: a fresh project with zero tasks produces 'no more work' on the first hasMoreWork check, so the bot never runs until the user hand-edits tasks.json. Wire through from cli.ts init. Add tests covering default priority, explicit priority, and the seeded task's shape.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

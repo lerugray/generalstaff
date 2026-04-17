@@ -60,14 +60,53 @@ describe("init command", () => {
     expect(mission).toContain("Bot scope");
   });
 
-  it("tasks.json is an empty array", async () => {
+  it("tasks.json is seeded with a pending template task at default priority 2", async () => {
     await runCli(["init", "/tmp/my-project", "--id=myproj"], TEST_DIR);
 
     const tasks = readFileSync(
       join(TEST_DIR, "state", "myproj", "tasks.json"),
       "utf8",
     );
-    expect(JSON.parse(tasks)).toEqual([]);
+    const parsed = JSON.parse(tasks);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].id).toBe("myproj-001");
+    expect(parsed[0].status).toBe("pending");
+    expect(parsed[0].priority).toBe(2);
+    expect(parsed[0].title).toContain("myproj");
+    expect(parsed[0].title).toContain("edit me");
+  });
+
+  it("accepts explicit --priority=N and propagates it into the seeded task + YAML snippet", async () => {
+    const result = await runCli(
+      ["init", "/tmp/my-project", "--id=myproj", "--priority=3"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("priority: 3");
+
+    const parsed = JSON.parse(
+      readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
+    );
+    expect(parsed[0].priority).toBe(3);
+  });
+
+  it("rejects non-positive --priority values", async () => {
+    const result = await runCli(
+      ["init", "/tmp/my-project", "--id=myproj", "--priority=0"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("positive integer");
+  });
+
+  it("rejects non-integer --priority values", async () => {
+    const result = await runCli(
+      ["init", "/tmp/my-project", "--id=myproj", "--priority=abc"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("positive integer");
   });
 
   it("prints a projects.yaml snippet", async () => {
