@@ -545,7 +545,7 @@ describe("runSession safeguards", () => {
     expect(result.execute_cycle_calls).toBe(1);
     expect(result.result_count).toBe(1);
     expect(String(result.captured)).toMatch(
-      /Cycle 1 completed: test-proj \u2014 verified \([^)]+ remaining\)/,
+      /Cycle 1 completed: test-proj \u2014 verified \(took [^,]+, [^)]+ remaining\)/,
     );
   }, 30_000);
 
