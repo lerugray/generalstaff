@@ -92,4 +92,9 @@ echo Exit code: %EXITCODE%
 echo Log:       %LOG%
 echo Summary:   digests\LAST_RUN.md
 
+REM Fire an end-of-session Telegram notification. Non-fatal: the script
+REM bails quietly if the bot token / chat_id aren't reachable, so an
+REM unrelated config issue never crashes a session.
+powershell -nologo -noprofile -ExecutionPolicy Bypass -File "scripts\notify_telegram.ps1" -ExitCode "%EXITCODE%" -BudgetMin "%BUDGET%" -LogPath "%LOG%" -DigestDir "digests"
+
 endlocal & exit /b %EXITCODE%
