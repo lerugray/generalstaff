@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task gs-151, no hands-off violations, and the diff provides strong evidence for task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Create src/providers/ollama.ts exporting createOllamaProvider(descriptor: ProviderDescriptor): LLMProvider that returns an object conforming to the LLMProvider interface from gs-150. invoke() posts to <host>/api/chat (mirror the shape already used by invokeOllamaReviewer in src/reviewer.ts) — model from descriptor.model, host defaults to http://localhost:11434, options.temperature defaults to 0, options.maxTokens maps to num_predict (default 800 — much smaller than reviewer's 8000 since digest-tier tasks are one-shot summaries). On HTTP non-2xx or fetch error return { content: '', error: '<message>' } rather than the [REVIEWER ERROR] sentinel — this path is NOT reviewer-shaped. Include a health() method returning ProviderHealth via a GET <host>/api/tags probe (reuse logic equivalent to src/ollama.ts checkOllamaReachable). Add tests in tests/providers.ollama.test.ts mocking globalThis.fetch: (a) happy path returns content, (b) non-2xx returns error, (c) fetch throws returns error, (d) host with trailing slash is normalized, (e) health() reachable=true on 200 from /api/tags, (f) health() reachable=false on fetch failure.",
+      "evidence": "The diff includes the creation of src/providers/ollama.ts with the createOllamaProvider function implementing the LLMProvider interface, including invoke() and health() methods as specified. It also includes tests in tests/providers.ollama.test.ts covering all the required scenarios.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) exited with code 0, indicating successful tests and type checking. The diff fully aligns with the task requirements and no unauthorized files were modified."
+}
