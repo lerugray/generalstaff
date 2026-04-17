@@ -62,7 +62,7 @@ dispatcher:
     cleanup();
   });
 
-  it("rejects empty hands_off with specific message", async () => {
+  it("rejects empty hands_off with specific message (names project + Rule 5)", async () => {
     const path = writeYaml(
       "no-handsoff.yaml",
       `
@@ -77,10 +77,12 @@ projects:
 `,
     );
     await expect(loadProjectsYaml(path)).rejects.toThrow("must not be empty");
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad"/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
     cleanup();
   });
 
-  it("rejects missing hands_off with 'required but missing'", async () => {
+  it("rejects missing hands_off with 'required but missing' (names project + Rule 5)", async () => {
     const path = writeYaml(
       "missing-handsoff.yaml",
       `
@@ -94,6 +96,34 @@ projects:
 `,
     );
     await expect(loadProjectsYaml(path)).rejects.toThrow("required but missing");
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad"/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
+    cleanup();
+  });
+
+  it("rejects config when only one of multiple projects has empty hands_off", async () => {
+    const path = writeYaml(
+      "mixed-handsoff.yaml",
+      `
+projects:
+  - id: good
+    path: /tmp/a
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [secret/]
+  - id: bad-one
+    path: /tmp/b
+    priority: 2
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: []
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad-one"/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow("must not be empty");
     cleanup();
   });
 

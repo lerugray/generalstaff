@@ -488,7 +488,7 @@
   {
     "id": "gs-107",
     "title": "Enforce Hard Rule 5 (mandatory hands-off lists) with a pre-flight validator in src/projects.ts loadProjectsYaml: if any registered project has an empty or missing hands_off array, reject the config at load time with a clear error pointing at the offending project id and Rule 5. Add tests covering: valid config, missing hands_off, empty hands_off, multiple projects where one is invalid.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
