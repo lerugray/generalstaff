@@ -631,6 +631,158 @@ remote access (§7b).
 
 ---
 
+## 8. Multi-Bot Fleet + Inter-Bot Communication (Phase 3+)
+
+**Captured:** 2026-04-17 morning. Ray raised parallel bots as a
+natural extension of the Phase 3 second-project work, and added
+a specific question: should bots be able to communicate with one
+another, possibly via MCP?
+
+**Status.** Hard Rule 3 already flags this direction — *"Sequential
+cycles for MVP. Parallel worktrees come later."* §8 is the design
+space for what "later" looks like.
+
+### What "multiple bots on different tracks" could mean
+
+Three meaningfully different patterns, each with its own tradeoffs:
+
+1. **Projects-parallel.** One bot on generalstaff, a second on
+   gamr, simultaneously. Natural fit for the existing architecture
+   (worktrees are already per-project, `bot/work` branches are
+   per-project, PROGRESS.jsonl is per-project). Main blockers:
+   `fleet_state.json` read-modify-write contention during picker
+   decisions, auto-merge to master needs serialization (two cycles
+   finishing within seconds of each other both try to merge), and
+   the picker itself goes from "pick one" to "assign N concurrent."
+   This is the lowest-friction next step and pairs naturally with
+   Phase 3's second-project validation.
+
+2. **Tracks-within-a-project.** Separate "bug fixes" / "new
+   features" / "refactors" lanes inside a single project, each with
+   its own task subset and its own worker. Requires splitting
+   `tasks.json` into tracks (or filtering by a `track` field on
+   each task) and a pool-of-workers abstraction to claim and
+   release tasks. More complex than projects-parallel because it
+   introduces intra-project coordination that doesn't exist today
+   (e.g., two bots want to touch the same file). Useful if a
+   single project becomes large enough that the 10-cycles-per-
+   project-per-session cap becomes the bottleneck.
+
+3. **Competitive implementations of the same task.** N bots race
+   on gs-XYZ independently; the reviewer picks the strongest diff
+   and discards the others. Highest LLM spend (N× per task) and
+   the pattern really only works when reviewer quality is already
+   high (otherwise "strongest diff" is noise). Probably a research
+   mode, not a default — potentially useful during reviewer
+   calibration or for high-stakes tasks where the user wants
+   redundant attempts.
+
+The right incremental path is almost certainly (1) → optionally
+(2) → maybe (3) as a later experiment. Each transition multiplies
+the coordination surface area; premature jumps introduce emergent
+bugs that are hard to attribute.
+
+### Inter-bot communication
+
+Once bots run in parallel, the next question is whether they can
+signal each other. Two architectural options:
+
+**(a) Peer-to-peer messaging.** Bots write messages directly into
+a shared inbox (`state/messages.jsonl`, or a SQLite queue, or an
+in-process MCP server) and read each other's output. Maximum
+flexibility — each bot can broadcast handoffs, warnings, or
+results to anyone. Maximum footgun — races between "bot A decides
+to work on X" and "bot B's message saying X is already done"
+arriving late. Emergent bad behavior if the signaling protocol
+isn't carefully designed.
+
+**(b) Dispatcher-mediated.** Bots don't talk to each other
+directly; they all talk to the dispatcher, which acts as a
+central coordinator. The dispatcher owns task assignment, merge
+serialization, and whatever cross-bot state matters (who's
+working on what, who finished, who's blocked on whom). Equivalent
+to a multi-worker job-queue pattern — well-understood, minimal
+emergent behavior, easy to audit. The bots are simpler (no need
+to model peer state); the dispatcher is slightly more complex.
+
+(b) is almost certainly the right default. Direct peer messaging
+is the kind of feature that looks elegant in a design doc and
+produces weird bugs in production.
+
+**The MCP angle.** Claude Code is an MCP client by default. If
+the GeneralStaff dispatcher exposes an **MCP server** with tools
+like `claim_task`, `report_progress`, `release_task`, `signal_peer`,
+the bots can use those tools natively without any extra glue
+code. The dispatcher becomes a standard MCP server; each bot's
+`claude -p` session connects to it the same way it connects to
+any other MCP server. This is a natural home for (b): the MCP
+server *is* the dispatcher's public API, and the bots are just
+clients.
+
+Advantages of an MCP-based dispatcher:
+
+- Zero glue code for bots — MCP integration is already
+  first-class in Claude Code
+- The same MCP server could be reached from a user-facing
+  dashboard (§7a) for fleet visualization without double-coding
+  the API
+- Testable with any MCP client (inspector, custom scripts)
+- Versionable — MCP tool signatures are the contract
+
+Open questions for this direction:
+
+- Does a locally-running MCP server conflict with Hard Rule 2
+  (file-based SSOT)? Probably not — the MCP server is a *process*
+  that reads/writes files as before; it's just a coordination
+  layer on top of the existing file-based state, not a replacement.
+- Are there existing agent-fleet / multi-agent-coordination repos
+  (MCP-based or otherwise) worth surveying before designing this
+  from scratch? Ray flagged this as "something we're overlooking
+  in the agent fleet repo" — unclear which specific repo, but a
+  survey pass in the 2026-04 timeframe should catch what's
+  emerged recently (Karpathy's recent work was also flagged in
+  §6; there may be overlap).
+- What's the right level of observability into fleet state? The
+  dispatcher should probably write a fleet-level PROGRESS entry
+  for every cross-bot event (task claimed, task released, merge
+  serialized, etc.), feeding both the audit log and §7a's live
+  viewer.
+
+### Risks to flag
+
+- **Parallel = Npx the spend** for paid reviewers. BYOK users
+  running 3 bots in parallel with OpenRouter pay 3× the reviewer
+  cost. The free Ollama path is the clean answer; the `.bat`
+  wrapper should make this explicit (e.g., warn when launching
+  parallel mode with a paid provider).
+- **The hands-off gate is currently per-cycle, not cross-bot.**
+  Two bots running in parallel could both try to modify
+  `src/reviewer.ts` and neither would know. The verification
+  gate catches it at cycle close, but the work was already done.
+  The dispatcher could preemptively reject overlapping task
+  assignments using the hands-off pattern set.
+- **Auto-merge ordering matters.** If bot A's merge conflicts
+  with bot B's changes to master, what happens? Options: merge
+  in completion order (simplest, ignores conflicts), merge in
+  priority order (user-configurable), or reject the later one
+  and require human resolution (safest). The dispatcher owns
+  this decision.
+- **A single crashed bot should not take down the fleet.** The
+  dispatcher needs health checks and the ability to release a
+  claim if a worker goes silent for too long.
+
+### Phase
+
+Phase 3+ for projects-parallel (the natural coupling with the
+second-project validation). Phase 4+ for tracks-within-project
+and inter-bot communication. Phase 5+ or later for competitive
+mode. Don't design the MCP-dispatcher API until projects-parallel
+is actually running and we know what tools the bots wish they
+had — premature API design in a distributed system is a
+category of slop worth avoiding.
+
+---
+
 ## Market observation: why no one else has built this
 
 Captured for reference, not as a design decision. Reasons it's
