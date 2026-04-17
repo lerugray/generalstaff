@@ -189,10 +189,29 @@ export function getProviderForRole(
       `No provider routed for role '${role}' (routes.${role} is unset). Call hasProviderForRole() first.`,
     );
   }
+  return instantiateProvider(registry, id);
+}
+
+export function getProviderById(
+  registry: ProviderRegistry,
+  id: string,
+): LLMProvider {
+  if (!registry.providers.has(id)) {
+    throw new ProviderConfigError(
+      `Unknown provider id '${id}'`,
+    );
+  }
+  return instantiateProvider(registry, id);
+}
+
+function instantiateProvider(
+  registry: ProviderRegistry,
+  id: string,
+): LLMProvider {
   const descriptor = registry.providers.get(id);
   if (!descriptor) {
     throw new ProviderConfigError(
-      `Role '${role}' references unknown provider '${id}'`,
+      `Unknown provider id '${id}'`,
     );
   }
   switch (descriptor.kind) {
