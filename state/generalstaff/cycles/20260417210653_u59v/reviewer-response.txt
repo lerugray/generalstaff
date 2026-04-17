@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes in the diff are directly related to the claimed task, no hands-off files were touched, the verification command passed, and there is strong evidence that the task was completed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add 'generalstaff providers list' subcommand in src/cli.ts. When invoked, load provider_config.yaml via loadProviderRegistry from gs-152. For each configured provider, print: id, kind, model, host (if ollama), api_key_env presence (openrouter, but noted as unimplemented in Phase 2). Support --json flag emitting the full registry as JSON. If provider_config.yaml is missing, print 'No provider_config.yaml found. See provider_config.yaml.example for format.' and exit 0 (not an error — the file is optional). Also list each route (digest/cycle_summary/classifier) with its resolved provider id, or '(unrouted)' if route not configured. Add tests in tests/cli.test.ts (or extend) covering: (a) missing file message, (b) valid file table output, (c) --json output shape. Wire into the switch(command) block and into printUsage()'s help text. Do NOT touch reviewer routing output — that's controlled by GENERALSTAFF_REVIEWER_PROVIDER env var and already shown via 'generalstaff config'.",
+      "evidence": "The diff shows the implementation of the 'providers list' subcommand in src/cli.ts, including parsing arguments, loading the provider registry, handling missing files, printing provider details and routes in both human-readable and JSON formats, and updating the help text. The tests in tests/cli.test.ts cover all required test cases for the new functionality.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) returned exit code 0, indicating all tests passed and type checking succeeded. The diff includes all necessary code changes and test additions for the task, with no evidence of scope drift or hands-off violations."
+}
