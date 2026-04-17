@@ -230,6 +230,85 @@ price. That's the same thesis GeneralStaff writes out in code
 — Hard Rule 1's "user keeps taste work" is the architectural
 version of "humans stay economically valuable."
 
+## Dogfooding as credibility
+
+GeneralStaff is built largely **by** GeneralStaff. The repo is
+registered with itself as a managed project; most of the
+Phase-1-and-forward commits land via verified autonomous cycles
+that go through the exact verification gate / reviewer /
+hands-off pipeline the tool sells to others. The interactive
+sessions (including this one) seed tasks, capture design, and
+handle taste work; the bot sessions execute the correctness work
+against those tasks. It is the same pattern a new user would run
+after `generalstaff init`.
+
+This is a credibility claim competitors cannot match:
+
+- **Polsia / Devin / closed-SaaS tools cannot show you their own
+  audit logs.** They can't show every cycle, every reviewer
+  verdict, every verification failure the system caught. GS
+  ships with `PROGRESS.jsonl` containing literally every
+  decision the system has made about itself across every cycle.
+  The audit log IS the credibility.
+- **Hand-rolled `claude -p` loops cannot show structural
+  verification.** They can show commits; they can't show
+  *commits that passed a scope-match reviewer + hands-off gate
+  + verification command*. GS's git history makes the
+  distinction visible.
+- **The tool caught itself being wrong, repeatedly, and those
+  catches are in the log.** The 2026-04-17 morning Ollama
+  run's cycle 2 tried to modify `src/reviewer.ts` when that
+  file was on the hands-off list — the reviewer rejected it
+  with `hands-off violation: src/reviewer.ts`. That rejection
+  is visible in PROGRESS.jsonl. A tool that never shows you
+  its own false starts is a tool you cannot trust; a tool that
+  shows every false start AND shows the mechanism that caught
+  each one is a tool whose claims are falsifiable.
+
+### README placement
+
+The dogfooding story should surface in at least two places:
+
+1. **Status / Maturity callout (near the top).** A single line
+   like *"GeneralStaff is built largely by GeneralStaff —
+   every verified commit in this repo passed the same gate
+   we sell to you. See `PROGRESS.jsonl` for the full audit."*
+   Gives the reader immediate credibility before they've read
+   anything else.
+2. **The approach / How it works section.** Reference the
+   audit log as an artifact the reader can inspect. *"Don't
+   trust the claim that the verification gate works — read
+   `PROGRESS.jsonl` and count the rejections yourself."*
+
+### Voice for this claim
+
+Matter-of-fact, not triumphant. *"We use this ourselves"* is a
+stronger statement than *"We proudly use this ourselves!"* The
+first is a verifiable fact; the second adds a performative
+layer the dogfooding story doesn't need. Let the claim be
+plain and the audit log do the work.
+
+Avoid language that implies "if we use it, it must be good."
+The argument isn't that dogfooding proves the tool is great —
+it's that dogfooding means the tool's failures are visible.
+That's a much more interesting claim and much harder to fake.
+
+### The anti-Polsia contrast is structural, not rhetorical
+
+A Polsia-model tool cannot be dogfooded publicly, because the
+tool's "work" is hidden inside a SaaS product. You can't see
+Polsia's own cycles building Polsia. You can only see the
+marketing. GeneralStaff's structure (open repo, file-based
+state, committed audit log) makes dogfooding *observable* —
+which means the claim is falsifiable if false. That
+falsifiability is what makes it count as evidence rather than
+marketing.
+
+The voice for this section should be confident precisely
+because the claim is unusually well-supported. Most tools
+saying *"we use this ourselves"* are asking you to take their
+word for it. GS can point at a file.
+
 ## Relationship to Hard Rule 1
 
 Voice is taste work, not correctness work. The bot can **outline**
