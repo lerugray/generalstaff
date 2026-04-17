@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff contains all necessary changes to implement the task of adding --priority=N filter to 'generalstaff task list', including CLI updates, logic changes, and comprehensive tests, with no hands-off violations or scope drift.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add --priority=N filter to 'generalstaff task list' (cli.ts) so operators can say 'task list --project=myapp --priority=1' to see only P1 tasks. Parse N as integer, error with 'Error: --priority must be a positive integer' on bad input. Add tests for filter match, empty filter result (prints 'No pending tasks at priority N.'), and mixing with no filter (existing behavior preserved).",
+      "evidence": "The diff modifies src/cli.ts to add the --priority option, implements parsing and validation logic, and updates the task listing to filter by priority. It also adds comprehensive tests in tests/tasks.test.ts covering all specified behaviors.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) passed successfully, confirming that all new code compiles and tests pass. The task completion is fully supported by the diff changes."
+}
