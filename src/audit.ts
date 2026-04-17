@@ -21,6 +21,23 @@ function progressPath(projectId: string): string {
   return join(getRootDir(), "state", projectId, "PROGRESS.jsonl");
 }
 
+// Read a newline-delimited JSON file and return parsed values. Missing file
+// returns []. Blank lines and malformed lines are silently skipped — callers
+// that need to preserve raw lines (e.g. `log` output) should do their own
+// parsing instead.
+export async function readJsonl(path: string): Promise<unknown[]> {
+  if (!existsSync(path)) return [];
+  const content = await readFile(path, "utf8");
+  const out: unknown[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+    } catch { /* skip malformed */ }
+  }
+  return out;
+}
+
 export async function appendProgress(
   projectId: string,
   event: ProgressEventType,
@@ -75,20 +92,8 @@ export async function tailProgressLog(
     const entries: ProgressEntry[] = [];
     const { readdirSync } = require("fs");
     for (const dir of readdirSync(stateDir)) {
-      const filePath = join(stateDir, dir, "PROGRESS.jsonl");
-      if (!existsSync(filePath)) continue;
-      const content = await readFile(filePath, "utf8");
-      for (const line of content.trim().split("\n")) {
-        if (line.trim()) {
-          try {
-            const parsed = JSON.parse(line);
-            if (isProgressEntry(parsed)) {
-              entries.push(parsed);
-            }
-          } catch {
-            // skip malformed
-          }
-        }
+      for (const value of await readJsonl(join(stateDir, dir, "PROGRESS.jsonl"))) {
+        if (isProgressEntry(value)) entries.push(value);
       }
     }
 
@@ -259,34 +264,25 @@ async function collectCycleEnds(
   const entries: ProgressEntry[] = [];
   const { readdirSync } = require("fs");
 
-  const collect = (content: string) => {
-    for (const line of content.trim().split("\n")) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
-          const started = startedAtMs(parsed);
-          if (sinceMs !== undefined && started < sinceMs) continue;
-          if (untilMs !== undefined && started > untilMs) continue;
-          if (options.verifiedOnly) {
-            const outcome = String(parsed.data.outcome ?? "");
-            if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
-          }
-          entries.push(parsed);
-        }
-      } catch { /* skip malformed */ }
+  const collect = async (filePath: string) => {
+    for (const value of await readJsonl(filePath)) {
+      if (!isProgressEntry(value) || value.event !== "cycle_end") continue;
+      const started = startedAtMs(value);
+      if (sinceMs !== undefined && started < sinceMs) continue;
+      if (untilMs !== undefined && started > untilMs) continue;
+      if (options.verifiedOnly) {
+        const outcome = String(value.data.outcome ?? "");
+        if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
+      }
+      entries.push(value);
     }
   };
 
   if (projectId) {
-    const filePath = join(stateDir, projectId, "PROGRESS.jsonl");
-    if (!existsSync(filePath)) return [];
-    collect(await readFile(filePath, "utf8"));
+    await collect(join(stateDir, projectId, "PROGRESS.jsonl"));
   } else {
     for (const dir of readdirSync(stateDir)) {
-      const filePath = join(stateDir, dir, "PROGRESS.jsonl");
-      if (!existsSync(filePath)) continue;
-      collect(await readFile(filePath, "utf8"));
+      await collect(join(stateDir, dir, "PROGRESS.jsonl"));
     }
   }
 
@@ -467,18 +463,12 @@ export async function loadProgressEvents(
   projectId: string,
   filterFn: (entry: ProgressEntry) => boolean,
 ): Promise<ProgressEntry[]> {
-  const filePath = progressPath(projectId);
-  if (!existsSync(filePath)) return [];
-  const content = await readFile(filePath, "utf8");
+  const parsed = await readJsonl(progressPath(projectId));
   const out: ProgressEntry[] = [];
-  for (const line of content.trim().split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line);
-      if (isProgressEntry(parsed) && filterFn(parsed)) {
-        out.push(parsed);
-      }
-    } catch { /* skip malformed */ }
+  for (const value of parsed) {
+    if (isProgressEntry(value) && filterFn(value)) {
+      out.push(value);
+    }
   }
   return out;
 }

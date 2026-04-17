@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -997,5 +997,69 @@ describe("loadProgressEvents", () => {
     expect(result).toHaveLength(2);
     expect(result[0].data.outcome).toBe("verified");
     expect(result[1].data.outcome).toBe("verified_weak");
+  });
+});
+
+describe("readJsonl", () => {
+  it("returns [] for a missing file", async () => {
+    const missing = join(TEST_DIR, "nope", "PROGRESS.jsonl");
+    const result = await readJsonl(missing);
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] for an empty file", async () => {
+    const dir = join(TEST_DIR, "state", "empty");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "PROGRESS.jsonl");
+    writeFileSync(file, "", "utf8");
+    const result = await readJsonl(file);
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] for a whitespace-only file", async () => {
+    const dir = join(TEST_DIR, "state", "blank");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "PROGRESS.jsonl");
+    writeFileSync(file, "\n\n   \n", "utf8");
+    const result = await readJsonl(file);
+    expect(result).toEqual([]);
+  });
+
+  it("parses valid JSONL and drops malformed lines silently", async () => {
+    const dir = join(TEST_DIR, "state", "mixed");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "PROGRESS.jsonl");
+    writeFileSync(
+      file,
+      '{"a":1}\nnot valid json\n{"b":2}\n\n{"c":3}\n',
+      "utf8",
+    );
+    const result = await readJsonl(file);
+    expect(result).toHaveLength(3);
+    expect(result[0]).toEqual({ a: 1 });
+    expect(result[1]).toEqual({ b: 2 });
+    expect(result[2]).toEqual({ c: 3 });
+  });
+
+  it("handles files with and without trailing newlines identically", async () => {
+    const dir = join(TEST_DIR, "state", "nl");
+    mkdirSync(dir, { recursive: true });
+    const withNl = join(dir, "with.jsonl");
+    const noNl = join(dir, "no.jsonl");
+    writeFileSync(withNl, '{"x":1}\n{"y":2}\n', "utf8");
+    writeFileSync(noNl, '{"x":1}\n{"y":2}', "utf8");
+    const a = await readJsonl(withNl);
+    const b = await readJsonl(noNl);
+    expect(a).toEqual(b);
+    expect(a).toHaveLength(2);
+  });
+
+  it("handles non-object JSON values too (arrays, numbers, strings)", async () => {
+    const dir = join(TEST_DIR, "state", "mixed-types");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "PROGRESS.jsonl");
+    writeFileSync(file, '42\n"hello"\n[1,2,3]\nnull\n', "utf8");
+    const result = await readJsonl(file);
+    expect(result).toEqual([42, "hello", [1, 2, 3], null]);
   });
 });
