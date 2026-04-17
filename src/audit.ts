@@ -66,6 +66,36 @@ export type LogLevel = "error";
 export interface TailProgressOptions {
   level?: LogLevel;
   grep?: RegExp;
+  sinceMs?: number;
+}
+
+// Parse a --since flag value. Accepts relative durations (30s, 15m, 2h, 3d)
+// or an absolute ISO-8601 timestamp. Returns the resulting epoch-ms lower
+// bound. `now` is injected for deterministic testing.
+export function parseSinceFlag(input: string, now: Date = new Date()): number {
+  const relMatch = /^(\d+)([smhd])$/.exec(input.trim());
+  if (relMatch) {
+    const amount = parseInt(relMatch[1]!, 10);
+    const unit = relMatch[2]!;
+    const multiplier =
+      unit === "s" ? 1000 :
+      unit === "m" ? 60 * 1000 :
+      unit === "h" ? 60 * 60 * 1000 :
+      24 * 60 * 60 * 1000;
+    return now.getTime() - amount * multiplier;
+  }
+  const ts = Date.parse(input);
+  if (Number.isNaN(ts)) {
+    throw new Error(
+      `Invalid --since value '${input}': expected ISO timestamp or relative duration (e.g. 30m, 2h, 1d)`,
+    );
+  }
+  return ts;
+}
+
+function matchesSince(entry: ProgressEntry, sinceMs: number): boolean {
+  const t = Date.parse(entry.timestamp);
+  return !Number.isNaN(t) && t >= sinceMs;
 }
 
 export function isErrorEntry(entry: ProgressEntry): boolean {
@@ -127,6 +157,10 @@ export async function tailProgressLog(
       const re = options.grep;
       filtered = filtered.filter((e) => matchesGrep(e, re));
     }
+    if (options.sinceMs !== undefined) {
+      const since = options.sinceMs;
+      filtered = filtered.filter((e) => matchesSince(e, since));
+    }
     const tail = filtered.slice(-lines);
     for (const entry of tail) {
       printEntry(entry);
@@ -141,6 +175,8 @@ export async function tailProgressLog(
         console.log("No audit log entries matching grep pattern.");
       } else if (options.level === "error") {
         console.log("No error-level audit log entries found.");
+      } else if (options.sinceMs !== undefined) {
+        console.log("No audit log entries since the given time.");
       }
     }
   }
@@ -160,7 +196,7 @@ async function tailSingleProject(
   const content = await readFile(filePath, "utf8");
   const allLines = content.trim().split("\n").filter(Boolean);
 
-  if (options.level === "error" || options.grep) {
+  if (options.level === "error" || options.grep || options.sinceMs !== undefined) {
     const matches: string[] = [];
     for (const line of allLines) {
       try {
@@ -168,6 +204,7 @@ async function tailSingleProject(
         if (!isProgressEntry(parsed)) continue;
         if (options.level === "error" && !isErrorEntry(parsed)) continue;
         if (options.grep && !matchesGrep(parsed, options.grep)) continue;
+        if (options.sinceMs !== undefined && !matchesSince(parsed, options.sinceMs)) continue;
         matches.push(line);
       } catch {
         // skip malformed
@@ -187,8 +224,10 @@ async function tailSingleProject(
         console.log(
           `No entries matching grep pattern for project "${projectId}".`,
         );
-      } else {
+      } else if (options.level === "error") {
         console.log(`No error-level entries for project "${projectId}".`);
+      } else if (options.sinceMs !== undefined) {
+        console.log(`No entries since the given time for project "${projectId}".`);
       }
     }
     return;

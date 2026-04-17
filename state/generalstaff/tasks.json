@@ -614,7 +614,7 @@
   {
     "id": "gs-128",
     "title": "Add `generalstaff log --since=<ts>` filter (alongside --lines/--level/--grep). Accepts absolute ISO or relative forms like '1h'/'30m'/'2d'. Tests covering each form plus malformed and future timestamps.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
