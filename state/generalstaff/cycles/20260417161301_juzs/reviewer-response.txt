@@ -1,0 +1,24 @@
+{
+  "verdict": "verification_failed",
+  "reason": "The diff contains hands-off violations by modifying src/safety.ts and src/reviewer.ts which are explicitly restricted.",
+  "scope_drift_files": [],
+  "hands_off_violations": [
+    "src/safety.ts",
+    "src/reviewer.ts",
+    "src/prompts/"
+  ],
+  "task_evidence": [
+    {
+      "task": "Fix failing tests in test files",
+      "evidence": "Multiple test files (e.g., test_safety.ts) show changes",
+      "confidence": "medium"
+    },
+    {
+      "task": "Improve safety module functionality",
+      "evidence": "src/safety.ts contains modifications",
+      "confidence": "low"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Critical hands-off violations detected. The safety/reviewer modules are explicitly restricted and should not be modified."
+}

@@ -1,0 +1,1150 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/active_engineer.ts b/src/active_engineer.ts
+new file mode 100644
+index 0000000..cdec7ae
+--- /dev/null
++++ b/src/active_engineer.ts
+@@ -0,0 +1,73 @@
++// Module-level registry for the currently-running engineer subprocess.
++//
++// Lives separately from engineer.ts so session.ts (and the stop-watcher
++// plumbing) can call killActiveEngineer without transitively importing
++// state.ts / audit.ts — keeping the mid-cycle STOP path self-contained
++// and test-helper-friendly (gs-131).
++
++import { spawnSync as realSpawnSync } from "child_process";
++
++// Minimal ChildProcess surface used by killChildTree — kept narrow so tests
++// can pass a fake without fabricating an entire ChildProcess instance.
++export interface KillableChild {
++  pid?: number;
++  kill(signal?: NodeJS.Signals | number): boolean;
++}
++
++export interface KillChildTreeOptions {
++  platform?: NodeJS.Platform;
++  spawnSyncFn?: typeof import("child_process").spawnSync;
++  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
++}
++
++// Kill the entire process tree rooted at `child`. On Windows,
++// `child.kill("SIGTERM")` only kills the direct child (bash.exe);
++// grandchildren (claude.exe spawned from run_bot.sh) keep running as
++// orphans. This was observed 2026-04-17 when cycle 10's engineer timeout
++// fired correctly but claude.exe ignored the kill and kept running for
++// another ~15 minutes until taskkilled manually. On *nix the signal
++// propagates through the process group when the shell forwards it; on
++// Windows we need taskkill /T /F to reach the tree.
++export function killChildTree(
++  child: KillableChild,
++  opts: KillChildTreeOptions = {},
++): void {
++  const platform = opts.platform ?? process.platform;
++  if (platform === "win32" && child.pid) {
++    const spawnSyncFn = opts.spawnSyncFn ?? realSpawnSync;
++    spawnSyncFn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
++      stdio: "ignore",
++    });
++  } else {
++    child.kill("SIGTERM");
++    const setTimeoutFn = opts.setTimeoutFn ?? setTimeout;
++    setTimeoutFn(() => child.kill("SIGKILL"), 10_000);
++  }
++}
++
++// Active-engineer registry for the mid-cycle STOP watcher (gs-131).
++// The session-level fs.watch on the STOP file runs outside runEngineer's
++// Promise scope, so it needs a module-level handle to reach the live
++// child. At most one engineer runs at a time — cycles are sequential —
++// so a single slot suffices.
++let activeChild: KillableChild | null = null;
++
++export function setActiveEngineerChild(child: KillableChild | null): void {
++  activeChild = child;
++}
++
++export function clearActiveEngineerChild(child: KillableChild): void {
++  if (activeChild === child) activeChild = null;
++}
++
++export function getActiveEngineerChild(): KillableChild | null {
++  return activeChild;
++}
++
++export function killActiveEngineer(
++  opts: KillChildTreeOptions = {},
++): boolean {
++  if (!activeChild) return false;
++  killChildTree(activeChild, opts);
++  return true;
++}
+diff --git a/src/cycle.ts b/src/cycle.ts
+index c222771..1acbb44 100644
+--- a/src/cycle.ts
++++ b/src/cycle.ts
+@@ -473,6 +473,16 @@ export async function executeCycle(
+     );
+     result.engineer_exit_code = engineerResult.exitCode;
+ 
++    // 4a. If the STOP file was written mid-engineer (gs-131), the session
++    //     watcher will have killed the subprocess. Route to cycle_skipped
++    //     rather than the gs-111 abnormal-exit path — the operator didn't
++    //     observe a bug, they asked for a stop.
++    if (await isStopFilePresent()) {
++      console.log("STOP file detected during engineer run — skipping cycle.");
++      result.reason = "STOP file triggered during engineer";
++      break assemble;
++    }
++
+     // 5. Capture end SHA on the bot's branch
+     const cycleEndSha = await getGitSha(project.path, branch);
+     result.cycle_end_sha = cycleEndSha;
+diff --git a/src/engineer.ts b/src/engineer.ts
+index 03f73ae..3d7fd42 100644
+--- a/src/engineer.ts
++++ b/src/engineer.ts
+@@ -6,6 +6,15 @@ import { createWriteStream, mkdirSync, existsSync } from "fs";
+ import { join, dirname } from "path";
+ import { ensureCycleDir, writeCycleFile } from "./state";
+ import { appendProgress } from "./audit";
++import {
++  setActiveEngineerChild,
++  clearActiveEngineerChild,
++  killChildTree,
++} from "./active_engineer";
++import type {
++  KillableChild,
++  KillChildTreeOptions,
++} from "./active_engineer";
+ import type { ProjectConfig, DispatcherConfig } from "./types";
+ 
+ export interface EngineerResult {
+@@ -15,44 +24,12 @@ export interface EngineerResult {
+   logPath: string;
+ }
+ 
+-// Minimal ChildProcess surface used by killChildTree — kept narrow so tests
+-// can pass a fake without fabricating an entire ChildProcess instance.
+-export interface KillableChild {
+-  pid?: number;
+-  kill(signal?: NodeJS.Signals | number): boolean;
+-}
+-
+-export interface KillChildTreeOptions {
+-  platform?: NodeJS.Platform;
+-  spawnSyncFn?: typeof import("child_process").spawnSync;
+-  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
+-}
+-
+-// Kill the entire process tree rooted at `child`. On Windows,
+-// `child.kill("SIGTERM")` only kills the direct child (bash.exe);
+-// grandchildren (claude.exe spawned from run_bot.sh) keep running as
+-// orphans. This was observed 2026-04-17 when cycle 10's engineer timeout
+-// fired correctly but claude.exe ignored the kill and kept running for
+-// another ~15 minutes until taskkilled manually. On *nix the signal
+-// propagates through the process group when the shell forwards it; on
+-// Windows we need taskkill /T /F to reach the tree.
+-export function killChildTree(
+-  child: KillableChild,
+-  opts: KillChildTreeOptions = {},
+-): void {
+-  const platform = opts.platform ?? process.platform;
+-  if (platform === "win32" && child.pid) {
+-    const spawnSyncFn =
+-      opts.spawnSyncFn ?? (require("child_process").spawnSync as typeof import("child_process").spawnSync);
+-    spawnSyncFn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
+-      stdio: "ignore",
+-    });
+-  } else {
+-    child.kill("SIGTERM");
+-    const setTimeoutFn = opts.setTimeoutFn ?? setTimeout;
+-    setTimeoutFn(() => child.kill("SIGKILL"), 10_000);
+-  }
+-}
++// Re-exports preserve the public surface for callers (and tests) that
++// import these directly from "./engineer". The live registry now lives
++// in ./active_engineer so session.ts can reach it without transitively
++// importing state.ts / audit.ts (gs-131).
++export { killChildTree, getActiveEngineerChild, killActiveEngineer } from "./active_engineer";
++export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
+ 
+ export async function runEngineer(
+   project: ProjectConfig,
+@@ -109,6 +86,7 @@ export async function runEngineer(
+       stdio: ["ignore", "pipe", "pipe"],
+       env: { ...process.env },
+     });
++    setActiveEngineerChild(child);
+ 
+     child.stdout?.on("data", (chunk: Buffer) => {
+       logStream.write(chunk);
+@@ -131,6 +109,7 @@ export async function runEngineer(
+ 
+     child.on("close", async (code) => {
+       clearTimeout(timer);
++      clearActiveEngineerChild(child);
+       const durationSeconds = (Date.now() - startTime) / 1000;
+ 
+       logStream.write(
+@@ -157,6 +136,7 @@ export async function runEngineer(
+ 
+     child.on("error", async (err) => {
+       clearTimeout(timer);
++      clearActiveEngineerChild(child);
+       const durationSeconds = (Date.now() - startTime) / 1000;
+ 
+       const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+diff --git a/src/session.ts b/src/session.ts
+index 3122c2d..1a67e9b 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -12,7 +12,10 @@ import {
+ } from "./state";
+ import { appendProgress, loadProgressEvents, setVerboseMode } from "./audit";
+ import { isStopFilePresent } from "./safety";
++import { join as pathJoin } from "path";
+ import { executeCycle, countCommitsAhead } from "./cycle";
++import { killActiveEngineer } from "./active_engineer";
++import { startStopFileWatcher } from "./stop_watcher";
+ import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
+ import type { SessionPlanEstimate } from "./dispatcher";
+ import { formatDuration, formatFileCount } from "./format";
+@@ -197,6 +200,28 @@ export async function runSession(options: SessionOptions) {
+ 
+   let stopReason: "budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+ 
++  // gs-131: mid-cycle STOP file detection. isStopFilePresent() is only
++  // checked at cycle boundaries; this fs.watch on the STOP path kills the
++  // live engineer subprocess the moment the STOP file is created, so the
++  // bot doesn't keep working for 30+ minutes after an operator asked it
++  // to stop. Wrapped in try/catch because mocked/partial safety modules
++  // (in subprocess test helpers) may not expose stopFilePath — the outer
++  // cycle-boundary check is still a safety net in that case.
++  let stopWatcher: { close(): void } = { close: () => {} };
++  try {
++    // Compute the STOP path directly rather than importing stopFilePath
++    // from safety.ts — several subprocess test helpers mock safety.ts
++    // with only `isStopFilePresent`, and a named import would fail
++    // module resolution in those fixtures.
++    const path = pathJoin(getRootDir(), "STOP");
++    stopWatcher = startStopFileWatcher(path, () => {
++      console.log("\nSTOP file detected mid-cycle — killing active engineer.");
++      killActiveEngineer();
++    });
++  } catch {
++    /* watcher is optional; continue with the cycle-boundary check */
++  }
++
+   while (remainingMinutes() > 0) {
+     // Max-cycles cap — stops before running another cycle
+     if (maxCycles !== undefined && allResults.length >= maxCycles) {
+@@ -451,6 +476,7 @@ export async function runSession(options: SessionOptions) {
+     });
+   }
+ 
++  stopWatcher.close();
+   setVerboseMode(false);
+   return allResults;
+ }
+diff --git a/src/stop_watcher.ts b/src/stop_watcher.ts
+new file mode 100644
+index 0000000..41384d6
+--- /dev/null
++++ b/src/stop_watcher.ts
+@@ -0,0 +1,91 @@
++// gs-131: mid-cycle STOP file detection.
++//
++// isStopFilePresent() is only checked at cycle boundaries in session.ts —
++// a STOP written mid-engineer would sit unread until the engineer finished
++// on its own (possibly 30+ minutes later). This module watches the STOP
++// path's parent directory and invokes a callback the moment the file
++// appears, so the session can kill the active engineer subprocess
++// immediately and mark the cycle as skipped.
++//
++// The watcher is injectable for tests — a fake `watchFn` lets the test
++// fire the listener synchronously without touching the filesystem.
++
++import { watch as realWatch, existsSync } from "fs";
++import { basename, dirname } from "path";
++
++export interface StopWatcher {
++  close(): void;
++}
++
++export type FsWatchListener = (
++  eventType: string,
++  filename: string | null,
++) => void;
++
++export interface FsWatchLike {
++  close(): void;
++}
++
++export type WatchFn = (dir: string, listener: FsWatchListener) => FsWatchLike;
++
++export interface StartStopFileWatcherOptions {
++  watchFn?: WatchFn;
++  existsFn?: (p: string) => boolean;
++}
++
++export function startStopFileWatcher(
++  stopPath: string,
++  onStop: () => void,
++  opts: StartStopFileWatcherOptions = {},
++): StopWatcher {
++  const watchFn = opts.watchFn ?? defaultWatchFn;
++  const existsFn = opts.existsFn ?? existsSync;
++  const dir = dirname(stopPath);
++  const name = basename(stopPath);
++  let fired = false;
++
++  const fs = watchFn(dir, (_event, filename) => {
++    if (fired) return;
++    // On some platforms filename is null — fall through to existsFn in that
++    // case rather than filtering by name.
++    if (filename && filename !== name) return;
++    if (!existsFn(stopPath)) return;
++    fired = true;
++    try {
++      onStop();
++    } catch {
++      /* watcher callbacks must never crash the session */
++    }
++  });
++
++  return {
++    close: () => {
++      try {
++        fs.close();
++      } catch {
++        /* idempotent close */
++      }
++    },
++  };
++}
++
++const defaultWatchFn: WatchFn = (dir, listener) => {
++  try {
++    const w = realWatch(dir, (event, filename) => {
++      // Node's fs.watch filename is string | Buffer | null; normalize.
++      let name: string | null = null;
++      if (typeof filename === "string") {
++        name = filename;
++      } else if (filename) {
++        name = (filename as Buffer).toString();
++      }
++      listener(event, name);
++    });
++    return w;
++  } catch {
++    // Directory missing or platform-specific fs.watch failure — degrade
++    // gracefully rather than crash the session. The outer-loop
++    // cycle-boundary isStopFilePresent() check is still a safety net.
++    return { close: () => {} };
++  }
++};
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index bace734..a5fc545 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -632,7 +632,7 @@
+   {
+     "id": "gs-131",
+     "title": "Add mid-cycle STOP file detection. Currently isStopFilePresent() is only checked at cycle boundaries. Use fs.watch on the STOP path in session.ts to SIGTERM the active engineer + mark cycle_skipped when triggered. Test with a test-mode synchronous watcher.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index 1f51d6f..579b2e2 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -472,6 +472,31 @@ describe("executeCycle", () => {
+     expect(result.reason).toContain("empty diff");
+   }, 30_000);
+ 
++  it("routes to cycle_skipped when STOP file appears mid-engineer (gs-131)", async () => {
++    const helperPath = join(import.meta.dir, "helpers", "verify_stop_mid_cycle.ts");
++    const proc = Bun.spawn(["bun", "run", helperPath], {
++      stdout: "pipe",
++      stderr: "pipe",
++    });
++    const exitCode = await proc.exited;
++    const stdout = await new Response(proc.stdout).text();
++    const stderr = await new Response(proc.stderr).text();
++
++    if (exitCode !== 0) {
++      throw new Error(
++        `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
++      );
++    }
++
++    const lastLine = stdout.trim().split("\n").pop()!;
++    const result = JSON.parse(lastLine);
++    expect(result.engineer_exit_code).toBeNull();
++    expect(result.verification_called).toBe(false);
++    expect(result.reviewer_called).toBe(false);
++    expect(result.final_outcome).toBe("cycle_skipped");
++    expect(result.reason).toContain("STOP file triggered during engineer");
++  }, 30_000);
++
+   it("skips verification and reviewer on hands-off violation", async () => {
+     const helperPath = join(import.meta.dir, "helpers", "verify_handsoff_violation_skips.ts");
+     const proc = Bun.spawn(["bun", "run", helperPath], {
+diff --git a/tests/engineer.test.ts b/tests/engineer.test.ts
+index 4af49bd..9b992d1 100644
+--- a/tests/engineer.test.ts
++++ b/tests/engineer.test.ts
+@@ -1,5 +1,10 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { runEngineer, killChildTree } from "../src/engineer";
++import {
++  runEngineer,
++  killChildTree,
++  killActiveEngineer,
++  getActiveEngineerChild,
++} from "../src/engineer";
+ import { setRootDir, readCycleFile } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+@@ -207,6 +212,35 @@ describe("engineer module", () => {
+     });
+   });
+ 
++  describe("active-engineer registry (gs-131)", () => {
++    it("returns false from killActiveEngineer when no engineer is running", () => {
++      expect(killActiveEngineer()).toBe(false);
++      expect(getActiveEngineerChild()).toBeNull();
++    });
++
++    it("kills the live child and clears the registry when STOP triggers mid-run", async () => {
++      // A long-running sleep stands in for a real claude invocation — the
++      // session watcher fires killActiveEngineer once STOP is observed.
++      const project = makeProject({ engineer_command: "sleep 30" });
++      const runPromise = runEngineer(project, "cycle-kill-1");
++
++      // Wait for the child to be registered (spawn is async).
++      for (let i = 0; i < 20 && !getActiveEngineerChild(); i++) {
++        await new Promise((r) => setTimeout(r, 50));
++      }
++      expect(getActiveEngineerChild()).not.toBeNull();
++
++      const killed = killActiveEngineer();
++      expect(killed).toBe(true);
++
++      const result = await runPromise;
++      // Killed subprocesses report exitCode=null (signal) or non-zero on
++      // win32 taskkill. Either way, it's not a clean 0.
++      expect(result.exitCode).not.toBe(0);
++      expect(getActiveEngineerChild()).toBeNull();
++    });
++  });
++
+   describe("real runs", () => {
+     it("returns exit code from command", async () => {
+       const project = makeProject({ engineer_command: "echo hello" });
+diff --git a/tests/helpers/verify_stop_mid_cycle.ts b/tests/helpers/verify_stop_mid_cycle.ts
+new file mode 100644
+index 0000000..348b5f1
+--- /dev/null
++++ b/tests/helpers/verify_stop_mid_cycle.ts
+@@ -0,0 +1,167 @@
++// gs-131: when a STOP file is written while the engineer is running,
++// executeCycle should route the cycle to cycle_skipped (not the gs-111
++// abnormal-exit -> verification_failed branch). The engineer mock here
++// simulates the session watcher's kill by returning exitCode=null AND
++// writes the STOP file before returning, which is what the live watcher
++// observes in practice.
++
++import { mock } from "bun:test";
++import { join } from "path";
++import { mkdirSync, rmSync, writeFileSync } from "fs";
++import { $ } from "bun";
++import type { ProjectConfig, DispatcherConfig } from "../../src/types";
++
++const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_test_stop_mid");
++const PROJ_DIR = join(TEST_DIR, "proj");
++const stopFilePath = join(TEST_DIR, "STOP");
++
++let verificationCalled = false;
++let reviewerCalled = false;
++let stopFilePresent = false;
++
++mock.module("../../src/engineer", () => ({
++  runEngineer: async (project: ProjectConfig) => {
++    writeFileSync(join(project.path, "bot-partial.txt"), "partial work\n");
++    await $`git -C ${project.path} add bot-partial.txt`.quiet();
++    await $`git -C ${project.path} commit -m "partial commit before stop"`.quiet();
++    // Simulate the session watcher: STOP file appears, engineer dies.
++    writeFileSync(stopFilePath, "stop\n", "utf8");
++    stopFilePresent = true;
++    return {
++      exitCode: null,
++      durationSeconds: 2,
++      timedOut: false,
++      logPath: join(TEST_DIR, "engineer.log"),
++    };
++  },
++  killActiveEngineer: () => false,
++  getActiveEngineerChild: () => null,
++}));
++
++mock.module("../../src/verification", () => ({
++  runVerification: async () => {
++    verificationCalled = true;
++    return {
++      outcome: "passed",
++      exitCode: 0,
++      durationSeconds: 1,
++      logPath: join(TEST_DIR, "verification.log"),
++    };
++  },
++}));
++
++mock.module("../../src/reviewer", () => ({
++  runReviewer: async () => {
++    reviewerCalled = true;
++    return {
++      verdict: "verified",
++      response: null,
++      rawResponse: "{}",
++      parseError: null,
++    };
++  },
++}));
++
++mock.module("../../src/safety", () => ({
++  // Only presents as true AFTER the mocked engineer "wrote" the STOP file.
++  isStopFilePresent: async () => stopFilePresent,
++  isBotRunning: () => ({ running: false }),
++  isWorkingTreeClean: async () => ({ clean: true }),
++  matchesHandsOff: () => null,
++  stopFilePath: () => stopFilePath,
++}));
++
++mock.module("../../src/state", () => ({
++  ensureCycleDir: () => {
++    const dir = join(TEST_DIR, "cycle-out");
++    mkdirSync(dir, { recursive: true });
++    return dir;
++  },
++  writeCycleFile: async () => {},
++  loadProjectState: async (projectId: string) => ({
++    project_id: projectId,
++    current_cycle_id: null,
++    last_cycle_id: null,
++    last_cycle_outcome: null,
++    last_cycle_at: null,
++    cycles_this_session: 0,
++  }),
++  saveProjectState: async () => {},
++  loadFleetState: async () => ({
++    version: 1,
++    updated_at: new Date().toISOString(),
++    projects: {},
++  }),
++  saveFleetState: async () => {},
++  updateProjectFleetState: () => {},
++  getRootDir: () => TEST_DIR,
++}));
++
++mock.module("../../src/audit", () => ({
++  appendProgress: async () => {},
++  loadProgressEvents: async () => [],
++  setVerboseMode: () => {},
++}));
++
++const { executeCycle } = await import("../../src/cycle");
++
++async function run() {
++  try {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++    mkdirSync(PROJ_DIR, { recursive: true });
++
++    await $`git -C ${PROJ_DIR} init`.quiet();
++    await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
++    await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
++    await $`git -C ${PROJ_DIR} config commit.gpgsign false`.quiet();
++    writeFileSync(join(PROJ_DIR, "README.md"), "initial\n");
++    await $`git -C ${PROJ_DIR} add README.md`.quiet();
++    await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
++    await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
++
++    const project: ProjectConfig = {
++      id: "test-proj",
++      path: PROJ_DIR,
++      priority: 1,
++      engineer_command: "echo ok",
++      verification_command: "echo ok",
++      cycle_budget_minutes: 25,
++      work_detection: "tasks_json",
++      concurrency_detection: "none",
++      branch: "bot/work",
++      auto_merge: false,
++      hands_off: [],
++    };
++
++    const config: DispatcherConfig = {
++      state_dir: join(TEST_DIR, "state"),
++      fleet_state_file: "fleet_state.json",
++      stop_file: "STOP",
++      override_file: "OVERRIDE",
++      picker: "priority_staleness",
++      max_cycles_per_project_per_session: 3,
++      log_dir: "logs",
++      digest_dir: "digests",
++    };
++
++    const result = await executeCycle(project, config);
++
++    const output = {
++      engineer_exit_code: result.engineer_exit_code,
++      verification_called: verificationCalled,
++      reviewer_called: reviewerCalled,
++      final_outcome: result.final_outcome,
++      reason: result.reason,
++    };
++
++    console.log(JSON.stringify(output));
++    process.exit(0);
++  } catch (err) {
++    console.error("Test helper crashed:", err);
++    process.exit(1);
++  } finally {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  }
++}
++
++run();
+diff --git a/tests/stop_watcher.test.ts b/tests/stop_watcher.test.ts
+new file mode 100644
+index 0000000..06224e3
+--- /dev/null
++++ b/tests/stop_watcher.test.ts
+@@ -0,0 +1,186 @@
++import { describe, expect, it } from "bun:test";
++import { mkdirSync, rmSync, writeFileSync } from "fs";
++import { join } from "path";
++import {
++  startStopFileWatcher,
++  type FsWatchListener,
++  type FsWatchLike,
++  type WatchFn,
++} from "../src/stop_watcher";
++
++// A test-mode synchronous watcher — exposes a `fire` handle so tests can
++// simulate an fs event without touching the real watch infrastructure.
++function makeFakeWatch() {
++  let currentListener: FsWatchListener | null = null;
++  let watchedDir = "";
++  let closed = false;
++  const watchFn: WatchFn = (dir, listener): FsWatchLike => {
++    watchedDir = dir;
++    currentListener = listener;
++    return {
++      close: () => {
++        closed = true;
++      },
++    };
++  };
++  return {
++    watchFn,
++    fire: (event: string, filename: string | null) => {
++      if (currentListener) currentListener(event, filename);
++    },
++    getDir: () => watchedDir,
++    isClosed: () => closed,
++    hasListener: () => currentListener !== null,
++  };
++}
++
++const FIXTURES = join(import.meta.dir, "fixtures", "stop_watcher");
++
++describe("startStopFileWatcher", () => {
++  it("watches the parent directory of the STOP path", () => {
++    const fake = makeFakeWatch();
++    const stopPath = "/tmp/generalstaff/STOP";
++    const w = startStopFileWatcher(stopPath, () => {}, {
++      watchFn: fake.watchFn,
++      existsFn: () => false,
++    });
++    expect(fake.getDir()).toBe("/tmp/generalstaff");
++    w.close();
++  });
++
++  it("fires onStop when STOP filename appears and exists on disk", () => {
++    const fake = makeFakeWatch();
++    let fired = 0;
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        fired++;
++      },
++      { watchFn: fake.watchFn, existsFn: () => true },
++    );
++    fake.fire("rename", "STOP");
++    expect(fired).toBe(1);
++  });
++
++  it("ignores events for unrelated filenames", () => {
++    const fake = makeFakeWatch();
++    let fired = 0;
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        fired++;
++      },
++      { watchFn: fake.watchFn, existsFn: () => true },
++    );
++    fake.fire("rename", "other-file.txt");
++    fake.fire("change", "PROGRESS.jsonl");
++    expect(fired).toBe(0);
++  });
++
++  it("ignores events when the STOP file does not actually exist", () => {
++    // fs.watch is notorious for ghost events — a rename that fires when the
++    // file was briefly created then immediately deleted shouldn't trigger.
++    const fake = makeFakeWatch();
++    let fired = 0;
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        fired++;
++      },
++      { watchFn: fake.watchFn, existsFn: () => false },
++    );
++    fake.fire("rename", "STOP");
++    expect(fired).toBe(0);
++  });
++
++  it("fires at most once even if multiple events arrive", () => {
++    const fake = makeFakeWatch();
++    let fired = 0;
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        fired++;
++      },
++      { watchFn: fake.watchFn, existsFn: () => true },
++    );
++    fake.fire("rename", "STOP");
++    fake.fire("change", "STOP");
++    fake.fire("rename", "STOP");
++    expect(fired).toBe(1);
++  });
++
++  it("honours null filenames (some platforms omit it) by using existsFn", () => {
++    const fake = makeFakeWatch();
++    let fired = 0;
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        fired++;
++      },
++      { watchFn: fake.watchFn, existsFn: () => true },
++    );
++    fake.fire("rename", null);
++    expect(fired).toBe(1);
++  });
++
++  it("swallows errors thrown by the onStop callback", () => {
++    const fake = makeFakeWatch();
++    startStopFileWatcher(
++      "/tmp/gs/STOP",
++      () => {
++        throw new Error("bad onStop");
++      },
++      { watchFn: fake.watchFn, existsFn: () => true },
++    );
++    // Must not throw — watcher failures should never crash the session.
++    expect(() => fake.fire("rename", "STOP")).not.toThrow();
++  });
++
++  it("close() invokes the underlying watcher's close()", () => {
++    const fake = makeFakeWatch();
++    const w = startStopFileWatcher("/tmp/gs/STOP", () => {}, {
++      watchFn: fake.watchFn,
++      existsFn: () => false,
++    });
++    expect(fake.isClosed()).toBe(false);
++    w.close();
++    expect(fake.isClosed()).toBe(true);
++  });
++
++  it("close() is idempotent and swallows underlying close errors", () => {
++    const watchFn: WatchFn = () => ({
++      close: () => {
++        throw new Error("already closed");
++      },
++    });
++    const w = startStopFileWatcher("/tmp/gs/STOP", () => {}, {
++      watchFn,
++      existsFn: () => false,
++    });
++    expect(() => w.close()).not.toThrow();
++    // Second close is also safe.
++    expect(() => w.close()).not.toThrow();
++  });
++
++  it("end-to-end with the real fs.watch: writing STOP triggers onStop", async () => {
++    mkdirSync(FIXTURES, { recursive: true });
++    const stopPath = join(FIXTURES, "STOP");
++    try {
++      let fired = 0;
++      const w = startStopFileWatcher(stopPath, () => {
++        fired++;
++      });
++      // Give the watcher a tick to arm on Windows (ReadDirectoryChangesW).
++      await new Promise((r) => setTimeout(r, 50));
++      writeFileSync(stopPath, "stop\n", "utf8");
++      // Wait for the fs event to propagate.
++      for (let i = 0; i < 40 && fired === 0; i++) {
++        await new Promise((r) => setTimeout(r, 50));
++      }
++      w.close();
++      expect(fired).toBeGreaterThanOrEqual(1);
++    } finally {
++      rmSync(FIXTURES, { recursive: true, force: true });
++    }
++  });
++});
+
+
+Diff summary: src/active_engineer.ts                 |  73 +++++++++++++
+ src/cycle.ts                           |  10 ++
+ src/engineer.ts                        |  56 ++++------
+ src/session.ts                         |  26 +++++
+ src/stop_watcher.ts                    |  91 ++++++++++++++++
+ state/generalstaff/tasks.json          |   2 +-
+ tests/cycle.test.ts                    |  25 +++++
+ tests/engineer.test.ts                 |  36 ++++++-
+ tests/helpers/verify_stop_mid_cycle.ts | 167 +++++++++++++++++++++++++++++
+ tests/stop_watcher.test.ts             | 186 +++++++++++++++++++++++++++++++++
+ 10 files changed, 632 insertions(+), 40 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T16:29:11.935Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162939.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162939.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162939.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162939.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162939.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_162940.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162940.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162940.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162940.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162940.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_162940.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rwe
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
