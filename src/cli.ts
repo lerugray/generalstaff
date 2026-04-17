@@ -53,9 +53,10 @@ import {
 } from "./sessions";
 import {
   loadProviderRegistry,
+  getProviderById,
   ProviderConfigError,
 } from "./providers/registry";
-import type { ProviderRole } from "./providers/types";
+import type { ProviderHealth, ProviderRole } from "./providers/types";
 
 const VERSION = "0.0.1";
 
@@ -172,6 +173,11 @@ Usage:
   generalstaff providers list [--json]                    List configured LLM providers + role routes from provider_config.yaml
     Example: generalstaff providers list
     Example: generalstaff providers list --json         # machine-readable registry
+  generalstaff providers ping <provider-id> [--json]      Probe a single provider's health() endpoint
+  generalstaff providers ping --all [--json]              Probe every configured provider in parallel
+    Example: generalstaff providers ping ollama_llama3
+    Example: generalstaff providers ping ollama_llama3 --json
+    Example: generalstaff providers ping --all          # summary table (exit 1 if any unreachable)
 
   generalstaff bot-status [--project=<id>]                Show unmerged commits on each project's bot branch
     Example: generalstaff bot-status                    # all projects
@@ -1081,11 +1087,131 @@ switch (command) {
 
   case "providers": {
     const sub = args[1];
-    if (sub !== "list") {
+    if (sub !== "list" && sub !== "ping") {
       console.error(
-        `Error: unknown providers subcommand '${sub ?? ""}'. Usage: generalstaff providers list [--json]`,
+        `Error: unknown providers subcommand '${sub ?? ""}'. Usage: generalstaff providers list [--json] | generalstaff providers ping <id>|--all [--json]`,
       );
       process.exit(2);
+    }
+    if (sub === "ping") {
+      const { values: pingValues, positionals: pingPositionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          json: { type: "boolean", default: false },
+          all: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const configPath = join(getRootDir(), "provider_config.yaml");
+      if (!existsSync(configPath)) {
+        console.error(
+          "Error: no provider_config.yaml found. See provider_config.yaml.example for format.",
+        );
+        process.exit(1);
+      }
+      let registry;
+      try {
+        registry = await loadProviderRegistry(configPath);
+      } catch (err) {
+        if (err instanceof ProviderConfigError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+
+      const probeById = async (
+        id: string,
+      ): Promise<{ id: string; health: ProviderHealth }> => {
+        try {
+          const provider = getProviderById(registry, id);
+          if (!provider.health) {
+            return {
+              id,
+              health: {
+                reachable: false,
+                error: "provider has no health() method",
+              },
+            };
+          }
+          return { id, health: await provider.health() };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { id, health: { reachable: false, error: msg } };
+        }
+      };
+
+      if (pingValues.all) {
+        const ids = Array.from(registry.providers.keys());
+        if (ids.length === 0) {
+          if (pingValues.json) {
+            console.log("[]");
+          } else {
+            console.log("No providers configured.");
+          }
+          break;
+        }
+        const results = await Promise.all(ids.map(probeById));
+        if (pingValues.json) {
+          console.log(
+            JSON.stringify(
+              results.map((r) => ({ id: r.id, ...r.health })),
+              null,
+              2,
+            ),
+          );
+        } else {
+          const idCol = Math.max(...ids.map((i) => i.length), 2);
+          console.log(
+            `${"id".padEnd(idCol)}  status       latency  detail`,
+          );
+          for (const r of results) {
+            const status = r.health.reachable ? "reachable" : "unreachable";
+            const lat =
+              r.health.latencyMs !== undefined ? `${r.health.latencyMs}ms` : "-";
+            const detail = r.health.reachable ? "" : (r.health.error ?? "");
+            console.log(
+              `${r.id.padEnd(idCol)}  ${status.padEnd(12)}  ${lat.padEnd(7)}  ${detail}`,
+            );
+          }
+        }
+        if (results.some((r) => !r.health.reachable)) process.exit(1);
+        break;
+      }
+
+      const id = pingPositionals[0];
+      if (!id) {
+        console.error(
+          "Error: provider id required. Usage: generalstaff providers ping <provider-id> [--json] | --all",
+        );
+        process.exit(2);
+      }
+      if (pingPositionals.length > 1) {
+        console.error(
+          "Error: only one provider id may be supplied (use --all to ping every provider)",
+        );
+        process.exit(2);
+      }
+      if (!registry.providers.has(id)) {
+        const available = Array.from(registry.providers.keys()).join(", ");
+        console.error(
+          `Error: unknown provider id '${id}'${available ? ` (available: ${available})` : " (no providers configured)"}`,
+        );
+        process.exit(1);
+      }
+      const { health } = await probeById(id);
+      if (pingValues.json) {
+        console.log(JSON.stringify(health, null, 2));
+      } else if (health.reachable) {
+        const lat = health.latencyMs !== undefined ? `${health.latencyMs}ms` : "?";
+        console.log(`Provider ${id}: reachable (${lat})`);
+      } else {
+        console.error(
+          `Provider ${id}: unreachable — ${health.error ?? "unknown error"}`,
+        );
+      }
+      if (!health.reachable) process.exit(1);
+      break;
     }
     const { values: provValues } = parseArgs({
       args: args.slice(2),

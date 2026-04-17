@@ -759,6 +759,202 @@ routes:
     });
   });
 
+  describe("providers ping command", () => {
+    const PING_TEST_DIR = join(import.meta.dir, "fixtures", "providers_ping_test");
+    const PING_FILE = join(PING_TEST_DIR, "provider_config.yaml");
+
+    beforeEach(() => {
+      mkdirSync(PING_TEST_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(PING_TEST_DIR, { recursive: true, force: true });
+    });
+
+    function writeConfig(providers: string) {
+      writeFileSync(PING_FILE, `providers:\n${providers}`);
+    }
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff providers ping");
+    });
+
+    it("errors when provider_config.yaml is absent", async () => {
+      const result = await runCli(["providers", "ping", "anything"], PING_TEST_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("no provider_config.yaml found");
+    });
+
+    it("errors when no provider id or --all is given", async () => {
+      writeConfig(
+        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+      );
+      const result = await runCli(["providers", "ping"], PING_TEST_DIR);
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("provider id required");
+    });
+
+    it("errors on unknown provider id", async () => {
+      writeConfig(
+        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "nope"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("unknown provider id 'nope'");
+      expect(result.stderr).toContain("ollama_llama3");
+    });
+
+    it("reports unreachable and exits 1 when the ollama host is down", async () => {
+      writeConfig(
+        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "ollama_llama3"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Provider ollama_llama3: unreachable");
+    });
+
+    it("--json emits the ProviderHealth object on failure", async () => {
+      writeConfig(
+        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "ollama_llama3", "--json"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.reachable).toBe(false);
+      expect(typeof parsed.error).toBe("string");
+    });
+
+    it("reports reachable with latency when the ollama host returns 200", async () => {
+      const server = Bun.serve({
+        port: 0,
+        fetch(req) {
+          const url = new URL(req.url);
+          if (url.pathname === "/api/tags") {
+            return new Response(JSON.stringify({ models: [] }), { status: 200 });
+          }
+          return new Response("nope", { status: 404 });
+        },
+      });
+      try {
+        const host = `http://127.0.0.1:${server.port}`;
+        writeConfig(
+          `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: ${host}\n`,
+        );
+        const result = await runCli(
+          ["providers", "ping", "ollama_llama3"],
+          PING_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("Provider ollama_llama3: reachable");
+        expect(result.stdout).toMatch(/\(\d+ms\)/);
+      } finally {
+        server.stop();
+      }
+    });
+
+    it("--json emits ProviderHealth on success", async () => {
+      const server = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response(JSON.stringify({ models: [] }), { status: 200 });
+        },
+      });
+      try {
+        const host = `http://127.0.0.1:${server.port}`;
+        writeConfig(
+          `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: ${host}\n`,
+        );
+        const result = await runCli(
+          ["providers", "ping", "ollama_llama3", "--json"],
+          PING_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.reachable).toBe(true);
+        expect(parsed.host).toBe(host);
+        expect(typeof parsed.latencyMs).toBe("number");
+      } finally {
+        server.stop();
+      }
+    });
+
+    it("--all pings every provider and prints a summary table", async () => {
+      const server = Bun.serve({
+        port: 0,
+        fetch() {
+          return new Response(JSON.stringify({ models: [] }), { status: 200 });
+        },
+      });
+      try {
+        const goodHost = `http://127.0.0.1:${server.port}`;
+        writeConfig(
+          `  - id: ollama_good\n    kind: ollama\n    model: llama3:8b\n    host: ${goodHost}\n` +
+            `  - id: ollama_bad\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+        );
+        const result = await runCli(
+          ["providers", "ping", "--all"],
+          PING_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(1);
+        expect(result.stdout).toContain("ollama_good");
+        expect(result.stdout).toContain("reachable");
+        expect(result.stdout).toContain("ollama_bad");
+        expect(result.stdout).toContain("unreachable");
+      } finally {
+        server.stop();
+      }
+    });
+
+    it("--all --json emits an array of ProviderHealth objects keyed by id", async () => {
+      writeConfig(
+        `  - id: ollama_bad\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "--all", "--json"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      const parsed = JSON.parse(result.stdout);
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].id).toBe("ollama_bad");
+      expect(parsed[0].reachable).toBe(false);
+    });
+
+    it("--all exits 0 when zero providers configured (empty registry)", async () => {
+      writeFileSync(PING_FILE, "providers: []\n");
+      const result = await runCli(
+        ["providers", "ping", "--all"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No providers configured");
+    });
+
+    it("reports unreachable for non-ollama provider kinds (Phase 2 stub)", async () => {
+      writeConfig(
+        `  - id: or_flagship\n    kind: openrouter\n    model: qwen/qwen3-coder-plus\n    api_key_env: OPENROUTER_API_KEY\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "or_flagship"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("not implemented in Phase 2");
+    });
+  });
+
   describe("digest command", () => {
     const DIGEST_TEST_DIR = join(import.meta.dir, "fixtures", "digest_cmd_test");
     const DIGEST_DIR = join(DIGEST_TEST_DIR, "digests");
