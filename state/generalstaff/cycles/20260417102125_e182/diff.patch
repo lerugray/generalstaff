@@ -1,0 +1,90 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 3452686..b32033b 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -33,6 +33,7 @@ import {
+   countTests,
+   formatSummary,
+ } from "./summary";
++import { formatRelativeTime } from "./format";
+ 
+ const VERSION = "0.0.1";
+ 
+@@ -215,7 +216,13 @@ switch (command) {
+         const state = fleet.projects[p.id];
+         console.log(`  ${p.id} (priority ${p.priority})`);
+         if (state) {
+-          console.log(`    Last cycle: ${state.last_cycle_at ?? "never"}`);
++          if (state.last_cycle_at) {
++            console.log(
++              `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
++            );
++          } else {
++            console.log(`    Last cycle: never`);
++          }
+           console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
+           console.log(`    Total cycles: ${state.total_cycles}`);
+         } else {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 86ce39c..d6794f2 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -362,7 +362,7 @@
+   {
+     "id": "gs-086",
+     "title": "Wire formatRelativeTime (from gs-085) into the 'generalstaff status' command output: replace the raw ISO timestamp on the 'Last cycle: ...' line with a relative version, but keep the ISO in parentheses for precision. Add tests. Only proceed after gs-085 lands.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index bdef13e..4f739fb 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -250,6 +250,45 @@ dispatcher:
+       // Ensure it's NOT JSON
+       expect(() => JSON.parse(result.stdout)).toThrow();
+     });
++
++    it("Last cycle line shows relative time and preserves ISO timestamp", async () => {
++      const isoTimestamp = "2026-04-15T12:00:00.000Z";
++      const fleetState = {
++        version: 1,
++        updated_at: "2026-04-16T00:00:00.000Z",
++        projects: {
++          alpha: {
++            last_cycle_at: isoTimestamp,
++            last_cycle_outcome: "verified",
++            total_cycles: 5,
++            total_verified: 4,
++            total_failed: 1,
++            accumulated_minutes: 120,
++          },
++        },
++      };
++      writeFileSync(
++        join(STATUS_TEST_DIR, "fleet_state.json"),
++        JSON.stringify(fleetState),
++      );
++
++      const result = await runCli(["status"], STATUS_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      // ISO timestamp kept in parentheses for precision
++      expect(result.stdout).toContain(`(${isoTimestamp})`);
++      // A relative fragment (days/hours/ago/yesterday/just now) should precede it
++      const lastCycleMatch = result.stdout.match(/Last cycle: (.+) \(2026-04-15T12:00:00\.000Z\)/);
++      expect(lastCycleMatch).not.toBeNull();
++      expect(lastCycleMatch![1]).not.toBe(isoTimestamp);
++      // beta has no state — still shows "never"
++      expect(result.stdout).toContain("No cycles yet");
++    });
++
++    it("Last cycle line shows 'never' when there is no state", async () => {
++      const result = await runCli(["status"], STATUS_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("No cycles yet");
++    });
+   });
+ 
+   describe("history", () => {
