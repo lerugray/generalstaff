@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the marked-done task, no scope drift or hands-off violations detected, and task evidence is present in the diff.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "You are NOT grading correctness — just checking that the claimed work has corresponding evidence.",
+      "evidence": "Changes in src/audit.ts and src/cli.ts implement the new command-line interface features, while tests/audit.test.ts adds comprehensive test coverage for these changes.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification output shows all tests passed, confirming no silent failures."
+}

@@ -1,0 +1,333 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index cd5c13b..e1520ab 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -65,6 +65,7 @@ export type LogLevel = "error";
+ 
+ export interface TailProgressOptions {
+   level?: LogLevel;
++  grep?: RegExp;
+ }
+ 
+ export function isErrorEntry(entry: ProgressEntry): boolean {
+@@ -74,6 +75,24 @@ export function isErrorEntry(entry: ProgressEntry): boolean {
+   return false;
+ }
+ 
++// Compile a user-supplied regex string with the case-insensitive flag. Throws a
++// clear Error on invalid syntax so callers can surface a single-line message
++// instead of the raw engine output.
++export function compileGrepPattern(pattern: string): RegExp {
++  try {
++    return new RegExp(pattern, "i");
++  } catch (err) {
++    throw new Error(
++      `Invalid --grep pattern '${pattern}': ${(err as Error).message}`,
++    );
++  }
++}
++
++export function matchesGrep(entry: ProgressEntry, pattern: RegExp): boolean {
++  const haystack = `${entry.event} ${JSON.stringify(entry.data ?? {})}`;
++  return pattern.test(haystack);
++}
++
+ export async function tailProgressLog(
+   projectId: string | undefined,
+   lines: number = 20,
+@@ -102,8 +121,12 @@ export async function tailProgressLog(
+         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+     );
+ 
+-    const filtered =
+-      options.level === "error" ? entries.filter(isErrorEntry) : entries;
++    let filtered = entries;
++    if (options.level === "error") filtered = filtered.filter(isErrorEntry);
++    if (options.grep) {
++      const re = options.grep;
++      filtered = filtered.filter((e) => matchesGrep(e, re));
++    }
+     const tail = filtered.slice(-lines);
+     for (const entry of tail) {
+       printEntry(entry);
+@@ -111,8 +134,14 @@ export async function tailProgressLog(
+ 
+     if (entries.length === 0) {
+       console.log("No audit log entries found.");
+-    } else if (filtered.length === 0 && options.level === "error") {
+-      console.log("No error-level audit log entries found.");
++    } else if (filtered.length === 0) {
++      if (options.grep && options.level === "error") {
++        console.log("No error-level audit log entries matching grep pattern.");
++      } else if (options.grep) {
++        console.log("No audit log entries matching grep pattern.");
++      } else if (options.level === "error") {
++        console.log("No error-level audit log entries found.");
++      }
+     }
+   }
+ }
+@@ -131,14 +160,15 @@ async function tailSingleProject(
+   const content = await readFile(filePath, "utf8");
+   const allLines = content.trim().split("\n").filter(Boolean);
+ 
+-  if (options.level === "error") {
++  if (options.level === "error" || options.grep) {
+     const matches: string[] = [];
+     for (const line of allLines) {
+       try {
+         const parsed = JSON.parse(line);
+-        if (isProgressEntry(parsed) && isErrorEntry(parsed)) {
+-          matches.push(line);
+-        }
++        if (!isProgressEntry(parsed)) continue;
++        if (options.level === "error" && !isErrorEntry(parsed)) continue;
++        if (options.grep && !matchesGrep(parsed, options.grep)) continue;
++        matches.push(line);
+       } catch {
+         // skip malformed
+       }
+@@ -149,7 +179,17 @@ async function tailSingleProject(
+       if (isProgressEntry(parsed)) printEntry(parsed);
+     }
+     if (matches.length === 0) {
+-      console.log(`No error-level entries for project "${projectId}".`);
++      if (options.grep && options.level === "error") {
++        console.log(
++          `No error-level entries matching grep pattern for project "${projectId}".`,
++        );
++      } else if (options.grep) {
++        console.log(
++          `No entries matching grep pattern for project "${projectId}".`,
++        );
++      } else {
++        console.log(`No error-level entries for project "${projectId}".`);
++      }
+     }
+     return;
+   }
+diff --git a/src/cli.ts b/src/cli.ts
+index 34ad954..8d7f048 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -15,7 +15,7 @@ import {
+   ProjectNotFoundError,
+ } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
++import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+@@ -78,10 +78,11 @@ Usage:
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+ 
+-  generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
++  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>]
+                                                           Tail PROGRESS.jsonl
+     Example: generalstaff log --project=myapp --lines=50
+     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
++    Example: generalstaff log --grep='verified|weak'     # case-insensitive regex over event + data
+ 
+   generalstaff summary [--no-tests] [--format=json] [--project=<id>]
+                                                           Dashboard: cycles, outcomes, duration, tasks, tests
+@@ -271,6 +272,7 @@ switch (command) {
+         project: { type: "string" },
+         lines: { type: "string", default: "20" },
+         level: { type: "string" },
++        grep: { type: "string" },
+       },
+       allowPositionals: false,
+     });
+@@ -278,8 +280,18 @@ switch (command) {
+       console.error(`Error: --level must be 'error' (got '${values.level}')`);
+       process.exit(2);
+     }
++    let grepRegex: RegExp | undefined;
++    if (values.grep !== undefined) {
++      try {
++        grepRegex = compileGrepPattern(values.grep);
++      } catch (err) {
++        console.error(`Error: ${(err as Error).message}`);
++        process.exit(2);
++      }
++    }
+     await tailProgressLog(values.project, parseInt(values.lines!, 10), {
+       level: values.level as "error" | undefined,
++      grep: grepRegex,
+     });
+     break;
+   }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 11f7be1..1bebbe4 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -398,7 +398,7 @@
+   {
+     "id": "gs-092",
+     "title": "Add a 'generalstaff log --grep=<pattern>' flag that filters log output by a case-insensitive regex pattern against the event+data fields of PROGRESS.jsonl. Rejects invalid regex with a clear error. Works alongside --lines/--project/--level. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index e73d01d..c5a74f7 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep } from "../src/audit";
+ import type { ProgressEntry } from "../src/types";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+@@ -266,6 +266,147 @@ describe("tailProgressLog", () => {
+   });
+ });
+ 
++describe("tailProgressLog --grep filter", () => {
++  it("filters single-project entries by a case-insensitive regex against event + data", async () => {
++    await appendProgress("proj-g", "cycle_start", { start_sha: "aaa111" }, "c1");
++    await appendProgress("proj-g", "cycle_end", { outcome: "verified", reason: "tests pass" }, "c1");
++    await appendProgress("proj-g", "cycle_end", { outcome: "verification_failed", reason: "flaky" }, "c2");
++
++    const pattern = compileGrepPattern("VERIF");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-g", 10, { grep: pattern }),
++    );
++    // Matches both 'verified' and 'verification_failed' (case-insensitive, substring)
++    expect(lines).toHaveLength(2);
++    expect(lines[0]).toContain("outcome=verified ");
++    expect(lines[1]).toContain("verification_failed");
++  });
++
++  it("matches against event name as well as data", async () => {
++    await appendProgress("proj-gn", "cycle_start", { start_sha: "abc" }, "c1");
++    await appendProgress("proj-gn", "engineer_invoked", { cmd: "test" }, "c1");
++    await appendProgress("proj-gn", "cycle_end", { outcome: "verified" }, "c1");
++
++    const pattern = compileGrepPattern("engineer");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-gn", 10, { grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("engineer_invoked");
++  });
++
++  it("filters all-projects output by grep", async () => {
++    await appendProgress("proj-ga", "cycle_skipped", { reason: "no work" }, "c1");
++    await new Promise((r) => setTimeout(r, 5));
++    await appendProgress("proj-gb", "cycle_end", { outcome: "verified" }, "c2");
++
++    const pattern = compileGrepPattern("skipped");
++    const lines = await captureLog(() =>
++      tailProgressLog(undefined, 10, { grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("cycle_skipped");
++  });
++
++  it("combines grep with level=error", async () => {
++    await appendProgress("proj-gc", "cycle_skipped", { reason: "empty diff" }, "c1");
++    await appendProgress("proj-gc", "cycle_skipped", { reason: "hands-off block" }, "c2");
++    await appendProgress("proj-gc", "cycle_end", { outcome: "verification_failed", reason: "tests failed" }, "c3");
++
++    const pattern = compileGrepPattern("empty");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-gc", 10, { level: "error", grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("empty diff");
++  });
++
++  it("prints a clear message when no entries match grep (single project)", async () => {
++    await appendProgress("proj-gn2", "cycle_end", { outcome: "verified" }, "c1");
++    const pattern = compileGrepPattern("nonexistent_token_xyz");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-gn2", 10, { grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No entries matching grep pattern");
++    expect(lines[0]).toContain("proj-gn2");
++  });
++
++  it("prints a clear message when no entries match grep (all projects)", async () => {
++    await appendProgress("proj-gn3", "cycle_end", { outcome: "verified" }, "c1");
++    const pattern = compileGrepPattern("nonexistent_token_xyz");
++    const lines = await captureLog(() =>
++      tailProgressLog(undefined, 10, { grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No audit log entries matching grep pattern");
++  });
++
++  it("prints a combined message when grep + level both exclude everything", async () => {
++    await appendProgress("proj-gn4", "cycle_end", { outcome: "verified" }, "c1");
++    const pattern = compileGrepPattern("verified");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-gn4", 10, { level: "error", grep: pattern }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No error-level entries matching grep pattern");
++  });
++
++  it("respects the lines limit when grep filter is active", async () => {
++    for (let i = 0; i < 5; i++) {
++      await appendProgress("proj-gl", "cycle_skipped", { reason: "x" }, `c${i}`);
++    }
++    const pattern = compileGrepPattern("skipped");
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-gl", 2, { grep: pattern }),
++    );
++    expect(lines).toHaveLength(2);
++  });
++});
++
++describe("compileGrepPattern", () => {
++  it("compiles a valid pattern with case-insensitive flag", () => {
++    const re = compileGrepPattern("hello");
++    expect(re.flags).toContain("i");
++    expect(re.test("HELLO world")).toBe(true);
++  });
++
++  it("accepts regex metacharacters", () => {
++    const re = compileGrepPattern("verified|skipped");
++    expect(re.test("outcome=verified")).toBe(true);
++    expect(re.test("cycle_skipped")).toBe(true);
++    expect(re.test("cycle_start")).toBe(false);
++  });
++
++  it("throws a clear error on invalid regex", () => {
++    expect(() => compileGrepPattern("[unterminated")).toThrow(/Invalid --grep pattern/);
++  });
++});
++
++describe("matchesGrep", () => {
++  function entry(event: string, data: Record<string, unknown> = {}): ProgressEntry {
++    return { timestamp: new Date().toISOString(), event: event as any, data };
++  }
++
++  it("matches against event name", () => {
++    expect(matchesGrep(entry("cycle_start"), /cycle/i)).toBe(true);
++    expect(matchesGrep(entry("cycle_start"), /verified/i)).toBe(false);
++  });
++
++  it("matches against data field values", () => {
++    expect(
++      matchesGrep(entry("cycle_end", { outcome: "verified" }), /verified/i),
++    ).toBe(true);
++    expect(
++      matchesGrep(entry("cycle_end", { reason: "tests pass" }), /tests/i),
++    ).toBe(true);
++  });
++
++  it("handles missing data gracefully", () => {
++    expect(matchesGrep(entry("cycle_start"), /cycle/i)).toBe(true);
++  });
++});
++
+ describe("isErrorEntry", () => {
+   function entry(event: string, data: Record<string, unknown> = {}): ProgressEntry {
+     return { timestamp: new Date().toISOString(), event: event as any, data };
