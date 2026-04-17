@@ -983,7 +983,7 @@
   {
     "id": "gs-163",
     "title": "Add docs/provider-config-format.md documenting the provider_config.yaml schema (separate from the example file so long-form explanation doesn't clutter the inline comments). Sections: (1) Purpose — why provider_config.yaml exists alongside the reviewer's env-var-based dispatch, citing FUTURE-DIRECTIONS §2 tier taxonomy. (2) Schema reference — each top-level block (providers, routes) with required/optional fields and types. (3) Supported provider kinds — ollama (fully implemented), openrouter/claude (listed but Phase 2 defers implementation to reviewer's inline path). (4) Role definitions — digest, cycle_summary, classifier; what each one controls. (5) A complete worked example copied from provider_config.yaml.example. (6) FAQ: 'Why isn't reviewer routing here?' (because reviewer dispatch stays in src/reviewer.ts this phase). Target length ~200 lines. Do NOT place under docs/internal/ (hands-off) or docs/sessions/ (hands-off) — lands in docs/ root which is NOT hands-off. Add a link to this doc from docs/ index if one exists (check first; create if not). No tests needed for prose-only docs.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

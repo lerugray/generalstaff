@@ -1,0 +1,299 @@
+# provider_config.yaml — Format Reference
+
+**Status:** Phase 2 (gs-163, 2026-04-17). Companion long-form reference
+for `provider_config.yaml.example` at the repo root. The example file
+carries inline comments; this document carries the prose that would
+otherwise bloat those comments.
+
+**Audience:** operators wiring up local LLM providers for the digest,
+cycle_summary, and classifier roles; contributors touching
+`src/providers/registry.ts`.
+
+---
+
+## 1. Purpose
+
+`provider_config.yaml` is the user-editable routing table that tells
+GeneralStaff which local LLM provider handles which non-reviewer role.
+It exists alongside — **not instead of** — the reviewer's
+environment-variable-based dispatch, and this split is deliberate.
+
+The reviewer is load-bearing (Hard Rule 6: "verification gate is
+load-bearing"). Its dispatch path stays inline in `src/reviewer.ts`
+and is selected per-launch via `GENERALSTAFF_REVIEWER_PROVIDER` (see
+`CLAUDE.md` §"Reviewer provider configuration"). Non-reviewer roles —
+narrative digest, cycle summary, work-item classification — are lower
+stakes and benefit from a single declarative file instead of more
+environment variables. `provider_config.yaml` is where that routing
+lives.
+
+The tier taxonomy that motivates having three providers at all
+(ollama / openrouter / claude) is documented in
+`FUTURE-DIRECTIONS-2026-04-15.md` §2 ("Model Plurality / Provider
+Routing"). Short version: cheap local work stays on Ollama, quality
+work goes to OpenRouter or Claude, and the choice is role-by-role.
+
+**What this file does not control:**
+
+- Reviewer dispatch. See `src/reviewer.ts` and the reviewer env vars
+  in `CLAUDE.md`.
+- Project registration. See `projects.yaml`.
+- Permission scoping / hands-off lists. Those live per-project in
+  `projects.yaml`.
+
+---
+
+## 2. Schema reference
+
+The file has two top-level blocks: `providers` (a catalogue of
+provider descriptors keyed by `id`) and `routes` (a mapping from
+role name to provider `id`). Both are parsed and validated by
+`loadProviderRegistry()` in `src/providers/registry.ts`; validation
+errors surface as `ProviderConfigError`.
+
+### 2.1 Top-level shape
+
+```yaml
+providers:
+  - id: <string>
+    kind: <ollama | openrouter | claude>
+    model: <string>
+    host: <string>            # optional
+    api_key_env: <string>     # optional
+  - ...
+
+routes:
+  digest: <provider-id>
+  cycle_summary: <provider-id>
+  classifier: <provider-id>
+```
+
+An absent file, an empty file, or a file containing only whitespace /
+`null` produces an empty registry — every route resolves to the
+sentinel string `"noop"` and `hasProviderForRole()` returns `false`.
+Anything else that fails validation throws `ProviderConfigError`.
+
+### 2.2 `providers[]` fields
+
+| Field         | Required | Type   | Notes                                                      |
+| ------------- | -------- | ------ | ---------------------------------------------------------- |
+| `id`          | yes      | string | Non-empty. Must be unique across the `providers` array.    |
+| `kind`        | yes      | string | One of `ollama`, `openrouter`, `claude`.                   |
+| `model`       | yes      | string | Non-empty. Interpreted per-kind (see §3).                  |
+| `host`        | no       | string | Only meaningful for `ollama`. Defaults to `localhost:11434`. |
+| `api_key_env` | no       | string | Reserved for future `openrouter` / `claude` wiring.        |
+
+Duplicate `id` values, missing or empty `id` / `kind` / `model`
+fields, and any `kind` outside the allowed set all produce a
+`ProviderConfigError` with a per-entry index so the bad record is
+easy to locate.
+
+### 2.3 `routes` fields
+
+| Role            | Required | Notes                                                      |
+| --------------- | -------- | ---------------------------------------------------------- |
+| `digest`        | no       | End-of-session narrative (gs-154, gs-158).                 |
+| `cycle_summary` | no       | Per-cycle plain-English summaries (Phase 2+).              |
+| `classifier`    | no       | Work-item classification (Phase 2+).                       |
+
+Every route is optional. An omitted role silently routes to `"noop"`
+and callers must check `hasProviderForRole()` before dispatching.
+Unknown role names (anything outside the three above) are a validation
+error, not a silent ignore — this catches typos early.
+
+Any role whose value is not a non-empty string, or whose value
+references a provider `id` not present in the `providers` array,
+is a validation error.
+
+---
+
+## 3. Supported provider kinds
+
+### 3.1 `ollama` — fully implemented
+
+`createOllamaProvider()` in `src/providers/ollama.ts` handles this
+kind. It talks to a local Ollama daemon over HTTP.
+
+- `model` is the Ollama-visible model tag (e.g. `llama3:8b`,
+  `qwen3:8b`). `ollama list` on the host shows what is installed.
+- `host` defaults to `http://localhost:11434`. Override only for
+  non-default Ollama installs. The `OLLAMA_HOST` environment
+  variable does **not** override this field — it is separately used
+  by the reviewer's ollama path and the pre-flight reachability
+  check.
+- `api_key_env` is ignored for this kind (Ollama has no API key).
+
+### 3.2 `openrouter` — descriptor only (Phase 2 defers)
+
+`kind: openrouter` parses and validates successfully, but
+`getProviderForRole()` / `getProviderById()` **throws** when
+resolving it:
+
+> Provider kind 'openrouter' not implemented in Phase 2 — see
+> src/reviewer.ts for inline dispatch
+
+The descriptor is accepted so operators can draft their eventual
+Phase 3 routing in-place without editor warnings. If you need
+OpenRouter routing today, it is available on the reviewer path
+only (select via `GENERALSTAFF_REVIEWER_PROVIDER=openrouter`).
+
+### 3.3 `claude` — descriptor only (Phase 2 defers)
+
+Same story as `openrouter`. `kind: claude` parses, but the registry
+refuses to instantiate it. Use the reviewer path
+(`GENERALSTAFF_REVIEWER_PROVIDER=claude`) if you need Claude
+routing in Phase 2.
+
+---
+
+## 4. Role definitions
+
+Three roles are currently defined. Each is intentionally narrow — the
+registry is a routing table, not a general-purpose LLM client.
+
+### 4.1 `digest`
+
+End-of-session narrative generation. Consumes the session's
+`PROGRESS.jsonl` entries and produces a short plain-English summary.
+This is the lowest-stakes role — imprecision in the narrative does
+not affect cycle correctness. Ollama is the default recommendation.
+
+Related work: gs-154, gs-158.
+
+### 4.2 `cycle_summary`
+
+Per-cycle plain-English summary, written next to the structured
+PROGRESS entries. Used by the local UI (future) and by session
+digests. Also low-stakes; Ollama-grade quality is typically
+sufficient.
+
+### 4.3 `classifier`
+
+Work-item classification — e.g. labeling incoming tasks by type,
+difficulty, or surface area. Medium-stakes: a bad classification can
+send a task to the wrong queue. If classification accuracy matters
+for your workflow, consider routing this role to a heavier provider
+once Phase 3 lands `openrouter` / `claude` support.
+
+---
+
+## 5. Worked example
+
+Copied verbatim from `provider_config.yaml.example` at the repo
+root (as of 2026-04-17). Start here; edit in place.
+
+```yaml
+# ----------------------------------------------------------------------
+# Provider catalogue — ids referenced by the routes: block below
+# ----------------------------------------------------------------------
+providers:
+  - id: ollama_llama3                       # stable id; routes: references it
+    kind: ollama                            # one of: ollama | openrouter | claude
+    model: llama3:8b                        # model name as Ollama sees it
+    host: http://localhost:11434            # optional; default is localhost:11434
+
+# ----------------------------------------------------------------------
+# Routes — which provider handles which role
+# ----------------------------------------------------------------------
+#
+# Any role omitted here defaults to "noop" and hasProviderForRole()
+# will return false for it — callers then fall back to their templated
+# non-LLM path. It is safe (and common) to wire up only the roles
+# you care about.
+routes:
+  digest: ollama_llama3
+  cycle_summary: ollama_llama3
+  classifier: ollama_llama3
+```
+
+Minimal variant (only wire the digest role, leave the others on
+their non-LLM fallbacks):
+
+```yaml
+providers:
+  - id: local_llama
+    kind: ollama
+    model: llama3:8b
+
+routes:
+  digest: local_llama
+```
+
+---
+
+## 6. FAQ
+
+### 6.1 Why isn't reviewer routing here?
+
+The reviewer is a Hard Rule 6 load-bearing component: a cycle isn't
+`done` until the reviewer confirms scope match. Phase 2 keeps its
+dispatch inline in `src/reviewer.ts` with env-var selection
+(`GENERALSTAFF_REVIEWER_PROVIDER`, `GENERALSTAFF_REVIEWER_MODEL`,
+`GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER`) rather than folding it
+into the shared registry. Rationales:
+
+1. The reviewer needs a per-launch override path (for quick A/B
+   between providers on a single session) that a file-based config
+   doesn't cleanly give you.
+2. The reviewer has unique behaviours — fallback provider on
+   error, pre-flight reachability checks — that don't fit the
+   generic `LLMProvider.invoke()` shape the registry assumes.
+3. Migrating reviewer dispatch into the registry would merge two
+   evolution cycles; deferring lets the registry stabilise first.
+
+Phase 3 may consolidate both paths behind the registry. Until then,
+the split is intentional and `provider_config.yaml` deliberately
+omits a `reviewer` role.
+
+### 6.2 What happens if `provider_config.yaml` is missing?
+
+`loadProviderRegistry()` returns an empty registry — no providers,
+every route pointing at `"noop"`. Callers must check
+`hasProviderForRole()` before dispatching; if it returns `false`
+they fall back to their templated (non-LLM) path. This is the
+default state for fresh installs and is fully supported.
+
+### 6.3 What happens if a route is omitted?
+
+That role silently resolves to `"noop"`. This lets you wire up only
+the roles you care about — e.g. enable the digest role only and
+leave `cycle_summary` / `classifier` on their non-LLM fallbacks.
+Omission is not an error.
+
+### 6.4 Can I mix provider kinds?
+
+Yes — the `providers` array takes any mix of supported kinds. But in
+Phase 2 only `ollama` instantiates successfully; `openrouter` and
+`claude` descriptors parse but throw on
+`getProviderForRole()` / `getProviderById()`. Mixing is planned for
+Phase 3.
+
+### 6.5 Where do errors go?
+
+Validation errors throw `ProviderConfigError` with a message that
+identifies the offending field (and, for `providers[]` entries, the
+array index). YAML parse errors are wrapped into the same error
+class with the underlying parser message preserved. Callers should
+let these bubble up — they are user-fixable config errors, not
+runtime faults.
+
+### 6.6 Is `provider_config.yaml` in any hands-off list?
+
+No. It is user-managed but bots are permitted to edit it. It is not
+gitignored by default; commit or ignore it per your own preference.
+
+---
+
+## 7. Related references
+
+- `provider_config.yaml.example` — canonical schema with inline
+  comments; the source of truth for field names.
+- `src/providers/registry.ts` — loader and validator.
+- `src/providers/types.ts` — TypeScript types for the provider
+  layer.
+- `src/providers/ollama.ts` — the only fully-wired provider kind in
+  Phase 2.
+- `CLAUDE.md` §"Reviewer provider configuration" — the parallel
+  env-var-based path for the reviewer role.
+- `FUTURE-DIRECTIONS-2026-04-15.md` §2 — tier taxonomy and the
+  rationale for having three provider kinds.
