@@ -862,7 +862,7 @@
   {
     "id": "gs-144",
     "title": "Add test coverage for isNoopCommand in src/verification.ts (currently only reached indirectly via runVerification). Cover: 'true', ':', 'echo', 'exit 0' all return true; 'true && npm test' returns true (startsWith-match per current implementation, document whether that's intentional); 'tree', 'truecheck' (begins with 'true' but not a word boundary) — current code treats 'truecheck' as noop because startsWith(noop + ' ') requires space, so 'truecheck' is NOT a noop — add the test pinning that behavior; whitespace-only returns false. Because isNoopCommand is module-private, either export it for tests or exercise it through runVerification with dryRun=true (which calls it explicitly). Prefer exporting.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { runVerification } from "../src/verification";
+import { runVerification, isNoopCommand } from "../src/verification";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
@@ -126,6 +126,48 @@ describe("verification gate", () => {
       // "exit 1" doesn't match any NOOP_COMMANDS, so dry run returns "passed"
       expect(result.outcome).toBe("passed");
       expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe("isNoopCommand", () => {
+    it("treats bare 'true' as a noop", () => {
+      expect(isNoopCommand("true")).toBe(true);
+    });
+
+    it("treats bare ':' as a noop", () => {
+      expect(isNoopCommand(":")).toBe(true);
+    });
+
+    it("treats bare 'echo' as a noop", () => {
+      expect(isNoopCommand("echo")).toBe(true);
+    });
+
+    it("treats 'exit 0' as a noop", () => {
+      expect(isNoopCommand("exit 0")).toBe(true);
+    });
+
+    it("treats prefix-with-space matches as noops (e.g. 'true && npm test')", () => {
+      // Documented behavior: startsWith(noop + ' ') matches, so a real test
+      // suite chained after `true` is still flagged as a noop. The chained
+      // command is not inspected — this is intentional but worth pinning.
+      expect(isNoopCommand("true && npm test")).toBe(true);
+    });
+
+    it("does not match commands that merely start with noop letters but no word boundary", () => {
+      // 'tree' shares no prefix; 'truecheck' begins with 'true' but the
+      // startsWith(noop + ' ') guard requires a space, so neither is a noop.
+      expect(isNoopCommand("tree")).toBe(false);
+      expect(isNoopCommand("truecheck")).toBe(false);
+    });
+
+    it("returns false for whitespace-only and empty input", () => {
+      expect(isNoopCommand("   ")).toBe(false);
+      expect(isNoopCommand("")).toBe(false);
+    });
+
+    it("trims surrounding whitespace before matching", () => {
+      expect(isNoopCommand("  true  ")).toBe(true);
+      expect(isNoopCommand("\techo hello\n")).toBe(true);
     });
   });
 
