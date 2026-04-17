@@ -29,6 +29,15 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / GB).toFixed(1)} GB`;
 }
 
+// gs-093: pluralize a file count for digest output. Negatives and invalid
+// inputs collapse to "0 files" rather than propagating nonsense into the
+// digest markdown.
+export function formatFileCount(n: number): string {
+  if (!Number.isFinite(n) || n < 1) return "0 files";
+  const count = Math.floor(n);
+  return count === 1 ? "1 file" : `${count} files`;
+}
+
 export function formatPercent(ratio: number): string {
   if (!Number.isFinite(ratio) || ratio < 0) return "?";
   return `${Math.round(ratio * 100)}%`;

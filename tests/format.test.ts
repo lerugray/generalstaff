@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   formatDuration,
   formatBytes,
+  formatFileCount,
   formatPercent,
   formatRelativeTime,
 } from "../src/format";
@@ -95,6 +96,35 @@ describe("formatBytes", () => {
     expect(formatBytes(NaN)).toBe("?");
     expect(formatBytes(Infinity)).toBe("?");
     expect(formatBytes(-Infinity)).toBe("?");
+  });
+});
+
+describe("formatFileCount", () => {
+  it("pluralizes basic cases", () => {
+    expect(formatFileCount(0)).toBe("0 files");
+    expect(formatFileCount(1)).toBe("1 file");
+    expect(formatFileCount(2)).toBe("2 files");
+  });
+
+  it("handles large numbers", () => {
+    expect(formatFileCount(42)).toBe("42 files");
+    expect(formatFileCount(1000)).toBe("1000 files");
+  });
+
+  it("floors fractional counts", () => {
+    expect(formatFileCount(1.9)).toBe("1 file");
+    expect(formatFileCount(2.5)).toBe("2 files");
+  });
+
+  it("returns '0 files' for negative inputs", () => {
+    expect(formatFileCount(-1)).toBe("0 files");
+    expect(formatFileCount(-100)).toBe("0 files");
+  });
+
+  it("returns '0 files' for invalid inputs", () => {
+    expect(formatFileCount(NaN)).toBe("0 files");
+    expect(formatFileCount(Infinity)).toBe("0 files");
+    expect(formatFileCount(-Infinity)).toBe("0 files");
   });
 });
 

@@ -15,7 +15,7 @@ import { isStopFilePresent } from "./safety";
 import { executeCycle, countCommitsAhead } from "./cycle";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
 import type { SessionPlanEstimate } from "./dispatcher";
-import { formatDuration } from "./format";
+import { formatDuration, formatFileCount } from "./format";
 import { fetchCommitSubject } from "./git";
 import { notifySessionEnd } from "./notify";
 import { countRemainingWork } from "./work_detection";
@@ -422,7 +422,7 @@ export async function writeDigest(
       verified.forEach((r, i) => {
         const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
         const diff = r.diff_stats
-          ? `  _(${r.diff_stats.files_changed} file(s), +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
+          ? `  _(${formatFileCount(r.diff_stats.files_changed)}, +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
           : "";
         content += `${i + 1}. ${subject}${diff}\n`;
       });
