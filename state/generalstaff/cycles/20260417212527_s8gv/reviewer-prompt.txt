@@ -1,0 +1,762 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+"priority": 2,
+"completed_at": "2026-04-17T21:31:36.258Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index c4e22f5..c123f87 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -53,9 +53,10 @@ import {
+ } from "./sessions";
+ import {
+   loadProviderRegistry,
++  getProviderById,
+   ProviderConfigError,
+ } from "./providers/registry";
+-import type { ProviderRole } from "./providers/types";
++import type { ProviderHealth, ProviderRole } from "./providers/types";
+ 
+ const VERSION = "0.0.1";
+ 
+@@ -172,6 +173,11 @@ Usage:
+   generalstaff providers list [--json]                    List configured LLM providers + role routes from provider_config.yaml
+     Example: generalstaff providers list
+     Example: generalstaff providers list --json         # machine-readable registry
++  generalstaff providers ping <provider-id> [--json]      Probe a single provider's health() endpoint
++  generalstaff providers ping --all [--json]              Probe every configured provider in parallel
++    Example: generalstaff providers ping ollama_llama3
++    Example: generalstaff providers ping ollama_llama3 --json
++    Example: generalstaff providers ping --all          # summary table (exit 1 if any unreachable)
+ 
+   generalstaff bot-status [--project=<id>]                Show unmerged commits on each project's bot branch
+     Example: generalstaff bot-status                    # all projects
+@@ -1081,12 +1087,132 @@ switch (command) {
+ 
+   case "providers": {
+     const sub = args[1];
+-    if (sub !== "list") {
++    if (sub !== "list" && sub !== "ping") {
+       console.error(
+-        `Error: unknown providers subcommand '${sub ?? ""}'. Usage: generalstaff providers list [--json]`,
++        `Error: unknown providers subcommand '${sub ?? ""}'. Usage: generalstaff providers list [--json] | generalstaff providers ping <id>|--all [--json]`,
+       );
+       process.exit(2);
+     }
++    if (sub === "ping") {
++      const { values: pingValues, positionals: pingPositionals } = parseArgs({
++        args: args.slice(2),
++        options: {
++          json: { type: "boolean", default: false },
++          all: { type: "boolean", default: false },
++        },
++        allowPositionals: true,
++      });
++      const configPath = join(getRootDir(), "provider_config.yaml");
++      if (!existsSync(configPath)) {
++        console.error(
++          "Error: no provider_config.yaml found. See provider_config.yaml.example for format.",
++        );
++        process.exit(1);
++      }
++      let registry;
++      try {
++        registry = await loadProviderRegistry(configPath);
++      } catch (err) {
++        if (err instanceof ProviderConfigError) {
++          console.error(`Error: ${err.message}`);
++          process.exit(1);
++        }
++        throw err;
++      }
++
++      const probeById = async (
++        id: string,
++      ): Promise<{ id: string; health: ProviderHealth }> => {
++        try {
++          const provider = getProviderById(registry, id);
++          if (!provider.health) {
++            return {
++              id,
++              health: {
++                reachable: false,
++                error: "provider has no health() method",
++              },
++            };
++          }
++          return { id, health: await provider.health() };
++        } catch (err) {
++          const msg = err instanceof Error ? err.message : String(err);
++          return { id, health: { reachable: false, error: msg } };
++        }
++      };
++
++      if (pingValues.all) {
++        const ids = Array.from(registry.providers.keys());
++        if (ids.length === 0) {
++          if (pingValues.json) {
++            console.log("[]");
++          } else {
++            console.log("No providers configured.");
++          }
++          break;
++        }
++        const results = await Promise.all(ids.map(probeById));
++        if (pingValues.json) {
++          console.log(
++            JSON.stringify(
++              results.map((r) => ({ id: r.id, ...r.health })),
++              null,
++              2,
++            ),
++          );
++        } else {
++          const idCol = Math.max(...ids.map((i) => i.length), 2);
++          console.log(
++            `${"id".padEnd(idCol)}  status       latency  detail`,
++          );
++          for (const r of results) {
++            const status = r.health.reachable ? "reachable" : "unreachable";
++            const lat =
++              r.health.latencyMs !== undefined ? `${r.health.latencyMs}ms` : "-";
++            const detail = r.health.reachable ? "" : (r.health.error ?? "");
++            console.log(
++              `${r.id.padEnd(idCol)}  ${status.padEnd(12)}  ${lat.padEnd(7)}  ${detail}`,
++            );
++          }
++        }
++        if (results.some((r) => !r.health.reachable)) process.exit(1);
++        break;
++      }
++
++      const id = pingPositionals[0];
++      if (!id) {
++        console.error(
++          "Error: provider id required. Usage: generalstaff providers ping <provider-id> [--json] | --all",
++        );
++        process.exit(2);
++      }
++      if (pingPositionals.length > 1) {
++        console.error(
++          "Error: only one provider id may be supplied (use --all to ping every provider)",
++        );
++        process.exit(2);
++      }
++      if (!registry.providers.has(id)) {
++        const available = Array.from(registry.providers.keys()).join(", ");
++        console.error(
++          `Error: unknown provider id '${id}'${available ? ` (available: ${available})` : " (no providers configured)"}`,
++        );
++        process.exit(1);
++      }
++      const { health } = await probeById(id);
++      if (pingValues.json) {
++        console.log(JSON.stringify(health, null, 2));
++      } else if (health.reachable) {
++        const lat = health.latencyMs !== undefined ? `${health.latencyMs}ms` : "?";
++        console.log(`Provider ${id}: reachable (${lat})`);
++      } else {
++        console.error(
++          `Provider ${id}: unreachable — ${health.error ?? "unknown error"}`,
++        );
++      }
++      if (!health.reachable) process.exit(1);
++      break;
++    }
+     const { values: provValues } = parseArgs({
+       args: args.slice(2),
+       options: {
+diff --git a/src/providers/registry.ts b/src/providers/registry.ts
+index a86c053..736fe11 100644
+--- a/src/providers/registry.ts
++++ b/src/providers/registry.ts
+@@ -189,10 +189,29 @@ export function getProviderForRole(
+       `No provider routed for role '${role}' (routes.${role} is unset). Call hasProviderForRole() first.`,
+     );
+   }
++  return instantiateProvider(registry, id);
++}
++
++export function getProviderById(
++  registry: ProviderRegistry,
++  id: string,
++): LLMProvider {
++  if (!registry.providers.has(id)) {
++    throw new ProviderConfigError(
++      `Unknown provider id '${id}'`,
++    );
++  }
++  return instantiateProvider(registry, id);
++}
++
++function instantiateProvider(
++  registry: ProviderRegistry,
++  id: string,
++): LLMProvider {
+   const descriptor = registry.providers.get(id);
+   if (!descriptor) {
+     throw new ProviderConfigError(
+-      `Role '${role}' references unknown provider '${id}'`,
++      `Unknown provider id '${id}'`,
+     );
+   }
+   switch (descriptor.kind) {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 11bfc1b..276cad1 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -956,8 +956,9 @@
+   {
+     "id": "gs-159",
+     "title": "Add 'generalstaff providers ping <provider-id>' subcommand in src/cli.ts. Loads the registry via loadProviderRegistry, instantiates the named provider, calls its health() method (gs-151 defines this on the ollama provider; other kinds throw 'not implemented in Phase 2'). Prints: 'Provider <id>: reachable (<latencyMs>ms)' on success, 'Provider <id>: unreachable — <error>' on failure (exit code 1 on failure for scripting). --json flag dumps the ProviderHealth object. Also support 'generalstaff providers ping --all' which pings every configured provider in parallel and prints a summary table. Add tests in tests/cli.test.ts covering: unknown provider id errors, ping single provider success, ping single provider failure (exit 1), --all table. Wire into the switch(command) block and printUsage() help text. Do NOT touch src/reviewer.ts; the existing 'generalstaff doctor' command has Ollama-specific probes — leave those as-is.",
+-    "status": "pending",
+-    "priority": 2
++    "status": "done",
++    "priority": 2,
++    "completed_at": "2026-04-17T21:31:36.258Z"
+   },
+   {
+     "id": "gs-160",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 7ec0dbc..d1fb63c 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -759,6 +759,202 @@ routes:
+     });
+   });
+ 
++  describe("providers ping command", () => {
++    const PING_TEST_DIR = join(import.meta.dir, "fixtures", "providers_ping_test");
++    const PING_FILE = join(PING_TEST_DIR, "provider_config.yaml");
++
++    beforeEach(() => {
++      mkdirSync(PING_TEST_DIR, { recursive: true });
++    });
++
++    afterEach(() => {
++      rmSync(PING_TEST_DIR, { recursive: true, force: true });
++    });
++
++    function writeConfig(providers: string) {
++      writeFileSync(PING_FILE, `providers:\n${providers}`);
++    }
++
++    it("is listed in --help output", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff providers ping");
++    });
++
++    it("errors when provider_config.yaml is absent", async () => {
++      const result = await runCli(["providers", "ping", "anything"], PING_TEST_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("no provider_config.yaml found");
++    });
++
++    it("errors when no provider id or --all is given", async () => {
++      writeConfig(
++        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++      );
++      const result = await runCli(["providers", "ping"], PING_TEST_DIR);
++      expect(result.exitCode).toBe(2);
++      expect(result.stderr).toContain("provider id required");
++    });
++
++    it("errors on unknown provider id", async () => {
++      writeConfig(
++        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++      );
++      const result = await runCli(
++        ["providers", "ping", "nope"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("unknown provider id 'nope'");
++      expect(result.stderr).toContain("ollama_llama3");
++    });
++
++    it("reports unreachable and exits 1 when the ollama host is down", async () => {
++      writeConfig(
++        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++      );
++      const result = await runCli(
++        ["providers", "ping", "ollama_llama3"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("Provider ollama_llama3: unreachable");
++    });
++
++    it("--json emits the ProviderHealth object on failure", async () => {
++      writeConfig(
++        `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++      );
++      const result = await runCli(
++        ["providers", "ping", "ollama_llama3", "--json"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.reachable).toBe(false);
++      expect(typeof parsed.error).toBe("string");
++    });
++
++    it("reports reachable with latency when the ollama host returns 200", async () => {
++      const server = Bun.serve({
++        port: 0,
++        fetch(req) {
++          const url = new URL(req.url);
++          if (url.pathname === "/api/tags") {
++            return new Response(JSON.stringify({ models: [] }), { status: 200 });
++          }
++          return new Response("nope", { status: 404 });
++        },
++      });
++      try {
++        const host = `http://127.0.0.1:${server.port}`;
++        writeConfig(
++          `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: ${host}\n`,
++        );
++        const result = await runCli(
++          ["providers", "ping", "ollama_llama3"],
++          PING_TEST_DIR,
++        );
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout).toContain("Provider ollama_llama3: reachable");
++        expect(result.stdout).toMatch(/\(\d+ms\)/);
++      } finally {
++        server.stop();
++      }
++    });
++
++    it("--json emits ProviderHealth on success", async () => {
++      const server = Bun.serve({
++        port: 0,
++        fetch() {
++          return new Response(JSON.stringify({ models: [] }), { status: 200 });
++        },
++      });
++      try {
++        const host = `http://127.0.0.1:${server.port}`;
++        writeConfig(
++          `  - id: ollama_llama3\n    kind: ollama\n    model: llama3:8b\n    host: ${host}\n`,
++        );
++        const result = await runCli(
++          ["providers", "ping", "ollama_llama3", "--json"],
++          PING_TEST_DIR,
++        );
++        expect(result.exitCode).toBe(0);
++        const parsed = JSON.parse(result.stdout);
++        expect(parsed.reachable).toBe(true);
++        expect(parsed.host).toBe(host);
++        expect(typeof parsed.latencyMs).toBe("number");
++      } finally {
++        server.stop();
++      }
++    });
++
++    it("--all pings every provider and prints a summary table", async () => {
++      const server = Bun.serve({
++        port: 0,
++        fetch() {
++          return new Response(JSON.stringify({ models: [] }), { status: 200 });
++        },
++      });
++      try {
++        const goodHost = `http://127.0.0.1:${server.port}`;
++        writeConfig(
++          `  - id: ollama_good\n    kind: ollama\n    model: llama3:8b\n    host: ${goodHost}\n` +
++            `  - id: ollama_bad\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++        );
++        const result = await runCli(
++          ["providers", "ping", "--all"],
++          PING_TEST_DIR,
++        );
++        expect(result.exitCode).toBe(1);
++        expect(result.stdout).toContain("ollama_good");
++        expect(result.stdout).toContain("reachable");
++        expect(result.stdout).toContain("ollama_bad");
++        expect(result.stdout).toContain("unreachable");
++      } finally {
++        server.stop();
++      }
++    });
++
++    it("--all --json emits an array of ProviderHealth objects keyed by id", async () => {
++      writeConfig(
++        `  - id: ollama_bad\n    kind: ollama\n    model: llama3:8b\n    host: http://127.0.0.1:1\n`,
++      );
++      const result = await runCli(
++        ["providers", "ping", "--all", "--json"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      const parsed = JSON.parse(result.stdout);
++      expect(Array.isArray(parsed)).toBe(true);
++      expect(parsed).toHaveLength(1);
++      expect(parsed[0].id).toBe("ollama_bad");
++      expect(parsed[0].reachable).toBe(false);
++    });
++
++    it("--all exits 0 when zero providers configured (empty registry)", async () => {
++      writeFileSync(PING_FILE, "providers: []\n");
++      const result = await runCli(
++        ["providers", "ping", "--all"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("No providers configured");
++    });
++
++    it("reports unreachable for non-ollama provider kinds (Phase 2 stub)", async () => {
++      writeConfig(
++        `  - id: or_flagship\n    kind: openrouter\n    model: qwen/qwen3-coder-plus\n    api_key_env: OPENROUTER_API_KEY\n`,
++      );
++      const result = await runCli(
++        ["providers", "ping", "or_flagship"],
++        PING_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("not implemented in Phase 2");
++    });
++  });
++
+   describe("digest command", () => {
+     const DIGEST_TEST_DIR = join(import.meta.dir, "fixtures", "digest_cmd_test");
+     const DIGEST_DIR = join(DIGEST_TEST_DIR, "digests");
+
+
+Diff summary: src/cli.ts                    | 132 +++++++++++++++++++++++++++-
+ src/providers/registry.ts     |  21 ++++-
+ state/generalstaff/tasks.json |   5 +-
+ tests/cli.test.ts             | 196 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 348 insertions(+), 6 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T21:32:06.450Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_213245.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213245.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_213246.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: 
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
