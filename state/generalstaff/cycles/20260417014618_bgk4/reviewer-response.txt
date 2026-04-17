@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes are directly related to the claimed task of adding the 'generalstaff bot-status' CLI command, no hands-off files were touched, and the verification command passed successfully.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add 'generalstaff bot-status [--project=<id>]' CLI command that prints the bot branch's commit count ahead of HEAD for each project (using countCommitsAhead). Indicates pending unmerged work. Format: 'myproject: 2 commit(s) on bot/work not yet on master'. Add tests.",
+      "evidence": "The diff adds the bot-status command to cli.ts, implements the logic to count commits ahead using countCommitsAhead, includes help text, and adds comprehensive tests in cli.test.ts covering various scenarios including filtering by project, error handling, and help output.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) passed with exit code 0, confirming that all tests including the new bot-status tests are passing. The implementation correctly adds the CLI command, integrates with the existing countCommitsAhead function, and includes proper error handling and test coverage."
+}
