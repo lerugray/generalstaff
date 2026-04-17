@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files changed relate to the gs-132 task, no hands-off violations, and the diff provides strong evidence for completing the task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "\"status\": \"done\"",
+      "evidence": "The task gs-132 in tasks.json is marked as 'done', and the diff includes all required changes: rollback logic in cycle.ts, progress event type addition in types.ts, updated comment in session.ts, and new tests in cycle.test.ts and helpers/verify_rollback_behavior.ts.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) exited with code 0, indicating successful execution of tests and type checking. The test helper verify_rollback_behavior.ts and associated tests in cycle.test.ts provide comprehensive coverage for the rollback behavior as specified in the task."
+}
