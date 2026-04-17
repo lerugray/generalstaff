@@ -1,0 +1,384 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cycle.ts b/src/cycle.ts
+index a311259..49c3e69 100644
+--- a/src/cycle.ts
++++ b/src/cycle.ts
+@@ -3,7 +3,7 @@
+ 
+ import { readFile } from "fs/promises";
+ import { existsSync } from "fs";
+-import { join } from "path";
++import { join, resolve as resolvePath } from "path";
+ import { $ } from "bun";
+ import {
+   ensureCycleDir,
+@@ -74,6 +74,23 @@ function worktreePath(project: ProjectConfig): string {
+   return join(project.path, ".bot-worktree");
+ }
+ 
++// Build the "bot branch has unmerged commits ahead of HEAD" error reason.
++// Resolves project.path to an absolute path so the suggested `git -C <path>`
++// command works regardless of the user's current working directory.
++export function formatUnmergedBranchError(
++  project: ProjectConfig,
++  branch: string,
++  unmerged: number,
++): string {
++  const resolvedPath = resolvePath(project.path);
++  return (
++    `${branch} has ${unmerged} unmerged commit(s) ahead of HEAD; ` +
++    `resetting would destroy that work. Merge manually ` +
++    `(git -C ${resolvedPath} merge --no-ff ${branch}) or set ` +
++    `auto_merge: true in projects.yaml for project ${project.id}.`
++  );
++}
++
+ async function autoCommitState(
+   project: ProjectConfig,
+   cycleId: string,
+@@ -403,11 +420,7 @@ export async function executeCycle(
+         }
+       } else {
+         // auto_merge: false — default per Hard Rule #4. Do NOT overwrite work.
+-        const reason =
+-          `${branch} has ${unmerged} unmerged commit(s) ahead of HEAD; ` +
+-          `resetting would destroy that work. Merge manually ` +
+-          `(git -C ${project.path} merge --no-ff ${branch}) or set ` +
+-          `auto_merge: true in projects.yaml for project ${project.id}.`;
++        const reason = formatUnmergedBranchError(project, branch, unmerged);
+         console.log(`\nERROR: ${reason}\n`);
+         await appendProgress(project.id, "cycle_skipped", {
+           reason,
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 7b65d74..d5d8edf 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -578,7 +578,7 @@
+   {
+     "id": "gs-122",
+     "title": "Improve the 'bot/work branch has unmerged commits' error message in src/cycle.ts to interpolate the resolved project path in the suggested git command — e.g., `git -C /full/path/to/project merge --no-ff bot/work` rather than the current placeholder. Also suggest the alternative `auto_merge: true` config change with the exact project id. Add a test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index ce8bc33..1f51d6f 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it } from "bun:test";
+-import { join } from "path";
++import { join, resolve as resolvePath } from "path";
+ import { tmpdir } from "os";
+ import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { $ } from "bun";
+@@ -9,6 +9,7 @@ import {
+   diffSummaryStats,
+   countCommitsAhead,
+   preflightCleanupWorktree,
++  formatUnmergedBranchError,
+ } from "../src/cycle";
+ import type { ProjectConfig } from "../src/types";
+ 
+@@ -495,3 +496,34 @@ describe("executeCycle", () => {
+     expect(result.reason).toContain("hands-off violation");
+   }, 30_000);
+ });
++
++describe("formatUnmergedBranchError", () => {
++  it("interpolates a resolved absolute path into the git command", () => {
++    // Relative path input — the message must resolve it to absolute.
++    const project = makeProject({
++      id: "myapp",
++      path: "./some/relative/dir",
++      branch: "bot/work",
++    });
++    const msg = formatUnmergedBranchError(project, "bot/work", 3);
++    const expectedAbs = resolvePath("./some/relative/dir");
++
++    expect(msg).toContain("bot/work has 3 unmerged commit(s)");
++    expect(msg).toContain(`git -C ${expectedAbs} merge --no-ff bot/work`);
++    // Relative form should NOT appear in the command (only the resolved one).
++    expect(msg).not.toContain("git -C ./some/relative/dir merge");
++  });
++
++  it("names the exact project id in the auto_merge suggestion", () => {
++    const project = makeProject({ id: "retrogaze", path: "/abs/p" });
++    const msg = formatUnmergedBranchError(project, "bot/work", 1);
++    expect(msg).toContain("auto_merge: true in projects.yaml for project retrogaze");
++  });
++
++  it("keeps absolute paths unchanged", () => {
++    const absPath = resolvePath("/tmp/already-abs");
++    const project = makeProject({ id: "p", path: absPath });
++    const msg = formatUnmergedBranchError(project, "bot/work", 2);
++    expect(msg).toContain(`git -C ${absPath} merge --no-ff bot/work`);
++  });
++});
+
+
+Diff summary: src/cycle.ts                  | 25 +++++++++++++++++++------
+ state/generalstaff/tasks.json |  2 +-
+ tests/cycle.test.ts           | 34 +++++++++++++++++++++++++++++++++-
+ 3 files changed, 53 insertions(+), 8 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T15:12:43.598Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_151310.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_151311.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\On
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
