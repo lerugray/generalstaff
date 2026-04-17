@@ -49,12 +49,15 @@ mock.module("../../src/cycle", () => ({
   countCommitsAhead: async () => 0,
   executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
     executeCycleCalls++;
-    const now = new Date().toISOString();
+    // Fixed ~90s cycle duration so the "took" field in the log line has
+    // a non-trivial value to assert on (gs-104).
+    const start = new Date(Date.now() - 90_000).toISOString();
+    const end = new Date().toISOString();
     return {
       cycle_id: `cycle-${executeCycleCalls}`,
       project_id: p.id,
-      started_at: now,
-      ended_at: now,
+      started_at: start,
+      ended_at: end,
       cycle_start_sha: "abc",
       cycle_end_sha: "def",
       engineer_exit_code: 0,
@@ -137,7 +140,7 @@ async function run() {
     const errors: string[] = [];
 
     const regex =
-      /Cycle 1 completed: test-proj \u2014 verified \([^)]+ remaining\)/;
+      /Cycle 1 completed: test-proj \u2014 verified \(took 1m\d+s, [^)]+ remaining\)/;
     if (!regex.test(joined)) {
       errors.push(
         `expected cycle completion log line matching regex, output was:\n${joined}`,

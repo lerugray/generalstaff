@@ -206,9 +206,14 @@ export async function runSession(options: SessionOptions) {
 
     // Live progress between cycles — makes long sessions readable
     const remainingStr = formatDuration(Math.max(0, remainingMinutes()) * 60);
+    const cycleDurationSec = Math.max(
+      0,
+      (new Date(result.ended_at).getTime() - new Date(result.started_at).getTime()) / 1000,
+    );
+    const cycleDurationStr = formatDuration(cycleDurationSec);
     console.log(
       `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
-        `${result.final_outcome} (${remainingStr} remaining)`,
+        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining)`,
     );
 
     // Guard against runaway empty cycles

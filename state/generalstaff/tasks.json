@@ -470,7 +470,7 @@
   {
     "id": "gs-104",
     "title": "Include per-cycle engineer duration in the 'Cycle N completed' log line so users can spot slowdowns in real time. Change `Cycle N completed: generalstaff — verified (58m50s remaining)` to `Cycle N completed: generalstaff — verified (took 6m12s, 58m50s remaining)`. Compute duration from cycle.started_at and cycle.ended_at. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
