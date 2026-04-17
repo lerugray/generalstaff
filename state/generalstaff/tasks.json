@@ -338,7 +338,7 @@
   {
     "id": "gs-082",
     "title": "In src/projects.ts, add a getProject(id) lookup helper with a typed 'not found' error that includes the list of available project ids. Refactor existing string-match fallbacks (like in cli.ts task list) to use it. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]
