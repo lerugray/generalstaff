@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -361,6 +361,113 @@ describe("tailProgressLog --grep filter", () => {
       tailProgressLog("proj-gl", 2, { grep: pattern }),
     );
     expect(lines).toHaveLength(2);
+  });
+});
+
+describe("parseSinceFlag", () => {
+  const now = new Date("2026-04-17T12:00:00.000Z");
+
+  it("parses minute-relative durations", () => {
+    const ms = parseSinceFlag("30m", now);
+    expect(ms).toBe(now.getTime() - 30 * 60 * 1000);
+  });
+
+  it("parses hour-relative durations", () => {
+    const ms = parseSinceFlag("2h", now);
+    expect(ms).toBe(now.getTime() - 2 * 60 * 60 * 1000);
+  });
+
+  it("parses day-relative durations", () => {
+    const ms = parseSinceFlag("3d", now);
+    expect(ms).toBe(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  });
+
+  it("parses second-relative durations", () => {
+    const ms = parseSinceFlag("45s", now);
+    expect(ms).toBe(now.getTime() - 45 * 1000);
+  });
+
+  it("parses absolute ISO timestamps", () => {
+    const ms = parseSinceFlag("2026-04-01T00:00:00Z", now);
+    expect(ms).toBe(Date.parse("2026-04-01T00:00:00Z"));
+  });
+
+  it("accepts future timestamps (no clamping)", () => {
+    const future = parseSinceFlag("2999-01-01T00:00:00Z", now);
+    expect(future).toBeGreaterThan(now.getTime());
+  });
+
+  it("throws on malformed input", () => {
+    expect(() => parseSinceFlag("1x", now)).toThrow(/Invalid --since value/);
+    expect(() => parseSinceFlag("not-a-date", now)).toThrow(/Invalid --since value/);
+    expect(() => parseSinceFlag("", now)).toThrow(/Invalid --since value/);
+  });
+});
+
+describe("tailProgressLog --since filter", () => {
+  it("filters single-project entries newer than sinceMs", async () => {
+    // Write an entry, capture its timestamp, then write a later entry.
+    await appendProgress("proj-s1", "cycle_start", { start_sha: "old" }, "c1");
+    const boundary = Date.now() + 1;
+    await new Promise((r) => setTimeout(r, 20));
+    await appendProgress("proj-s1", "cycle_start", { start_sha: "new" }, "c2");
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-s1", 10, { sinceMs: boundary }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("sha=new");
+  });
+
+  it("filters all-projects entries by sinceMs", async () => {
+    await appendProgress("proj-s2a", "cycle_start", { start_sha: "oldA" }, "c1");
+    await appendProgress("proj-s2b", "cycle_start", { start_sha: "oldB" }, "c1");
+    const boundary = Date.now() + 1;
+    await new Promise((r) => setTimeout(r, 20));
+    await appendProgress("proj-s2a", "cycle_end", { outcome: "verified" }, "c1");
+
+    const lines = await captureLog(() =>
+      tailProgressLog(undefined, 10, { sinceMs: boundary }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("cycle_end");
+  });
+
+  it("prints a clear message when nothing is newer than sinceMs (single project)", async () => {
+    await appendProgress("proj-s3", "cycle_start", { start_sha: "old" }, "c1");
+    const future = Date.now() + 60 * 60 * 1000;
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-s3", 10, { sinceMs: future }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No entries since the given time");
+    expect(lines[0]).toContain("proj-s3");
+  });
+
+  it("prints a clear message when nothing is newer than sinceMs (all projects)", async () => {
+    await appendProgress("proj-s4", "cycle_start", { start_sha: "old" }, "c1");
+    const future = Date.now() + 60 * 60 * 1000;
+
+    const lines = await captureLog(() =>
+      tailProgressLog(undefined, 10, { sinceMs: future }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No audit log entries since the given time");
+  });
+
+  it("combines --since with --level=error", async () => {
+    await appendProgress("proj-s5", "cycle_end", { outcome: "verification_failed", reason: "old-fail" }, "c1");
+    const boundary = Date.now() + 1;
+    await new Promise((r) => setTimeout(r, 20));
+    await appendProgress("proj-s5", "cycle_start", { start_sha: "x" }, "c2");
+    await appendProgress("proj-s5", "cycle_end", { outcome: "verification_failed", reason: "new-fail" }, "c2");
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-s5", 10, { level: "error", sinceMs: boundary }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("new-fail");
   });
 });
 
