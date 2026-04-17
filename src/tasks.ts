@@ -53,6 +53,20 @@ export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {
   return tasks.filter((t) => t.status !== "done" && t.status !== "skipped");
 }
 
+export interface TaskCounts {
+  pending: number;
+  done: number;
+  total: number;
+}
+
+export function countTasks(tasks: GreenfieldTask[]): TaskCounts {
+  return {
+    pending: pendingTasks(tasks).length,
+    done: tasks.filter((t) => t.status === "done").length,
+    total: tasks.length,
+  };
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

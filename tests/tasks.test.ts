@@ -15,6 +15,7 @@ import {
   nextTaskId,
   addTask,
   markTaskDone,
+  countTasks,
   TasksLoadError,
   TaskValidationError,
 } from "../src/tasks";
@@ -238,6 +239,24 @@ describe("tasks module", () => {
       const task = await addTask("myproj", long);
       expect(task.title).toBe(long);
       expect(task.title.length).toBe(600);
+    });
+  });
+
+  describe("countTasks", () => {
+    it("returns zeros for an empty list", () => {
+      expect(countTasks([])).toEqual({ pending: 0, done: 0, total: 0 });
+    });
+
+    it("counts pending, done, and total; skipped adds only to total", () => {
+      const tasks: GreenfieldTask[] = [
+        { id: "a-1", title: "A", status: "pending", priority: 1 },
+        { id: "a-2", title: "B", status: "pending", priority: 1 },
+        { id: "a-3", title: "C", status: "in_progress", priority: 1 },
+        { id: "a-4", title: "D", status: "done", priority: 1 },
+        { id: "a-5", title: "E", status: "done", priority: 1 },
+        { id: "a-6", title: "F", status: "skipped", priority: 1 },
+      ];
+      expect(countTasks(tasks)).toEqual({ pending: 3, done: 2, total: 6 });
     });
   });
 
@@ -534,6 +553,102 @@ describe("CLI task command", () => {
     });
   });
 
+  describe("task count", () => {
+    it("reports pending, done, and total for a single project", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+        { id: "gs-002", title: "b", status: "in_progress", priority: 1 },
+        { id: "gs-003", title: "c", status: "done", priority: 1 },
+        { id: "gs-004", title: "d", status: "done", priority: 1 },
+        { id: "gs-005", title: "e", status: "skipped", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await runCli(
+        ["task", "count", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe("proj: 2 pending, 2 done (5 total)");
+    });
+
+    it("reports all-zero counts when tasks.json is missing for --project", async () => {
+      const result = await runCli(
+        ["task", "count", "--project=ghost"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe("ghost: 0 pending, 0 done (0 total)");
+    });
+
+    it("surfaces malformed JSON as an error", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        "{bad json",
+      );
+      const result = await runCli(
+        ["task", "count", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Failed to load tasks");
+    });
+
+    it("counts across all projects when --project is omitted", async () => {
+      const PROJECTS_YAML = `
+projects:
+  - id: proj
+    path: /tmp/proj
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - README.md
+  - id: other
+    path: /tmp/other
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - README.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+      writeFileSync(join(TEST_DIR, "projects.yaml"), PROJECTS_YAML);
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "a", status: "pending", priority: 1 },
+          { id: "gs-002", title: "b", status: "done", priority: 1 },
+        ]),
+      );
+      mkdirSync(join(TEST_DIR, "state", "other"), { recursive: true });
+      writeFileSync(
+        join(TEST_DIR, "state", "other", "tasks.json"),
+        JSON.stringify([
+          { id: "ot-001", title: "x", status: "done", priority: 1 },
+          { id: "ot-002", title: "y", status: "done", priority: 1 },
+          { id: "ot-003", title: "z", status: "pending", priority: 1 },
+        ]),
+      );
+      const result = await runCli(["task", "count"], TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("proj: 1 pending, 1 done (2 total)");
+      expect(result.stdout).toContain("other: 1 pending, 2 done (3 total)");
+    });
+  });
+
   describe("unknown subcommand", () => {
     it("errors when no subcommand is given", async () => {
       const result = await runCli(["task"], TEST_DIR);
@@ -554,5 +669,6 @@ describe("CLI task command", () => {
     expect(result.stdout).toContain("task list");
     expect(result.stdout).toContain("task add");
     expect(result.stdout).toContain("task done");
+    expect(result.stdout).toContain("task count");
   });
 });
