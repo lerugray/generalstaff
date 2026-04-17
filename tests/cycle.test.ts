@@ -395,7 +395,7 @@ describe("preflightCleanupWorktree", () => {
       const result = await preflightCleanupWorktree(project, rmFn);
       expect(result.wasStale).toBe(true);
       expect(result.removed).toBe(false);
-      expect(result.warning).toContain("locked");
+      expect(result.warning).toContain("locked by another process");
       expect(result.warning).toContain("EBUSY");
     } finally {
       rmSync(repo, { recursive: true, force: true });
