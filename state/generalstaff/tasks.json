@@ -496,5 +496,11 @@
     "title": "Add test coverage for the session_complete ProgressEntry event (introduced by gs-099): verify exactly one event fires per session_end path, data.total_cycles matches allResults.length, data.stop_reason is in the expected set ('budget'|'max-cycles'|'stop-file'|'no-project'|'insufficient-budget'|'empty-cycles'), data.duration_minutes is a non-negative number. Use a session fixture or mock.",
     "status": "pending",
     "priority": 2
+  },
+  {
+    "id": "gs-109",
+    "title": "Produce a README outline proposal at `docs/README-PROPOSAL.md` following the matiassingers/awesome-readme checklist structure. Read README.md (existing), CLAUDE.md, DESIGN.md, PIVOT-2026-04-15.md, FUTURE-DIRECTIONS-2026-04-15.md, RULE-RELAXATION-2026-04-15.md, UI-VISION-2026-04-15.md, and the PHASE-1-*-2026-04-15 docs. Output section headers + one-bullet-per-section summary + cite which source doc each bullet draws from. Do NOT modify README.md itself. Do NOT write any narrative prose in the sections. Only propose structure and what-belongs-where. This is pure retrieval/outlining on behalf of the README dogfooding experiment proposed in FUTURE-DIRECTIONS §6 — the user will handle voice, positioning, and final prose in a later interactive session. Create the docs/ directory if it doesn't exist.",
+    "status": "pending",
+    "priority": 2
   }
 ]
