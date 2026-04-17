@@ -552,3 +552,50 @@ describe("formatUnmergedBranchError", () => {
     expect(msg).toContain(`git -C ${absPath} merge --no-ff bot/work`);
   });
 });
+
+describe("runSingleCycle — unknown project", () => {
+  const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
+
+  it("errors with ProjectNotFoundError-style message + exit code 1", async () => {
+    const testDir = join(tmpdir(), "gs-cycle-nf-" + Date.now());
+    try {
+      mkdirSync(testDir, { recursive: true });
+      writeFileSync(
+        join(testDir, "projects.yaml"),
+        [
+          "projects:",
+          "  - id: alpha",
+          "    path: .",
+          "    priority: 1",
+          "    engineer_command: \"echo hi\"",
+          "    verification_command: \"echo ok\"",
+          "    cycle_budget_minutes: 30",
+          "    hands_off:",
+          "      - CLAUDE.md",
+          "dispatcher:",
+          "  state_dir: ./state",
+          "  fleet_state_file: ./fleet_state.json",
+          "  stop_file: ./STOP",
+          "  override_file: ./next_project.txt",
+          "  picker: priority_x_staleness",
+          "  max_cycles_per_project_per_session: 3",
+          "  log_dir: ./logs",
+          "  digest_dir: ./digests",
+          "",
+        ].join("\n"),
+      );
+      const proc = Bun.spawn(
+        ["bun", "run", CLI_PATH, "cycle", "--project=nonesuch"],
+        { stdout: "pipe", stderr: "pipe", cwd: testDir, env: { ...process.env } },
+      );
+      const stderr = await new Response(proc.stderr).text();
+      await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("project 'nonesuch' not found");
+      expect(stderr).toContain("Available: alpha");
+    } finally {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+});
