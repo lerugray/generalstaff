@@ -1,0 +1,175 @@
+# GeneralStaff — Launch Plan
+
+**Status:** Forward-looking planning doc. Append-only per section;
+each new entry is date-stamped so the history is legible.
+
+## 2026-04-17 — Initial capture
+
+### Positioning
+
+**Accurate framing (use this verbatim):** *"Open-source alternative
+to Polsia — autonomous engineering with the anti-slop architecture
+Polsia doesn't have."*
+
+**Avoid:** "We open-sourced Polsia" (wrong — can't open-source
+someone else's proprietary software; looks sloppy and picks an
+unnecessary legal fight). **Also avoid:** "Polsia killer"
+(aggressive, reads as VC-posture; we're not trying to kill
+anyone, we're offering the principled version).
+
+**One-line pitch:** *"Polsia assumes you want a SaaS. GeneralStaff
+doesn't care what you're building. Bring your own imagination; the
+tool runs the execution."* (From FUTURE-DIRECTIONS §4, already in
+README.)
+
+### Pre-launch gates (don't ship before these)
+
+1. **Phase 1 threshold hit:** 5 clean supervised cycles per Hard
+   Rule 4. As of 2026-04-17 afternoon we're ~30 cycles in with
+   the auto_merge-verification bug (gs-132) fixed, so the next
+   5 clean cycles after that fix lands is the real Phase 1 close.
+2. **Phase 4 Tauri UI at least preview-able.** A launch without
+   a clickable install path for non-CLI users is wasted ammo.
+   Per FUTURE-DIRECTIONS §10, the Tauri installer is the
+   non-programmer distribution vehicle — launching without it
+   caps the reachable audience at developers who can run
+   `bun src/cli.ts`.
+3. **Phase 3 second-project validation.** At least one non-
+   GeneralStaff project running cycles (gamr per §5 of
+   FUTURE-DIRECTIONS). Proves generality, otherwise the
+   generalizability claim is unprovable.
+4. **README polished.** Voice-calibrated pass after gs-109 +
+   gs-110's structural + voice work. Must pass the "a skeptical
+   Hacker News reader can see the point in 30 seconds" test.
+5. **SUPPORTERS.md + GitHub Sponsors link live.** Rule 10
+   alignment: Ray-personally or foundation, never
+   "GeneralStaff LLC."
+
+### Pre-launch artifact checklist
+
+- [ ] `README.md` — final prose pass, badges, one animated
+      PROGRESS.jsonl screenshot
+- [ ] `SUPPORTERS.md` — empty-but-present at launch; starts
+      populating after first donors
+- [ ] `CONTRIBUTING.md` — brief, anti-slop-aligned (Rule 1
+      applies to contributors too: correctness PRs welcome,
+      feature PRs that extend into taste-work flagged)
+- [ ] `LICENSE` — currently... check which; probably AGPL-3.0
+      fits the anti-extraction stance but may over-scare
+      enterprise users. Revisit.
+- [ ] GitHub Sponsors configured
+- [ ] Release tag v0.1.0 cut
+- [ ] Install one-liner tested end-to-end from a clean machine
+- [ ] At least one non-Ray person runs it end-to-end successfully
+
+### Platforms (in order of leverage)
+
+1. **Show HN post.** Real launch moment for dev tooling.
+   Title candidates:
+   - *"Show HN: GeneralStaff — open-source alternative to Polsia,
+      verification-first"*
+   - *"Show HN: We wrapped Claude Code agents to prevent the Polsia
+      2-minute auto-commit failure mode"*
+   - *"Show HN: Kriegspiel for your codebase — autonomous
+      engineering that refuses to commit slop"*
+   Test each against "would a skeptical HN reader click this."
+2. **Long-form article.** Cross-post across Medium + dev.to +
+   Ray's own site. Content is cheap to mirror; don't pick one.
+   The article's job is not traffic — it's the canonical piece
+   someone links to when arguing "there's an OSS version of
+   Polsia."
+3. **r/ClaudeCode** — target audience already using Claude Code
+   and likely recognizing the pain points GeneralStaff
+   addresses (runaway bot commits, verification pain, hands-off
+   enforcement gaps). High signal-to-noise subreddit.
+4. **X longform thread** launch day. Tags the usual OSS + dev
+   tool accounts. Hooked on a specific screenshot or quote.
+5. **Secondary dev communities:** r/programming, r/opensource,
+   r/selfhosted, r/LocalLLaMA, Lobste.rs, dev tool newsletters
+   (TLDR, Refind). Cross-post same article link; don't rewrite
+   per-platform.
+6. **Later-wave outreach:** swyx's newsletter, Simon Willison's
+   weekly links, Latent Space — high trust dev-tool coverage
+   but requires an angle that makes the project newsworthy
+   beyond "another OSS tool."
+
+### Narrative hooks (pick 2-3 per piece)
+
+- **Generalist-to-OSS-author arc.** Ray's background (30+ board
+  games, record production, minimum-wage day job) produced the
+  specific pattern-matching that Polsia's specialist VC founders
+  lack. Honest + specific; avoids cliche.
+- **Hammerstein framing.** Industriousness-without-judgment is
+  the worst quadrant; GeneralStaff's Hard Rules structurally
+  prevent it. This is the intellectual spine and
+  Marxism-compatible per VOICE.md §Intellectual framing.
+- **"Built itself" dogfooding.** GeneralStaff's own PROGRESS.jsonl
+  is public evidence — you can audit every cycle, every verdict,
+  every diff. Screenshottable. Polsia can't show you this.
+- **Polsia auto-commit-in-2-minutes.** Trustpilot review quoted
+  verbatim: *"Within 2 minutes flat, it had entered me into
+  obligations that I couldn't back (automatically offered free
+  products to influencers). It took too long to find the OFF
+  switch."* This is the opening hook.
+- **Verification-first vs. lock-in-first.** Single most
+  structural difference. One sentence each: Polsia commits first,
+  you chargeback later; GeneralStaff verifies first, you merge
+  later.
+- **"Bring your own imagination."** Neutral on project
+  motivation — SaaS, art project, satirical anti-startup, blog
+  read by four people, all valid. Differentiates against
+  Polsia's implicit startup-accelerator framing.
+
+### Anti-patterns to avoid in launch content
+
+- **Don't demo-hack.** No "watch GeneralStaff build a SaaS in 10
+  minutes" videos. That's Polsia's genre; doing it worse than
+  them loses, doing it better validates their framing.
+- **Don't over-promise "autonomous."** The Hard Rules EXIST
+  because autonomous-everything is the failure mode. Lead with
+  what the tool refuses to do; that's the honest pitch.
+- **Don't gate on flashy UI.** Phase 4 UI is the install vehicle,
+  not the hero. The hero is the verification gate + the audit log.
+- **Don't apologize for local-first.** It's a feature. "Your
+  code never leaves your machine" is a value proposition, not
+  a limitation.
+
+### Screenshots / artifacts to prepare
+
+- PROGRESS.jsonl tail showing a verification_failed cycle being
+  correctly rejected (post-gs-132)
+- Terminal output of a clean 10-cycle session with green
+  verified-count
+- The Hard Rules list (from RULE-RELAXATION-2026-04-15.md)
+  rendered as a readable graphic
+- Side-by-side config comparison: Polsia's dashboard vs.
+  projects.yaml + tasks.json (readable text files vs. locked
+  cloud state)
+- The kriegspiel campaign-map wireframe (UI-VISION sketch) even
+  if the UI isn't built — grounds the visual brand
+
+### Post-launch followups
+
+- Monitor Show HN comments in real time; reply within 2h of
+  first critique (HN rewards quick, substantive author engagement)
+- Collect every "I tried it and..." issue in a single tracking
+  doc; respond-rate matters for first-100-users trust
+- Update LAUNCH-PLAN.md itself with lessons learned, new
+  platforms that worked, articles that landed vs. died. It
+  becomes a living retrospective.
+
+### Legal / ethical constraints
+
+- The Polsia critique stays specific and sourced (Trustpilot
+  quotes, public pricing, public marketing copy). No speculation
+  about their internals.
+- Never imply their product is fraudulent — it's structurally
+  flawed for principled use, not a scam. Different claim.
+- Never use screenshots of Polsia's actual UI without clear
+  fair-use commentary framing.
+
+---
+
+**Author:** Initial draft captured by Claude (interactive session)
+during the 2026-04-17 afternoon chain-session prep. Follow-on
+edits should append to this file with date headers, not rewrite.

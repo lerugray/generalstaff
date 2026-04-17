@@ -18,10 +18,10 @@ interactive Claude sessions work on master in the main directory.
 
 ## Bot scope exclusions (hands-off)
 
-- Design documents (DESIGN.md, PIVOT, RULE-RELAXATION, PHASE-1-*, etc.)
+- Design documents (DESIGN.md, PIVOT, RULE-RELAXATION, PHASE-1-*, FUTURE-DIRECTIONS, UI-VISION, LAUNCH-PLAN, VOICE)
 - Project conventions (CLAUDE.md, INDEX.md, README.md)
 - Safety-critical modules (src/safety.ts, src/reviewer.ts, src/prompts/)
-- Bot launcher scripts (scripts/, run_bot*)
+- Bot launcher scripts (scripts/, run_bot*, run_session*)
 - Hammerstein logs (docs/internal/)
 - Session notes (docs/sessions/)
 - The hands-off list itself (projects.yaml, projects.yaml.example)
