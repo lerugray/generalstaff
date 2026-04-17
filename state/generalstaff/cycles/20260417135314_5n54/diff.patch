@@ -1,0 +1,255 @@
+diff --git a/src/cycle.ts b/src/cycle.ts
+index aef5395..354410a 100644
+--- a/src/cycle.ts
++++ b/src/cycle.ts
+@@ -418,6 +418,67 @@ export async function executeCycle(
+     diff_length: fullDiff.length,
+   }, cycleId);
+ 
++  // 6a. If engineer exited abnormally (killed mid-task or non-zero exit),
++  //     block verification + reviewer. Partial work from a killed engineer
++  //     must never be accepted as verified. (Fix: gs-111 — observed
++  //     2026-04-17 cycle 10 when engineer timeout killed claude.exe but the
++  //     partial diff was still reviewed and marked verified.)
++  if (engineerResult.exitCode === null || engineerResult.exitCode !== 0) {
++    const finalOutcome: CycleOutcome = "verification_failed";
++    const reason = `engineer exited abnormally (code=${engineerResult.exitCode})`;
++    console.log(`\nSkipping verification and reviewer: ${reason}`);
++    const stats = diffSummaryStats(fullDiff);
++
++    const endedAt = new Date().toISOString();
++    console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
++
++    await appendProgress(project.id, "cycle_end", {
++      outcome: finalOutcome,
++      reason,
++      start_sha: cycleStartSha,
++      end_sha: cycleEndSha,
++      engineer_exit_code: engineerResult.exitCode,
++      verification_outcome: "failed",
++      reviewer_verdict: "verification_failed",
++      diff_stats: stats,
++      duration_seconds: Math.round(
++        (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
++      ),
++    }, cycleId);
++
++    const fleet = await loadFleetState(config);
++    const durationMinutes =
++      (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
++    updateProjectFleetState(fleet, project.id, finalOutcome, durationMinutes);
++    await saveFleetState(fleet, config);
++
++    const projState = await loadProjectState(project.id, config);
++    projState.current_cycle_id = null;
++    projState.last_cycle_id = cycleId;
++    projState.last_cycle_outcome = finalOutcome;
++    projState.last_cycle_at = endedAt;
++    projState.cycles_this_session += 1;
++    await saveProjectState(projState, config);
++
++    await cleanupWorktree(project);
++    await autoCommitState(project, cycleId, finalOutcome);
++
++    return {
++      cycle_id: cycleId,
++      project_id: project.id,
++      started_at: startedAt,
++      ended_at: endedAt,
++      cycle_start_sha: cycleStartSha,
++      cycle_end_sha: cycleEndSha,
++      engineer_exit_code: engineerResult.exitCode,
++      verification_outcome: "failed",
++      reviewer_verdict: "verification_failed",
++      final_outcome: finalOutcome,
++      reason,
++      diff_stats: stats,
++    };
++  }
++
+   // 6b. Skip verification and reviewer if diff is empty — nothing to test or review
+   if (!fullDiff.trim()) {
+     const finalOutcome: CycleOutcome = "verified_weak";
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9df6c50..d4b0095 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -512,7 +512,7 @@
+   {
+     "id": "gs-111",
+     "title": "(BUG) When the engineer subprocess exits abnormally (exit code null, meaning killed by signal, OR any non-zero exit code), the cycle should skip the verification gate + reviewer entirely and mark itself verification_failed with reason 'engineer exited abnormally (code=X)'. Currently src/cycle.ts proceeds through verification on whatever partial diff exists, which accepted a killed-mid-task engineer's partial work as verified on 2026-04-17 cycle 10. Add early-return in executeCycle after engineer completes if engineerResult.exitCode === null || engineerResult.exitCode !== 0. Add tests covering: exit=0 (proceeds), exit=1 (blocks), exit=null i.e. killed (blocks), with verification of the cycle_end event's reason field.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index 40f6d93..abf3f24 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -321,10 +321,9 @@ describe("countCommitsAhead", () => {
+ });
+ 
+ describe("executeCycle", () => {
+-  it("runs verification and reviewer even when engineer exits non-zero", async () => {
+-    // Run in a subprocess so mock.module calls don't leak into other test files
+-    const helperPath = join(import.meta.dir, "helpers", "verify_nonzero_engineer_continues.ts");
+-    const proc = Bun.spawn(["bun", "run", helperPath], {
++  async function runEngineerExitHelper(exitCodeArg: string) {
++    const helperPath = join(import.meta.dir, "helpers", "verify_engineer_exit_handling.ts");
++    const proc = Bun.spawn(["bun", "run", helperPath, exitCodeArg], {
+       stdout: "pipe",
+       stderr: "pipe",
+     });
+@@ -337,16 +336,38 @@ describe("executeCycle", () => {
+         `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
+       );
+     }
+-
+-    // Parse the JSON output for detailed assertions
+     const lastLine = stdout.trim().split("\n").pop()!;
+-    const result = JSON.parse(lastLine);
+-    expect(result.engineer_exit_code).toBe(1);
++    return JSON.parse(lastLine);
++  }
++
++  it("proceeds through verification and reviewer when engineer exits 0", async () => {
++    const result = await runEngineerExitHelper("0");
++    expect(result.engineer_exit_code).toBe(0);
+     expect(result.verification_called).toBe(true);
+     expect(result.reviewer_called).toBe(true);
+     expect(result.final_outcome).toBe("verified");
+   }, 30_000);
+ 
++  it("blocks verification and reviewer when engineer exits non-zero", async () => {
++    const result = await runEngineerExitHelper("1");
++    expect(result.engineer_exit_code).toBe(1);
++    expect(result.verification_called).toBe(false);
++    expect(result.reviewer_called).toBe(false);
++    expect(result.final_outcome).toBe("verification_failed");
++    expect(result.reason).toContain("engineer exited abnormally");
++    expect(result.reason).toContain("code=1");
++  }, 30_000);
++
++  it("blocks verification and reviewer when engineer is killed (exit=null)", async () => {
++    const result = await runEngineerExitHelper("null");
++    expect(result.engineer_exit_code).toBeNull();
++    expect(result.verification_called).toBe(false);
++    expect(result.reviewer_called).toBe(false);
++    expect(result.final_outcome).toBe("verification_failed");
++    expect(result.reason).toContain("engineer exited abnormally");
++    expect(result.reason).toContain("code=null");
++  }, 30_000);
++
+   it("skips verification and reviewer on empty diff", async () => {
+     const helperPath = join(import.meta.dir, "helpers", "verify_empty_diff_skips.ts");
+     const proc = Bun.spawn(["bun", "run", helperPath], {
+diff --git a/tests/helpers/verify_nonzero_engineer_continues.ts b/tests/helpers/verify_engineer_exit_handling.ts
+similarity index 74%
+rename from tests/helpers/verify_nonzero_engineer_continues.ts
+rename to tests/helpers/verify_engineer_exit_handling.ts
+index 82f90d5..9c7efd9 100644
+--- a/tests/helpers/verify_nonzero_engineer_continues.ts
++++ b/tests/helpers/verify_engineer_exit_handling.ts
+@@ -1,8 +1,9 @@
+-// Isolated test helper: proves that executeCycle runs verification and
+-// reviewer even when the engineer exits with a non-zero code.
+-//
+-// This runs in a subprocess so that mock.module calls don't leak into
+-// other test files. Exits 0 and prints JSON on success, exits 1 on failure.
++// Isolated test helper: verifies executeCycle's handling of engineer
++// exit codes. Argv[2] selects the exit code to simulate:
++//   "0"    -> clean exit, cycle proceeds through verification + reviewer
++//   "1"    -> non-zero exit, cycle blocks before verification
++//   "null" -> killed by signal, cycle blocks before verification
++// (Regression test for gs-111.)
+ 
+ import { mock } from "bun:test";
+ import { join } from "path";
+@@ -10,22 +11,28 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { $ } from "bun";
+ import type { ProjectConfig, DispatcherConfig } from "../../src/types";
+ 
+-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_test");
++const exitCodeArg = process.argv[2] ?? "0";
++const engineerExitCode: number | null =
++  exitCodeArg === "null" ? null : parseInt(exitCodeArg, 10);
++
++const TEST_DIR = join(
++  import.meta.dir,
++  "..",
++  "fixtures",
++  `cycle_test_exit_${exitCodeArg}`,
++);
+ const PROJ_DIR = join(TEST_DIR, "proj");
+ 
+ let verificationCalled = false;
+ let reviewerCalled = false;
+ 
+-// --- Module mocks (safe here — isolated subprocess) ---
+-
+ mock.module("../../src/engineer", () => ({
+   runEngineer: async (project: ProjectConfig) => {
+-    // Create a real commit so the cycle sees a non-empty diff
+     writeFileSync(join(project.path, "bot-output.txt"), "engineer output\n");
+     await $`git -C ${project.path} add bot-output.txt`.quiet();
+     await $`git -C ${project.path} commit -m "mock engineer commit"`.quiet();
+     return {
+-      exitCode: 1,
++      exitCode: engineerExitCode,
+       durationSeconds: 3,
+       timedOut: false,
+       logPath: join(TEST_DIR, "engineer.log"),
+@@ -104,17 +111,15 @@ mock.module("../../src/audit", () => ({
+ 
+ const { executeCycle } = await import("../../src/cycle");
+ 
+-// --- Test setup ---
+-
+ async function run() {
+   try {
+     rmSync(TEST_DIR, { recursive: true, force: true });
+     mkdirSync(PROJ_DIR, { recursive: true });
+ 
+-    // Set up a real git repo for cycle.ts git commands
+     await $`git -C ${PROJ_DIR} init`.quiet();
+     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
+     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
++    await $`git -C ${PROJ_DIR} config commit.gpgsign false`.quiet();
+     writeFileSync(join(PROJ_DIR, "README.md"), "initial\n");
+     await $`git -C ${PROJ_DIR} add README.md`.quiet();
+     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
+@@ -148,31 +153,17 @@ async function run() {
+     const result = await executeCycle(project, config);
+ 
+     const output = {
+-      pass: true,
+       engineer_exit_code: result.engineer_exit_code,
+       verification_called: verificationCalled,
+       reviewer_called: reviewerCalled,
+       verification_outcome: result.verification_outcome,
+       reviewer_verdict: result.reviewer_verdict,
+       final_outcome: result.final_outcome,
++      reason: result.reason,
+     };
+ 
+-    // Validate assertions
+-    const errors: string[] = [];
+-    if (result.engineer_exit_code !== 1) errors.push(`engineer_exit_code: expected 1, got ${result.engineer_exit_code}`);
+-    if (!verificationCalled) errors.push("verification was NOT called");
+-    if (!reviewerCalled) errors.push("reviewer was NOT called");
+-    if (result.verification_outcome !== "passed") errors.push(`verification_outcome: expected "passed", got "${result.verification_outcome}"`);
+-    if (result.reviewer_verdict !== "verified") errors.push(`reviewer_verdict: expected "verified", got "${result.reviewer_verdict}"`);
+-    if (result.final_outcome !== "verified") errors.push(`final_outcome: expected "verified", got "${result.final_outcome}"`);
+-
+-    if (errors.length > 0) {
+-      output.pass = false;
+-      console.error("Assertion failures:\n" + errors.join("\n"));
+-    }
+-
+     console.log(JSON.stringify(output));
+-    process.exit(errors.length > 0 ? 1 : 0);
++    process.exit(0);
+   } catch (err) {
+     console.error("Test helper crashed:", err);
+     process.exit(1);
