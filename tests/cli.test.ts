@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { $ } from "bun";
 
@@ -1567,6 +1567,87 @@ routes:
     it("is listed in --help output", async () => {
       const result = await runCli(["--help"]);
       expect(result.stdout).toContain("generalstaff bot-status");
+    });
+  });
+
+  describe("stop --status / --check (gs-165)", () => {
+    const STOP_STATUS_DIR = join(import.meta.dir, "fixtures", "stop_status_test");
+
+    beforeEach(() => {
+      mkdirSync(join(STOP_STATUS_DIR, "state"), { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(STOP_STATUS_DIR, { recursive: true, force: true });
+    });
+
+    it("reports STOP present + pid recorded", async () => {
+      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
+      writeFileSync(join(STOP_STATUS_DIR, "state", "session.pid"), "12345\n");
+      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/STOP file: present at .*STOP/);
+      expect(result.stdout).toContain("Session pid: 12345");
+    });
+
+    it("reports STOP present + no pid file", async () => {
+      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
+      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/STOP file: present at .*STOP/);
+      expect(result.stdout).toContain("Session pid: none recorded");
+    });
+
+    it("reports STOP absent + pid recorded", async () => {
+      writeFileSync(join(STOP_STATUS_DIR, "state", "session.pid"), "999\n");
+      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("STOP file: absent");
+      expect(result.stdout).toContain("Session pid: 999");
+    });
+
+    it("reports STOP absent + no pid file", async () => {
+      const result = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("STOP file: absent");
+      expect(result.stdout).toContain("Session pid: none recorded");
+    });
+
+    it("accepts --check as an alias of --status", async () => {
+      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
+      const result = await runCli(["stop", "--check"], STOP_STATUS_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/STOP file: present at .*STOP/);
+      expect(result.stdout).toContain("Session pid: none recorded");
+    });
+
+    it("errors out when --status is combined with --force", async () => {
+      const result = await runCli(
+        ["stop", "--status", "--force"],
+        STOP_STATUS_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--status/--check and --force are mutually exclusive",
+      );
+    });
+
+    it("does not create or remove the STOP file", async () => {
+      // STOP absent before: stays absent after
+      const result1 = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result1.exitCode).toBe(0);
+      expect(existsSync(join(STOP_STATUS_DIR, "STOP"))).toBe(false);
+
+      // STOP present before: stays present after
+      writeFileSync(join(STOP_STATUS_DIR, "STOP"), "");
+      const result2 = await runCli(["stop", "--status"], STOP_STATUS_DIR);
+      expect(result2.exitCode).toBe(0);
+      expect(existsSync(join(STOP_STATUS_DIR, "STOP"))).toBe(true);
+    });
+
+    it("is advertised in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("stop --status");
     });
   });
 
