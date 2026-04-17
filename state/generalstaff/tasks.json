@@ -446,7 +446,7 @@
   {
     "id": "gs-100",
     "title": "Add a 'generalstaff status --watch[=N]' flag that refreshes the status output every N seconds until killed (Ctrl-C). Default N=5 when --watch is specified without a value. Minimum N=1. Use setInterval and clear the terminal between renders (ANSI clear-screen, suppressed when not a TTY — fall back to repeated output). Add tests with a mocked timer covering: default interval, custom interval, interval clamping at 1.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

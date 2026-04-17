@@ -35,6 +35,7 @@ import {
   formatSummary,
 } from "./summary";
 import { formatRelativeTime } from "./format";
+import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
 
 const VERSION = "0.0.1";
 
@@ -54,9 +55,11 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json]                            Show fleet state
+  generalstaff status [--json] [--watch[=N]]              Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
+    Example: generalstaff status --watch                # refresh every 5s until Ctrl-C
+    Example: generalstaff status --watch=10             # refresh every 10s
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -211,44 +214,59 @@ switch (command) {
   }
 
   case "status": {
+    const rawStatusArgs = args.slice(1);
+    const watch = parseWatchFlag(rawStatusArgs);
     const { values: statusValues } = parseArgs({
-      args: args.slice(1),
+      args: stripWatchArgs(rawStatusArgs),
       options: {
         json: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
-    const projects = await loadProjects();
-    const fleet = await loadFleetState();
-    const stopped = await isStopFilePresent();
 
-    if (statusValues.json) {
-      const summaries = await Promise.all(
-        projects.map((p) => getProjectSummary(p, fleet)),
-      );
-      const output = { stopped, projects: summaries };
-      console.log(JSON.stringify(output, null, 2));
-    } else {
-      console.log("=== GeneralStaff Fleet Status ===\n");
-      console.log(`STOP file: ${stopped ? "PRESENT (halted)" : "absent (ready)"}`);
-      console.log(`Registered projects: ${projects.length}\n`);
-      for (const p of projects) {
-        const state = fleet.projects[p.id];
-        console.log(`  ${p.id} (priority ${p.priority})`);
-        if (state) {
-          if (state.last_cycle_at) {
+    const renderStatus = async () => {
+      const projects = await loadProjects();
+      const fleet = await loadFleetState();
+      const stopped = await isStopFilePresent();
+
+      if (statusValues.json) {
+        const summaries = await Promise.all(
+          projects.map((p) => getProjectSummary(p, fleet)),
+        );
+        const output = { stopped, projects: summaries };
+        console.log(JSON.stringify(output, null, 2));
+      } else {
+        console.log("=== GeneralStaff Fleet Status ===\n");
+        console.log(
+          `STOP file: ${stopped ? "PRESENT (halted)" : "absent (ready)"}`,
+        );
+        console.log(`Registered projects: ${projects.length}\n`);
+        for (const p of projects) {
+          const state = fleet.projects[p.id];
+          console.log(`  ${p.id} (priority ${p.priority})`);
+          if (state) {
+            if (state.last_cycle_at) {
+              console.log(
+                `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
+              );
+            } else {
+              console.log(`    Last cycle: never`);
+            }
             console.log(
-              `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
+              `    Last outcome: ${state.last_cycle_outcome ?? "none"}`,
             );
+            console.log(`    Total cycles: ${state.total_cycles}`);
           } else {
-            console.log(`    Last cycle: never`);
+            console.log(`    No cycles yet`);
           }
-          console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
-          console.log(`    Total cycles: ${state.total_cycles}`);
-        } else {
-          console.log(`    No cycles yet`);
         }
       }
+    };
+
+    if (watch.enabled) {
+      await runWatchLoop(renderStatus, watch.intervalSeconds);
+    } else {
+      await renderStatus();
     }
     break;
   }
