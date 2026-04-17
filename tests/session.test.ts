@@ -164,8 +164,97 @@ describe("writeDigest", () => {
 
     const content = readFileSync(join(digestDir, files[0]), "utf8");
     expect(content).toContain("**Cycles:** 0");
-    // No cycle sections
+    // Empty results: skip all section headers and Summary line
     expect(content).not.toContain("##");
+    expect(content).not.toContain("**Summary:**");
+  });
+
+  it("includes Summary line with verified/failed counts when results present", async () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
+      makeCycleResult({ cycle_id: "c-2", final_outcome: "verification_failed" }),
+      makeCycleResult({ cycle_id: "c-3", final_outcome: "verified_weak" }),
+    ];
+    await writeDigest(results, 10, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    expect(content).toContain("**Summary:** 2 verified, 1 failed");
+  });
+
+  it("renders a 'What got done' section listing verified cycles", async () => {
+    const results = [
+      makeCycleResult({
+        cycle_id: "cycle-aaa",
+        final_outcome: "verified",
+        diff_stats: { files_changed: 3, insertions: 42, deletions: 5 },
+      }),
+      makeCycleResult({
+        cycle_id: "cycle-bbb",
+        final_outcome: "verified_weak",
+        diff_stats: { files_changed: 1, insertions: 8, deletions: 0 },
+      }),
+    ];
+    await writeDigest(results, 5, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    expect(content).toContain("## What got done");
+    // Fake SHAs won't resolve to a commit subject, so label falls back to cycle_id
+    expect(content).toMatch(/1\. cycle-aaa\s+_\(3 file\(s\), \+42\/-5\)_/);
+    expect(content).toMatch(/2\. cycle-bbb\s+_\(1 file\(s\), \+8\/-0\)_/);
+  });
+
+  it("renders an 'Issues' section with 'None' when all cycles verified", async () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    await writeDigest(results, 3, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    expect(content).toContain("## Issues");
+    expect(content).toContain("_None — all cycles passed verification._");
+  });
+
+  it("renders an 'Issues' section listing failed cycles with reasons", async () => {
+    const results = [
+      makeCycleResult({ cycle_id: "ok", final_outcome: "verified" }),
+      makeCycleResult({
+        cycle_id: "bad-cycle-id",
+        final_outcome: "verification_failed",
+        reason: "reviewer rejected scope drift",
+      }),
+    ];
+    await writeDigest(results, 3, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    expect(content).toContain("## Issues");
+    expect(content).toContain(
+      "**bad-cycle-id** — verification_failed: reviewer rejected scope drift",
+    );
+  });
+
+  it("places detailed per-cycle blocks after a '## Details' divider", async () => {
+    const results = [makeCycleResult({ project_id: "myproj", cycle_id: "c-42" })];
+    await writeDigest(results, 1, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    // Details block precedes the per-cycle section header
+    const detailsIdx = content.indexOf("## Details");
+    const cycleIdx = content.indexOf("## myproj — c-42");
+    expect(detailsIdx).toBeGreaterThan(-1);
+    expect(cycleIdx).toBeGreaterThan(detailsIdx);
   });
 });
 

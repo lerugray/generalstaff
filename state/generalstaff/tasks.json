@@ -340,5 +340,89 @@
     "title": "In src/projects.ts, add a getProject(id) lookup helper with a typed 'not found' error that includes the list of available project ids. Refactor existing string-match fallbacks (like in cli.ts task list) to use it. Add tests.",
     "status": "done",
     "priority": 3
+  },
+  {
+    "id": "gs-083",
+    "title": "Add a 'generalstaff digest --latest' flag that prints the absolute path of the most recently modified digest file in digests/, or a clear message if no digest exists. Add tests covering the happy path, empty directory, and filter compatibility with --json/--list.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-084",
+    "title": "Add a 'generalstaff summary --project=<id>' filter flag that restricts the fleet summary dashboard output to a single project. When unknown project id is passed, print a clear error listing valid ids (use getProject helper). Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-085",
+    "title": "Add a formatRelativeTime(iso: string, now?: Date) helper to src/format.ts that converts an ISO timestamp to a human relative string: 'just now' (<60s), '3 min ago', '2h ago', 'yesterday at HH:MM', 'N days ago'. Handles future dates gracefully ('in N min'). Include tests covering each bucket and invalid input.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-086",
+    "title": "Wire formatRelativeTime (from gs-085) into the 'generalstaff status' command output: replace the raw ISO timestamp on the 'Last cycle: ...' line with a relative version, but keep the ISO in parentheses for precision. Add tests. Only proceed after gs-085 lands.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-087",
+    "title": "Add a test for parseDigest in src/session.ts that verifies compatibility with the new multi-section digest format (## What got done / ## Issues / ## Details headers before the per-cycle sections). The existing cycle-section regex expects '## <project> — <cycle_id>'; confirm the new headers don't accidentally match.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-088",
+    "title": "Extract a shared readJsonl(path: string): unknown[] helper in src/audit.ts that reads a newline-delimited JSON file, skips empty lines, and silently drops malformed lines (returning the valid ones). Refactor existing tail/filter utilities to use it. Add tests covering missing file, empty file, malformed lines mixed with valid, and trailing newline.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-089",
+    "title": "Add 'generalstaff history --format=json' for machine-readable cycle history output. Emit an array of cycle objects with { cycle_id, project_id, started_at, outcome, diff_stats, reason }. Parse-able by external tools. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-090",
+    "title": "Add a reviewer provider fallback chain. In src/reviewer.ts, if the primary provider (from GENERALSTAFF_REVIEWER_PROVIDER) returns a response starting with '[REVIEWER ERROR]', retry once using the provider named in GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER (env var). Log the fallback attempt via appendProgress. Skip fallback if unset or equal to primary. Add tests for: fallback triggered, fallback not triggered (primary succeeded), fallback also fails, fallback equals primary (no retry).",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-091",
+    "title": "Validate 'generalstaff task add' input: reject empty titles or whitespace-only titles with a clear error message ('task title cannot be empty') and non-zero exit. Add tests covering valid title, empty string, whitespace-only, and very long titles (accept but warn if over 500 chars).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-092",
+    "title": "Add a 'generalstaff log --grep=<pattern>' flag that filters log output by a case-insensitive regex pattern against the event+data fields of PROGRESS.jsonl. Rejects invalid regex with a clear error. Works alongside --lines/--project/--level. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-093",
+    "title": "Add a formatFileCount(n: number) helper to src/format.ts that pluralizes: 0 -> '0 files', 1 -> '1 file', 2 -> '2 files'. Use it in writeDigest's 'What got done' list (replacing the current '${n} file(s)' template). Add tests covering 0, 1, 2, large numbers, and negative (should return '0 files').",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-094",
+    "title": "Extract fetchCommitSubject from src/session.ts into a new module src/git.ts with its own tests. session.ts imports from there. The new module should be a natural home for future git helpers (countCommitsAhead currently lives in cycle.ts and could also move here in a later task).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-095",
+    "title": "Add a test for invokeOllamaReviewer verifying it correctly returns the message.content when the response also contains a 'thinking' field (some reasoning models like qwen3 populate both). Mock fetch to return { message: { content: 'real answer', thinking: 'internal reasoning' } } and verify the result is 'real answer' (thinking field ignored).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-096",
+    "title": "Add a 'generalstaff task count [--project=<id>]' subcommand that reports the number of pending vs done tasks per project (or for all projects when --project is omitted). Output format: 'myproj: 5 pending, 12 done (17 total)'. Add tests.",
+    "status": "pending",
+    "priority": 3
   }
 ]

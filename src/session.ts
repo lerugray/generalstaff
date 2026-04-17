@@ -2,12 +2,14 @@
 // Outer loop: time budget → pick project → cycle → chain or rotate → repeat
 
 import { $ } from "bun";
+import { spawnSync } from "child_process";
 import { loadProjectsYaml } from "./projects";
 import {
   loadFleetState,
   saveFleetState,
   loadProjectState,
   saveProjectState,
+  getRootDir,
 } from "./state";
 import { appendProgress } from "./audit";
 import { isStopFilePresent } from "./safety";
@@ -315,6 +317,21 @@ export async function runSession(options: SessionOptions) {
   return allResults;
 }
 
+export function fetchCommitSubject(startSha: string, endSha: string): string {
+  if (!endSha || endSha === startSha) return "";
+  try {
+    const result = spawnSync("git", ["log", "-1", "--format=%s", endSha], {
+      cwd: getRootDir(),
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    });
+    if (result.status !== 0) return "";
+    return (result.stdout ?? "").toString().trim();
+  } catch {
+    return "";
+  }
+}
+
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
@@ -323,7 +340,6 @@ export async function writeDigest(
   const { mkdirSync, existsSync } = require("fs");
   const { writeFile } = require("fs/promises");
   const { join } = require("path");
-  const { getRootDir } = require("./state");
 
   const digestDir = join(getRootDir(), config.digest_dir);
   if (!existsSync(digestDir)) {
@@ -333,10 +349,52 @@ export async function writeDigest(
   const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/T/, "_").replace(/\.\d+Z$/, "");
   const digestPath = join(digestDir, `digest_${ts}.md`);
 
+  const verified = results.filter(
+    (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
+  );
+  const failed = results.filter(
+    (r) => r.final_outcome !== "verified" && r.final_outcome !== "verified_weak",
+  );
+
   let content = `# GeneralStaff Session Digest\n\n`;
   content += `**Date:** ${new Date().toISOString()}\n`;
   content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
-  content += `**Cycles:** ${results.length}\n\n`;
+  content += `**Cycles:** ${results.length}\n`;
+  if (results.length > 0) {
+    content += `**Summary:** ${verified.length} verified, ${failed.length} failed\n`;
+  }
+  content += `\n`;
+
+  if (results.length > 0) {
+    content += `## What got done\n\n`;
+    if (verified.length === 0) {
+      content += `_No cycles passed verification this session._\n\n`;
+    } else {
+      verified.forEach((r, i) => {
+        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
+        const diff = r.diff_stats
+          ? `  _(${r.diff_stats.files_changed} file(s), +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
+          : "";
+        content += `${i + 1}. ${subject}${diff}\n`;
+      });
+      content += `\n`;
+    }
+
+    content += `## Issues\n\n`;
+    if (failed.length === 0) {
+      content += `_None — all cycles passed verification._\n\n`;
+    } else {
+      for (const r of failed) {
+        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
+        content += `- **${subject}** — ${r.final_outcome}: ${r.reason}\n`;
+      }
+      content += `\n`;
+    }
+
+    content += `---\n\n`;
+    content += `## Details\n\n`;
+    content += `_Per-cycle technical detail (SHAs, reviewer verdicts) below._\n\n`;
+  }
 
   for (const r of results) {
     content += `## ${r.project_id} — ${r.cycle_id}\n\n`;

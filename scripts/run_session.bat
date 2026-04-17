@@ -2,12 +2,19 @@
 REM GeneralStaff — session launcher (Windows)
 REM
 REM Usage:
-REM   scripts\run_session.bat               (6 hour default)
-REM   scripts\run_session.bat 300           (5 hour override)
+REM   scripts\run_session.bat                   (6 hr, openrouter reviewer)
+REM   scripts\run_session.bat 300               (5 hr, openrouter reviewer)
+REM   scripts\run_session.bat 90 ollama         (90 min, local Ollama reviewer)
+REM   scripts\run_session.bat 120 claude        (2 hr, fallback to claude -p)
 REM
 REM Runs `generalstaff session --budget=<min>` synchronously, tees output
 REM to logs/session_<ts>.log, then writes digests/LAST_RUN.md as a pointer
 REM to the log + timestamped digest written by session.ts.
+REM
+REM Reviewer providers:
+REM   openrouter — Qwen3 Coder via OpenRouter (paid, ~$0.02/session; default)
+REM   ollama     — local Ollama server, qwen3:8b by default (free, offline)
+REM   claude     — claude -p (highest quality but uses Claude quota)
 REM
 REM Locale-safe timestamps via PowerShell. For Task Scheduler automation,
 REM register this .bat with: "Start in" = the GeneralStaff project root,
@@ -19,6 +26,10 @@ setlocal enabledelayedexpansion
 set "PROJECT_ROOT=C:\Users\rweis\OneDrive\Documents\GeneralStaff"
 set "BUDGET=%~1"
 if "%BUDGET%"=="" set "BUDGET=360"
+
+set "PROVIDER=%~2"
+if "%PROVIDER%"=="" set "PROVIDER=openrouter"
+set "GENERALSTAFF_REVIEWER_PROVIDER=%PROVIDER%"
 
 REM Ensure Git Bash, bun, and claude are on PATH. When launched via
 REM Explorer double-click (or Task Scheduler), the inherited PATH may
@@ -37,23 +48,22 @@ if not exist digests mkdir digests
 for /f %%i in ('powershell -nologo -command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%i"
 set "LOG=logs\session_%TS%.log"
 
-REM Route the reviewer agent to OpenRouter Qwen (validated 2026-04-16,
-REM 4/4 verdict agreement with claude -p on tonight's cycle samples).
-REM Remove or set to "claude" to fall back to claude -p.
-set "GENERALSTAFF_REVIEWER_PROVIDER=openrouter"
-
-REM Load the OpenRouter API key from Ray's provider .env. The key is
-REM stored under OPENAI_API_KEY (OpenRouter uses OpenAI-compatible
-REM auth, and the field was named before this routing existed).
-REM Scoped to this subprocess; not exported session-wide.
-set "PROVIDER_ENV=C:\Users\rweis\OneDrive\Documents\MiroShark\.env"
-for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" "%PROVIDER_ENV%"`) do set "OPENROUTER_API_KEY=%%b"
-if "%OPENROUTER_API_KEY%"=="" (
-  echo WARNING: OPENROUTER_API_KEY not found at %PROVIDER_ENV% — reviewer
-  echo          will fall through to a 'REVIEWER ERROR' string and every
-  echo          cycle will fail-safe to verification_failed. Either
-  echo          provision the key or unset GENERALSTAFF_REVIEWER_PROVIDER
-  echo          above to fall back to claude -p.
+REM Provider-specific credential loading. OpenRouter needs an API key
+REM from Ray's shared provider .env (stored under OPENAI_API_KEY — that
+REM field name predates this routing). Ollama and claude need nothing:
+REM ollama talks to localhost:11434, claude -p uses its own subscription
+REM auth. Scoped to this subprocess; not exported session-wide.
+if /i "%PROVIDER%"=="openrouter" (
+  set "PROVIDER_ENV=C:\Users\rweis\OneDrive\Documents\MiroShark\.env"
+  for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" "!PROVIDER_ENV!"`) do set "OPENROUTER_API_KEY=%%b"
+  if "!OPENROUTER_API_KEY!"=="" (
+    echo WARNING: OPENROUTER_API_KEY not found at !PROVIDER_ENV! — reviewer
+    echo          will fall through to a 'REVIEWER ERROR' string and every
+    echo          cycle will fail-safe to verification_failed. Either
+    echo          provision the key or pass a different provider, e.g.:
+    echo            scripts\run_session.bat %BUDGET% ollama
+    echo            scripts\run_session.bat %BUDGET% claude
+  )
 )
 
 echo === GeneralStaff session launcher ===

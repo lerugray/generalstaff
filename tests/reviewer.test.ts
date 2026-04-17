@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { invokeOpenRouterReviewer, parseReviewerResponse } from "../src/reviewer";
+import {
+  invokeOllamaReviewer,
+  invokeOpenRouterReviewer,
+  parseReviewerResponse,
+} from "../src/reviewer";
 
 const VALID_RESPONSE = {
   verdict: "verified" as const,
@@ -233,5 +237,147 @@ describe("invokeOpenRouterReviewer", () => {
     // The fetch try/catch will catch the JSON parse error
     expect(result).toContain("[REVIEWER ERROR]");
     expect(result).toContain("fetch failed");
+  });
+});
+
+describe("invokeOllamaReviewer", () => {
+  const originalFetch = globalThis.fetch;
+  const originalHost = process.env.OLLAMA_HOST;
+  const originalModel = process.env.GENERALSTAFF_REVIEWER_MODEL;
+
+  beforeEach(() => {
+    delete process.env.GENERALSTAFF_REVIEWER_MODEL;
+    delete process.env.OLLAMA_HOST;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalHost === undefined) delete process.env.OLLAMA_HOST;
+    else process.env.OLLAMA_HOST = originalHost;
+    if (originalModel === undefined) delete process.env.GENERALSTAFF_REVIEWER_MODEL;
+    else process.env.GENERALSTAFF_REVIEWER_MODEL = originalModel;
+  });
+
+  it("builds correct request body and parses content from well-formed response", async () => {
+    let capturedUrl = "";
+    let capturedInit: RequestInit | undefined;
+
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedInit = init;
+      return new Response(
+        JSON.stringify({ message: { content: "the ollama verdict" }, done: true }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("review the diff");
+
+    expect(result).toBe("the ollama verdict");
+    expect(capturedUrl).toBe("http://localhost:11434/api/chat");
+    expect(capturedInit?.method).toBe("POST");
+
+    const body = JSON.parse(capturedInit?.body as string) as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+      stream: boolean;
+      options: { temperature: number; num_predict: number };
+    };
+    expect(body.model).toBe("qwen3:8b");
+    expect(body.messages).toEqual([{ role: "user", content: "review the diff" }]);
+    expect(body.stream).toBe(false);
+    expect(body.options.temperature).toBe(0);
+    expect(body.options.num_predict).toBe(8000);
+  });
+
+  it("honors OLLAMA_HOST override and strips trailing slash", async () => {
+    process.env.OLLAMA_HOST = "http://192.168.1.50:11434/";
+    let capturedUrl = "";
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      capturedUrl = String(url);
+      return new Response(
+        JSON.stringify({ message: { content: "ok" } }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    await invokeOllamaReviewer("prompt");
+
+    expect(capturedUrl).toBe("http://192.168.1.50:11434/api/chat");
+  });
+
+  it("honors GENERALSTAFF_REVIEWER_MODEL override", async () => {
+    process.env.GENERALSTAFF_REVIEWER_MODEL = "llama3:latest";
+    let capturedBody: string | null = null;
+
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      capturedBody = init?.body as string;
+      return new Response(
+        JSON.stringify({ message: { content: "ok" } }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    await invokeOllamaReviewer("prompt");
+
+    expect(capturedBody).not.toBeNull();
+    const body = JSON.parse(capturedBody as unknown as string);
+    expect(body.model).toBe("llama3:latest");
+  });
+
+  it("returns error string on non-2xx HTTP response", async () => {
+    globalThis.fetch = (async () => {
+      return new Response("model not found", {
+        status: 404,
+        statusText: "Not Found",
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("prompt");
+
+    expect(result).toContain("[REVIEWER ERROR]");
+    expect(result).toContain("404");
+    expect(result).toContain("Not Found");
+    expect(result).toContain("model not found");
+  });
+
+  it("returns error string with truncation hint when done_reason is 'length'", async () => {
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({ message: { content: "" }, done_reason: "length" }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("prompt");
+
+    expect(result).toContain("[REVIEWER ERROR]");
+    expect(result).toContain("truncated");
+    expect(result).toContain("num_predict");
+  });
+
+  it("returns error string when response is missing content", async () => {
+    globalThis.fetch = (async () => {
+      return new Response(JSON.stringify({}), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("prompt");
+
+    expect(result).toContain("[REVIEWER ERROR]");
+    expect(result).toContain("missing content");
+  });
+
+  it("returns error string when fetch throws (server not running)", async () => {
+    globalThis.fetch = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("prompt");
+
+    expect(result).toContain("[REVIEWER ERROR]");
+    expect(result).toContain("fetch failed");
+    expect(result).toContain("ECONNREFUSED");
+    expect(result).toContain("Ollama server running");
   });
 });

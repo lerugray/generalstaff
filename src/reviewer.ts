@@ -87,13 +87,20 @@ export async function runReviewer(
   // Provider routing. Default: claude -p (behavior since Phase 1). Opt-in:
   // GENERALSTAFF_REVIEWER_PROVIDER=openrouter uses the OpenRouter Chat
   // Completions API with Qwen3 Coder (see FUTURE-DIRECTIONS-2026-04-15.md
-  // §2 tier taxonomy). The reviewer is structured JSON-in/JSON-out so a
-  // tools-capable agent is not required on this path.
+  // §2 tier taxonomy). GENERALSTAFF_REVIEWER_PROVIDER=ollama uses a
+  // locally running Ollama server — zero-cost, offline, and the best
+  // story for users who don't want to pay for an LLM API. The reviewer
+  // is structured JSON-in/JSON-out so a tools-capable agent is not
+  // required on any of these paths.
   const provider = (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "claude").toLowerCase();
-  const rawResponse =
-    provider === "openrouter"
-      ? await invokeOpenRouterReviewer(prompt)
-      : await spawnClaude(prompt, cwdOverride ?? project.path);
+  let rawResponse: string;
+  if (provider === "openrouter") {
+    rawResponse = await invokeOpenRouterReviewer(prompt);
+  } else if (provider === "ollama") {
+    rawResponse = await invokeOllamaReviewer(prompt);
+  } else {
+    rawResponse = await spawnClaude(prompt, cwdOverride ?? project.path);
+  }
 
   await writeCycleFile(
     project.id,
@@ -220,6 +227,58 @@ export async function invokeOpenRouterReviewer(prompt: string): Promise<string> 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `[REVIEWER ERROR] OpenRouter fetch failed: ${msg}`;
+  }
+}
+
+// Ollama-backed reviewer invocation. Calls a locally running Ollama
+// server via its native chat API. Defaults to qwen3:8b (8B Qwen3 with
+// strong code/JSON output, ~5 GB model); overridable via
+// GENERALSTAFF_REVIEWER_MODEL. The host defaults to http://localhost:11434
+// and can be overridden via OLLAMA_HOST (e.g. for a remote Ollama server
+// on another machine in the LAN).
+//
+// Zero network cost, works offline, no API key needed — the best default
+// for self-hosted users of GeneralStaff. Qwen3 enables a thinking/reasoning
+// mode by default; num_predict is set high enough to cover both the
+// reasoning pass and the final JSON verdict output.
+export async function invokeOllamaReviewer(prompt: string): Promise<string> {
+  const host = (process.env.OLLAMA_HOST ?? "http://localhost:11434").replace(/\/$/, "");
+  const model = process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen3:8b";
+
+  try {
+    const response = await fetch(`${host}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        stream: false,
+        options: {
+          temperature: 0,
+          num_predict: 8000,
+        },
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      return `[REVIEWER ERROR] Ollama ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`;
+    }
+    const data = (await response.json()) as {
+      message?: { content?: string };
+      done_reason?: string;
+    };
+    const content = data?.message?.content;
+    if (typeof content !== "string" || content.length === 0) {
+      const hint =
+        data?.done_reason === "length"
+          ? " (response truncated — consider raising num_predict)"
+          : "";
+      return `[REVIEWER ERROR] Ollama response missing content${hint}: ${JSON.stringify(data).slice(0, 1500)}`;
+    }
+    return content;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `[REVIEWER ERROR] Ollama fetch failed (is the Ollama server running at ${host}?): ${msg}`;
   }
 }
 
