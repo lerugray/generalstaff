@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { formatDuration, formatBytes } from "../src/format";
+import { formatDuration, formatBytes, formatPercent } from "../src/format";
 
 describe("formatDuration", () => {
   it("renders sub-minute values as seconds", () => {
@@ -90,5 +90,33 @@ describe("formatBytes", () => {
     expect(formatBytes(NaN)).toBe("?");
     expect(formatBytes(Infinity)).toBe("?");
     expect(formatBytes(-Infinity)).toBe("?");
+  });
+});
+
+describe("formatPercent", () => {
+  it("renders representative ratios", () => {
+    expect(formatPercent(0)).toBe("0%");
+    expect(formatPercent(0.42)).toBe("42%");
+    expect(formatPercent(1)).toBe("100%");
+  });
+
+  it("rounds to the nearest integer", () => {
+    expect(formatPercent(0.425)).toBe("43%");
+    expect(formatPercent(0.4249)).toBe("42%");
+    expect(formatPercent(0.999)).toBe("100%");
+    expect(formatPercent(0.001)).toBe("0%");
+  });
+
+  it("handles ratios above 1", () => {
+    expect(formatPercent(1.5)).toBe("150%");
+    expect(formatPercent(2)).toBe("200%");
+  });
+
+  it("returns ? for invalid inputs", () => {
+    expect(formatPercent(NaN)).toBe("?");
+    expect(formatPercent(Infinity)).toBe("?");
+    expect(formatPercent(-Infinity)).toBe("?");
+    expect(formatPercent(-0.1)).toBe("?");
+    expect(formatPercent(-1)).toBe("?");
   });
 });

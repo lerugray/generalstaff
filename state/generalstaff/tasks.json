@@ -278,7 +278,7 @@
   {
     "id": "gs-072",
     "title": "Add a formatPercent helper to src/format.ts (0.42 -> '42%', 1.0 -> '100%', 0 -> '0%', handles NaN/Infinity/negatives by returning '?'). Include tests covering boundaries and invalid inputs.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

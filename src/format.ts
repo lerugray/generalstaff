@@ -28,3 +28,8 @@ export function formatBytes(bytes: number): string {
   if (bytes < GB) return `${(bytes / MB).toFixed(1)} MB`;
   return `${(bytes / GB).toFixed(1)} GB`;
 }
+
+export function formatPercent(ratio: number): string {
+  if (!Number.isFinite(ratio) || ratio < 0) return "?";
+  return `${Math.round(ratio * 100)}%`;
+}
