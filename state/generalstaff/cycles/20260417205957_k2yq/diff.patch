@@ -1,0 +1,236 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index d1b9392..b372f3e 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -302,10 +302,19 @@ function shaRange(startSha: unknown, endSha: unknown): string {
+   return start === end ? start : `${start}..${end}`;
+ }
+ 
++export const VALID_OUTCOME_FILTERS = [
++  "verified",
++  "verified_weak",
++  "verification_failed",
++  "cycle_skipped",
++] as const;
++export type OutcomeFilter = (typeof VALID_OUTCOME_FILTERS)[number];
++
+ export interface LoadCycleHistoryOptions {
+   since?: string;
+   until?: string;
+   verifiedOnly?: boolean;
++  outcome?: OutcomeFilter;
+ }
+ 
+ // Parse a YYYYMMDD string to an epoch-ms bound. endOfDay=true returns the
+@@ -371,6 +380,10 @@ async function collectCycleEnds(
+         const outcome = String(value.data.outcome ?? "");
+         if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
+       }
++      if (options.outcome !== undefined) {
++        const outcome = String(value.data.outcome ?? "");
++        if (outcome !== options.outcome) continue;
++      }
+       entries.push(value);
+     }
+   };
+diff --git a/src/cli.ts b/src/cli.ts
+index e715108..80ffd07 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -22,7 +22,7 @@ import {
+   writeSessionPid,
+   removeSessionPid,
+ } from "./safety";
+-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag } from "./audit";
++import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+@@ -98,6 +98,7 @@ Usage:
+ 
+   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact|json] [--costs]
+                        [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
++                       [--outcome=verified|verified_weak|verification_failed|cycle_skipped]
+                                                           Cycle history (compact: tab-delimited, no headers)
+     Example: generalstaff history --lines=50
+     Example: generalstaff history --project=myapp --format=compact
+@@ -105,6 +106,7 @@ Usage:
+     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
++    Example: generalstaff history --outcome=verification_failed  # show only failed cycles
+ 
+   generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>] [--since=<ts>]
+                                                           Tail PROGRESS.jsonl
+@@ -457,6 +459,7 @@ switch (command) {
+         since: { type: "string" },
+         until: { type: "string" },
+         "verified-only": { type: "boolean", default: false },
++        outcome: { type: "string" },
+       },
+       allowPositionals: false,
+     });
+@@ -465,10 +468,24 @@ switch (command) {
+       console.error(`Error: unknown --format value: ${fmt} (supported: table, compact, json)`);
+       process.exit(1);
+     }
++    if (historyValues["verified-only"] && historyValues.outcome !== undefined) {
++      console.error("Error: --verified-only and --outcome are mutually exclusive");
++      process.exit(1);
++    }
++    if (
++      historyValues.outcome !== undefined &&
++      !(VALID_OUTCOME_FILTERS as readonly string[]).includes(historyValues.outcome)
++    ) {
++      console.error(
++        `Error: unknown --outcome value: ${historyValues.outcome} (supported: ${VALID_OUTCOME_FILTERS.join(", ")})`,
++      );
++      process.exit(1);
++    }
+     const loadOpts = {
+       since: historyValues.since,
+       until: historyValues.until,
+       verifiedOnly: historyValues["verified-only"],
++      outcome: historyValues.outcome as OutcomeFilter | undefined,
+     };
+     const limit = parseInt(historyValues.lines!, 10);
+     if (fmt === "json") {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index bbecdd5..58f192a 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -885,7 +885,7 @@
+   {
+     "id": "gs-148",
+     "title": "Add a 'generalstaff history --outcome=<verified|verified_weak|verification_failed|cycle_skipped>' filter in src/cli.ts history command (alongside existing --verified-only). Threads into loadCycleHistory / loadCycleHistoryJson as an extra option (src/audit.ts collectCycleEnds). Error 'Error: unknown --outcome value' with the valid list when passed a bad value. If both --verified-only and --outcome are set, error 'Error: --verified-only and --outcome are mutually exclusive'. Add tests covering each valid value, invalid value, and mutual exclusion.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index ac8608e..7343642 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -782,6 +782,47 @@ describe("loadCycleHistory --verified-only filter", () => {
+   });
+ });
+ 
++describe("loadCycleHistory --outcome filter", () => {
++  beforeEach(async () => {
++    await appendProgress("proj-oc", "cycle_end", {
++      outcome: "verified", start_sha: "a", end_sha: "b", duration_seconds: 10,
++    }, "c-ok");
++    await appendProgress("proj-oc", "cycle_end", {
++      outcome: "verified_weak", start_sha: "a", end_sha: "b", duration_seconds: 10,
++    }, "c-weak");
++    await appendProgress("proj-oc", "cycle_end", {
++      outcome: "cycle_skipped", start_sha: "a", end_sha: "a", duration_seconds: 1,
++    }, "c-skip");
++    await appendProgress("proj-oc", "cycle_end", {
++      outcome: "verification_failed", start_sha: "a", end_sha: "c", duration_seconds: 15,
++    }, "c-fail");
++  });
++
++  it("returns only verified rows when outcome='verified'", async () => {
++    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verified" });
++    expect(rows).toHaveLength(1);
++    expect(rows[0].outcome).toBe("verified");
++  });
++
++  it("returns only verified_weak rows when outcome='verified_weak'", async () => {
++    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verified_weak" });
++    expect(rows).toHaveLength(1);
++    expect(rows[0].outcome).toBe("verified_weak");
++  });
++
++  it("returns only verification_failed rows when outcome='verification_failed'", async () => {
++    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verification_failed" });
++    expect(rows).toHaveLength(1);
++    expect(rows[0].outcome).toBe("verification_failed");
++  });
++
++  it("returns only cycle_skipped rows when outcome='cycle_skipped'", async () => {
++    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "cycle_skipped" });
++    expect(rows).toHaveLength(1);
++    expect(rows[0].outcome).toBe("cycle_skipped");
++  });
++});
++
+ describe("loadCycleHistoryJson", () => {
+   it("returns empty array when no state dir exists", async () => {
+     rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 855fcae..e9d27b9 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -398,6 +398,69 @@ dispatcher:
+       const result = await runCli(["--help"]);
+       expect(result.stdout).toContain("history");
+     });
++
++    it("filters by --outcome=verified", async () => {
++      const result = await runCli(["history", "--outcome=verified"], HISTORY_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      const lines = result.stdout.trim().split("\n");
++      // 5 verified rows (3 alpha at i=0,2,4 + 2 beta at i=10,12) + header + separator = 7
++      expect(lines).toHaveLength(7);
++      expect(result.stdout).not.toContain("verification_failed");
++    });
++
++    it("filters by --outcome=verification_failed", async () => {
++      const result = await runCli(
++        ["history", "--outcome=verification_failed"],
++        HISTORY_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const lines = result.stdout.trim().split("\n");
++      // 3 failed rows (2 alpha at i=1,3 + 1 beta at i=11) + header + separator = 5
++      expect(lines).toHaveLength(5);
++      expect(result.stdout).toContain("verification_failed");
++    });
++
++    it("returns no data rows for --outcome=verified_weak when none exist", async () => {
++      const result = await runCli(
++        ["history", "--outcome=verified_weak"],
++        HISTORY_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("No cycle history found.");
++    });
++
++    it("returns no data rows for --outcome=cycle_skipped when none exist", async () => {
++      const result = await runCli(
++        ["history", "--outcome=cycle_skipped"],
++        HISTORY_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("No cycle history found.");
++    });
++
++    it("errors on invalid --outcome value", async () => {
++      const result = await runCli(
++        ["history", "--outcome=bogus"],
++        HISTORY_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("unknown --outcome value");
++      expect(result.stderr).toContain("verified");
++      expect(result.stderr).toContain("verified_weak");
++      expect(result.stderr).toContain("verification_failed");
++      expect(result.stderr).toContain("cycle_skipped");
++    });
++
++    it("errors when --verified-only and --outcome are both set", async () => {
++      const result = await runCli(
++        ["history", "--verified-only", "--outcome=verified"],
++        HISTORY_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--verified-only and --outcome are mutually exclusive",
++      );
++    });
+   });
+ 
+   describe("log --lines", () => {
