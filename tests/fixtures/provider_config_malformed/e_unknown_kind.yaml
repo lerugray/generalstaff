@@ -1,0 +1,4 @@
+providers:
+  - id: gem
+    kind: gemini
+    model: gemini-2.5-flash

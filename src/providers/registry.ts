@@ -5,9 +5,11 @@
 // reviewer path is NOT a consumer of this module — reviewer dispatch
 // remains inline in src/reviewer.ts per Phase 2 scoping.
 //
-// When provider_config.yaml is missing, the registry contains no
-// providers and every route points at the string "noop"; callers should
-// consult hasProviderForRole() before dispatching.
+// When provider_config.yaml is missing OR exists but is empty / all
+// whitespace, the registry contains no providers and every route points
+// at the string "noop"; callers should consult hasProviderForRole()
+// before dispatching. Any other malformed input surfaces as
+// ProviderConfigError so the caller sees a single error type.
 
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
@@ -144,8 +146,19 @@ export async function loadProviderRegistry(
     return emptyRegistry();
   }
   const raw = await readFile(filePath, "utf8");
-  const parsed = parseYaml(raw);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(raw);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ProviderConfigError(
+      `provider_config.yaml: YAML parse error — ${msg}`,
+    );
+  }
+  if (parsed === null || parsed === undefined) {
+    return emptyRegistry();
+  }
+  if (typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new ProviderConfigError(
       "provider_config.yaml: root must be an object",
     );

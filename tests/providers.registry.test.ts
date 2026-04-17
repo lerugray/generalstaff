@@ -1,13 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import {
   getProviderForRole,
   hasProviderForRole,
   loadProviderRegistry,
   ProviderConfigError,
 } from "../src/providers/registry";
+
+const MALFORMED_FIXTURE_DIR = resolve(
+  __dirname,
+  "fixtures",
+  "provider_config_malformed",
+);
+
+function fixturePath(name: string): string {
+  return join(MALFORMED_FIXTURE_DIR, name);
+}
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "gs-registry-"));
@@ -264,6 +274,70 @@ providers:
       ProviderConfigError,
     );
     await expect(loadProviderRegistry(path)).rejects.toThrow(/array/);
+  });
+});
+
+describe("loadProviderRegistry — malformed fixtures (gs-162)", () => {
+  it("(a) wraps a YAML parse error in ProviderConfigError", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("a_yaml_parse_error.yaml")),
+    ).rejects.toThrow(ProviderConfigError);
+    await expect(
+      loadProviderRegistry(fixturePath("a_yaml_parse_error.yaml")),
+    ).rejects.toThrow(/YAML parse error/);
+  });
+
+  it("(b) rejects a top-level providers block that is a map, not a list", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("b_providers_not_array.yaml")),
+    ).rejects.toThrow(ProviderConfigError);
+    await expect(
+      loadProviderRegistry(fixturePath("b_providers_not_array.yaml")),
+    ).rejects.toThrow(/array/);
+  });
+
+  it("(c) rejects a provider entry missing id", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("c_missing_id.yaml")),
+    ).rejects.toThrow(/\.id/);
+  });
+
+  it("(d) rejects a provider entry missing kind", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("d_missing_kind.yaml")),
+    ).rejects.toThrow(/\.kind/);
+  });
+
+  it("(e) rejects unknown provider kind 'gemini'", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("e_unknown_kind.yaml")),
+    ).rejects.toThrow(/gemini/);
+  });
+
+  it("(f) rejects a provider entry missing model", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("f_missing_model.yaml")),
+    ).rejects.toThrow(/\.model/);
+  });
+
+  it("(g) rejects a route referencing an undeclared provider id", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("g_routes_unknown_provider.yaml")),
+    ).rejects.toThrow(/ghost_provider/);
+  });
+
+  it("(h) rejects an unknown role key in routes", async () => {
+    await expect(
+      loadProviderRegistry(fixturePath("h_routes_unknown_role.yaml")),
+    ).rejects.toThrow(/reviewer/);
+  });
+
+  it("(i) treats an empty file as an empty registry (lenient fallback)", async () => {
+    const registry = await loadProviderRegistry(fixturePath("i_empty.yaml"));
+    expect(registry.providers.size).toBe(0);
+    expect(registry.routes.digest).toBe("noop");
+    expect(registry.routes.cycle_summary).toBe("noop");
+    expect(registry.routes.classifier).toBe("noop");
   });
 });
 

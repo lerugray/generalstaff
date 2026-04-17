@@ -976,8 +976,9 @@
   {
     "id": "gs-162",
     "title": "Add test coverage in tests/providers.registry.test.ts for every malformed-input branch of loadProviderRegistry (gs-152). Cases: (a) yaml parse failure (raw '{[ bad'), (b) top-level providers not a map, (c) provider entry missing id, (d) provider entry missing kind, (e) provider entry with unknown kind ('gemini' — not in Phase 2), (f) provider entry missing model, (g) routes referencing a provider id that is not declared, (h) routes with unknown role key, (i) empty file (returns empty registry, not an error — this is the 'no provider_config.yaml' equivalent for an existing-but-blank file). Each case asserts either a ProviderConfigError with the expected field name OR the documented lenient fallback. Also add a fixture at tests/fixtures/provider_config_malformed/ with one bad example per case. Do NOT touch provider_config.yaml.example — that stays as the golden-path reference.",
-    "status": "pending",
-    "priority": 3
+    "status": "done",
+    "priority": 3,
+    "updated_at": "2026-04-17"
   },
   {
     "id": "gs-163",

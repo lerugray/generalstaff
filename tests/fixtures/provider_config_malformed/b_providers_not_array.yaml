@@ -1,0 +1,4 @@
+providers:
+  id: ollama_llama3
+  kind: ollama
+  model: llama3:8b
