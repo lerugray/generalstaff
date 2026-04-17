@@ -240,6 +240,13 @@ async function detectMarkedDoneTasks(
     return "(git_issues mode: no per-cycle task tracking)";
   }
 
+  if (project.work_detection === "git_unmerged") {
+    // git_unmerged mode tracks pending work as bot-branch commits ahead of
+    // local master. No per-cycle "task done" signal — work is removed when
+    // the branch is merged into master.
+    return "(git_unmerged mode: no per-cycle task tracking)";
+  }
+
   return "(Unknown work_detection mode)";
 }
 

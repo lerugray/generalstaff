@@ -16,6 +16,8 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
       return greenfieldHasMoreWork(project.id);
     case "git_issues":
       return gitIssuesHasMoreWork(project.path);
+    case "git_unmerged":
+      return gitUnmergedHasMoreWork(project.path, project.branch);
     default:
       return false; // unknown mode: fail-safe, no chaining
   }
@@ -31,6 +33,8 @@ export async function countRemainingWork(
       return greenfieldCountRemaining(project.id);
     case "git_issues":
       return gitIssuesCountRemaining(project.path);
+    case "git_unmerged":
+      return gitUnmergedCountRemaining(project.path, project.branch);
     default:
       return 0;
   }
@@ -154,4 +158,35 @@ export async function gitIssuesHasMoreWork(
   projectPath: string,
 ): Promise<boolean> {
   return (await gitIssuesCountRemaining(projectPath)) > 0;
+}
+
+// git_unmerged mode: counts commits on the project's bot branch ahead of
+// local master as a proxy for pending work. Useful for projects without
+// an explicit tasks.json — work is "pending" until merged into master.
+export async function gitUnmergedCountRemaining(
+  projectPath: string,
+  branch: string,
+): Promise<number> {
+  const env = { ...process.env, GIT_CEILING_DIRECTORIES: join(projectPath, "..") };
+  const result = spawnSync(
+    "git",
+    ["rev-list", "--count", `master..${branch}`],
+    {
+      cwd: projectPath,
+      encoding: "utf8",
+      timeout: 10_000,
+      stdio: ["ignore", "pipe", "ignore"],
+      env,
+    },
+  );
+  if (result.status !== 0 || typeof result.stdout !== "string") return 0;
+  const n = parseInt(result.stdout.trim(), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export async function gitUnmergedHasMoreWork(
+  projectPath: string,
+  branch: string,
+): Promise<boolean> {
+  return (await gitUnmergedCountRemaining(projectPath, branch)) > 0;
 }

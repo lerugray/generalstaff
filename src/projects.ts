@@ -19,6 +19,7 @@ const VALID_WORK_DETECTION: WorkDetectionMode[] = [
   "catalogdna_bot_tasks",
   "tasks_json",
   "git_issues",
+  "git_unmerged",
 ];
 
 const VALID_CONCURRENCY_DETECTION: ConcurrencyDetectionMode[] = [
