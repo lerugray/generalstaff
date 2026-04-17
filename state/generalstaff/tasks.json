@@ -626,7 +626,7 @@
   {
     "id": "gs-130",
     "title": "Add `generalstaff cycle-redo --project=<id> --task=<id>` to reopen a done task as pending. Tests: reopen-done, reopen-pending (noop), reopen-not-found.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

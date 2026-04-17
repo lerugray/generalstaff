@@ -24,6 +24,7 @@ import {
   pendingTasks,
   addTask,
   markTaskDone,
+  markTaskPending,
   countTasks,
   TasksLoadError,
   TaskValidationError,
@@ -124,6 +125,9 @@ Usage:
   generalstaff task count [--project=<id>]                Report pending vs done counts
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
+
+  generalstaff cycle-redo --project=<id> --task=<task-id>  Reopen a done task as pending
+    Example: generalstaff cycle-redo --project=myapp --task=my-042
 
   generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path] [--regen=<file>]
                                                           Print a session digest to stdout, or list all
@@ -657,6 +661,56 @@ switch (command) {
           "         generalstaff task count [--project=<id>]",
       );
       process.exit(1);
+    }
+    break;
+  }
+
+  case "cycle-redo": {
+    const { values: redoValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+        task: { type: "string" },
+      },
+      allowPositionals: false,
+    });
+    if (!redoValues.project) {
+      console.error("Error: --project=<id> is required");
+      process.exit(1);
+    }
+    if (!redoValues.task) {
+      console.error("Error: --task=<task-id> is required");
+      process.exit(1);
+    }
+    let result;
+    try {
+      result = await markTaskPending(redoValues.project, redoValues.task);
+    } catch (err) {
+      if (err instanceof TasksLoadError) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
+    if (result.kind === "project_not_found") {
+      console.error(
+        `Error: no tasks file for project '${redoValues.project}' (${result.path})`,
+      );
+      process.exit(1);
+    } else if (result.kind === "task_not_found") {
+      console.error(
+        `Error: task '${redoValues.task}' not found in project '${redoValues.project}'`,
+      );
+      if (result.availableIds.length > 0) {
+        console.error(`  Available: ${result.availableIds.join(", ")}`);
+      }
+      process.exit(1);
+    } else if (result.kind === "already_pending") {
+      console.log(`${result.task.id} is already pending.`);
+    } else {
+      console.log(
+        `Reopened ${result.task.id} as pending: ${result.task.title}`,
+      );
     }
     break;
   }
