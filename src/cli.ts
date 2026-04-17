@@ -4,7 +4,8 @@ import { parseArgs } from "util";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { runSession } from "./session";
-import { runSingleCycle } from "./cycle";
+import { runSingleCycle, countCommitsAhead } from "./cycle";
+import { $ } from "bun";
 import { loadFleetState, getProjectSummary, getRootDir } from "./state";
 import { loadProjects, loadProjectsYaml, loadDispatcherConfig } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
@@ -98,6 +99,10 @@ Usage:
 
   generalstaff config                                     Pretty-print the parsed+validated projects.yaml (with resolved defaults)
     Example: generalstaff config                        # useful for debugging config issues
+
+  generalstaff bot-status [--project=<id>]                Show unmerged commits on each project's bot branch
+    Example: generalstaff bot-status                    # all projects
+    Example: generalstaff bot-status --project=myapp    # single project
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -607,6 +612,48 @@ switch (command) {
     console.log(`  max_cycles_per_project_per_session:${d.max_cycles_per_project_per_session}`);
     console.log(`  log_dir:                           ${d.log_dir}`);
     console.log(`  digest_dir:                        ${d.digest_dir}`);
+    break;
+  }
+
+  case "bot-status": {
+    const { values: bsValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+      },
+      allowPositionals: false,
+    });
+    const all = await loadProjects();
+    const target = bsValues.project
+      ? all.filter((p) => p.id === bsValues.project)
+      : all;
+    if (bsValues.project && target.length === 0) {
+      console.error(`Error: project '${bsValues.project}' not found`);
+      if (all.length > 0) {
+        console.error(`  Available: ${all.map((p) => p.id).join(", ")}`);
+      }
+      process.exit(1);
+    }
+    if (target.length === 0) {
+      console.log("No projects registered.");
+      break;
+    }
+    for (const p of target) {
+      let headBranch = "HEAD";
+      try {
+        const out = await $`git -C ${p.path} rev-parse --abbrev-ref HEAD`
+          .quiet()
+          .text();
+        const trimmed = out.trim();
+        if (trimmed && trimmed !== "HEAD") headBranch = trimmed;
+      } catch {
+        // fall through: project path may not be a git repo
+      }
+      const n = await countCommitsAhead(p.path, p.branch, "HEAD");
+      console.log(
+        `${p.id}: ${n} commit(s) on ${p.branch} not yet on ${headBranch}`,
+      );
+    }
     break;
   }
 

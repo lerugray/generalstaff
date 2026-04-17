@@ -266,7 +266,7 @@
   {
     "id": "gs-070",
     "title": "Add 'generalstaff bot-status [--project=<id>]' CLI command that prints the bot branch's commit count ahead of HEAD for each project (using countCommitsAhead). Indicates pending unmerged work. Format: 'myproject: 2 commit(s) on bot/work not yet on master'. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
