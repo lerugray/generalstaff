@@ -440,7 +440,7 @@
   {
     "id": "gs-099",
     "title": "Add a 'session_complete' ProgressEntry event type (fleet-level, not per-project) that emits once at session end with aggregated stats: total_cycles, total_verified, total_failed, duration_minutes, stop_reason. Complements the existing per-project session_end entries. Add to ProgressEventType union in types.ts, emit from session.ts after the per-project session_end loop, and add tests verifying the event fires exactly once per session.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

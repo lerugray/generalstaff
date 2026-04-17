@@ -541,6 +541,24 @@ describe("runSession safeguards", () => {
     expect(String(result.captured)).toContain("Stop reason:");
   }, 30_000);
 
+  it("emits exactly one fleet-level session_complete event", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_session_complete_event.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.complete_event_count).toBe(1);
+    expect(result.fleet_project_id).toBe("_fleet");
+    const data = result.event_data as Record<string, unknown>;
+    expect(data).toBeTruthy();
+    expect(data.total_cycles).toBe(result.execute_cycle_calls);
+    expect(data.total_failed).toBe(0);
+    expect(typeof data.duration_minutes).toBe("number");
+    expect(typeof data.stop_reason).toBe("string");
+  }, 30_000);
+
   it("adds capped projects to the skip set", async () => {
     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
       "verify_capped_projects_skipped.ts",
