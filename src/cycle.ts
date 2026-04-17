@@ -658,6 +658,40 @@ export async function executeCycle(
     result.ended_at = new Date().toISOString();
     console.log(`\nCycle outcome: ${result.final_outcome} — ${result.reason}`);
 
+    // gs-132: when a cycle is verification_failed and the engineer made
+    // real commits (non-empty diff), reset the bot branch back to the
+    // start SHA so the bad commits are discarded. Without this, the next
+    // cycle's auto-merge path — or session-end auto-merge — will
+    // fast-forward those rejected commits onto HEAD.
+    const canRollback =
+      result.cycle_start_sha !== "unknown" &&
+      result.cycle_start_sha !== "skipped" &&
+      result.cycle_start_sha !== result.cycle_end_sha;
+    if (result.final_outcome === "verification_failed" && canRollback) {
+      const beforeSha = result.cycle_end_sha;
+      try {
+        // Use update-ref so the reset works even when bot/work is the
+        // checked-out ref in a worktree (the typical .bot-worktree
+        // setup). `git branch -f` refuses in that case.
+        await $`git -C ${project.path} update-ref refs/heads/${project.branch} ${result.cycle_start_sha}`.quiet();
+        console.log(
+          `Rolled back ${project.branch}: ${beforeSha.slice(0, 8)} → ${result.cycle_start_sha.slice(0, 8)}`,
+        );
+        result.cycle_end_sha = result.cycle_start_sha;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(
+          `Warning: rollback of ${project.branch} failed: ${msg}`,
+        );
+      }
+      await appendProgress(project.id, "cycle_rollback", {
+        branch: project.branch,
+        before_sha: beforeSha,
+        after_sha: result.cycle_end_sha,
+        reason: result.reason,
+      }, cycleId);
+    }
+
     // Field order mirrors the pre-refactor event layout so on-disk JSON
     // line shape is unchanged for downstream consumers.
     const cycleEndData: Record<string, unknown> = {

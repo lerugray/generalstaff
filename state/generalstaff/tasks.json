@@ -638,7 +638,7 @@
   {
     "id": "gs-132",
     "title": "(BUG) When a cycle's reviewer_verdict is verification_failed, the commit the engineer made on bot/work is NOT rolled back, and the next cycle's auto_merge path (cycle.ts:417) or session-end auto_merge (session.ts:370-376, whose comment falsely asserts 'anything on bot/work here has already passed the per-cycle verification gate') merges it into HEAD anyway. On 2026-04-17 afternoon this path landed 6 hands-off-violating and scope-creeping commits on master after they had been reported verification_failed. Fix: in src/cycle.ts executeCycle, after the reviewer returns a non-verified outcome WITH a non-empty diff, reset bot/work back to the cycle's start_sha so the bad commit is discarded and not later auto-merged. Log a cycle_rollback PROGRESS event (add to ProgressEventType union + VALID_EVENTS in src/types.ts) naming before_sha and after_sha. Update the optimistic comment in session.ts:370-376 to reflect the new guarantee. Add tests in tests/cycle.test.ts covering: (a) verified cycle — no rollback, (b) verification_failed with diff — rollback fires, cycle_end's end_sha equals start_sha, (c) verification_failed with empty diff — no rollback (noop), (d) verified_weak — no rollback (still considered acceptable work). Do NOT modify src/safety.ts or src/reviewer.ts; the fix lives entirely in src/cycle.ts, src/session.ts, src/types.ts.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

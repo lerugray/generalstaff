@@ -372,8 +372,9 @@ export async function runSession(options: SessionOptions) {
   // Without this, the final cycle's work waits on bot/work until the
   // next session's first cycle picks it up via the cycle.ts path —
   // cosmetically confusing because the digest says N verified while
-  // master only reflects N-1. Safe: anything on bot/work here has
-  // already passed the per-cycle verification gate.
+  // master only reflects N-1. Safe because gs-132 guarantees it:
+  // verification_failed cycles roll their commits off bot/work before
+  // cycle_end, so anything reachable here has passed the gate.
   for (const p of projects) {
     if (!p.auto_merge) continue;
     if (!cyclesPerProject.has(p.id)) continue;

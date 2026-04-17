@@ -67,7 +67,7 @@ describe("isProgressEntry", () => {
       "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
       "verification_run", "verification_outcome", "diff_summary",
       "reviewer_invoked", "reviewer_response", "reviewer_verdict",
-      "reviewer_fallback", "worktree_preflight",
+      "reviewer_fallback", "worktree_preflight", "cycle_rollback",
       "cycle_end", "session_start", "session_end", "session_complete",
     ];
     for (const e of events) {
