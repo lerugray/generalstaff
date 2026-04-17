@@ -392,7 +392,7 @@
   {
     "id": "gs-091",
     "title": "Validate 'generalstaff task add' input: reject empty titles or whitespace-only titles with a clear error message ('task title cannot be empty') and non-zero exit. Add tests covering valid title, empty string, whitespace-only, and very long titles (accept but warn if over 500 chars).",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
