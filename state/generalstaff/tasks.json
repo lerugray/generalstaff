@@ -460,5 +460,41 @@
     "title": "Include the reviewer provider name in the digest header so multi-provider runs are traceable from the digest alone. Read from GENERALSTAFF_REVIEWER_PROVIDER (default 'claude') at session start, thread it through writeDigest's config param, and emit a '**Reviewer:** <provider>' line in the digest header (e.g., '**Reviewer:** ollama (qwen3:8b)'). When GENERALSTAFF_REVIEWER_MODEL is set, include the model in parentheses. Add tests covering default, openrouter, ollama, and unknown-provider cases.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-103",
+    "title": "Add a pre-flight Ollama reachability check in session.ts when GENERALSTAFF_REVIEWER_PROVIDER=ollama. Before the first cycle runs, fire a GET to `${OLLAMA_HOST}/api/tags` (default http://localhost:11434). If unreachable, emit a warning to stderr suggesting the user either start the Ollama server (`ollama serve`) or set GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter. Non-fatal — the session proceeds; bad-call fallback will catch it at cycle time anyway, but the pre-flight warning gives clearer error attribution. Add tests mocking fetch for reachable/unreachable/timeout cases.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-104",
+    "title": "Include per-cycle engineer duration in the 'Cycle N completed' log line so users can spot slowdowns in real time. Change `Cycle N completed: generalstaff — verified (58m50s remaining)` to `Cycle N completed: generalstaff — verified (took 6m12s, 58m50s remaining)`. Compute duration from cycle.started_at and cycle.ended_at. Add test.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-105",
+    "title": "Remove the now-dead Telegram notify invocation from scripts/run_session.bat. src/notify.ts handles end-of-session notification directly from bun now (see 2026-04-17 notify refactor), so the powershell call in the .bat is redundant (and unreachable in detached launch contexts anyway). Keep scripts/notify_telegram.ps1 for manual re-sends. Update the .bat's comment block to reflect the new flow.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-106",
+    "title": "Add a test for invokeReviewerWithFallback covering the Ollama-unreachable-to-OpenRouter-fallback scenario: primary=ollama returns '[REVIEWER ERROR] Ollama fetch failed...', fallback=openrouter returns a well-formed response, verify final rawResponse is the openrouter content AND the onFallback callback fired with the primary error. Uses mocked fetch.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-107",
+    "title": "Enforce Hard Rule 5 (mandatory hands-off lists) with a pre-flight validator in src/projects.ts loadProjectsYaml: if any registered project has an empty or missing hands_off array, reject the config at load time with a clear error pointing at the offending project id and Rule 5. Add tests covering: valid config, missing hands_off, empty hands_off, multiple projects where one is invalid.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-108",
+    "title": "Add test coverage for the session_complete ProgressEntry event (introduced by gs-099): verify exactly one event fires per session_end path, data.total_cycles matches allResults.length, data.stop_reason is in the expected set ('budget'|'max-cycles'|'stop-file'|'no-project'|'insufficient-budget'|'empty-cycles'), data.duration_minutes is a non-negative number. Use a session fixture or mock.",
+    "status": "pending",
+    "priority": 2
   }
 ]
