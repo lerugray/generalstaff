@@ -296,7 +296,7 @@
   {
     "id": "gs-075",
     "title": "Add test coverage for the OpenRouter reviewer code path in reviewer.ts. Mock the global fetch to return a well-formed chat-completion response; verify invokeOpenRouterReviewer builds the correct request body (model, messages, temperature), parses the response, and fail-safes correctly on HTTP errors and malformed JSON.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
