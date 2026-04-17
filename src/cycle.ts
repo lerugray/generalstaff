@@ -3,7 +3,7 @@
 
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
-import { join } from "path";
+import { join, resolve as resolvePath } from "path";
 import { $ } from "bun";
 import {
   ensureCycleDir,
@@ -72,6 +72,23 @@ export async function countCommitsAhead(
 
 function worktreePath(project: ProjectConfig): string {
   return join(project.path, ".bot-worktree");
+}
+
+// Build the "bot branch has unmerged commits ahead of HEAD" error reason.
+// Resolves project.path to an absolute path so the suggested `git -C <path>`
+// command works regardless of the user's current working directory.
+export function formatUnmergedBranchError(
+  project: ProjectConfig,
+  branch: string,
+  unmerged: number,
+): string {
+  const resolvedPath = resolvePath(project.path);
+  return (
+    `${branch} has ${unmerged} unmerged commit(s) ahead of HEAD; ` +
+    `resetting would destroy that work. Merge manually ` +
+    `(git -C ${resolvedPath} merge --no-ff ${branch}) or set ` +
+    `auto_merge: true in projects.yaml for project ${project.id}.`
+  );
 }
 
 async function autoCommitState(
@@ -403,11 +420,7 @@ export async function executeCycle(
         }
       } else {
         // auto_merge: false — default per Hard Rule #4. Do NOT overwrite work.
-        const reason =
-          `${branch} has ${unmerged} unmerged commit(s) ahead of HEAD; ` +
-          `resetting would destroy that work. Merge manually ` +
-          `(git -C ${project.path} merge --no-ff ${branch}) or set ` +
-          `auto_merge: true in projects.yaml for project ${project.id}.`;
+        const reason = formatUnmergedBranchError(project, branch, unmerged);
         console.log(`\nERROR: ${reason}\n`);
         await appendProgress(project.id, "cycle_skipped", {
           reason,
