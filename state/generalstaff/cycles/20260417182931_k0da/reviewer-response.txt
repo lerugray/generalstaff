@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task, no hands-off violations, and verification passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "\"status\": \"done\",",
+      "evidence": "The diff shows refactoring of src/cycle.ts to use getProject and ProjectNotFoundError instead of findProject, adds error handling with improved messaging, and includes a new test in tests/cycle.test.ts that verifies the error behavior for unknown projects.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming that all tests including the new test case for runSingleCycle with unknown project are passing."
+}
