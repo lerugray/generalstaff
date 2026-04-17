@@ -1,0 +1,316 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/audit.ts b/src/audit.ts
+index 3c7b3b4..4023a71 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -203,6 +203,7 @@ function shaRange(startSha: unknown, endSha: unknown): string {
+ export interface LoadCycleHistoryOptions {
+   since?: string;
+   until?: string;
++  verifiedOnly?: boolean;
+ }
+ 
+ // Parse a YYYYMMDD string to an epoch-ms bound. endOfDay=true returns the
+@@ -268,6 +269,10 @@ export async function loadCycleHistory(
+           const started = startedAtMs(parsed);
+           if (sinceMs !== undefined && started < sinceMs) continue;
+           if (untilMs !== undefined && started > untilMs) continue;
++          if (options.verifiedOnly) {
++            const outcome = String(parsed.data.outcome ?? "");
++            if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
++          }
+           entries.push(parsed);
+         }
+       } catch { /* skip malformed */ }
+diff --git a/src/cli.ts b/src/cli.ts
+index d819369..e4c1d21 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -55,12 +55,13 @@ Usage:
+     Example: generalstaff start                         # resume after a stop
+ 
+   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
+-                       [--since=YYYYMMDD] [--until=YYYYMMDD]
++                       [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
+                                                           Cycle history (compact: tab-delimited, no headers)
+     Example: generalstaff history --lines=50
+     Example: generalstaff history --project=myapp --format=compact
+     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
++    Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+ 
+   generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
+                                                           Tail PROGRESS.jsonl
+@@ -270,6 +271,7 @@ switch (command) {
+         costs: { type: "boolean", default: false },
+         since: { type: "string" },
+         until: { type: "string" },
++        "verified-only": { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -278,7 +280,11 @@ switch (command) {
+       rows = await loadCycleHistory(
+         historyValues.project,
+         parseInt(historyValues.lines!, 10),
+-        { since: historyValues.since, until: historyValues.until },
++        {
++          since: historyValues.since,
++          until: historyValues.until,
++          verifiedOnly: historyValues["verified-only"],
++        },
+       );
+     } catch (err) {
+       console.error(`Error: ${(err as Error).message}`);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ecc5b10..56aeb6f 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -308,7 +308,7 @@
+   {
+     "id": "gs-077",
+     "title": "Add a 'generalstaff history --verified-only' flag that filters out cycle_skipped and verification_failed rows from the history output. Works in both default and --format=compact modes. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index d61b627..e4f9dc4 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -495,6 +495,45 @@ describe("loadCycleHistory date filters", () => {
+   });
+ });
+ 
++describe("loadCycleHistory --verified-only filter", () => {
++  beforeEach(async () => {
++    await appendProgress("proj-vo", "cycle_end", {
++      outcome: "verified", start_sha: "a", end_sha: "b", duration_seconds: 10,
++    }, "c-ok");
++    await appendProgress("proj-vo", "cycle_end", {
++      outcome: "verified_weak", start_sha: "a", end_sha: "b", duration_seconds: 10,
++    }, "c-weak");
++    await appendProgress("proj-vo", "cycle_end", {
++      outcome: "cycle_skipped", start_sha: "a", end_sha: "a", duration_seconds: 1,
++    }, "c-skip");
++    await appendProgress("proj-vo", "cycle_end", {
++      outcome: "verification_failed", start_sha: "a", end_sha: "c", duration_seconds: 15,
++    }, "c-fail");
++  });
++
++  it("includes all rows when verifiedOnly is false or undefined", async () => {
++    const rows = await loadCycleHistory("proj-vo");
++    expect(rows).toHaveLength(4);
++  });
++
++  it("filters out cycle_skipped and verification_failed when verifiedOnly is true", async () => {
++    const rows = await loadCycleHistory("proj-vo", 20, { verifiedOnly: true });
++    expect(rows).toHaveLength(2);
++    const outcomes = rows.map((r) => r.outcome).sort();
++    expect(outcomes).toEqual(["verified", "verified_weak"]);
++  });
++
++  it("preserves verifiedOnly filter across multiple projects", async () => {
++    await appendProgress("proj-vo-b", "cycle_end", {
++      outcome: "verification_failed", start_sha: "x", end_sha: "y", duration_seconds: 5,
++    }, "c-b-fail");
++    const rows = await loadCycleHistory(undefined, 20, { verifiedOnly: true });
++    expect(rows.every((r) => r.outcome !== "cycle_skipped" && r.outcome !== "verification_failed"))
++      .toBe(true);
++    expect(rows).toHaveLength(2);
++  });
++});
++
+ describe("parseDateFlag", () => {
+   it("parses YYYYMMDD at start of UTC day", () => {
+     const ms = parseDateFlag("20260415", false);
+
+
+Diff summary: src/audit.ts                  |  5 +++++
+ src/cli.ts                    | 10 ++++++++--
+ state/generalstaff/tasks.json |  2 +-
+ tests/audit.test.ts           | 39 +++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 53 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T08:40:17.665Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_084035.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_084035.md
+
+ 445 pass
+ 0 fail
+ 1325 expect() calls
+Ran 445 tests across 20 files. [27.13s]
+
+========================================
+Exit code: 0
+Duration: 28.9s
+Ended: 2026-04-17T08:40:46.594Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
