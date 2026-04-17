@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff aligns with the marked-done task, no hands-off violations, and verification passed with no test failures.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "state/generalstaff/tasks.json",
+      "evidence": "The task file shows the 'format date' task marked as done, and the diff implements the function in src/format.ts and updates tests in tests/format.test.ts",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification command ran successfully with 487 passing tests, no scope drift detected."
+}

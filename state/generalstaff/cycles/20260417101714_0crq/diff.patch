@@ -1,0 +1,153 @@
+diff --git a/src/format.ts b/src/format.ts
+index 0fdcc0e..fb33744 100644
+--- a/src/format.ts
++++ b/src/format.ts
+@@ -33,3 +33,47 @@ export function formatPercent(ratio: number): string {
+   if (!Number.isFinite(ratio) || ratio < 0) return "?";
+   return `${Math.round(ratio * 100)}%`;
+ }
++
++// gs-085: human-friendly relative-time formatter for status/history lines.
++// Buckets: <60s -> "just now"; <1h -> "N min ago"; same calendar day and
++// >=1h -> "Nh ago"; prior calendar day -> "yesterday at HH:MM"; older ->
++// "N days ago". Future times mirror past ("in N min", "in Nh", "in N days").
++// The "yesterday" bucket is intentionally calendar-based, not a 24h window,
++// so early-morning reads of a late-night event read naturally.
++export function formatRelativeTime(iso: string, now: Date = new Date()): string {
++  const then = new Date(iso);
++  const thenMs = then.getTime();
++  if (!Number.isFinite(thenMs)) return "?";
++
++  const deltaSec = Math.floor((now.getTime() - thenMs) / 1000);
++  const absSec = Math.abs(deltaSec);
++  const future = deltaSec < 0;
++
++  if (absSec < 60) return "just now";
++
++  if (absSec < 3600) {
++    const mins = Math.floor(absSec / 60);
++    return future ? `in ${mins} min` : `${mins} min ago`;
++  }
++
++  if (future) {
++    if (absSec < 86400) {
++      return `in ${Math.floor(absSec / 3600)}h`;
++    }
++    return `in ${Math.floor(absSec / 86400)} days`;
++  }
++
++  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
++  const thenDay = new Date(then.getFullYear(), then.getMonth(), then.getDate());
++  const dayDiff = Math.round((today.getTime() - thenDay.getTime()) / 86400000);
++
++  if (dayDiff === 0) {
++    return `${Math.floor(absSec / 3600)}h ago`;
++  }
++  if (dayDiff === 1) {
++    const hh = String(then.getHours()).padStart(2, "0");
++    const mm = String(then.getMinutes()).padStart(2, "0");
++    return `yesterday at ${hh}:${mm}`;
++  }
++  return `${dayDiff} days ago`;
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index a60317b..86ce39c 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -356,7 +356,7 @@
+   {
+     "id": "gs-085",
+     "title": "Add a formatRelativeTime(iso: string, now?: Date) helper to src/format.ts that converts an ISO timestamp to a human relative string: 'just now' (<60s), '3 min ago', '2h ago', 'yesterday at HH:MM', 'N days ago'. Handles future dates gracefully ('in N min'). Include tests covering each bucket and invalid input.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/format.test.ts b/tests/format.test.ts
+index e50836c..92ac6e1 100644
+--- a/tests/format.test.ts
++++ b/tests/format.test.ts
+@@ -1,5 +1,10 @@
+ import { describe, it, expect } from "bun:test";
+-import { formatDuration, formatBytes, formatPercent } from "../src/format";
++import {
++  formatDuration,
++  formatBytes,
++  formatPercent,
++  formatRelativeTime,
++} from "../src/format";
+ 
+ describe("formatDuration", () => {
+   it("renders sub-minute values as seconds", () => {
+@@ -120,3 +125,71 @@ describe("formatPercent", () => {
+     expect(formatPercent(-1)).toBe("?");
+   });
+ });
++
++describe("formatRelativeTime", () => {
++  // Fixed "now" for deterministic bucket tests: Thu 2026-04-17 14:30:00 local.
++  const now = new Date(2026, 3, 17, 14, 30, 0);
++  const relative = (secondsAgo: number) =>
++    new Date(now.getTime() - secondsAgo * 1000).toISOString();
++
++  it("renders sub-minute past as 'just now'", () => {
++    expect(formatRelativeTime(relative(0), now)).toBe("just now");
++    expect(formatRelativeTime(relative(30), now)).toBe("just now");
++    expect(formatRelativeTime(relative(59), now)).toBe("just now");
++  });
++
++  it("renders sub-hour past in minutes", () => {
++    expect(formatRelativeTime(relative(60), now)).toBe("1 min ago");
++    expect(formatRelativeTime(relative(180), now)).toBe("3 min ago");
++    expect(formatRelativeTime(relative(3599), now)).toBe("59 min ago");
++  });
++
++  it("renders same-calendar-day past in hours", () => {
++    // 2h30m ago is same day (14:30 -> 12:00)
++    expect(formatRelativeTime(relative(2 * 3600 + 1800), now)).toBe("2h ago");
++    // 14h ago is same day (14:30 -> 00:30)
++    expect(formatRelativeTime(relative(14 * 3600), now)).toBe("14h ago");
++  });
++
++  it("renders prior calendar day as 'yesterday at HH:MM'", () => {
++    // Yesterday 23:45 (2026-04-16 23:45)
++    const yesterday = new Date(2026, 3, 16, 23, 45, 0).toISOString();
++    expect(formatRelativeTime(yesterday, now)).toBe("yesterday at 23:45");
++    // Yesterday 09:05 — pads minutes
++    const yesterdayMorning = new Date(2026, 3, 16, 9, 5, 0).toISOString();
++    expect(formatRelativeTime(yesterdayMorning, now)).toBe(
++      "yesterday at 09:05",
++    );
++  });
++
++  it("renders older past in days", () => {
++    // 3 calendar days ago
++    const threeDaysAgo = new Date(2026, 3, 14, 14, 30, 0).toISOString();
++    expect(formatRelativeTime(threeDaysAgo, now)).toBe("3 days ago");
++    // 30 days ago
++    const thirtyDaysAgo = new Date(2026, 2, 18, 14, 30, 0).toISOString();
++    expect(formatRelativeTime(thirtyDaysAgo, now)).toBe("30 days ago");
++  });
++
++  it("renders near-future as 'in N min'", () => {
++    const future = (secondsAhead: number) =>
++      new Date(now.getTime() + secondsAhead * 1000).toISOString();
++    expect(formatRelativeTime(future(30), now)).toBe("just now");
++    expect(formatRelativeTime(future(60), now)).toBe("in 1 min");
++    expect(formatRelativeTime(future(180), now)).toBe("in 3 min");
++  });
++
++  it("renders far-future in hours and days", () => {
++    const future = (secondsAhead: number) =>
++      new Date(now.getTime() + secondsAhead * 1000).toISOString();
++    expect(formatRelativeTime(future(3600), now)).toBe("in 1h");
++    expect(formatRelativeTime(future(5 * 3600), now)).toBe("in 5h");
++    expect(formatRelativeTime(future(2 * 86400), now)).toBe("in 2 days");
++  });
++
++  it("returns ? for invalid inputs", () => {
++    expect(formatRelativeTime("not a date", now)).toBe("?");
++    expect(formatRelativeTime("", now)).toBe("?");
++    expect(formatRelativeTime("2026-13-99T99:99:99Z", now)).toBe("?");
++  });
++});
