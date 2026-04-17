@@ -14,6 +14,7 @@ import {
   readStateFile,
   getProjectSummary,
   getRecentCycles,
+  botWorktreePath,
 } from "../src/state";
 import type { ProjectConfig } from "../src/types";
 import { join } from "path";
@@ -440,5 +441,41 @@ describe("getRecentCycles", () => {
 
     expect(await getRecentCycles("zero-proj", 0)).toEqual([]);
     expect(await getRecentCycles("zero-proj", -1)).toEqual([]);
+  });
+});
+
+describe("botWorktreePath", () => {
+  it("returns '<project.path>/.bot-worktree'", () => {
+    const project: ProjectConfig = {
+      id: "demo",
+      path: "/some/project",
+      priority: 1,
+      engineer_command: "true",
+      verification_command: "true",
+      cycle_budget_minutes: 1,
+      work_detection: "tasks_json",
+      concurrency_detection: "worktree",
+      branch: "bot/work",
+      auto_merge: false,
+      hands_off: [],
+    };
+    expect(botWorktreePath(project)).toBe(join("/some/project", ".bot-worktree"));
+  });
+
+  it("preserves the caller's path verbatim (no normalization)", () => {
+    const project: ProjectConfig = {
+      id: "rel",
+      path: "./relative/path",
+      priority: 1,
+      engineer_command: "true",
+      verification_command: "true",
+      cycle_budget_minutes: 1,
+      work_detection: "tasks_json",
+      concurrency_detection: "worktree",
+      branch: "bot/work",
+      auto_merge: false,
+      hands_off: [],
+    };
+    expect(botWorktreePath(project)).toBe(join("./relative/path", ".bot-worktree"));
   });
 });

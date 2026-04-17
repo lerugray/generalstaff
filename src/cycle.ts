@@ -14,6 +14,7 @@ import {
   saveFleetState,
   updateProjectFleetState,
   getRootDir,
+  botWorktreePath,
 } from "./state";
 import { appendProgress } from "./audit";
 import { runEngineer } from "./engineer";
@@ -69,10 +70,6 @@ export async function countCommitsAhead(
   }
 }
 
-function worktreePath(project: ProjectConfig): string {
-  return join(project.path, ".bot-worktree");
-}
-
 // Build the "bot branch has unmerged commits ahead of HEAD" error reason.
 // Resolves project.path to an absolute path so the suggested `git -C <path>`
 // command works regardless of the user's current working directory.
@@ -114,7 +111,7 @@ async function autoCommitState(
 }
 
 async function cleanupWorktree(project: ProjectConfig): Promise<void> {
-  const wt = worktreePath(project);
+  const wt = botWorktreePath(project);
   if (existsSync(wt)) {
     try {
       await $`git -C ${project.path} worktree remove ${wt} --force`.quiet();
@@ -140,7 +137,7 @@ export async function preflightCleanupWorktree(
   project: ProjectConfig,
   rmFn?: (path: string) => void,
 ): Promise<{ wasStale: boolean; removed: boolean; warning?: string }> {
-  const wt = worktreePath(project);
+  const wt = botWorktreePath(project);
   if (!existsSync(wt)) {
     return { wasStale: false, removed: false };
   }
@@ -624,7 +621,7 @@ export async function executeCycle(
 
     // 7. Independent verification gate
     //    Run in the worktree if it exists (tests the bot's code, not master)
-    const wt = worktreePath(project);
+    const wt = botWorktreePath(project);
     const verCwd = existsSync(wt) ? wt : undefined;
     if (verCwd) {
       console.log(`Running verification gate in worktree: ${wt}`);

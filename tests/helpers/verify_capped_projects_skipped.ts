@@ -129,6 +129,7 @@ mock.module("../../src/state", () => ({
   }),
   saveProjectState: async () => {},
   getRootDir: () => TEST_DIR,
+  botWorktreePath: (project: { path: string }) => join(project.path, ".bot-worktree"),
 }));
 
 mock.module("../../src/audit", () => ({

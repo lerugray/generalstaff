@@ -6,7 +6,7 @@ import { unlink } from "fs/promises";
 import { join } from "path";
 import { $ } from "bun";
 import { createInterface } from "readline";
-import { getRootDir } from "./state";
+import { getRootDir, botWorktreePath } from "./state";
 import type { ProjectConfig } from "./types";
 
 interface CheckResult {
@@ -85,7 +85,7 @@ export async function findStaleWorktreeIssues(
 ): Promise<DiagnosticIssue[]> {
   const issues: DiagnosticIssue[] = [];
   for (const p of projects) {
-    const wt = join(p.path, ".bot-worktree");
+    const wt = botWorktreePath(p);
     if (!existsSync(wt)) continue;
     let ageMin = Infinity;
     try {

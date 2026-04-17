@@ -50,6 +50,10 @@ export function getRootDir(): string {
   return _rootDir;
 }
 
+export function botWorktreePath(project: ProjectConfig): string {
+  return join(project.path, ".bot-worktree");
+}
+
 function getStateDir(config?: DispatcherConfig): string {
   const root = getRootDir();
   return config?.state_dir

@@ -836,8 +836,9 @@
   {
     "id": "gs-140",
     "title": "Extract a shared botWorktreePath(project) helper into src/state.ts (or a new lightweight src/paths.ts — your call) and refactor the three current inline uses: src/cycle.ts worktreePath (currently a private function), src/clean.ts join(p.path, '.bot-worktree'), and src/doctor.ts join(p.path, '.bot-worktree'). Keep the same returned string so no behavior changes. Add a trivial test pinning the shape ('<path>/.bot-worktree'). Do NOT touch src/safety.ts (hands-off) — its inline join stays.",
-    "status": "pending",
-    "priority": 3
+    "status": "done",
+    "priority": 3,
+    "completed_at": "2026-04-17T21:51:11.415Z"
   },
   {
     "id": "gs-141",
