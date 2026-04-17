@@ -656,6 +656,109 @@ projects:
     });
   });
 
+  describe("providers list command", () => {
+    const PROV_TEST_DIR = join(import.meta.dir, "fixtures", "providers_list_test");
+    const PROV_FILE = join(PROV_TEST_DIR, "provider_config.yaml");
+
+    beforeEach(() => {
+      mkdirSync(PROV_TEST_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(PROV_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("prints missing-file message when provider_config.yaml is absent", async () => {
+      const result = await runCli(["providers", "list"], PROV_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        "No provider_config.yaml found. See provider_config.yaml.example for format.",
+      );
+    });
+
+    it("emits empty JSON registry when file absent under --json", async () => {
+      const result = await runCli(["providers", "list", "--json"], PROV_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.providers).toEqual([]);
+      expect(parsed.routes).toEqual({
+        digest: null,
+        cycle_summary: null,
+        classifier: null,
+      });
+    });
+
+    it("prints provider table and routes when file is present", async () => {
+      writeFileSync(
+        PROV_FILE,
+        `providers:
+  - id: ollama_llama3
+    kind: ollama
+    model: llama3:8b
+    host: http://localhost:11434
+routes:
+  digest: ollama_llama3
+  cycle_summary: ollama_llama3
+`,
+      );
+      const result = await runCli(["providers", "list"], PROV_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("=== GeneralStaff Providers ===");
+      expect(result.stdout).toContain("Providers: 1");
+      expect(result.stdout).toContain("[ollama_llama3]");
+      expect(result.stdout).toContain("kind:        ollama");
+      expect(result.stdout).toContain("model:       llama3:8b");
+      expect(result.stdout).toContain("host:        http://localhost:11434");
+      expect(result.stdout).toContain("[routes]");
+      expect(result.stdout).toContain("digest");
+      expect(result.stdout).toContain("ollama_llama3");
+      expect(result.stdout).toContain("classifier");
+      expect(result.stdout).toContain("(unrouted)");
+    });
+
+    it("--json emits full registry shape", async () => {
+      writeFileSync(
+        PROV_FILE,
+        `providers:
+  - id: ollama_llama3
+    kind: ollama
+    model: llama3:8b
+routes:
+  digest: ollama_llama3
+`,
+      );
+      const result = await runCli(["providers", "list", "--json"], PROV_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(Array.isArray(parsed.providers)).toBe(true);
+      expect(parsed.providers).toHaveLength(1);
+      expect(parsed.providers[0].id).toBe("ollama_llama3");
+      expect(parsed.providers[0].kind).toBe("ollama");
+      expect(parsed.providers[0].model).toBe("llama3:8b");
+      expect(parsed.routes.digest).toBe("ollama_llama3");
+      expect(parsed.routes.cycle_summary).toBeNull();
+      expect(parsed.routes.classifier).toBeNull();
+    });
+
+    it("exits non-zero on malformed provider_config.yaml", async () => {
+      writeFileSync(PROV_FILE, "providers: not-an-array\n");
+      const result = await runCli(["providers", "list"], PROV_TEST_DIR);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("providers");
+    });
+
+    it("rejects unknown subcommand", async () => {
+      const result = await runCli(["providers", "bogus"], PROV_TEST_DIR);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("unknown providers subcommand");
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("generalstaff providers list");
+    });
+  });
+
   describe("digest command", () => {
     const DIGEST_TEST_DIR = join(import.meta.dir, "fixtures", "digest_cmd_test");
     const DIGEST_DIR = join(DIGEST_TEST_DIR, "digests");
