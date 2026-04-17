@@ -284,7 +284,7 @@
   {
     "id": "gs-073",
     "title": "In src/summary.ts, add a per-project success-rate line to the Cycles section of the fleet summary: 'Success rate: NN% (X/Y verified)' using formatPercent. Only shown when a project has at least one cycle. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

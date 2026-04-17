@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { getRootDir } from "./state";
 import { loadProgressEvents } from "./audit";
-import { formatBytes, formatDuration } from "./format";
+import { formatBytes, formatDuration, formatPercent } from "./format";
 
 export interface OutcomeCounts {
   verified: number;
@@ -14,6 +14,11 @@ export interface OutcomeCounts {
   other: number;
 }
 
+export interface ProjectCycleStats {
+  verified: number;
+  total: number;
+}
+
 export interface FleetSummary {
   projects: number;
   cycles_total: number;
@@ -21,6 +26,7 @@ export interface FleetSummary {
   duration_seconds: number;
   tasks_pending: number;
   tasks_by_project: Record<string, number>;
+  cycles_by_project: Record<string, ProjectCycleStats>;
 }
 
 export interface TestCounts {
@@ -103,6 +109,7 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
     duration_seconds: 0,
     tasks_pending: 0,
     tasks_by_project: {},
+    cycles_by_project: {},
   };
 
   if (!existsSync(stateDir)) return empty;
@@ -120,6 +127,7 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
     ...empty,
     outcomes: { ...empty.outcomes },
     tasks_by_project: {},
+    cycles_by_project: {},
   };
 
   summary.projects = projectDirs.length;
@@ -133,10 +141,15 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
     );
     for (const e of ends) {
       summary.cycles_total += 1;
+      if (!summary.cycles_by_project[projectId]) {
+        summary.cycles_by_project[projectId] = { verified: 0, total: 0 };
+      }
+      summary.cycles_by_project[projectId].total += 1;
       const outcome = String(e.data.outcome ?? "");
       switch (outcome) {
         case "verified":
           summary.outcomes.verified += 1;
+          summary.cycles_by_project[projectId].verified += 1;
           break;
         case "verified_weak":
           summary.outcomes.verified_weak += 1;
@@ -232,6 +245,17 @@ export function formatSummary(
     lines.push(`  Skipped:       ${summary.outcomes.cycle_skipped}  (${pct(summary.outcomes.cycle_skipped, summary.cycles_total)})`);
     if (summary.outcomes.other > 0) {
       lines.push(`  Other:         ${summary.outcomes.other}`);
+    }
+    const projectsWithCycles = Object.keys(summary.cycles_by_project).sort();
+    if (projectsWithCycles.length > 0) {
+      lines.push("  By project:");
+      for (const p of projectsWithCycles) {
+        const stats = summary.cycles_by_project[p];
+        const rate = formatPercent(stats.verified / stats.total);
+        lines.push(
+          `    ${p}: Success rate: ${rate} (${stats.verified}/${stats.total} verified)`,
+        );
+      }
     }
   }
   lines.push("");
