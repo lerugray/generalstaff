@@ -1,0 +1,175 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 67f5a3b..a15934b 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -12,7 +12,7 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+-import { loadTasks, pendingTasks, addTask } from "./tasks";
++import { loadTasks, pendingTasks, addTask, TasksLoadError } from "./tasks";
+ import {
+   buildFleetSummary,
+   computeDiskUsage,
+@@ -300,7 +300,16 @@ switch (command) {
+         console.error("Error: --project=<id> is required");
+         process.exit(1);
+       }
+-      const tasks = await loadTasks(values.project);
++      let tasks;
++      try {
++        tasks = await loadTasks(values.project);
++      } catch (err) {
++        if (err instanceof TasksLoadError) {
++          console.error(`Error: ${err.message}`);
++          process.exit(1);
++        }
++        throw err;
++      }
+       const pending = pendingTasks(tasks);
+       if (pending.length === 0) {
+         console.log("No pending tasks.");
+@@ -336,7 +345,16 @@ switch (command) {
+         }
+         priority = parsed;
+       }
+-      const task = await addTask(taskValues.project, title, priority);
++      let task;
++      try {
++        task = await addTask(taskValues.project, title, priority);
++      } catch (err) {
++        if (err instanceof TasksLoadError) {
++          console.error(`Error: ${err.message}`);
++          process.exit(1);
++        }
++        throw err;
++      }
+       console.log(`Added ${task.id}: ${task.title}`);
+     } else {
+       console.error(
+diff --git a/src/tasks.ts b/src/tasks.ts
+index 80dc09b..0f1e20e 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -10,12 +10,36 @@ function tasksPath(projectId: string): string {
+   return join(getRootDir(), "state", projectId, "tasks.json");
+ }
+ 
++export class TasksLoadError extends Error {
++  constructor(
++    public readonly filePath: string,
++    public readonly reason: string,
++    public readonly cause?: unknown,
++  ) {
++    super(`Failed to load tasks from ${filePath}: ${reason}`);
++    this.name = "TasksLoadError";
++  }
++}
++
+ export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
+   const path = tasksPath(projectId);
+   if (!existsSync(path)) return [];
+   const raw = await readFile(path, "utf8");
+   if (!raw.trim()) return [];
+-  return JSON.parse(raw) as GreenfieldTask[];
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch (err) {
++    const detail = err instanceof Error ? err.message : String(err);
++    throw new TasksLoadError(path, `invalid JSON (${detail})`, err);
++  }
++  if (!Array.isArray(parsed)) {
++    throw new TasksLoadError(
++      path,
++      `expected a JSON array, got ${parsed === null ? "null" : typeof parsed}`,
++    );
++  }
++  return parsed as GreenfieldTask[];
+ }
+ 
+ export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 2e90d04..aa29855 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -236,7 +236,7 @@
+   {
+     "id": "gs-065",
+     "title": "In tasks.ts loadTasks, surface JSON parse errors instead of silently returning an empty list (current behavior misleads users into thinking there's 'no work' when really their tasks.json is malformed). On parse failure, log a clear error with the file path and rethrow or return a typed failure. Update callers to handle the new failure mode gracefully. Add tests covering malformed JSON, empty file, and valid-but-not-array structure.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index f2c89f8..dd6c921 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -14,6 +14,7 @@ import {
+   deriveTaskIdPrefix,
+   nextTaskId,
+   addTask,
++  TasksLoadError,
+ } from "../src/tasks";
+ import type { GreenfieldTask } from "../src/types";
+ 
+@@ -63,6 +64,37 @@ describe("tasks module", () => {
+       expect(tasks).toEqual([]);
+     });
+ 
++    it("throws TasksLoadError with file path on malformed JSON", async () => {
++      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
++      writeFileSync(path, "{not valid json");
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TasksLoadError);
++      const err = caught as TasksLoadError;
++      expect(err.filePath).toBe(path);
++      expect(err.message).toContain("invalid JSON");
++      expect(err.message).toContain("tasks.json");
++    });
++
++    it("throws TasksLoadError when JSON is valid but not an array", async () => {
++      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
++      writeFileSync(path, JSON.stringify({ id: "x", title: "y" }));
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TasksLoadError);
++      const err = caught as TasksLoadError;
++      expect(err.filePath).toBe(path);
++      expect(err.message).toContain("expected a JSON array");
++    });
++
+     it("parses a non-empty tasks.json", async () => {
+       const data: GreenfieldTask[] = [
+         { id: "gs-001", title: "first", status: "pending", priority: 1 },
+@@ -213,6 +245,20 @@ describe("CLI task command", () => {
+       expect(result.stdout).toContain("No pending tasks.");
+     });
+ 
++    it("surfaces a clear error when tasks.json is malformed", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        "{not valid json",
++      );
++      const result = await runCli(
++        ["task", "list", "--project=proj"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("Failed to load tasks");
++      expect(result.stderr).toContain("invalid JSON");
++    });
++
+     it("prints only pending/in_progress tasks", async () => {
+       const tasks: GreenfieldTask[] = [
+         { id: "gs-001", title: "open item", status: "pending", priority: 1 },
