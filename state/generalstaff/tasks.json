@@ -272,7 +272,7 @@
   {
     "id": "gs-071",
     "title": "In work_detection.ts, add a 'git_unmerged' mode that counts commits on bot/work ahead of master as a proxy for pending work (alternative to tasks_json for projects without an explicit task file). Add VALID_WORK_DETECTION entry, cycle.ts dispatch, and tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

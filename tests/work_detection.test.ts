@@ -7,6 +7,8 @@ import {
   countRemainingWork,
   gitIssuesCountRemaining,
   gitIssuesHasMoreWork,
+  gitUnmergedCountRemaining,
+  gitUnmergedHasMoreWork,
 } from "../src/work_detection";
 import type { ProjectConfig } from "../src/types";
 import { setRootDir } from "../src/state";
@@ -328,6 +330,67 @@ describe("gitIssuesHasMoreWork", () => {
   });
 });
 
+function setupRepoWithBranch(
+  name: string,
+  branchCommitsAhead: number,
+  branchName = "bot/work",
+): string {
+  const workDir = join(FIXTURES, name);
+  mkdirSync(workDir, { recursive: true });
+
+  git(workDir, ["init", "--initial-branch=master"]);
+  git(workDir, ["config", "user.email", "test@test.com"]);
+  git(workDir, ["config", "user.name", "Test"]);
+  writeFileSync(join(workDir, "README.md"), "initial\n");
+  git(workDir, ["add", "README.md"]);
+  git(workDir, ["commit", "-m", "initial"]);
+
+  git(workDir, ["checkout", "-b", branchName]);
+  for (let i = 0; i < branchCommitsAhead; i++) {
+    writeFileSync(join(workDir, `f-${i}.txt`), `x ${i}\n`);
+    git(workDir, ["add", `f-${i}.txt`]);
+    git(workDir, ["commit", "-m", `bot change ${i}`]);
+  }
+  return workDir;
+}
+
+describe("gitUnmergedCountRemaining", () => {
+  it("counts branch commits ahead of master", async () => {
+    const workDir = setupRepoWithBranch("unmerged-3", 3);
+    expect(await gitUnmergedCountRemaining(workDir, "bot/work")).toBe(3);
+  });
+
+  it("returns 0 when branch is at master", async () => {
+    const workDir = setupRepoWithBranch("unmerged-0", 0);
+    expect(await gitUnmergedCountRemaining(workDir, "bot/work")).toBe(0);
+  });
+
+  it("returns 0 when the branch doesn't exist", async () => {
+    const workDir = setupRepoWithBranch("unmerged-nobranch", 0);
+    expect(
+      await gitUnmergedCountRemaining(workDir, "nonexistent-branch"),
+    ).toBe(0);
+  });
+
+  it("returns 0 when path is not a git repo", async () => {
+    const notRepo = join(FIXTURES, "unmerged-not-a-repo");
+    mkdirSync(notRepo, { recursive: true });
+    expect(await gitUnmergedCountRemaining(notRepo, "bot/work")).toBe(0);
+  });
+});
+
+describe("gitUnmergedHasMoreWork", () => {
+  it("returns true when branch has commits ahead of master", async () => {
+    const workDir = setupRepoWithBranch("unmerged-has-2", 2);
+    expect(await gitUnmergedHasMoreWork(workDir, "bot/work")).toBe(true);
+  });
+
+  it("returns false when branch has no commits ahead", async () => {
+    const workDir = setupRepoWithBranch("unmerged-has-0", 0);
+    expect(await gitUnmergedHasMoreWork(workDir, "bot/work")).toBe(false);
+  });
+});
+
 describe("countRemainingWork", () => {
   function makeProject(
     overrides: Partial<ProjectConfig> & Pick<ProjectConfig, "work_detection">,
@@ -380,6 +443,16 @@ describe("countRemainingWork", () => {
     const project = makeProject({
       work_detection: "git_issues",
       path: workDir,
+    });
+    expect(await countRemainingWork(project)).toBe(2);
+  });
+
+  it("dispatches to git_unmerged mode", async () => {
+    const workDir = setupRepoWithBranch("dispatch-unmerged", 2);
+    const project = makeProject({
+      work_detection: "git_unmerged",
+      path: workDir,
+      branch: "bot/work",
     });
     expect(await countRemainingWork(project)).toBe(2);
   });
