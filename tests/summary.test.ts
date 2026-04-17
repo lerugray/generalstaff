@@ -138,6 +138,58 @@ describe("buildFleetSummary", () => {
     expect(s.outcomes.verified).toBe(2);
   });
 
+  it("filters cycles and tasks to a single project when projectFilter is provided", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    mkdirSync(join(stateDir, "beta"), { recursive: true });
+
+    writeFileSync(
+      join(stateDir, "alpha", "PROGRESS.jsonl"),
+      cycleEnd({ project: "alpha", cycleId: "c-a1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified", durationSeconds: 120 }) + "\n",
+    );
+    writeFileSync(
+      join(stateDir, "beta", "PROGRESS.jsonl"),
+      cycleEnd({ project: "beta", cycleId: "c-b1", ts: "2026-04-16T11:00:00.000Z", outcome: "verification_failed", durationSeconds: 30 }) + "\n",
+    );
+    writeFileSync(
+      join(stateDir, "alpha", "tasks.json"),
+      JSON.stringify([{ id: "a-1", title: "t1", status: "pending", priority: 1 }]),
+    );
+    writeFileSync(
+      join(stateDir, "beta", "tasks.json"),
+      JSON.stringify([
+        { id: "b-1", title: "t1", status: "pending", priority: 1 },
+        { id: "b-2", title: "t2", status: "pending", priority: 1 },
+      ]),
+    );
+
+    const s = await buildFleetSummary("alpha");
+    expect(s.projects).toBe(1);
+    expect(s.cycles_total).toBe(1);
+    expect(s.outcomes.verified).toBe(1);
+    expect(s.outcomes.verification_failed).toBe(0);
+    expect(s.duration_seconds).toBe(120);
+    expect(s.cycles_by_project.alpha).toEqual({ verified: 1, total: 1 });
+    expect(s.cycles_by_project.beta).toBeUndefined();
+    expect(s.tasks_pending).toBe(1);
+    expect(s.tasks_by_project.alpha).toBe(1);
+    expect(s.tasks_by_project.beta).toBeUndefined();
+  });
+
+  it("returns empty summary when projectFilter matches no state directory", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    writeFileSync(
+      join(stateDir, "alpha", "PROGRESS.jsonl"),
+      cycleEnd({ project: "alpha", cycleId: "c-1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified" }) + "\n",
+    );
+
+    const s = await buildFleetSummary("ghost");
+    expect(s.projects).toBe(0);
+    expect(s.cycles_total).toBe(0);
+    expect(Object.keys(s.cycles_by_project)).toHaveLength(0);
+  });
+
   it("ignores non-cycle_end events", async () => {
     const stateDir = join(TEST_DIR, "state");
     mkdirSync(join(stateDir, "alpha"), { recursive: true });
