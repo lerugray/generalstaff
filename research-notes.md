@@ -170,6 +170,8 @@ digest" file per project is faster to triage.
 
 **no-as-a-service** (hotheadhacker/no-as-a-service, 7K stars) — Joke API proving "bring your own imagination" works. Simple idea + clean execution = community adoption. Good example of project-motivation neutrality.
 
+**logo-creator MCP** — https://mcpmarket.com/tools/skills/logo-creator-1 — MCP tool for project logos, useful for Phase 7 branding with kriegspiel theme.
+
 ## 2026-04-17 — karpathy LLM-wiki gist (persistent-context pattern)
 
 **Source:** https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
@@ -282,5 +284,145 @@ where possible.
 
 **Not a task.** Stub only; revisit when Phase 4 opens.
 
+## 2026-04-17 — Drafter-reviewer pattern convergence
 
-**logo-creator MCP** — https://mcpmarket.com/tools/skills/logo-creator-1 — MCP tool for project logos, useful for Phase 7 branding with kriegspiel theme.
+**Source:** 2026-04-17 evening chat assessing three new repos Ray
+flagged. Pattern-matching insight, not a new external reference.
+
+At least **four independent Claude Code frameworks** have now
+converged on the drafter-reviewer (or engineer-reviewer) pattern
+as the core architecture:
+
+1. **GeneralStaff** — Engineer writes code, Reviewer verifies
+   against hands-off list + scope-drift + silent-failure criteria.
+2. **pi-autoresearch** (davebcn87) — Drafter runs an experiment,
+   reviewer compares against noise floor, reverts on regression.
+3. **desplega-ai/agent-swarm** — Lead agent plans and delegates,
+   worker agents execute, lead reviews.
+4. **MadsLorentzen/ai-job-search** — Drafter agent writes CV + cover
+   letter, reviewer agent critiques, drafter revises.
+
+None of these cross-cite each other, which means the pattern is
+being independently discovered. That's a strong convergence
+signal — the architecture isn't GeneralStaff-specific, it's the
+natural shape autonomous LLM work takes when correctness matters.
+
+**Launch-article material:** frame GeneralStaff as the version
+that *names* and *structurally enforces* the pattern via Hard
+Rule 1 (correctness vs. taste split). The other three projects
+use it implicitly; GeneralStaff makes it explicit and builds
+governance around it (verification gate, hands-off enforcement,
+audit log). That's the difference between a pattern and a
+product.
+
+**Why this matters beyond the article:** if the pattern is
+converging across the ecosystem, our implementation choices
+stop being bespoke and become shared primitives. Future
+interoperability (e.g., swapping reviewers across projects,
+importing task formats, sharing calibration harnesses) becomes
+plausible. Not a near-term concern, but worth noting.
+
+## 2026-04-17 — TimesFM for Phase 12+ Kriegspiel simulation
+
+**Source:** https://github.com/google-research/timesfm
+**Paper:** A decoder-only foundation model for time-series
+forecasting (ICML 2024)
+
+Google Research's pretrained time-series foundation model.
+Currently at 2.5, 200M params, 16k context, quantile forecast
+head. MIT-adjacent public availability via Hugging Face; also
+shipped as a BigQuery ML function, Google Sheets feature, and
+Vertex AI endpoint.
+
+**Why relevant:** FUTURE-DIRECTIONS §1 (Simulation / Kriegspiel
+Mode, Phase 12+) explicitly requires *"confidence intervals,
+not single numbers"* — the design-critical constraint that
+separates honest forecasts from false-confidence slop. TimesFM's
+quantile head produces exactly this shape (p10/p50/p90 across a
+forecast horizon). For projects with historical metrics
+(revenue, signups, churn, rating), TimesFM could ground the
+simulation's forecast layer in a real neural model rather than
+hand-waved projections.
+
+**Complementary to the tools §1 already lists** (Mesa for
+agent-based, SimPy for discrete events, PyMC for Bayesian,
+scipy.stats for basic sampling): TimesFM is the "structured
+time-series foundation" slot those don't fill.
+
+**Shape for GeneralStaff integration (Phase 12+, not soon):**
+`generalstaff simulate <project>` reads campaign_plan.md + any
+historical metrics the project exposes, runs TimesFM locally for
+KPI projections with quantiles, pipes results to a human-readable
+report (go/no-go recommendation with rationale). Hard Rule 10
+compatible — TimesFM runs locally via Hugging Face; no cloud
+egress required.
+
+**Not a task.** Capture only; revisit when Phase 12 opens.
+
+## 2026-04-17 — ai-legal-claude: curl-install pattern (distribution)
+
+**Source:** https://github.com/zubair-trabzada/ai-legal-claude
+
+Tool itself (14-skill Claude Code legal-review suite) is not
+relevant to GeneralStaff's scope. **Install pattern is.**
+
+The repo ships with a one-command installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/.../install.sh | bash
+```
+
+That's the right distribution shape for FUTURE-DIRECTIONS §10's
+non-programmer audience (Phase 5+). A music teacher installing
+GeneralStaff should not need `git clone`, `bun install`, and a
+YAML-editing session. A single curl line is.
+
+**Not as hostile to the principled-security stance as it looks:**
+`curl | bash` gets criticism, but the alternative for Phase 5+
+users (cloning + installing Bun manually + running CLI commands)
+is strictly worse for adoption. The honest path is: ship the
+script, publish its source prominently, let the skeptical read
+it before piping. Same pattern Homebrew, Bun, and others use.
+
+**Skepticism noted:** the repo's README has "check out the
+Skool community" — growth-hacking/funnel energy. Not what we
+want to emulate. The technical pattern is good; the marketing
+pattern is bad.
+
+**Hold for Phase 5+.** Not a task; referenced when the install-
+flow design work happens.
+
+## 2026-04-17 — Claude Design launched (Anthropic, 2026-04-17)
+
+**Source:** https://venturebeat.com/technology/anthropic-just-launched-claude-design-*
+
+Anthropic shipped **Claude Design** on 2026-04-17 — a Figma/
+Adobe competitor, research preview, available to paid Claude
+subscribers. Powered by Claude Opus 4.7. Generates website
+prototypes, slide decks, design systems, one-pagers from prompts;
+refined via chat + inline comments + sliders. Assumes
+non-designer user.
+
+**Plan for GeneralStaff Phase 4** (UI work, not soon):
+- When Phase 4 opens, do ONE manual Claude Design session to
+  validate the UI-VISION aesthetic (19th-century lithograph,
+  brass fittings, Prussian palette, Kriegspiel campaign map)
+  can be hit by the tool.
+- If yes: use it to generate 3-5 mockups for `docs/ui-mockups/`
+  that become the design-first artifact for Tauri implementation.
+- If no: fall back to manual design; don't force it.
+- **Don't queue a task yet.** Too many unknowns (aesthetic fit,
+  export formats, API timing).
+
+**Rule 8 consideration:** Ray's catalogdna Playwright-Claude
+pattern (captured above) could automate Claude Design access
+via browser, but the subscription-automation path is exactly
+what Rule 8 is cautious about. Prefer waiting for Anthropic
+to ship a Claude Design API (likely within 1-3 months given
+their pace). Personal-use automation is fine; shipping the
+automation to OSS users is the line.
+
+**Adjacent data point:** Anthropic's CPO left Figma's board
+2026-04-16, one day before the launch. Non-trivial corporate
+signal that Anthropic is committed to the design market — the
+tool won't be abandoned.

@@ -873,8 +873,8 @@
   },
   {
     "id": "gs-146",
-    "title": "Add a 'generalstaff stop --status' subcommand (or --check flag) in src/cli.ts that prints whether the STOP file is present and the session pid it would target, without creating or removing anything. Output: 'STOP file: present at <path>' or 'STOP file: absent' and 'Session pid: <pid>' or 'Session pid: none recorded'. Useful for scripts that want to sanity-check before running 'stop --force'. Add tests covering stop-present+pid, stop-absent+nopid, and combinations.",
-    "status": "pending",
+    "title": "(SUPERSEDED by gs-165) Original spec required exporting stopFilePath from src/safety.ts (hands-off); 4 attempts in 2026-04-17 chain session 3 were cleanly rolled back by gs-132's new rollback logic. Replaced with gs-165 which uses inline STOP path construction (same pattern as stop_watcher.ts + session.ts already use). Kept as historical record.",
+    "status": "done",
     "priority": 3
   },
   {
@@ -984,5 +984,11 @@
     "title": "Add docs/provider-config-format.md documenting the provider_config.yaml schema (separate from the example file so long-form explanation doesn't clutter the inline comments). Sections: (1) Purpose — why provider_config.yaml exists alongside the reviewer's env-var-based dispatch, citing FUTURE-DIRECTIONS §2 tier taxonomy. (2) Schema reference — each top-level block (providers, routes) with required/optional fields and types. (3) Supported provider kinds — ollama (fully implemented), openrouter/claude (listed but Phase 2 defers implementation to reviewer's inline path). (4) Role definitions — digest, cycle_summary, classifier; what each one controls. (5) A complete worked example copied from provider_config.yaml.example. (6) FAQ: 'Why isn't reviewer routing here?' (because reviewer dispatch stays in src/reviewer.ts this phase). Target length ~200 lines. Do NOT place under docs/internal/ (hands-off) or docs/sessions/ (hands-off) — lands in docs/ root which is NOT hands-off. Add a link to this doc from docs/ index if one exists (check first; create if not). No tests needed for prose-only docs.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-165",
+    "title": "Re-implement gs-146 (stop --status / --check) WITHOUT modifying src/safety.ts. In src/cli.ts's stop command handler, add a --status flag (and --check as alias) that is mutually exclusive with --force. When set: construct the STOP path inline via pathJoin(getRootDir(), 'STOP') — same pattern used in src/stop_watcher.ts and src/session.ts (see the 'workaround' comment near session.ts's STOP usage — stopFilePath is module-private in safety.ts and that's deliberate; do NOT export it). Check existsSync(stopPath); print 'STOP file: present at <path>' or 'STOP file: absent'. Read state/session.pid if it exists (readFileSync utf8, trim); print 'Session pid: <pid>' or 'Session pid: none recorded'. Do not create or remove anything — read-only inspection. Tests in tests/cli.test.ts covering: stop-present+pid, stop-present+nopid, stop-absent+pid, stop-absent+nopid, --status-with-force errors out. Wire into printUsage() help text. Do NOT modify src/safety.ts — it is hands-off and was the blocker for the original gs-146 (4 failed attempts in 2026-04-17 session 3). gs-132's rollback caught all 4 attempts cleanly; this task's purpose is to unblock the feature via a correct implementation.",
+    "status": "pending",
+    "priority": 2
   }
 ]
