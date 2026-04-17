@@ -16,6 +16,7 @@ import {
   addTask,
   markTaskDone,
   markTaskPending,
+  removeTask,
   countTasks,
   TasksLoadError,
   TaskValidationError,
@@ -366,6 +367,52 @@ describe("tasks module", () => {
       expect(stored[0].status).toBe("done");
     });
   });
+
+  describe("removeTask", () => {
+    it("returns project_not_found when tasks.json is missing", async () => {
+      const result = await removeTask("nope", "x-1");
+      expect(result.kind).toBe("project_not_found");
+    });
+
+    it("returns task_not_found when id isn't present", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await removeTask("myproj", "gs-999");
+      expect(result.kind).toBe("task_not_found");
+      if (result.kind === "task_not_found") {
+        expect(result.availableIds).toEqual(["gs-001"]);
+      }
+    });
+
+    it("removes a task and preserves the rest", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+        { id: "gs-002", title: "b", status: "done", priority: 2 },
+        { id: "gs-003", title: "c", status: "pending", priority: 3 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(seed, null, 2),
+      );
+      const result = await removeTask("myproj", "gs-002");
+      expect(result.kind).toBe("removed");
+      if (result.kind === "removed") {
+        expect(result.task.id).toBe("gs-002");
+      }
+
+      const stored = JSON.parse(
+        readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
+      );
+      expect(stored).toHaveLength(2);
+      expect(stored[0].id).toBe("gs-001");
+      expect(stored[1].id).toBe("gs-003");
+    });
+  });
 });
 
 describe("CLI task command", () => {
@@ -607,6 +654,77 @@ describe("CLI task command", () => {
     });
   });
 
+  describe("task rm", () => {
+    it("errors when --project is missing", async () => {
+      const result = await runCli(["task", "rm", "--task=gs-001"], TEST_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--project=<id> is required");
+    });
+
+    it("errors when --task is missing", async () => {
+      const result = await runCli(
+        ["task", "rm", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--task=<task-id> is required");
+    });
+
+    it("errors when the project has no tasks.json", async () => {
+      const result = await runCli(
+        ["task", "rm", "--project=ghost", "--task=gs-001"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("no tasks file for project");
+    });
+
+    it("errors when the task id is not found and lists available", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await runCli(
+        ["task", "rm", "--project=proj", "--task=gs-999"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("gs-999");
+      expect(result.stderr).toContain("not found");
+      expect(result.stderr).toContain("gs-001");
+    });
+
+    it("removes the task and rewrites the file without it", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "keep me", status: "pending", priority: 1 },
+        { id: "gs-002", title: "delete me", status: "pending", priority: 1 },
+        { id: "gs-003", title: "keep me too", status: "done", priority: 2 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed, null, 2),
+      );
+      const result = await runCli(
+        ["task", "rm", "--project=proj", "--task=gs-002"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Removed gs-002");
+
+      const stored = JSON.parse(
+        readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
+      );
+      expect(stored).toHaveLength(2);
+      expect(stored.map((t: GreenfieldTask) => t.id)).toEqual([
+        "gs-001",
+        "gs-003",
+      ]);
+    });
+  });
+
   describe("task count", () => {
     it("reports pending, done, and total for a single project", async () => {
       const seed: GreenfieldTask[] = [
@@ -723,6 +841,7 @@ dispatcher:
     expect(result.stdout).toContain("task list");
     expect(result.stdout).toContain("task add");
     expect(result.stdout).toContain("task done");
+    expect(result.stdout).toContain("task rm");
     expect(result.stdout).toContain("task count");
   });
 });

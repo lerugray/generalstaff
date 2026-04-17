@@ -158,6 +158,30 @@ export async function markTaskDone(
   return { kind: "done", task: updated[idx]! };
 }
 
+export type RemoveTaskResult =
+  | { kind: "removed"; task: GreenfieldTask }
+  | { kind: "task_not_found"; availableIds: string[] }
+  | { kind: "project_not_found"; path: string };
+
+export async function removeTask(
+  projectId: string,
+  taskId: string,
+): Promise<RemoveTaskResult> {
+  const path = tasksPath(projectId);
+  if (!existsSync(path)) {
+    return { kind: "project_not_found", path };
+  }
+  const tasks = await loadTasks(projectId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx === -1) {
+    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
+  }
+  const task = tasks[idx]!;
+  const updated = tasks.filter((_, i) => i !== idx);
+  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  return { kind: "removed", task };
+}
+
 export type MarkTaskPendingResult =
   | { kind: "reopened"; task: GreenfieldTask }
   | { kind: "already_pending"; task: GreenfieldTask }
