@@ -408,12 +408,18 @@ export async function runSession(options: SessionOptions) {
   // with aggregated stats; written to the "_fleet" pseudo-project log so
   // it isn't tied to any individual project's PROGRESS.jsonl.
   const fleetBuckets = categorizeResults(allResults);
+  const reviewerProvider = process.env.GENERALSTAFF_REVIEWER_PROVIDER || "claude";
+  const reviewerModel = process.env.GENERALSTAFF_REVIEWER_MODEL;
+  const reviewerLabel = reviewerModel
+    ? `${reviewerProvider} (${reviewerModel})`
+    : reviewerProvider;
   await appendProgress("_fleet", "session_complete", {
     duration_minutes: Math.round(elapsed),
     total_cycles: allResults.length,
     total_verified: fleetBuckets.verified.length,
     total_failed: fleetBuckets.failed.length,
     stop_reason: stopReason,
+    reviewer: reviewerLabel,
   });
 
   // End-of-session Telegram notification. Moved here from the .bat

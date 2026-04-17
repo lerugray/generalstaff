@@ -608,7 +608,7 @@
   {
     "id": "gs-127",
     "title": "Add `generalstaff status --sessions` flag: table of last N sessions (start time, duration, cycle count, pass/fail, reviewer, stop reason). Reads session_complete PROGRESS events. Default N=10. Tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

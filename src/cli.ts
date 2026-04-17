@@ -36,6 +36,12 @@ import {
 } from "./summary";
 import { formatRelativeTime } from "./format";
 import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
+import {
+  loadRecentSessions,
+  formatSessionsTable,
+  parseSessionsFlag,
+  stripSessionsArgs,
+} from "./sessions";
 
 const VERSION = "0.0.1";
 
@@ -55,11 +61,14 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]]              Show fleet state
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]]
+                                                          Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
     Example: generalstaff status --watch                # refresh every 5s until Ctrl-C
     Example: generalstaff status --watch=10             # refresh every 10s
+    Example: generalstaff status --sessions             # last 10 sessions as a table
+    Example: generalstaff status --sessions=20 --json   # last 20 sessions, JSON
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -218,8 +227,9 @@ switch (command) {
   case "status": {
     const rawStatusArgs = args.slice(1);
     const watch = parseWatchFlag(rawStatusArgs);
+    const sessionsFlag = parseSessionsFlag(rawStatusArgs);
     const { values: statusValues } = parseArgs({
-      args: stripWatchArgs(rawStatusArgs),
+      args: stripSessionsArgs(stripWatchArgs(rawStatusArgs)),
       options: {
         json: { type: "boolean", default: false },
       },
@@ -230,6 +240,19 @@ switch (command) {
       const projects = await loadProjects();
       const fleet = await loadFleetState();
       const stopped = await isStopFilePresent();
+
+      if (sessionsFlag.enabled) {
+        const sessions = await loadRecentSessions(sessionsFlag.limit);
+        if (statusValues.json) {
+          console.log(JSON.stringify(sessions, null, 2));
+        } else {
+          console.log(
+            `=== Recent sessions (last ${sessionsFlag.limit}) ===\n`,
+          );
+          console.log(formatSessionsTable(sessions));
+        }
+        return;
+      }
 
       if (statusValues.json) {
         const summaries = await Promise.all(
