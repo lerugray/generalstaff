@@ -289,7 +289,11 @@ export async function runSession(options: SessionOptions) {
   }
 
   // Write digest
-  await writeDigest(allResults, elapsed, config);
+  await writeDigest(allResults, elapsed, {
+    digest_dir: config.digest_dir,
+    reviewer_provider: process.env.GENERALSTAFF_REVIEWER_PROVIDER,
+    reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
+  });
 
   // Log session end for each project
   for (const p of projects) {
@@ -345,7 +349,11 @@ export async function runSession(options: SessionOptions) {
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
-  config: { digest_dir: string },
+  config: {
+    digest_dir: string;
+    reviewer_provider?: string;
+    reviewer_model?: string;
+  },
 ) {
   const { mkdirSync, existsSync } = require("fs");
   const { writeFile } = require("fs/promises");
@@ -367,10 +375,18 @@ export async function writeDigest(
     (r) => r.final_outcome !== "verified" && r.final_outcome !== "verified_weak",
   );
 
+  const reviewerProvider = (
+    config.reviewer_provider ?? "claude"
+  ).toLowerCase();
+  const reviewerLabel = config.reviewer_model
+    ? `${reviewerProvider} (${config.reviewer_model})`
+    : reviewerProvider;
+
   let content = `# GeneralStaff Session Digest\n\n`;
   content += `**Date:** ${new Date().toISOString()}\n`;
   content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
   content += `**Cycles:** ${results.length}\n`;
+  content += `**Reviewer:** ${reviewerLabel}\n`;
   if (results.length > 0) {
     content += `**Summary:** ${verified.length} verified, ${failed.length} failed\n`;
   }
