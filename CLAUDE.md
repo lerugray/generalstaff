@@ -124,6 +124,67 @@ committed doc) instead.
   via `provider_config.yaml` per
   `FUTURE-DIRECTIONS-2026-04-15.md` §2.
 
+### Reviewer provider configuration
+
+The verification-gate reviewer (`src/reviewer.ts`) is
+provider-pluggable. The default is `claude` (uses `claude -p`
+and consumes Ray's Claude subscription quota); the project also
+ships first-class support for `openrouter` (Qwen3 Coder, paid
+per-token but very cheap — ~$0.02/session) and `ollama` (local,
+free, offline). The Hard-Rule 8 BYOK principle applies: nothing
+about the reviewer is hosted, no key is shipped, every credential
+is sourced from the user's own environment at launch.
+
+**Environment variables:**
+
+- `GENERALSTAFF_REVIEWER_PROVIDER` — selects the provider.
+  Values: `claude` (default), `openrouter`, `ollama`.
+- `GENERALSTAFF_REVIEWER_MODEL` — optional model override;
+  only meaningful for providers that expose a model knob
+  (e.g. `qwen/qwen3-coder-plus` for openrouter, `qwen3:8b`
+  for ollama). Providers pick a sensible default if unset.
+- `GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER` — optional.
+  If the primary provider returns a `[REVIEWER ERROR]`,
+  the reviewer retries once using this provider (gs-090).
+  Skip fallback if unset or equal to the primary.
+- `OPENROUTER_API_KEY` — required when the primary or
+  fallback provider is `openrouter`. No default; if unset
+  when openrouter is selected, every cycle fail-safes to
+  `verification_failed`.
+- `OLLAMA_HOST` — optional. Defaults to
+  `http://localhost:11434`. Used by the ollama reviewer
+  and the pre-flight reachability check (gs-103).
+
+**Credential sourcing on Ray's machines.** The OpenRouter
+key is stored in the MiroShark `.env` at
+`C:\Users\rweis\OneDrive\Documents\MiroShark\.env` under the
+field name `OPENAI_API_KEY` (the field name predates this
+routing — don't rename it). `scripts/run_session.bat` reads
+this file at launch and exports the key into the subprocess
+scope only; it is not written session-wide.
+
+**How `scripts/run_session.bat` wires it up.** The launcher
+takes two positional args: `run_session.bat <budget_min>
+<provider>`. Provider defaults to `openrouter`. The .bat:
+
+1. Sets `GENERALSTAFF_REVIEWER_PROVIDER` from the second arg.
+2. If the provider is `openrouter`, `findstr`-parses the
+   MiroShark `.env` for the `OPENAI_API_KEY=` line and
+   assigns it to `OPENROUTER_API_KEY` inside the subprocess
+   scope (see lines 60–71 of the .bat).
+3. If the key is missing, prints a clear warning pointing
+   the user at the alternative providers (`ollama`,
+   `claude`) — the session still proceeds but every cycle
+   will fail-safe.
+4. Ollama and claude providers need no credential plumbing:
+   ollama talks to `localhost:11434`, `claude -p` uses its
+   own subscription auth.
+
+When adding a new provider, mirror this pattern: env-var
+selection in `reviewer.ts`, credential loading in the .bat
+(scoped to the subprocess, never session-wide), and a clear
+fallback to `verification_failed` if credentials are absent.
+
 ### Project stakes (why this isn't just a hobby)
 
 GeneralStaff, catalogdna, and Retrogaze are Ray's dev-adjacent
