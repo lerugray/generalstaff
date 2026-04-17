@@ -81,15 +81,35 @@ export async function runEngineer(
       process.stderr.write(chunk);
     });
 
+    // Kill the entire process tree rooted at `child`. On Windows,
+    // `child.kill("SIGTERM")` only kills the direct child (bash.exe);
+    // grandchildren (claude.exe spawned from run_bot.sh) keep running
+    // as orphans. This was observed 2026-04-17 when cycle 10's engineer
+    // timeout fired correctly but claude.exe ignored the kill and kept
+    // running for another ~15 minutes until taskkilled manually.
+    // On *nix the signal propagates through the process group when the
+    // shell forwards it; on Windows we need taskkill /T /F to reach the
+    // tree. Importing spawnSync locally to avoid adding a top-level
+    // import only used on the failure path.
+    const killChildTree = () => {
+      if (process.platform === "win32" && child.pid) {
+        const { spawnSync } = require("child_process");
+        spawnSync("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
+          stdio: "ignore",
+        });
+      } else {
+        child.kill("SIGTERM");
+        setTimeout(() => child.kill("SIGKILL"), 10_000);
+      }
+    };
+
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       logStream.write(
         `\n\n=== TIMED OUT after ${project.cycle_budget_minutes + 5} min ===\n`,
       );
-      child.kill("SIGTERM");
-      // Give it 10s to clean up, then SIGKILL
-      setTimeout(() => child.kill("SIGKILL"), 10_000);
+      killChildTree();
     }, timeoutMs);
 
     child.on("close", async (code) => {

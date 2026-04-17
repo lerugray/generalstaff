@@ -508,5 +508,35 @@
     "title": "Augment docs/README-PROPOSAL.md with voice-calibration annotations. Read VOICE.md in full (all sections including 'Mainstream-economics anchors' and 'Dogfooding as credibility'). For each proposed section in README-PROPOSAL.md, append a one-line `_Voice:_` annotation that flags where the editorial voice calibration applies — e.g., section §5 'The problem' → '_Voice: lean into anti-slop + anti-extraction framing from VOICE.md §1; optional Falk & Tsoukalas anchor._'; section §11 'Why this over the alternatives' → '_Voice: direct Polsia comparison allowed per VOICE.md §1; keep pointed not screed per §2; dogfooding contrast is structural not rhetorical per VOICE.md §Dogfooding._'; section §13 'Hammerstein framing' → '_Voice: the Marxist-compatible reading per VOICE.md §Intellectual framing is fair game._'; section §3 'Status / Maturity' → '_Voice: add dogfooding credibility line per VOICE.md §Dogfooding README placement._'; section §6 'The approach / How it works' → '_Voice: reference PROGRESS.jsonl as observable evidence per VOICE.md §Dogfooding README placement._'; neutral sections (badges, prerequisites, license) → '_Voice: neutral technical._'. Do NOT rewrite any section headers or bullets. Do NOT write the actual README prose. Only add the inline `_Voice:_` lines.",
     "status": "pending",
     "priority": 2
+  },
+  {
+    "id": "gs-111",
+    "title": "(BUG) When the engineer subprocess exits abnormally (exit code null, meaning killed by signal, OR any non-zero exit code), the cycle should skip the verification gate + reviewer entirely and mark itself verification_failed with reason 'engineer exited abnormally (code=X)'. Currently src/cycle.ts proceeds through verification on whatever partial diff exists, which accepted a killed-mid-task engineer's partial work as verified on 2026-04-17 cycle 10. Add early-return in executeCycle after engineer completes if engineerResult.exitCode === null || engineerResult.exitCode !== 0. Add tests covering: exit=0 (proceeds), exit=1 (blocks), exit=null i.e. killed (blocks), with verification of the cycle_end event's reason field.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-112",
+    "title": "Add a session-level watchdog that logs a warning when a cycle takes >2x its cycle_budget_minutes. Purpose: give users a visible signal that an engineer or reviewer step is stuck before the engineer timeout fires. Implementation: in session.ts, after executeCycle returns, compute actual duration from result.started_at / result.ended_at and compare to project.cycle_budget_minutes * 2. Emit console.error('[WATCHDOG] cycle X took Nm, 2x the budget — consider investigating') when threshold exceeded. Non-fatal, purely observability. Add test.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-113",
+    "title": "Add `generalstaff digest --regen=<digest-file-path>` that re-renders an existing digest markdown from the underlying PROGRESS.jsonl cycle_end events. Useful for recovering when a digest rendered with a bug (like the 2026-04-17 cycle-1 subject fallback) needs a fresh pass with the corrected code. Reads the digest file's date range, finds matching cycle_end entries, rebuilds CycleResult objects, calls writeDigest. Writes to a new timestamped file rather than overwriting. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-114",
+    "title": "Add a regression test for the engineer timeout Windows process-tree kill (src/engineer.ts killChildTree). Since testing the actual spawn+kill path is cross-platform-flaky in a unit test, instead assert that on process.platform === 'win32', the code path uses spawnSync('taskkill', ['/pid', ..., '/f', '/t']) rather than child.kill('SIGTERM'). Mock spawnSync and verify the call shape. Also verify that on non-Windows platforms the signal path is used.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-115",
+    "title": "Add end-to-end test coverage for notifySessionEnd's real homedir loader path (currently only the dependency-injection path is tested in tests/notify.test.ts). Use a fixture ~/.claude layout inside a tmpdir, point HOME / USERPROFILE env at it, verify loadTelegramCredentials reads the correct files. Restore env after. Add a cross-platform skip marker if HOME env manipulation is too brittle on Windows CI.",
+    "status": "pending",
+    "priority": 3
   }
 ]
