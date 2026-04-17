@@ -1,0 +1,207 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 0d0784f..b1c4333 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -84,9 +84,9 @@ Usage:
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+ 
+-  generalstaff init <path> [--id=<id>]                    Scaffold state dir for a new project
++  generalstaff init <path> [--id=<id>] [--priority=<N>]   Scaffold state dir for a new project
+     Example: generalstaff init ./myapp
+-    Example: generalstaff init ../other-repo --id=other
++    Example: generalstaff init ../other-repo --id=other --priority=1
+ 
+   generalstaff stop [--force]                             Create STOP file (halt dispatcher)
+     Example: generalstaff stop                          # halt before next cycle
+@@ -1106,17 +1106,27 @@ switch (command) {
+       args: args.slice(1),
+       options: {
+         id: { type: "string" },
++        priority: { type: "string" },
+       },
+       allowPositionals: true,
+     });
+     const projectPath = initPositionals[0];
+     if (!projectPath) {
+-      console.error("Error: project path is required\n  Usage: generalstaff init <path> [--id=<id>]");
++      console.error("Error: project path is required\n  Usage: generalstaff init <path> [--id=<id>] [--priority=<N>]");
+       process.exit(1);
+     }
++    let priority = 2;
++    if (initValues.priority !== undefined) {
++      const n = Number(initValues.priority);
++      if (!Number.isInteger(n) || n < 1) {
++        console.error(`Error: --priority must be a positive integer (got '${initValues.priority}')`);
++        process.exit(1);
++      }
++      priority = n;
++    }
+     const resolvedPath = resolve(projectPath);
+     const projectId = initValues.id ?? basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
+-    await initProject(projectId, resolvedPath);
++    await initProject(projectId, resolvedPath, { priority });
+     break;
+   }
+ 
+diff --git a/src/init.ts b/src/init.ts
+index 626058a..6773346 100644
+--- a/src/init.ts
++++ b/src/init.ts
+@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from "fs";
+ import { writeFile } from "fs/promises";
+ import { join } from "path";
+ import { getRootDir } from "./state";
++import type { GreenfieldTask } from "./types";
+ 
+ const MISSION_TEMPLATE = (id: string, path: string) =>
+   `# ${id} — Mission (GeneralStaff context)
+@@ -35,10 +36,10 @@ Project path: ${path}
+ - What the bot commits (per-project git workflow)
+ `;
+ 
+-const YAML_SNIPPET = (id: string, path: string) =>
++const YAML_SNIPPET = (id: string, path: string, priority: number) =>
+   `  - id: ${id}
+     path: ${path}
+-    priority: 2
++    priority: ${priority}
+     engineer_command: "<TODO>"
+     verification_command: "<TODO>"
+     cycle_budget_minutes: 45
+@@ -50,10 +51,29 @@ const YAML_SNIPPET = (id: string, path: string) =>
+       - CLAUDE.md
+       - "<TODO — add real hands-off patterns>"`;
+ 
++export function seedTaskIdPrefix(projectId: string): string {
++  const initials = projectId
++    .replace(/[^a-zA-Z]/g, "")
++    .slice(0, 2)
++    .toLowerCase();
++  return (initials || "task") + "-";
++}
++
++export function buildSeedTask(projectId: string, priority: number): GreenfieldTask {
++  return {
++    id: seedTaskIdPrefix(projectId) + "001",
++    title: `Describe first task for ${projectId} (edit me or run generalstaff task rm)`,
++    status: "pending",
++    priority,
++  };
++}
++
+ export async function initProject(
+   projectId: string,
+   projectPath: string,
++  options: { priority?: number } = {},
+ ): Promise<void> {
++  const priority = options.priority ?? 2;
+   const stateDir = join(getRootDir(), "state", projectId);
+ 
+   if (existsSync(stateDir)) {
+@@ -69,11 +89,16 @@ export async function initProject(
+     MISSION_TEMPLATE(projectId, projectPath),
+     "utf8",
+   );
+-  await writeFile(join(stateDir, "tasks.json"), "[]\n", "utf8");
++  const seed = buildSeedTask(projectId, priority);
++  await writeFile(
++    join(stateDir, "tasks.json"),
++    JSON.stringify([seed], null, 2) + "\n",
++    "utf8",
++  );
+ 
+   console.log(`Created state/${projectId}/`);
+   console.log(`  MISSION.md  — edit to describe bot scope`);
+-  console.log(`  tasks.json  — empty task list\n`);
++  console.log(`  tasks.json  — seeded with 1 pending task (priority ${priority})\n`);
+   console.log(`Add this to projects.yaml:\n`);
+-  console.log(YAML_SNIPPET(projectId, projectPath));
++  console.log(YAML_SNIPPET(projectId, projectPath, priority));
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 8c44f4e..bbecdd5 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -867,7 +867,7 @@
+   {
+     "id": "gs-145",
+     "title": "Improve src/init.ts scaffolding: accept a --priority=N flag (default 2) and emit it into the YAML snippet and into a first 'pending' template task written to tasks.json (instead of the current empty-array content). The template task title should read 'Describe first task for <project_id> (edit me or run generalstaff task rm)' with status pending and the given priority. Rationale: a fresh project with zero tasks produces 'no more work' on the first hasMoreWork check, so the bot never runs until the user hand-edits tasks.json. Wire through from cli.ts init. Add tests covering default priority, explicit priority, and the seeded task's shape.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/init.test.ts b/tests/init.test.ts
+index bad1453..f596b95 100644
+--- a/tests/init.test.ts
++++ b/tests/init.test.ts
+@@ -60,14 +60,66 @@ describe("init command", () => {
+     expect(mission).toContain("Bot scope");
+   });
+ 
+-  it("tasks.json is an empty array", async () => {
++  it("tasks.json is seeded with a single pending template task (default priority 2)", async () => {
+     await runCli(["init", "/tmp/my-project", "--id=myproj"], TEST_DIR);
+ 
+     const tasks = readFileSync(
+       join(TEST_DIR, "state", "myproj", "tasks.json"),
+       "utf8",
+     );
+-    expect(JSON.parse(tasks)).toEqual([]);
++    const parsed = JSON.parse(tasks);
++    expect(Array.isArray(parsed)).toBe(true);
++    expect(parsed).toHaveLength(1);
++    expect(parsed[0]).toEqual({
++      id: "my-001",
++      title: "Describe first task for myproj (edit me or run generalstaff task rm)",
++      status: "pending",
++      priority: 2,
++    });
++  });
++
++  it("--priority=N is threaded into the seeded task and the YAML snippet", async () => {
++    const result = await runCli(
++      ["init", "/tmp/my-project", "--id=myproj", "--priority=1"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(0);
++
++    const tasks = JSON.parse(
++      readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
++    );
++    expect(tasks[0].priority).toBe(1);
++    expect(tasks[0].status).toBe("pending");
++    expect(result.stdout).toContain("priority: 1");
++  });
++
++  it("rejects non-positive-integer --priority", async () => {
++    const result = await runCli(
++      ["init", "/tmp/my-project", "--id=myproj", "--priority=0"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("--priority must be a positive integer");
++  });
++
++  it("rejects non-numeric --priority", async () => {
++    const result = await runCli(
++      ["init", "/tmp/my-project", "--id=myproj", "--priority=high"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("--priority must be a positive integer");
++  });
++
++  it("seeded task title references project id with derived id too", async () => {
++    await runCli(["init", "/tmp/fresh"], TEST_DIR);
++    const tasks = JSON.parse(
++      readFileSync(join(TEST_DIR, "state", "fresh", "tasks.json"), "utf8"),
++    );
++    expect(tasks[0].title).toBe(
++      "Describe first task for fresh (edit me or run generalstaff task rm)",
++    );
++    expect(tasks[0].id).toBe("fr-001");
+   });
+ 
+   it("prints a projects.yaml snippet", async () => {
