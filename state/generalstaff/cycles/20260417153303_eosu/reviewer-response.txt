@@ -1,0 +1,22 @@
+{
+  "verdict": "verification_failed",
+  "reason": "hands-off violation detected in src/reviewer.ts",
+  "scope_drift_files": [],
+  "hands_off_violations": [
+    "src/reviewer.ts"
+  ],
+  "task_evidence": [
+    {
+      "task": "Add a test for the notify function",
+      "evidence": "tests/notify.test.ts was modified",
+      "confidence": "high"
+    },
+    {
+      "task": "Implement the notify function",
+      "evidence": "src/reviewer.ts was modified",
+      "confidence": "medium"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The src/reviewer.ts file is explicitly listed in the hands-off violations, which prohibits modifications to this file."
+}
