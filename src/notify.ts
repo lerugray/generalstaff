@@ -95,9 +95,16 @@ export function formatSessionMessage(p: SessionNotificationParams): string {
 
 /** Telegram sendMessage accepts up to 4096 UTF-8 chars. Truncate with
  *  a marker so the user knows to read the digest file for the full cut. */
-function truncateForTelegram(text: string, limit = 3900): string {
+export function truncateForTelegram(text: string, limit = 3900): string {
   if (text.length <= limit) return text;
-  return text.slice(0, limit - 20) + "\n\n[...truncated]";
+  let cut = limit - 20;
+  // Avoid splitting a UTF-16 surrogate pair. A high surrogate (0xD800-
+  // 0xDBFF) at the final slice index would be separated from its
+  // trailing low surrogate, producing a lone surrogate that serializes
+  // to invalid UTF-8 bytes when the message is POSTed as JSON.
+  const lastCode = text.charCodeAt(cut - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) cut -= 1;
+  return text.slice(0, cut) + "\n\n[...truncated]";
 }
 
 /** Sends a single message via the Telegram Bot API. Returns void —
