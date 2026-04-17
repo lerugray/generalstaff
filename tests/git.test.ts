@@ -70,4 +70,42 @@ describe("fetchCommitSubject", () => {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  // gs-097 regression: reproduces the "cycle 1 subject missing from digest"
+  // scenario. Session-init commit A lands on master, bot/work is forked from
+  // A, bot commits B on bot/work, the session-end merge brings B into master.
+  // fetchCommitSubject(A, B) must still resolve B's subject — the 2026-04-17
+  // morning digest fell back to cycle_id for cycle 1 despite B existing and
+  // being reachable. If this test ever fails, the bug has a genuine git-level
+  // cause (object missing, ref collision, etc.) rather than a data-plumbing
+  // issue upstream.
+  it("resolves end SHA after session-init + merge-into-master flow", async () => {
+    const repo = join(tmpdir(), "gs-git-merged-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "seed.txt", "seed", "initial master commit");
+      const sessionInitSha = await commitFile(
+        repo,
+        "state.txt",
+        "state",
+        "state: session init",
+      );
+      await $`git -C ${repo} branch bot/work master`.quiet();
+      await $`git -C ${repo} checkout bot/work`.quiet();
+      const botCommitSha = await commitFile(
+        repo,
+        "task.txt",
+        "done",
+        "gs-087: parseDigest test regression",
+      );
+      await $`git -C ${repo} checkout master`.quiet();
+      await $`git -C ${repo} merge --no-ff bot/work -m ${"Merge branch 'bot/work'"}`.quiet();
+      setRootDir(repo);
+      expect(fetchCommitSubject(sessionInitSha, botCommitSha)).toBe(
+        "gs-087: parseDigest test regression",
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });
