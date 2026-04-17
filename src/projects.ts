@@ -330,3 +330,31 @@ export function findProject(
 ): ProjectConfig | undefined {
   return projects.find((p) => p.id === projectId);
 }
+
+export class ProjectNotFoundError extends Error {
+  constructor(
+    public projectId: string,
+    public availableIds: string[],
+  ) {
+    const avail =
+      availableIds.length > 0
+        ? ` Available: ${availableIds.join(", ")}`
+        : " No projects are registered.";
+    super(`Project "${projectId}" not found.${avail}`);
+    this.name = "ProjectNotFoundError";
+  }
+}
+
+export function getProject(
+  projects: ProjectConfig[],
+  projectId: string,
+): ProjectConfig {
+  const match = projects.find((p) => p.id === projectId);
+  if (!match) {
+    throw new ProjectNotFoundError(
+      projectId,
+      projects.map((p) => p.id),
+    );
+  }
+  return match;
+}

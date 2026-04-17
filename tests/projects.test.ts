@@ -3,6 +3,8 @@ import {
   loadProjectsYaml,
   validateHandsOff,
   warnProjectPaths,
+  getProject,
+  ProjectNotFoundError,
 } from "../src/projects";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -356,6 +358,46 @@ describe("validateHandsOff", () => {
     const patterns = warnings.map((w) => w.message);
     expect(patterns.some((m) => m.includes("bogus_one.xyz"))).toBe(true);
     expect(patterns.some((m) => m.includes("bogus_two.xyz"))).toBe(true);
+  });
+});
+
+describe("getProject", () => {
+  const sample = [
+    fakeProject({ id: "alpha" }),
+    fakeProject({ id: "beta" }),
+    fakeProject({ id: "gamma" }),
+  ];
+
+  it("returns the matching project", () => {
+    const p = getProject(sample, "beta");
+    expect(p.id).toBe("beta");
+  });
+
+  it("throws ProjectNotFoundError with available ids when not found", () => {
+    try {
+      getProject(sample, "delta");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProjectNotFoundError);
+      const e = err as ProjectNotFoundError;
+      expect(e.projectId).toBe("delta");
+      expect(e.availableIds).toEqual(["alpha", "beta", "gamma"]);
+      expect(e.message).toContain("delta");
+      expect(e.message).toContain("alpha");
+      expect(e.message).toContain("beta");
+      expect(e.message).toContain("gamma");
+    }
+  });
+
+  it("error message notes when no projects are registered", () => {
+    try {
+      getProject([], "anything");
+      throw new Error("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ProjectNotFoundError);
+      expect((err as ProjectNotFoundError).availableIds).toEqual([]);
+      expect((err as Error).message).toContain("No projects are registered");
+    }
   });
 });
 

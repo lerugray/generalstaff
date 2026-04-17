@@ -7,7 +7,13 @@ import { runSession } from "./session";
 import { runSingleCycle, countCommitsAhead } from "./cycle";
 import { $ } from "bun";
 import { loadFleetState, getProjectSummary, getRootDir } from "./state";
-import { loadProjects, loadProjectsYaml, loadDispatcherConfig } from "./projects";
+import {
+  loadProjects,
+  loadProjectsYaml,
+  loadDispatcherConfig,
+  getProject,
+  ProjectNotFoundError,
+} from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
 import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
 import { initProject } from "./init";
@@ -630,15 +636,22 @@ switch (command) {
       allowPositionals: false,
     });
     const all = await loadProjects();
-    const target = bsValues.project
-      ? all.filter((p) => p.id === bsValues.project)
-      : all;
-    if (bsValues.project && target.length === 0) {
-      console.error(`Error: project '${bsValues.project}' not found`);
-      if (all.length > 0) {
-        console.error(`  Available: ${all.map((p) => p.id).join(", ")}`);
+    let target: typeof all;
+    if (bsValues.project) {
+      try {
+        target = [getProject(all, bsValues.project)];
+      } catch (err) {
+        if (err instanceof ProjectNotFoundError) {
+          console.error(`Error: project '${err.projectId}' not found`);
+          if (err.availableIds.length > 0) {
+            console.error(`  Available: ${err.availableIds.join(", ")}`);
+          }
+          process.exit(1);
+        }
+        throw err;
       }
-      process.exit(1);
+    } else {
+      target = all;
     }
     if (target.length === 0) {
       console.log("No projects registered.");
