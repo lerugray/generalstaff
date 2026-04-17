@@ -495,6 +495,45 @@ describe("loadCycleHistory date filters", () => {
   });
 });
 
+describe("loadCycleHistory --verified-only filter", () => {
+  beforeEach(async () => {
+    await appendProgress("proj-vo", "cycle_end", {
+      outcome: "verified", start_sha: "a", end_sha: "b", duration_seconds: 10,
+    }, "c-ok");
+    await appendProgress("proj-vo", "cycle_end", {
+      outcome: "verified_weak", start_sha: "a", end_sha: "b", duration_seconds: 10,
+    }, "c-weak");
+    await appendProgress("proj-vo", "cycle_end", {
+      outcome: "cycle_skipped", start_sha: "a", end_sha: "a", duration_seconds: 1,
+    }, "c-skip");
+    await appendProgress("proj-vo", "cycle_end", {
+      outcome: "verification_failed", start_sha: "a", end_sha: "c", duration_seconds: 15,
+    }, "c-fail");
+  });
+
+  it("includes all rows when verifiedOnly is false or undefined", async () => {
+    const rows = await loadCycleHistory("proj-vo");
+    expect(rows).toHaveLength(4);
+  });
+
+  it("filters out cycle_skipped and verification_failed when verifiedOnly is true", async () => {
+    const rows = await loadCycleHistory("proj-vo", 20, { verifiedOnly: true });
+    expect(rows).toHaveLength(2);
+    const outcomes = rows.map((r) => r.outcome).sort();
+    expect(outcomes).toEqual(["verified", "verified_weak"]);
+  });
+
+  it("preserves verifiedOnly filter across multiple projects", async () => {
+    await appendProgress("proj-vo-b", "cycle_end", {
+      outcome: "verification_failed", start_sha: "x", end_sha: "y", duration_seconds: 5,
+    }, "c-b-fail");
+    const rows = await loadCycleHistory(undefined, 20, { verifiedOnly: true });
+    expect(rows.every((r) => r.outcome !== "cycle_skipped" && r.outcome !== "verification_failed"))
+      .toBe(true);
+    expect(rows).toHaveLength(2);
+  });
+});
+
 describe("parseDateFlag", () => {
   it("parses YYYYMMDD at start of UTC day", () => {
     const ms = parseDateFlag("20260415", false);

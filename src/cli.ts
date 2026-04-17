@@ -55,12 +55,13 @@ Usage:
     Example: generalstaff start                         # resume after a stop
 
   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
-                       [--since=YYYYMMDD] [--until=YYYYMMDD]
+                       [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
                                                           Cycle history (compact: tab-delimited, no headers)
     Example: generalstaff history --lines=50
     Example: generalstaff history --project=myapp --format=compact
     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+    Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
 
   generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
                                                           Tail PROGRESS.jsonl
@@ -270,6 +271,7 @@ switch (command) {
         costs: { type: "boolean", default: false },
         since: { type: "string" },
         until: { type: "string" },
+        "verified-only": { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -278,7 +280,11 @@ switch (command) {
       rows = await loadCycleHistory(
         historyValues.project,
         parseInt(historyValues.lines!, 10),
-        { since: historyValues.since, until: historyValues.until },
+        {
+          since: historyValues.since,
+          until: historyValues.until,
+          verifiedOnly: historyValues["verified-only"],
+        },
       );
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);

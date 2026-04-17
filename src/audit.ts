@@ -203,6 +203,7 @@ function shaRange(startSha: unknown, endSha: unknown): string {
 export interface LoadCycleHistoryOptions {
   since?: string;
   until?: string;
+  verifiedOnly?: boolean;
 }
 
 // Parse a YYYYMMDD string to an epoch-ms bound. endOfDay=true returns the
@@ -268,6 +269,10 @@ export async function loadCycleHistory(
           const started = startedAtMs(parsed);
           if (sinceMs !== undefined && started < sinceMs) continue;
           if (untilMs !== undefined && started > untilMs) continue;
+          if (options.verifiedOnly) {
+            const outcome = String(parsed.data.outcome ?? "");
+            if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
+          }
           entries.push(parsed);
         }
       } catch { /* skip malformed */ }
