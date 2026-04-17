@@ -373,6 +373,7 @@ export function printHistoryCompact(
   rows: CycleHistoryRow[],
   useColor: boolean = Boolean(process.stdout.isTTY),
   costs?: Record<string, CycleCostSummary>,
+  byProject?: Record<string, ProjectCostSummary>,
 ): void {
   for (const row of rows) {
     const outcome = colorizeOutcome(row.outcome, useColor);
@@ -381,7 +382,12 @@ export function printHistoryCompact(
       const c = costs[row.cycle_id];
       const invocations = c?.reviewer_invocations ?? 0;
       const tokens = c?.estimated_tokens ?? 0;
-      console.log(`${base}\t${invocations}\t${tokens}`);
+      let line = `${base}\t${invocations}\t${tokens}`;
+      if (byProject) {
+        const projTokens = byProject[row.project]?.estimated_tokens ?? 0;
+        line = `${line}\t${projTokens}`;
+      }
+      console.log(line);
     } else {
       console.log(base);
     }
@@ -402,11 +408,19 @@ export interface CycleCostSummary {
   estimated_tokens: number;
 }
 
+export interface ProjectCostSummary {
+  project_id: string;
+  reviewer_invocations: number;
+  prompt_chars: number;
+  estimated_tokens: number;
+}
+
 export interface CostsSummary {
   reviewer_invocations: number;
   prompt_chars: number;
   estimated_tokens: number;
   by_cycle: Record<string, CycleCostSummary>;
+  by_project: Record<string, ProjectCostSummary>;
 }
 
 function estimateTokens(chars: number): number {
@@ -443,25 +457,35 @@ export async function summarizeCosts(
 ): Promise<CostsSummary> {
   const stateDir = join(getRootDir(), "state");
   if (!existsSync(stateDir)) {
-    return { reviewer_invocations: 0, prompt_chars: 0, estimated_tokens: 0, by_cycle: {} };
+    return { reviewer_invocations: 0, prompt_chars: 0, estimated_tokens: 0, by_cycle: {}, by_project: {} };
   }
 
   const { readdirSync } = require("fs");
-  const entries: ProgressEntry[] = [];
   const isReviewerInvoked = (e: ProgressEntry) => e.event === "reviewer_invoked";
+  // Track which project each entry came from so we can aggregate per-project
+  // totals — entry.project_id is set by appendProgress, but we trust the
+  // directory name as a fallback.
+  const tagged: Array<{ project: string; entry: ProgressEntry }> = [];
+
+  const tag = async (proj: string) => {
+    for (const e of await loadProgressEvents(proj, isReviewerInvoked)) {
+      tagged.push({ project: e.project_id ?? proj, entry: e });
+    }
+  };
 
   if (projectId) {
-    entries.push(...(await loadProgressEvents(projectId, isReviewerInvoked)));
+    await tag(projectId);
   } else {
     for (const dir of readdirSync(stateDir)) {
-      entries.push(...(await loadProgressEvents(dir, isReviewerInvoked)));
+      await tag(dir);
     }
   }
 
   const byCycle: Record<string, CycleCostSummary> = {};
+  const byProject: Record<string, ProjectCostSummary> = {};
   let totalChars = 0;
 
-  for (const e of entries) {
+  for (const { project, entry: e } of tagged) {
     const fullId = e.cycle_id ?? "?";
     const key = fullId.slice(0, 12);
     const rawLen = e.data.prompt_length;
@@ -481,12 +505,27 @@ export async function summarizeCosts(
         estimated_tokens: estimateTokens(chars),
       };
     }
+
+    const projExisting = byProject[project];
+    if (projExisting) {
+      projExisting.reviewer_invocations += 1;
+      projExisting.prompt_chars += chars;
+      projExisting.estimated_tokens = estimateTokens(projExisting.prompt_chars);
+    } else {
+      byProject[project] = {
+        project_id: project,
+        reviewer_invocations: 1,
+        prompt_chars: chars,
+        estimated_tokens: estimateTokens(chars),
+      };
+    }
   }
 
   return {
-    reviewer_invocations: entries.length,
+    reviewer_invocations: tagged.length,
     prompt_chars: totalChars,
     estimated_tokens: estimateTokens(totalChars),
     by_cycle: byCycle,
+    by_project: byProject,
   };
 }

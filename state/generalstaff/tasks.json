@@ -248,7 +248,7 @@
   {
     "id": "gs-067",
     "title": "In audit.ts summarizeCosts, add per-project breakdown of reviewer_invoked events (currently aggregated across fleet). Return { byProject: Record<string, {invocations, estTokens}>, total: {...} }. Wire into 'history --costs' output as an extra column when --project is not specified. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

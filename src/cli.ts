@@ -299,7 +299,8 @@ switch (command) {
     if (historyValues.format === "compact") {
       if (historyValues.costs) {
         const summary = await summarizeCosts(historyValues.project);
-        printHistoryCompact(rows, undefined, summary.by_cycle);
+        const byProject = historyValues.project ? undefined : summary.by_project;
+        printHistoryCompact(rows, undefined, summary.by_cycle, byProject);
       } else {
         printHistoryCompact(rows);
       }
