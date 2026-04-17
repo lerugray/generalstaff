@@ -868,6 +868,137 @@ the basic multi-bot dispatcher is running.
 
 ---
 
+## 9. Autobot Bootstrap / Onboarding Wizard (Phase 3)
+
+**Captured:** 2026-04-17 morning, after Ray proposed that
+GeneralStaff should be able to build/design an autobot for a
+project that currently has none (using gamr or one of his
+existing repos as the example later).
+
+**Framing shift.** This reframes Phase 3 itself. The current
+Phase-3 plan is "add a second project to prove GS generalizes
+beyond catalogdna." A more interesting framing is **"does
+GS onboard a fresh project in one command"** — the second
+project isn't just a generality test, it's the proving ground
+for the onboarding flow. The design target becomes:
+
+```
+$ generalstaff bootstrap --project=/path/to/gamr
+Analyzing... detected TypeScript + vitest + git
+Proposal written to /path/to/gamr/.generalstaff-proposal/
+  - CLAUDE-AUTONOMOUS.md (draft autobot contract)
+  - tasks.json (seeded with 5 starter correctness tasks)
+  - hands_off.yaml (7 pattern proposals with rationale)
+  - verify_command.sh (inferred: npm test && tsc --noEmit)
+  - engineer_command.sh (standard claude -p invocation)
+  - README-PROPOSAL.md (what each file is, what to edit)
+Review the proposal, move files into place, then:
+  generalstaff register --project=/path/to/gamr
+```
+
+**Why this fits Rule 1.** Bootstrapping IS correctness work
+when scoped right:
+
+- *Detecting* the project's language, test framework, and
+  build tools → correctness (reading file markers, running
+  `ls`, parsing package.json — fully bounded)
+- *Proposing* a hands_off list → correctness (pattern-match
+  the file tree, suggest defensible defaults)
+- *Seeding* starter tasks from inferred gaps → borderline,
+  but the scaffold ones can be safely generic ("add test for
+  module X", "document function Y") without inventing
+  product direction
+- *Writing the CLAUDE-AUTONOMOUS.md tone/voice* → taste work,
+  stays with user (the bot drafts structure + placeholders,
+  user fills in voice)
+
+Same retrieval-vs-generation line as §6: the bot outlines
+and proposes; the user decides voice, scope, and whether
+the proposal becomes the final config.
+
+**Concrete outputs.** The bootstrap command writes files to
+a **staging directory** (`.generalstaff-proposal/` inside the
+target project) rather than modifying the repo. This enforces
+the "propose, don't impose" pattern:
+
+1. `CLAUDE-AUTONOMOUS.md` — project-specific autobot contract
+   skeleton with sections for Phase-A/B behavior, constraints,
+   and scope discipline. Placeholders marked `<FILL IN>`.
+2. `tasks.json` — 3-5 starter tasks inferred from repo state
+   (missing tests, undocumented modules, open TODOs in code
+   comments, stale dependencies). Each task scoped small.
+3. `hands_off.yaml` — pattern proposals with one-line rationale
+   per pattern ("`node_modules/**` — generated, never edit by
+   bot"; "`src/generated/**` — codegen output"; etc.). User
+   reviews; Rule 5 requires non-empty before registration.
+4. `verify_command.sh` — inferred from test-framework detection
+   (package.json scripts, Cargo.toml's test aliases, etc.).
+5. `engineer_command.sh` — standard `claude -p` invocation
+   pointed at the project's CLAUDE-AUTONOMOUS.md.
+6. `README-PROPOSAL.md` — what each file is, what to edit, what
+   to keep, how to register with `generalstaff register` once
+   the user is happy with the proposal.
+
+**What the bootstrap deliberately doesn't do.**
+
+- **Never writes to the target repo root** without the user
+  moving files manually. The staging dir is throwaway.
+- **Never registers the project** automatically. User runs
+  `generalstaff register` explicitly after reviewing.
+- **Never invents product direction.** The starter tasks are
+  correctness-type tasks that any codebase can use ("add tests
+  for uncovered module X"), not "implement feature Y."
+- **Never infers the autobot's *name* or *personality*.** Those
+  are taste decisions. The CLAUDE-AUTONOMOUS.md has
+  `<PROJECT_NAME>` placeholders the user fills.
+
+**Detection heuristics (first pass).** The detection layer
+reads:
+
+- `package.json` → Node/TypeScript, npm scripts for test/lint
+- `Cargo.toml` → Rust, `cargo test`
+- `pyproject.toml` / `setup.py` → Python, pytest/ruff
+- `go.mod` → Go, `go test ./...`
+- `pom.xml` / `build.gradle` → Java/Kotlin
+- Absence of any of the above → print a message asking the
+  user to specify the verify command manually
+
+None of this is novel — any decent CI generator does it.
+GeneralStaff just ties detection to a specifically-shaped
+proposal output.
+
+**Why this is Phase 3 (not later).** Phase 3 was always "prove
+generality with a second project." The bootstrap feature turns
+that into "prove generality AND onboarding velocity in one
+move." gamr is the perfect first target — deliberately-mediocre
+idea (per the test-project constraints doc), lets us measure
+bootstrap behavior without product-validity as a confounder.
+
+If the gamr bootstrap produces a proposal that survives a
+5-minute user review without massive edits, that's a stronger
+generality signal than just "GS ran cycles on a second repo."
+
+**Open questions.**
+
+- Should the bootstrap also propose a `cycle_budget_minutes`?
+  Probably yes, with a very conservative default (30 min) and a
+  note suggesting the user tune after a few cycles.
+- Should the bootstrap install anything? Probably no — anything
+  installable should be explicit user action. The proposal is a
+  doc, not a side effect.
+- How does this interact with §8's multi-project parallel?
+  Cleanly — bootstrap creates one project at a time; parallel
+  dispatch sees them the same way regardless of origin.
+- What about existing autobot projects (catalogdna) that
+  already have a non-GS-shaped autobot? The bootstrap would be
+  the wrong tool — catalogdna keeps its existing protocol,
+  GeneralStaff just wraps it per the current per-project
+  relationship (see CLAUDE.md §"Critical: the per-project
+  relationship"). Bootstrap is for *new* autobots, not
+  retrofitting existing ones.
+
+---
+
 ## Market observation: why no one else has built this
 
 Captured for reference, not as a design decision. Reasons it's
