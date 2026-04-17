@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes correspond to the claimed task, no hands-off violations, and the verification command passed with all tests successful.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add a 'generalstaff log --level=error' filter that shows only cycle_skipped, verification_failed, and entries with event names ending in _error from PROGRESS.jsonl. Pair with existing --lines/--project flags. Add tests.",
+      "evidence": "The diff adds a new 'level' option to the CLI, implements error-level filtering in tailProgressLog and tailSingleProject functions, introduces the isErrorEntry helper function, and includes comprehensive tests for the new functionality.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) passed successfully with all tests green, confirming the implementation works as intended."
+}

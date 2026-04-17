@@ -1,0 +1,258 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index 98a31c9..e984b53 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -44,12 +44,26 @@ export async function appendProgress(
+   await appendFile(filePath, JSON.stringify(entry) + "\n", "utf8");
+ }
+ 
++export type LogLevel = "error";
++
++export interface TailProgressOptions {
++  level?: LogLevel;
++}
++
++export function isErrorEntry(entry: ProgressEntry): boolean {
++  if (entry.event === "cycle_skipped") return true;
++  if (entry.event.endsWith("_error")) return true;
++  if (entry.data?.outcome === "verification_failed") return true;
++  return false;
++}
++
+ export async function tailProgressLog(
+   projectId: string | undefined,
+   lines: number = 20,
++  options: TailProgressOptions = {},
+ ) {
+   if (projectId) {
+-    await tailSingleProject(projectId, lines);
++    await tailSingleProject(projectId, lines, options);
+   } else {
+     // Show across all projects
+     const stateDir = join(getRootDir(), "state");
+@@ -83,18 +97,26 @@ export async function tailProgressLog(
+         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+     );
+ 
+-    const tail = entries.slice(-lines);
++    const filtered =
++      options.level === "error" ? entries.filter(isErrorEntry) : entries;
++    const tail = filtered.slice(-lines);
+     for (const entry of tail) {
+       printEntry(entry);
+     }
+ 
+     if (entries.length === 0) {
+       console.log("No audit log entries found.");
++    } else if (filtered.length === 0 && options.level === "error") {
++      console.log("No error-level audit log entries found.");
+     }
+   }
+ }
+ 
+-async function tailSingleProject(projectId: string, lines: number) {
++async function tailSingleProject(
++  projectId: string,
++  lines: number,
++  options: TailProgressOptions = {},
++) {
+   const filePath = progressPath(projectId);
+   if (!existsSync(filePath)) {
+     console.log(`No PROGRESS.jsonl for project "${projectId}".`);
+@@ -103,8 +125,31 @@ async function tailSingleProject(projectId: string, lines: number) {
+ 
+   const content = await readFile(filePath, "utf8");
+   const allLines = content.trim().split("\n").filter(Boolean);
+-  const tail = allLines.slice(-lines);
+ 
++  if (options.level === "error") {
++    const matches: string[] = [];
++    for (const line of allLines) {
++      try {
++        const parsed = JSON.parse(line);
++        if (isProgressEntry(parsed) && isErrorEntry(parsed)) {
++          matches.push(line);
++        }
++      } catch {
++        // skip malformed
++      }
++    }
++    const tail = matches.slice(-lines);
++    for (const line of tail) {
++      const parsed = JSON.parse(line);
++      if (isProgressEntry(parsed)) printEntry(parsed);
++    }
++    if (matches.length === 0) {
++      console.log(`No error-level entries for project "${projectId}".`);
++    }
++    return;
++  }
++
++  const tail = allLines.slice(-lines);
+   for (const line of tail) {
+     try {
+       const parsed = JSON.parse(line);
+diff --git a/src/cli.ts b/src/cli.ts
+index 1d82c29..d89c891 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -61,8 +61,10 @@ Usage:
+     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+ 
+-  generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
++  generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
++                                                          Tail PROGRESS.jsonl
+     Example: generalstaff log --project=myapp --lines=50
++    Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
+ 
+   generalstaff summary [--no-tests] [--format=json]       Dashboard: cycles, outcomes, duration, tasks, tests
+     Example: generalstaff summary                       # one-screen fleet overview
+@@ -237,10 +239,17 @@ switch (command) {
+       options: {
+         project: { type: "string" },
+         lines: { type: "string", default: "20" },
++        level: { type: "string" },
+       },
+       allowPositionals: false,
+     });
+-    await tailProgressLog(values.project, parseInt(values.lines!, 10));
++    if (values.level !== undefined && values.level !== "error") {
++      console.error(`Error: --level must be 'error' (got '${values.level}')`);
++      process.exit(2);
++    }
++    await tailProgressLog(values.project, parseInt(values.lines!, 10), {
++      level: values.level as "error" | undefined,
++    });
+     break;
+   }
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index b72c9ca..2b6aa2d 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -290,7 +290,7 @@
+   {
+     "id": "gs-074",
+     "title": "Add a 'generalstaff log --level=error' filter that shows only cycle_skipped, verification_failed, and entries with event names ending in _error from PROGRESS.jsonl. Pair with existing --lines/--project flags. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index 8a91c99..0c46bb8 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,6 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry } from "../src/audit";
++import type { ProgressEntry } from "../src/types";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs";
+@@ -188,6 +189,70 @@ describe("tailProgressLog", () => {
+     expect(lines[0]).toContain("No state directory");
+   });
+ 
++  it("filters to error-level entries for a single project when level=error", async () => {
++    await appendProgress("proj-err", "cycle_start", { start_sha: "abc" }, "c1");
++    await appendProgress("proj-err", "cycle_end", { outcome: "verified" }, "c1");
++    await appendProgress("proj-err", "cycle_skipped", { reason: "empty diff" }, "c2");
++    await appendProgress("proj-err", "cycle_end", { outcome: "verification_failed", reason: "tests failed" }, "c3");
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-err", 10, { level: "error" }),
++    );
++
++    expect(lines).toHaveLength(2);
++    expect(lines[0]).toContain("cycle_skipped");
++    expect(lines[1]).toContain("verification_failed");
++    for (const line of lines) {
++      expect(line).not.toContain("cycle_start");
++      expect(line).not.toContain("outcome=verified ");
++    }
++  });
++
++  it("filters to error-level entries across all projects when level=error", async () => {
++    await appendProgress("proj-x", "cycle_start", { start_sha: "a" }, "cx1");
++    await new Promise((r) => setTimeout(r, 5));
++    await appendProgress("proj-x", "cycle_skipped", { reason: "no work" }, "cx2");
++    await new Promise((r) => setTimeout(r, 5));
++    await appendProgress("proj-y", "cycle_end", { outcome: "verified" }, "cy1");
++    await new Promise((r) => setTimeout(r, 5));
++    await appendProgress("proj-y", "cycle_end", { outcome: "verification_failed" }, "cy2");
++
++    const lines = await captureLog(() =>
++      tailProgressLog(undefined, 10, { level: "error" }),
++    );
++
++    expect(lines).toHaveLength(2);
++    expect(lines[0]).toContain("proj-x");
++    expect(lines[0]).toContain("cycle_skipped");
++    expect(lines[1]).toContain("proj-y");
++    expect(lines[1]).toContain("verification_failed");
++  });
++
++  it("prints a clear message when no error-level entries exist (single project)", async () => {
++    await appendProgress("proj-clean", "cycle_start", { start_sha: "a" }, "c1");
++    await appendProgress("proj-clean", "cycle_end", { outcome: "verified" }, "c1");
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-clean", 10, { level: "error" }),
++    );
++
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No error-level entries");
++    expect(lines[0]).toContain("proj-clean");
++  });
++
++  it("respects the lines limit when filtering to error level", async () => {
++    for (let i = 0; i < 5; i++) {
++      await appendProgress("proj-many", "cycle_skipped", { reason: `r${i}` }, `c-${i}`);
++    }
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-many", 2, { level: "error" }),
++    );
++
++    expect(lines).toHaveLength(2);
++  });
++
+   it("omits cycle tag when cycle_id is absent", async () => {
+     await appendProgress("proj-nocycle", "session_start", { budget: 30 });
+ 
+@@ -201,6 +266,32 @@ describe("tailProgressLog", () => {
+   });
+ });
+ 
++describe("isErrorEntry", () => {
++  function entry(event: string, data: Record<string, unknown> = {}): ProgressEntry {
++    return { timestamp: new Date().toISOString(), event: event as any, data };
++  }
++
++  it("returns true for cycle_skipped", () => {
++    expect(isErrorEntry(entry("cycle_skipped", { reason: "empty" }))).toBe(true);
++  });
++
++  it("returns true when data.outcome is verification_failed", () => {
++    expect(isErrorEntry(entry("cycle_end", { outcome: "verification_failed" }))).toBe(true);
++    expect(isErrorEntry(entry("verification_outcome", { outcome: "verification_failed" }))).toBe(true);
++  });
++
++  it("returns true for events ending in _error", () => {
++    expect(isErrorEntry(entry("engineer_error", {}))).toBe(true);
++    expect(isErrorEntry(entry("reviewer_error", {}))).toBe(true);
++  });
++
++  it("returns false for ordinary events", () => {
++    expect(isErrorEntry(entry("cycle_start", { start_sha: "a" }))).toBe(false);
++    expect(isErrorEntry(entry("cycle_end", { outcome: "verified" }))).toBe(false);
++    expect(isErrorEntry(entry("engineer_completed", { exit_code: 0 }))).toBe(false);
++  });
++});
++
+ describe("session_end entries", () => {
+   it("stores total_verified and total_failed alongside total_cycles and duration_minutes", async () => {
+     await appendProgress("proj-sess", "session_end", {
