@@ -316,6 +316,87 @@ describe("writeDigest", () => {
   });
 });
 
+describe("writeDigest narrative (gs-158)", () => {
+  const NARRATIVE_ENV = "GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER";
+  let savedEnv: string | undefined;
+
+  beforeEach(() => {
+    savedEnv = process.env[NARRATIVE_ENV];
+    delete process.env[NARRATIVE_ENV];
+  });
+
+  afterEach(() => {
+    if (savedEnv === undefined) delete process.env[NARRATIVE_ENV];
+    else process.env[NARRATIVE_ENV] = savedEnv;
+  });
+
+  it("produces identical baseline output when env var is unset", async () => {
+    // Narrative flag OFF → digest matches the pre-gs-158 format exactly.
+    await writeDigest([makeCycleResult()], 1, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Narrative:**");
+    expect(content).toContain("**Summary:** 1 verified, 0 failed\n");
+  });
+
+  it("injects the narrative line right after Summary when provider returns", async () => {
+    process.env[NARRATIVE_ENV] = "ollama-local";
+    const provider = {
+      name: "stub",
+      async invoke() {
+        return { content: "A short narrative about the session." };
+      },
+    };
+    await writeDigest(
+      [makeCycleResult()],
+      1,
+      { digest_dir: "digests" },
+      { narrativeProvider: provider },
+    );
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain(
+      "**Narrative:** A short narrative about the session.",
+    );
+    // Narrative line must sit immediately after the Summary line.
+    const summaryIdx = content.indexOf("**Summary:**");
+    const narrativeIdx = content.indexOf("**Narrative:**");
+    expect(summaryIdx).toBeGreaterThan(-1);
+    expect(narrativeIdx).toBeGreaterThan(summaryIdx);
+    const between = content.slice(summaryIdx, narrativeIdx);
+    expect(between.split("\n").length).toBe(2);
+  });
+
+  it("omits the narrative line and keeps the digest complete when provider errors", async () => {
+    process.env[NARRATIVE_ENV] = "ollama-local";
+    const provider = {
+      name: "stub",
+      async invoke() {
+        throw new Error("simulated provider failure");
+      },
+    };
+    await writeDigest(
+      [makeCycleResult({ final_outcome: "verified" })],
+      1,
+      { digest_dir: "digests" },
+      { narrativeProvider: provider },
+    );
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Narrative:**");
+    // Rest of the digest still renders: header, summary, per-cycle block.
+    expect(content).toContain("**Summary:** 1 verified, 0 failed\n");
+    expect(content).toContain("## What got done");
+    expect(content).toContain("## Details");
+  });
+});
+
 function makePlan(overrides: Partial<SessionPlanEstimate> = {}): SessionPlanEstimate {
   return {
     picks: [],
