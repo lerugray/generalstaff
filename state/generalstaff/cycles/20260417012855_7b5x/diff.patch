@@ -1,0 +1,301 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 51ccc19..86d3415 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -12,7 +12,7 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+-import { loadTasks, pendingTasks, addTask, TasksLoadError } from "./tasks";
++import { loadTasks, pendingTasks, addTask, markTaskDone, TasksLoadError } from "./tasks";
+ import {
+   buildFleetSummary,
+   computeDiskUsage,
+@@ -78,6 +78,8 @@ Usage:
+   generalstaff task add --project=<id> [--priority=N] <title>
+                                                           Append a new task to tasks.json
+     Example: generalstaff task add --project=myapp "Fix login bug"
++  generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
++    Example: generalstaff task done --project=myapp --task=my-042
+ 
+   generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
+                                                           Print a session digest to stdout, or list all
+@@ -380,11 +382,57 @@ switch (command) {
+         throw err;
+       }
+       console.log(`Added ${task.id}: ${task.title}`);
++    } else if (sub === "done") {
++      const { values: doneValues } = parseArgs({
++        args: args.slice(2),
++        options: {
++          project: { type: "string" },
++          task: { type: "string" },
++        },
++        allowPositionals: false,
++      });
++      if (!doneValues.project) {
++        console.error("Error: --project=<id> is required");
++        process.exit(1);
++      }
++      if (!doneValues.task) {
++        console.error("Error: --task=<task-id> is required");
++        process.exit(1);
++      }
++      let result;
++      try {
++        result = await markTaskDone(doneValues.project, doneValues.task);
++      } catch (err) {
++        if (err instanceof TasksLoadError) {
++          console.error(`Error: ${err.message}`);
++          process.exit(1);
++        }
++        throw err;
++      }
++      if (result.kind === "project_not_found") {
++        console.error(
++          `Error: no tasks file for project '${doneValues.project}' (${result.path})`,
++        );
++        process.exit(1);
++      } else if (result.kind === "task_not_found") {
++        console.error(
++          `Error: task '${doneValues.task}' not found in project '${doneValues.project}'`,
++        );
++        if (result.availableIds.length > 0) {
++          console.error(`  Available: ${result.availableIds.join(", ")}`);
++        }
++        process.exit(1);
++      } else if (result.kind === "already_done") {
++        console.log(`${result.task.id} is already done.`);
++      } else {
++        console.log(`Marked ${result.task.id} as done: ${result.task.title}`);
++      }
+     } else {
+       console.error(
+-        "Error: task subcommand required (list or add)\n" +
++        "Error: task subcommand required (list, add, or done)\n" +
+           "  Usage: generalstaff task list --project=<id>\n" +
+-          "         generalstaff task add --project=<id> <title>",
++          "         generalstaff task add --project=<id> <title>\n" +
++          "         generalstaff task done --project=<id> --task=<task-id>",
+       );
+       process.exit(1);
+     }
+diff --git a/src/tasks.ts b/src/tasks.ts
+index 0f1e20e..e0f3b84 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -103,3 +103,32 @@ export async function addTask(
+   await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+   return task;
+ }
++
++export type MarkTaskDoneResult =
++  | { kind: "done"; task: GreenfieldTask }
++  | { kind: "already_done"; task: GreenfieldTask }
++  | { kind: "task_not_found"; availableIds: string[] }
++  | { kind: "project_not_found"; path: string };
++
++export async function markTaskDone(
++  projectId: string,
++  taskId: string,
++): Promise<MarkTaskDoneResult> {
++  const path = tasksPath(projectId);
++  if (!existsSync(path)) {
++    return { kind: "project_not_found", path };
++  }
++  const tasks = await loadTasks(projectId);
++  const idx = tasks.findIndex((t) => t.id === taskId);
++  if (idx === -1) {
++    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
++  }
++  const task = tasks[idx]!;
++  if (task.status === "done") {
++    return { kind: "already_done", task };
++  }
++  const updated = [...tasks];
++  updated[idx] = { ...task, status: "done" };
++  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
++  return { kind: "done", task: updated[idx]! };
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 62139c6..eb51319 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -230,7 +230,7 @@
+   {
+     "id": "gs-064",
+     "title": "Add CLI subcommand 'generalstaff task done --project=<id> --task=<task-id>' to mark a single task as done without hand-editing tasks.json. Error if project or task not found. Print a notice (don't error) if already done. Add tests for success, not-found, already-done.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index dd6c921..418122e 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -14,6 +14,7 @@ import {
+   deriveTaskIdPrefix,
+   nextTaskId,
+   addTask,
++  markTaskDone,
+   TasksLoadError,
+ } from "../src/tasks";
+ import type { GreenfieldTask } from "../src/types";
+@@ -211,6 +212,59 @@ describe("tasks module", () => {
+       expect(existsSync(path)).toBe(true);
+     });
+   });
++
++  describe("markTaskDone", () => {
++    it("returns project_not_found when tasks.json is missing", async () => {
++      const result = await markTaskDone("nope", "x-1");
++      expect(result.kind).toBe("project_not_found");
++    });
++
++    it("returns task_not_found when id isn't present", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "pending", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await markTaskDone("myproj", "gs-999");
++      expect(result.kind).toBe("task_not_found");
++      if (result.kind === "task_not_found") {
++        expect(result.availableIds).toEqual(["gs-001"]);
++      }
++    });
++
++    it("returns already_done when task is already done", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "done", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await markTaskDone("myproj", "gs-001");
++      expect(result.kind).toBe("already_done");
++    });
++
++    it("marks a pending task as done and persists", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "pending", priority: 1 },
++        { id: "gs-002", title: "b", status: "pending", priority: 2 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed, null, 2),
++      );
++      const result = await markTaskDone("myproj", "gs-002");
++      expect(result.kind).toBe("done");
++
++      const stored = JSON.parse(
++        readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
++      );
++      expect(stored[1].status).toBe("done");
++      expect(stored[0].status).toBe("pending");
++    });
++  });
+ });
+ 
+ describe("CLI task command", () => {
+@@ -335,6 +389,89 @@ describe("CLI task command", () => {
+     });
+   });
+ 
++  describe("task done", () => {
++    it("errors when --project is missing", async () => {
++      const result = await runCli(["task", "done", "--task=gs-001"], TEST_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("--project=<id> is required");
++    });
++
++    it("errors when --task is missing", async () => {
++      const result = await runCli(
++        ["task", "done", "--project=proj"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("--task=<task-id> is required");
++    });
++
++    it("errors when the project has no tasks.json", async () => {
++      const result = await runCli(
++        ["task", "done", "--project=ghost", "--task=gs-001"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("no tasks file for project");
++    });
++
++    it("errors when the task id is not found", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "pending", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await runCli(
++        ["task", "done", "--project=proj", "--task=gs-999"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("gs-999");
++      expect(result.stderr).toContain("not found");
++      expect(result.stderr).toContain("gs-001");
++    });
++
++    it("prints a notice (exit 0) when task is already done", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "done", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await runCli(
++        ["task", "done", "--project=proj", "--task=gs-001"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("already done");
++    });
++
++    it("marks a task as done and persists the change", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "open", status: "pending", priority: 1 },
++        { id: "gs-002", title: "other", status: "pending", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(seed, null, 2),
++      );
++      const result = await runCli(
++        ["task", "done", "--project=proj", "--task=gs-001"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("Marked gs-001");
++
++      const stored = JSON.parse(
++        readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
++      );
++      expect(stored[0].status).toBe("done");
++      expect(stored[1].status).toBe("pending");
++    });
++  });
++
+   describe("unknown subcommand", () => {
+     it("errors when no subcommand is given", async () => {
+       const result = await runCli(["task"], TEST_DIR);
+@@ -354,5 +491,6 @@ describe("CLI task command", () => {
+     expect(result.stdout).toContain("generalstaff task");
+     expect(result.stdout).toContain("task list");
+     expect(result.stdout).toContain("task add");
++    expect(result.stdout).toContain("task done");
+   });
+ });
