@@ -381,6 +381,29 @@ describe("invokeOllamaReviewer", () => {
     expect(result).toContain("ECONNREFUSED");
     expect(result).toContain("Ollama server running");
   });
+
+  it("returns message.content and ignores 'thinking' field when both present", async () => {
+    // Reasoning models like qwen3 populate a separate `thinking` field
+    // alongside `content`. The reviewer must return only `content` so
+    // parseReviewerResponse sees the JSON verdict, not the chain of thought.
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "real answer",
+            thinking: "internal reasoning that should be ignored",
+          },
+          done: true,
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await invokeOllamaReviewer("prompt");
+
+    expect(result).toBe("real answer");
+    expect(result).not.toContain("internal reasoning");
+  });
 });
 
 describe("invokeReviewerWithFallback", () => {
