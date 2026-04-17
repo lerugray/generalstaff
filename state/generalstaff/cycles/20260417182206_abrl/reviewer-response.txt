@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff aligns with the claimed task, shows no scope drift or hands-off violations, and provides strong evidence for task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "status": "done",
+      "evidence": "The diff adds 'worktree_preflight' to VALID_EVENTS in src/types.ts, updates the test in tests/types.test.ts to include 'worktree_preflight' in the valid event list, and adds a regression test for the event. The task status in tasks.json is also updated to 'done'.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, and all changes are directly related to the claimed task. No warnings or failures in the test output indicate that the fix is working as expected."
+}
