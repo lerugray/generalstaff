@@ -988,7 +988,7 @@
   {
     "id": "gs-165",
     "title": "Re-implement gs-146 (stop --status / --check) WITHOUT modifying src/safety.ts. In src/cli.ts's stop command handler, add a --status flag (and --check as alias) that is mutually exclusive with --force. When set: construct the STOP path inline via pathJoin(getRootDir(), 'STOP') — same pattern used in src/stop_watcher.ts and src/session.ts (see the 'workaround' comment near session.ts's STOP usage — stopFilePath is module-private in safety.ts and that's deliberate; do NOT export it). Check existsSync(stopPath); print 'STOP file: present at <path>' or 'STOP file: absent'. Read state/session.pid if it exists (readFileSync utf8, trim); print 'Session pid: <pid>' or 'Session pid: none recorded'. Do not create or remove anything — read-only inspection. Tests in tests/cli.test.ts covering: stop-present+pid, stop-present+nopid, stop-absent+pid, stop-absent+nopid, --status-with-force errors out. Wire into printUsage() help text. Do NOT modify src/safety.ts — it is hands-off and was the blocker for the original gs-146 (4 failed attempts in 2026-04-17 session 3). gs-132's rollback caught all 4 attempts cleanly; this task's purpose is to unblock the feature via a correct implementation.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]

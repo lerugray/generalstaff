@@ -95,9 +95,11 @@ Usage:
     Example: generalstaff init ../other-repo --id=other
     Example: generalstaff init ./lowprio --priority=3   # seed template task at priority 3
 
-  generalstaff stop [--force]                             Create STOP file (halt dispatcher)
+  generalstaff stop [--force] | [--status|--check]        Create STOP file (halt dispatcher)
     Example: generalstaff stop                          # halt before next cycle
     Example: generalstaff stop --force                  # also kill the running session process
+    Example: generalstaff stop --status                 # read-only: print STOP file + session pid state
+    Example: generalstaff stop --check                  # alias of --status
 
   generalstaff start                                      Remove STOP file (allow dispatch)
     Example: generalstaff start                         # resume after a stop
@@ -389,9 +391,46 @@ switch (command) {
   case "stop": {
     const { values } = parseArgs({
       args: args.slice(1),
-      options: { force: { type: "boolean", default: false } },
+      options: {
+        force: { type: "boolean", default: false },
+        status: { type: "boolean", default: false },
+        check: { type: "boolean", default: false },
+      },
       allowPositionals: true,
     });
+    const statusMode = values.status || values.check;
+    if (statusMode && values.force) {
+      console.error(
+        "Error: --status/--check and --force are mutually exclusive",
+      );
+      process.exit(1);
+    }
+    if (statusMode) {
+      // gs-165: read-only inspection of STOP file and recorded session pid.
+      // Path computed inline — stopFilePath is module-private in safety.ts
+      // by design; mirror the pattern used by src/stop_watcher.ts and
+      // src/session.ts rather than exporting it.
+      const stopPath = join(getRootDir(), "STOP");
+      if (existsSync(stopPath)) {
+        console.log(`STOP file: present at ${stopPath}`);
+      } else {
+        console.log("STOP file: absent");
+      }
+      const pidPath = join(getRootDir(), "state", "session.pid");
+      let pidLine = "Session pid: none recorded";
+      if (existsSync(pidPath)) {
+        try {
+          const raw = readFileSync(pidPath, "utf8").trim();
+          if (raw.length > 0) {
+            pidLine = `Session pid: ${raw}`;
+          }
+        } catch {
+          // keep default "none recorded" — unreadable pid file is a no-signal.
+        }
+      }
+      console.log(pidLine);
+      break;
+    }
     if (values.force) {
       const result = await stopForce();
       if (result.pid === null) {
