@@ -180,6 +180,38 @@ candidate set is narrow:
   whether the features are shippable. Web version preferred
   over mobile for scaffolding simplicity.
 
+## Prefer existing OSS tools over custom code
+
+Before writing a custom implementation of anything non-trivial
+(parser, scheduler, embedding store, UI framework, message
+queue, retrieval index, etc.), check whether a mature
+open-source tool already solves the problem. If one does,
+wrap it — don't rewrite it.
+
+This is a **decision default**, not a Hard Rule. Custom code
+isn't forbidden; it just has to earn its place against the
+alternative. Legitimate reasons to roll custom: licence
+incompatibility, the OSS tool would pull in a heavyweight
+dependency tree for a thin use case, the OSS tool is
+unmaintained or has known correctness bugs, or the custom
+version is genuinely shorter than the integration shim.
+
+**Why this matters in Hammerstein terms.** Writing custom code
+where mature OSS exists is a concrete instance of
+*industriousness without judgment* — the worst quadrant. It
+looks productive (lines written, tests passing, commits
+landing) but the work could have been free. The staff-officer
+move is to know the catalog and pick the right tool; the
+stupid-industrious move is to reimplement the catalog.
+
+**Provider-routing corollary.** Same principle applies to LLM
+provider selection. Don't burn paid API quota on work a free
+local model can do, and don't burn local compute on work the
+user needs the machine for. **Ollama for unattended runs
+(overnight, while away); OpenRouter or Claude for attended
+runs** (compute stays remote so the user's machine stays
+responsive).
+
 ## Hammerstein context
 
 GeneralStaff is named after the general-staff quadrant of Kurt von
