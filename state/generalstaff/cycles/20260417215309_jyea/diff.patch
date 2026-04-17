@@ -1,0 +1,86 @@
+diff --git a/src/verification.ts b/src/verification.ts
+index 5f6f74f..83310b7 100644
+--- a/src/verification.ts
++++ b/src/verification.ts
+@@ -15,7 +15,7 @@ import type {
+ // Commands that are effectively no-ops — flag as verified_weak
+ const NOOP_COMMANDS = ["true", ":", "echo", "exit 0"];
+ 
+-function isNoopCommand(command: string): boolean {
++export function isNoopCommand(command: string): boolean {
+   const trimmed = command.trim();
+   return NOOP_COMMANDS.some(
+     (noop) => trimmed === noop || trimmed.startsWith(noop + " "),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 1a57981..9e710be 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -862,7 +862,7 @@
+   {
+     "id": "gs-144",
+     "title": "Add test coverage for isNoopCommand in src/verification.ts (currently only reached indirectly via runVerification). Cover: 'true', ':', 'echo', 'exit 0' all return true; 'true && npm test' returns true (startsWith-match per current implementation, document whether that's intentional); 'tree', 'truecheck' (begins with 'true' but not a word boundary) — current code treats 'truecheck' as noop because startsWith(noop + ' ') requires space, so 'truecheck' is NOT a noop — add the test pinning that behavior; whitespace-only returns false. Because isNoopCommand is module-private, either export it for tests or exercise it through runVerification with dryRun=true (which calls it explicitly). Prefer exporting.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/verification.test.ts b/tests/verification.test.ts
+index 01e3654..98d217f 100644
+--- a/tests/verification.test.ts
++++ b/tests/verification.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { runVerification } from "../src/verification";
++import { runVerification, isNoopCommand } from "../src/verification";
+ import { setRootDir, readCycleFile } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+@@ -129,6 +129,48 @@ describe("verification gate", () => {
+     });
+   });
+ 
++  describe("isNoopCommand", () => {
++    it("treats bare 'true' as a noop", () => {
++      expect(isNoopCommand("true")).toBe(true);
++    });
++
++    it("treats bare ':' as a noop", () => {
++      expect(isNoopCommand(":")).toBe(true);
++    });
++
++    it("treats bare 'echo' as a noop", () => {
++      expect(isNoopCommand("echo")).toBe(true);
++    });
++
++    it("treats 'exit 0' as a noop", () => {
++      expect(isNoopCommand("exit 0")).toBe(true);
++    });
++
++    it("treats prefix-with-space matches as noops (e.g. 'true && npm test')", () => {
++      // Documented behavior: startsWith(noop + ' ') matches, so a real test
++      // suite chained after `true` is still flagged as a noop. The chained
++      // command is not inspected — this is intentional but worth pinning.
++      expect(isNoopCommand("true && npm test")).toBe(true);
++    });
++
++    it("does not match commands that merely start with noop letters but no word boundary", () => {
++      // 'tree' shares no prefix; 'truecheck' begins with 'true' but the
++      // startsWith(noop + ' ') guard requires a space, so neither is a noop.
++      expect(isNoopCommand("tree")).toBe(false);
++      expect(isNoopCommand("truecheck")).toBe(false);
++    });
++
++    it("returns false for whitespace-only and empty input", () => {
++      expect(isNoopCommand("   ")).toBe(false);
++      expect(isNoopCommand("")).toBe(false);
++    });
++
++    it("trims surrounding whitespace before matching", () => {
++      expect(isNoopCommand("  true  ")).toBe(true);
++      expect(isNoopCommand("\techo hello\n")).toBe(true);
++    });
++  });
++
+   describe("audit trail", () => {
+     it("writes progress entries for verification", async () => {
+       const project = makeProject({ verification_command: "test 1 -eq 1" });
