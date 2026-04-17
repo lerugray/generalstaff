@@ -20,7 +20,7 @@ import { runEngineer } from "./engineer";
 import { runVerification } from "./verification";
 import { runReviewer } from "./reviewer";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
-import { loadProjectsYaml, findProject } from "./projects";
+import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -710,10 +710,18 @@ export async function executeCycle(
 
 export async function runSingleCycle(options: SingleCycleOptions) {
   const yaml = await loadProjectsYaml();
-  const project = findProject(yaml.projects, options.projectId);
-  if (!project) {
-    console.error(`Project "${options.projectId}" not found in projects.yaml`);
-    process.exit(1);
+  let project;
+  try {
+    project = getProject(yaml.projects, options.projectId);
+  } catch (err) {
+    if (err instanceof ProjectNotFoundError) {
+      console.error(`Error: project '${err.projectId}' not found`);
+      if (err.availableIds.length > 0) {
+        console.error(`  Available: ${err.availableIds.join(", ")}`);
+      }
+      process.exit(1);
+    }
+    throw err;
   }
 
   const result = await executeCycle(project, yaml.dispatcher, options.dryRun);

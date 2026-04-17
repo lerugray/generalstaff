@@ -656,7 +656,7 @@
   {
     "id": "gs-135",
     "title": "Refactor src/cycle.ts runSingleCycle to use getProject + ProjectNotFoundError instead of the legacy findProject lookup (which returns undefined and prints a bare 'Project X not found' line). Mirror the pattern the summary/bot-status commands in src/cli.ts adopted in gs-082: print 'Error: project <id> not found' then 'Available: <ids>' when known ids exist, then process.exit(1). Add a test in tests/cycle.test.ts using a fake yaml that has no matching project and verify the error + exit code.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
