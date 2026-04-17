@@ -22,6 +22,8 @@ the source doc whose existing content should seed that bullet.
 - One-sentence elevator describing the meta-dispatcher + verification
   gate + audit log (source: `README.md` lines 6–9).
 
+_Voice: anti-Polsia positioning spine per VOICE.md §1 — the tagline can be unembarrassed about the labor-economics framing ("your code, your keys, your control" already reads as anti-extraction)._
+
 ## 2. Badges
 
 - Placeholder row — none ship yet in the current README. Candidates
@@ -30,6 +32,8 @@ the source doc whose existing content should seed that bullet.
 - Static status line is already in `README.md` lines 11–15 and could
   collapse into badges + one sentence.
 
+_Voice: neutral technical._
+
 ## 3. Status / Maturity callout
 
 - Current "Status (2026-04-16)" blockquote (source: `README.md` lines
@@ -37,6 +41,8 @@ the source doc whose existing content should seed that bullet.
   repo, cross-platform.
 - Roadmap pointer ("you are here") mirrors the Phase 7 line (source:
   `README.md` line 185).
+
+_Voice: add dogfooding credibility line per VOICE.md §Dogfooding README placement — matter-of-fact, not triumphant, per VOICE.md §Voice for this claim._
 
 ## 4. Visuals / Demo
 
@@ -49,6 +55,8 @@ the source doc whose existing content should seed that bullet.
     `UI-VISION-2026-04-15.md` §"When this happens";
     `README.md` lines 182–184).
 
+_Voice: neutral technical._
+
 ## 5. The problem
 
 - Failure mode framing: "industrious without judgment" + Polsia
@@ -57,6 +65,8 @@ the source doc whose existing content should seed that bullet.
 - Optional: the same framing in Hammerstein-quadrant terms (source:
   `README.md` §"The Hammerstein framing" lines 125–143; deeper
   grounding in `PIVOT-2026-04-15.md` §"Why pivot").
+
+_Voice: lean into anti-slop + anti-extraction framing from VOICE.md §1; optional Falk & Tsoukalas anchor per VOICE.md §Mainstream-economics anchors ("automation arms race", "demand externalities")._
 
 ## 6. The approach / How it works
 
@@ -70,12 +80,16 @@ the source doc whose existing content should seed that bullet.
 - Open audit log bullet (source: `README.md` lines 48–50;
   format in `DESIGN.md` §"Open audit log entry format").
 
+_Voice: reference PROGRESS.jsonl as observable evidence per VOICE.md §Dogfooding README placement — "don't trust the claim, read the log and count rejections yourself."_
+
 ## 7. Prerequisites / Installation
 
 - Toolchain list: git, bash, bun 1.2+, claude CLI (source: `README.md`
   lines 54–55).
 - `git clone` + `bun install` + `bun link` + `generalstaff doctor`
   block (source: `README.md` lines 57–63).
+
+_Voice: neutral technical._
 
 ## 8. Quickstart / Usage
 
@@ -86,6 +100,8 @@ the source doc whose existing content should seed that bullet.
 - Reassurance line: bot only pushes to `bot/work`, export = git clone
   (source: `README.md` lines 82–83; `RULE-RELAXATION-2026-04-15.md`
   §"Hard Rule #7").
+
+_Voice: mostly neutral technical; the reassurance line (bot only pushes to `bot/work`, export = git clone) can echo the anti-extraction framing per VOICE.md §1 — the user owns the code, always._
 
 ## 9. Configuration
 
@@ -101,6 +117,8 @@ the source doc whose existing content should seed that bullet.
   `OLLAMA_HOST` (source: `CLAUDE.md` §"Reviewer provider
   configuration").
 
+_Voice: neutral technical._
+
 ## 10. Features
 
 - Bulleted feature list, drawn from the 15 CLI commands in
@@ -110,6 +128,8 @@ the source doc whose existing content should seed that bullet.
 - Phase 1 "Definition of done" bullets as features list (source:
   `PHASE-1-PLAN-2026-04-15.md` §"Definition of done for Phase 1";
   `PHASE-1-SKETCH-2026-04-15.md` §"Definition of done for Phase 1").
+
+_Voice: neutral technical._
 
 ## 11. Why this over the alternatives
 
@@ -121,6 +141,8 @@ the source doc whose existing content should seed that bullet.
   97–99; historical context in `research-notes.md`, per `CLAUDE.md`
   §"Read first" order).
 
+_Voice: direct Polsia comparison allowed per VOICE.md §1; keep pointed not screed per §2; dogfooding contrast is structural not rhetorical per VOICE.md §Dogfooding (Polsia-model tools cannot be dogfooded publicly)._
+
 ## 12. Who this is for
 
 - "Bring your own imagination" neutral-on-motivation framing (source:
@@ -131,6 +153,8 @@ the source doc whose existing content should seed that bullet.
   (source: `README.md` lines 119–123;
   `RULE-RELAXATION-2026-04-15.md` §"Hard Rule #1").
 
+_Voice: human-livability is the universal per VOICE.md §3 — Hard Rule 1 (taste work stays with user) is the architectural form of the thesis per VOICE.md §Personal context._
+
 ## 13. The Hammerstein framing (philosophy)
 
 - Origin of the name + clever-industrious vs stupid-industrious
@@ -138,12 +162,16 @@ the source doc whose existing content should seed that bullet.
 - Forward reference to `docs/internal/` once public (source:
   `README.md` lines 140–143).
 
+_Voice: the Marxist-compatible reading per VOICE.md §Intellectual framing is fair game — inherit the operational philosophy without inheriting the politics._
+
 ## 14. Hard rules
 
 - All 10 rules, one line each (source: `README.md` lines 145–169;
   canonical list in `RULE-RELAXATION-2026-04-15.md` §2 + §3).
 - Pointer to `RULE-RELAXATION-2026-04-15.md` for rationale (source:
   `README.md` line 171).
+
+_Voice: each rule is a labor choice per VOICE.md §1; Rules 7 (user owns the code), 8 (BYOK), 9 (open audit log), and 10 (local-first) carry the structural anti-extraction stance and can be framed as such._
 
 ## 15. Roadmap
 
@@ -164,6 +192,8 @@ the source doc whose existing content should seed that bullet.
 - Revised 12-phase plan reference (source: `PIVOT-2026-04-15.md`
   §"Phased build plan (revised)").
 
+_Voice: neutral technical._
+
 ## 16. Documentation
 
 - Pointer list already in current `README.md` lines 187–200.
@@ -182,12 +212,16 @@ the source doc whose existing content should seed that bullet.
   - `CLAUDE.md`.
   - `research-notes.md`.
 
+_Voice: neutral technical._
+
 ## 17. Tests
 
 - Not in current README. Candidate one-liner: "bun test" runs the
   suite; coverage numbers cited in the Status block (source:
   `README.md` line 12; structure in
   `PHASE-1-SKETCH-2026-04-15.md` §"Test strategy").
+
+_Voice: neutral technical._
 
 ## 18. Contributing
 
@@ -196,9 +230,13 @@ the source doc whose existing content should seed that bullet.
 - Expand once public: CONTRIBUTING.md link, code of conduct, issue
   template guidance (no current source — TBD at public launch).
 
+_Voice: neutral technical; the PROGRESS.jsonl feedback loop line ties naturally to the dogfooding claim per VOICE.md §Dogfooding — contributors can inspect the same audit log the tool shows its users._
+
 ## 19. License
 
 - MIT (source: `README.md` line 209).
+
+_Voice: neutral technical._
 
 ## 20. Acknowledgements / Prior art
 
@@ -209,6 +247,8 @@ the source doc whose existing content should seed that bullet.
   - Hammerstein framing lineage from catalogdna's "AI Collaboration
     Principles" (source: `CLAUDE.md` §"Hammerstein context";
     external path noted there).
+
+_Voice: mostly neutral technical; the Hammerstein lineage attribution can lean on VOICE.md §Intellectual framing — credit the operational-philosophy reading, not the politics of its origin._
 
 ## 21. FAQ (optional)
 
@@ -223,6 +263,8 @@ the source doc whose existing content should seed that bullet.
     roadmap in `FUTURE-DIRECTIONS-2026-04-15.md` §2.
   - "How do I stop the bot from touching file X?" → Hard Rule #5,
     `projects.yaml.example`.
+
+_Voice: neutral technical for the procedural Qs (Q1, Q2, Q5); the "pay for a platform" (Q3) and "non-Claude models" (Q4) answers can surface the BYOK / anti-extraction stance per VOICE.md §1 plainly and without hedging._
 
 ---
 
@@ -245,6 +287,8 @@ the source doc whose existing content should seed that bullet.
   detection, state-dir location).
 - `PHASE-1-SKETCH-2026-04-15.md` — CLI surface, file structure, test
   strategy.
+- `VOICE.md` — editorial calibration for public writing (added for
+  gs-110 voice annotations above).
 
 ## Gaps flagged
 
