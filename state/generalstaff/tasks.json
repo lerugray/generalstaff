@@ -536,7 +536,7 @@
   {
     "id": "gs-115",
     "title": "Add end-to-end test coverage for notifySessionEnd's real homedir loader path (currently only the dependency-injection path is tested in tests/notify.test.ts). Use a fixture ~/.claude layout inside a tmpdir, point HOME / USERPROFILE env at it, verify loadTelegramCredentials reads the correct files. Restore env after. Add a cross-platform skip marker if HOME env manipulation is too brittle on Windows CI.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

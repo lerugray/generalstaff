@@ -313,6 +313,95 @@ describe("sendTelegramMessage", () => {
   });
 });
 
+describe("loadTelegramCredentials default homedir path", () => {
+  // The no-arg call resolves homedir() from os, which on Windows reads
+  // USERPROFILE and on POSIX reads HOME. Manipulate both envs so the
+  // fixture layout inside TEST_HOME is picked up regardless of platform.
+  const originalHome = process.env.HOME;
+  const originalUserProfile = process.env.USERPROFILE;
+
+  beforeEach(() => {
+    process.env.HOME = TEST_HOME;
+    process.env.USERPROFILE = TEST_HOME;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+  });
+
+  it("resolves credentials from a fixture homedir when no arg is passed", () => {
+    writeCredentials("bot-default-token", "555");
+    const result = loadTelegramCredentials();
+    expect(result).toEqual({ token: "bot-default-token", chatId: "555" });
+  });
+
+  it("returns null when the fixture homedir lacks the .claude config", () => {
+    // TEST_HOME exists (beforeEach recreates it) but is empty.
+    const result = loadTelegramCredentials();
+    expect(result).toBeNull();
+  });
+
+  it("notifySessionEnd with no loader falls through to the default homedir path and fires fetch when credentials are present", async () => {
+    writeCredentials("end-to-end-token", "777");
+    let capturedUrl = "";
+    let capturedBody: string | null = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url);
+      capturedBody = init?.body as string;
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+      await notifySessionEnd({
+        success: true,
+        budgetMinutes: 5,
+        durationMinutes: 2,
+        verified: 1,
+        failed: 0,
+        skipped: 0,
+        tasksDone: ["gs-115: add default homedir notify test"],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(capturedUrl).toBe("https://api.telegram.org/botend-to-end-token/sendMessage");
+    expect(capturedBody).not.toBeNull();
+    const body = JSON.parse(capturedBody as unknown as string);
+    expect(body.chat_id).toBe("777");
+    expect(body.text).toContain("gs-115: add default homedir notify test");
+  });
+
+  it("notifySessionEnd with no loader is a silent no-op when the fixture homedir lacks credentials", async () => {
+    let fetchCalled = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      fetchCalled = true;
+      return new Response("{}");
+    }) as unknown as typeof fetch;
+
+    try {
+      await notifySessionEnd({
+        success: true,
+        budgetMinutes: 1,
+        durationMinutes: 1,
+        verified: 0,
+        failed: 0,
+        skipped: 0,
+        tasksDone: [],
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetchCalled).toBe(false);
+  });
+});
+
 describe("notifySessionEnd composition", () => {
   const originalFetch = globalThis.fetch;
 
