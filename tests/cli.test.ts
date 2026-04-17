@@ -610,6 +610,77 @@ projects:
       const result = await runCli(["--help"]);
       expect(result.stdout).toContain("generalstaff digest");
     });
+
+    describe("--list", () => {
+      const SAMPLE_DIGEST = (cycles: number, verified: number, failed: number, skipped: number) => {
+        let md = `# GeneralStaff Session Digest\n\n**Date:** 2026-04-16T10:00:00.000Z\n**Duration:** 5m\n**Cycles:** ${cycles}\n\n`;
+        for (let i = 0; i < verified; i++) md += `## p — c${i}\n\n- **Outcome:** verified\n\n`;
+        for (let i = 0; i < failed; i++) md += `## p — f${i}\n\n- **Outcome:** verification_failed\n\n`;
+        for (let i = 0; i < skipped; i++) md += `## p — s${i}\n\n- **Outcome:** cycle_skipped\n\n`;
+        return md;
+      };
+
+      it("prints clear message when digests dir is empty", async () => {
+        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("prints clear message when digests dir does not exist", async () => {
+        rmSync(DIGEST_DIR, { recursive: true, force: true });
+        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("lists a single digest with parsed counts", async () => {
+        writeFileSync(
+          join(DIGEST_DIR, "digest_20260416_100000.md"),
+          SAMPLE_DIGEST(3, 2, 1, 0),
+        );
+        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("digest_20260416_100000.md");
+        expect(result.stdout).toContain("2026-04-16 10:00:00");
+        expect(result.stdout).toContain("cycles=3");
+        expect(result.stdout).toContain("verified=2");
+        expect(result.stdout).toContain("failed=1");
+        expect(result.stdout).toContain("skipped=0");
+      });
+
+      it("lists multiple digests newest first", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), SAMPLE_DIGEST(1, 1, 0, 0));
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), SAMPLE_DIGEST(2, 1, 1, 0));
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), SAMPLE_DIGEST(4, 2, 1, 1));
+        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const lines = result.stdout.trim().split("\n");
+        expect(lines.length).toBe(3);
+        expect(lines[0]).toContain("digest_20260416_180000.md");
+        expect(lines[1]).toContain("digest_20260416_090000.md");
+        expect(lines[2]).toContain("digest_20260415_120000.md");
+        expect(lines[0]).toContain("cycles=4");
+        expect(lines[0]).toContain("skipped=1");
+      });
+
+      it("rejects combining --list with --latest", async () => {
+        const result = await runCli(
+          ["digest", "--list", "--latest"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain("--list cannot be combined");
+      });
+
+      it("rejects combining --list with --date", async () => {
+        const result = await runCli(
+          ["digest", "--list", "--date=20260416"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain("--list cannot be combined");
+      });
+    });
   });
 
   describe("help completeness", () => {

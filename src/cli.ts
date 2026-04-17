@@ -76,9 +76,11 @@ Usage:
                                                           Append a new task to tasks.json
     Example: generalstaff task add --project=myapp "Fix login bug"
 
-  generalstaff digest [--latest] [--date=YYYYMMDD]        Print a session digest to stdout
+  generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
+                                                          Print a session digest to stdout, or list all
     Example: generalstaff digest --latest                # most recent digest
     Example: generalstaff digest --date=20260416         # first digest from that day
+    Example: generalstaff digest --list                  # enumerate digests, newest first
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
@@ -373,11 +375,16 @@ switch (command) {
       options: {
         latest: { type: "boolean", default: false },
         date: { type: "string" },
+        list: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
     if (digestValues.latest && digestValues.date) {
       console.error("Error: --latest and --date are mutually exclusive");
+      process.exit(1);
+    }
+    if (digestValues.list && (digestValues.latest || digestValues.date)) {
+      console.error("Error: --list cannot be combined with --latest or --date");
       process.exit(1);
     }
     const dispatcher = await loadDispatcherConfig();
@@ -387,6 +394,33 @@ switch (command) {
           .filter((f) => /^digest_\d{8}_\d{6}\.md$/.test(f))
           .sort()
       : [];
+    if (digestValues.list) {
+      if (files.length === 0) {
+        console.log("No digests found.");
+        break;
+      }
+      const sorted = [...files].sort().reverse();
+      for (const f of sorted) {
+        const content = readFileSync(join(digestDir, f), "utf8");
+        const m = f.match(/^digest_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.md$/);
+        const date = m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
+        const cyclesMatch = content.match(/\*\*Cycles:\*\*\s*(\d+)/);
+        const cycles = cyclesMatch ? cyclesMatch[1] : "?";
+        let verified = 0;
+        let failed = 0;
+        let skipped = 0;
+        for (const om of content.matchAll(/\*\*Outcome:\*\*\s*(\w+)/g)) {
+          const o = om[1];
+          if (o === "verified" || o === "verified_weak") verified++;
+          else if (o === "verification_failed") failed++;
+          else if (o === "cycle_skipped") skipped++;
+        }
+        console.log(
+          `${f}  ${date}  cycles=${cycles}  verified=${verified} failed=${failed} skipped=${skipped}`,
+        );
+      }
+      break;
+    }
     if (files.length === 0) {
       console.log("No digests found.");
       break;

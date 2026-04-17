@@ -212,7 +212,7 @@
   {
     "id": "gs-061",
     "title": "Add a 'generalstaff digest --list' subcommand that enumerates all digest files in digests/ with their date, total cycles, and verified/failed/skipped breakdown (parsed from the digest markdown). If no digests exist, print a clear message. Sort newest first. Add tests covering empty dir, one digest, and multiple digests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
