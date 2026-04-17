@@ -165,6 +165,17 @@ explicitly, don't proactively write.
   before switching machines.
 - **Default branch is `master`**, not `main`. Ray's git
   convention. Don't rename.
+- **Detached bot launches default to visible cmd windows.** When
+  launching a bot session from an interactive Claude Code session
+  so it survives the session closing (e.g. PowerShell
+  `Start-Process` driving `scripts\run_session.bat`), leave the
+  cmd window visible — Ray uses the window's presence as ambient
+  confirmation that the bot is actually running. Do NOT use
+  `-WindowStyle Hidden`. Detachment is handled by Start-Process
+  itself regardless of window style; hiding the window sacrifices
+  observability for no detachment benefit. Rationale captured
+  2026-04-17 after a hidden-window launch left Ray unable to
+  visually confirm the session had started.
 - **Model routing:** Ray has detailed provider routing rules in
   `~/.claude/CLAUDE.md` (Gemini for summaries, OpenRouter Qwen
   for code delegation, Ollama for tiny tasks, Claude for
