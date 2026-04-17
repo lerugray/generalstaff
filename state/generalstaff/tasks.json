@@ -572,7 +572,7 @@
   {
     "id": "gs-121",
     "title": "Refactor executeCycle in src/cycle.ts to consolidate its multiple early-return paths into a single assembly point. Currently there are 6+ places that construct a CycleResult with different fields set, which makes adding new fields (like the gs-111 abnormal-exit block) error-prone. Approach: use a mutable builder object throughout the function, single return at the end. Don't change behavior — just structure. Safety: the 600+ tests are the regression guard. Add no new tests; this is a pure refactor.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
