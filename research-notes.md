@@ -241,4 +241,46 @@ LLM assistant UX.
   work; LLM-wiki = how the human and assistant maintain shared
   memory across sessions.
 
+## 2026-04-17 — Playwright + Chrome-extension Claude precedent (stub)
+
+**Source:** Ray's own prior work, not external. Captured during
+the 2026-04-17 afternoon chat about Claude Design UI automation.
+
+**The pattern:** catalogdna (and reportedly "others" in Ray's
+project portfolio) have historically used Playwright to drive
+Claude in the Chrome extension / web app — sessions communicate
+with a logged-in Claude subscription via browser automation
+rather than via Anthropic's API. This is how "the webapp" worked
+in at least one of those projects.
+
+**Why this stub exists:** the exact mechanism (entry point,
+login handling, extraction path, how Claude's response is
+captured out of the DOM) is NOT documented here yet. Ray
+confirmed the pattern exists; details are in the catalogdna
+repo or possibly elsewhere. A future interactive session that
+needs this (likely Phase 4+ if Anthropic hasn't shipped a
+Claude Design API by then) should start by reading that repo's
+scripts directory for the Playwright glue.
+
+**Relevance to GeneralStaff:**
+- Potential Phase 4+ automation vector for Claude Design if
+  Anthropic's API ships late.
+- ALSO a potential Engineer-role provider option per Phase 2's
+  "engineer swap to aider or opencode with Qwen" (FUTURE-
+  DIRECTIONS §2). If we're willing to automate a logged-in
+  Claude subscription, that's another path to the same
+  cost-profile shift.
+
+**Hard Rule 8 tension:** the rule says subscription use is
+"opt-in personal-use only" — deliberately cautious about
+automating consumer Anthropic subscriptions because of ToS
+gray area (RULE-RELAXATION §5.2). Any GeneralStaff-shipped
+feature that uses this pattern has to either (a) be clearly
+labeled as personal-use-only opt-in with warnings, or (b)
+wait for Anthropic to bless automation via API. Prefer (b)
+where possible.
+
+**Not a task.** Stub only; revisit when Phase 4 opens.
+
+
 **logo-creator MCP** — https://mcpmarket.com/tools/skills/logo-creator-1 — MCP tool for project logos, useful for Phase 7 branding with kriegspiel theme.
