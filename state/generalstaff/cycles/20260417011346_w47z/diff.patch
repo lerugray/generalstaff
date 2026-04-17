@@ -1,0 +1,165 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index a15934b..343fabe 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -76,9 +76,11 @@ Usage:
+                                                           Append a new task to tasks.json
+     Example: generalstaff task add --project=myapp "Fix login bug"
+ 
+-  generalstaff digest [--latest] [--date=YYYYMMDD]        Print a session digest to stdout
++  generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
++                                                          Print a session digest to stdout, or list all
+     Example: generalstaff digest --latest                # most recent digest
+     Example: generalstaff digest --date=20260416         # first digest from that day
++    Example: generalstaff digest --list                  # enumerate digests, newest first
+ 
+   generalstaff version                                    Show version + environment info (for bug reports)
+     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
+@@ -373,6 +375,7 @@ switch (command) {
+       options: {
+         latest: { type: "boolean", default: false },
+         date: { type: "string" },
++        list: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -380,6 +383,10 @@ switch (command) {
+       console.error("Error: --latest and --date are mutually exclusive");
+       process.exit(1);
+     }
++    if (digestValues.list && (digestValues.latest || digestValues.date)) {
++      console.error("Error: --list cannot be combined with --latest or --date");
++      process.exit(1);
++    }
+     const dispatcher = await loadDispatcherConfig();
+     const digestDir = resolve(getRootDir(), dispatcher.digest_dir);
+     const files = existsSync(digestDir)
+@@ -387,6 +394,33 @@ switch (command) {
+           .filter((f) => /^digest_\d{8}_\d{6}\.md$/.test(f))
+           .sort()
+       : [];
++    if (digestValues.list) {
++      if (files.length === 0) {
++        console.log("No digests found.");
++        break;
++      }
++      const sorted = [...files].sort().reverse();
++      for (const f of sorted) {
++        const content = readFileSync(join(digestDir, f), "utf8");
++        const m = f.match(/^digest_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.md$/);
++        const date = m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
++        const cyclesMatch = content.match(/\*\*Cycles:\*\*\s*(\d+)/);
++        const cycles = cyclesMatch ? cyclesMatch[1] : "?";
++        let verified = 0;
++        let failed = 0;
++        let skipped = 0;
++        for (const om of content.matchAll(/\*\*Outcome:\*\*\s*(\w+)/g)) {
++          const o = om[1];
++          if (o === "verified" || o === "verified_weak") verified++;
++          else if (o === "verification_failed") failed++;
++          else if (o === "cycle_skipped") skipped++;
++        }
++        console.log(
++          `${f}  ${date}  cycles=${cycles}  verified=${verified} failed=${failed} skipped=${skipped}`,
++        );
++      }
++      break;
++    }
+     if (files.length === 0) {
+       console.log("No digests found.");
+       break;
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index aa29855..fff9aa9 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -212,7 +212,7 @@
+   {
+     "id": "gs-061",
+     "title": "Add a 'generalstaff digest --list' subcommand that enumerates all digest files in digests/ with their date, total cycles, and verified/failed/skipped breakdown (parsed from the digest markdown). If no digests exist, print a clear message. Sort newest first. Add tests covering empty dir, one digest, and multiple digests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 3f6dc06..747a09b 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -610,6 +610,77 @@ projects:
+       const result = await runCli(["--help"]);
+       expect(result.stdout).toContain("generalstaff digest");
+     });
++
++    describe("--list", () => {
++      const SAMPLE_DIGEST = (cycles: number, verified: number, failed: number, skipped: number) => {
++        let md = `# GeneralStaff Session Digest\n\n**Date:** 2026-04-16T10:00:00.000Z\n**Duration:** 5m\n**Cycles:** ${cycles}\n\n`;
++        for (let i = 0; i < verified; i++) md += `## p — c${i}\n\n- **Outcome:** verified\n\n`;
++        for (let i = 0; i < failed; i++) md += `## p — f${i}\n\n- **Outcome:** verification_failed\n\n`;
++        for (let i = 0; i < skipped; i++) md += `## p — s${i}\n\n- **Outcome:** cycle_skipped\n\n`;
++        return md;
++      };
++
++      it("prints clear message when digests dir is empty", async () => {
++        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout).toContain("No digests found");
++      });
++
++      it("prints clear message when digests dir does not exist", async () => {
++        rmSync(DIGEST_DIR, { recursive: true, force: true });
++        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout).toContain("No digests found");
++      });
++
++      it("lists a single digest with parsed counts", async () => {
++        writeFileSync(
++          join(DIGEST_DIR, "digest_20260416_100000.md"),
++          SAMPLE_DIGEST(3, 2, 1, 0),
++        );
++        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout).toContain("digest_20260416_100000.md");
++        expect(result.stdout).toContain("2026-04-16 10:00:00");
++        expect(result.stdout).toContain("cycles=3");
++        expect(result.stdout).toContain("verified=2");
++        expect(result.stdout).toContain("failed=1");
++        expect(result.stdout).toContain("skipped=0");
++      });
++
++      it("lists multiple digests newest first", async () => {
++        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), SAMPLE_DIGEST(1, 1, 0, 0));
++        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), SAMPLE_DIGEST(2, 1, 1, 0));
++        writeFileSync(join(DIGEST_DIR, "digest_20260416_180000.md"), SAMPLE_DIGEST(4, 2, 1, 1));
++        const result = await runCli(["digest", "--list"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        const lines = result.stdout.trim().split("\n");
++        expect(lines.length).toBe(3);
++        expect(lines[0]).toContain("digest_20260416_180000.md");
++        expect(lines[1]).toContain("digest_20260416_090000.md");
++        expect(lines[2]).toContain("digest_20260415_120000.md");
++        expect(lines[0]).toContain("cycles=4");
++        expect(lines[0]).toContain("skipped=1");
++      });
++
++      it("rejects combining --list with --latest", async () => {
++        const result = await runCli(
++          ["digest", "--list", "--latest"],
++          DIGEST_TEST_DIR,
++        );
++        expect(result.exitCode).not.toBe(0);
++        expect(result.stderr).toContain("--list cannot be combined");
++      });
++
++      it("rejects combining --list with --date", async () => {
++        const result = await runCli(
++          ["digest", "--list", "--date=20260416"],
++          DIGEST_TEST_DIR,
++        );
++        expect(result.exitCode).not.toBe(0);
++        expect(result.stderr).toContain("--list cannot be combined");
++      });
++    });
+   });
+ 
+   describe("help completeness", () => {
