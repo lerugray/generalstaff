@@ -6,6 +6,7 @@ import {
   checkCycleWatchdog,
   regenerateDigest,
   parseFormattedDuration,
+  runSessionChain,
 } from "../src/session";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -880,5 +881,78 @@ describe("checkCycleWatchdog", () => {
     // would otherwise trigger. We return null so the session stays readable.
     expect(checkCycleWatchdog(100, 0)).toBe(null);
     expect(checkCycleWatchdog(100, -5)).toBe(null);
+  });
+});
+
+describe("runSessionChain", () => {
+  const baseOpts = { budgetMinutes: 10, dryRun: true };
+
+  it("rejects chain=0 with a clear error", async () => {
+    const runner = async () => [];
+    await expect(runSessionChain(baseOpts, 0, runner)).rejects.toThrow(
+      /--chain must be a positive integer/,
+    );
+  });
+
+  it("rejects negative chain values", async () => {
+    const runner = async () => [];
+    await expect(runSessionChain(baseOpts, -2, runner)).rejects.toThrow(
+      /--chain must be a positive integer/,
+    );
+  });
+
+  it("rejects non-integer chain values", async () => {
+    const runner = async () => [];
+    await expect(runSessionChain(baseOpts, 1.5, runner)).rejects.toThrow(
+      /--chain must be a positive integer/,
+    );
+  });
+
+  it("runs the runner exactly once when chain=1", async () => {
+    let calls = 0;
+    const runner = async () => {
+      calls++;
+      return [];
+    };
+    const runs = await runSessionChain(baseOpts, 1, runner);
+    expect(calls).toBe(1);
+    expect(runs).toHaveLength(1);
+  });
+
+  it("runs the runner N times when chain=N", async () => {
+    let calls = 0;
+    const seenOpts: typeof baseOpts[] = [];
+    const runner = async (opts: typeof baseOpts) => {
+      calls++;
+      seenOpts.push(opts);
+      return [makeCycleResult({ cycle_id: `cycle-${calls}` })];
+    };
+    const runs = await runSessionChain(baseOpts, 3, runner);
+    expect(calls).toBe(3);
+    expect(runs).toHaveLength(3);
+    // Each child session receives the same options
+    expect(seenOpts.every((o) => o.budgetMinutes === 10 && o.dryRun === true)).toBe(true);
+    // The results from each run are collected in order
+    expect(runs[0][0].cycle_id).toBe("cycle-1");
+    expect(runs[2][0].cycle_id).toBe("cycle-3");
+  });
+
+  it("runs sessions sequentially, not in parallel", async () => {
+    const log: string[] = [];
+    let tick = 0;
+    const runner = async () => {
+      const t = ++tick;
+      log.push(`start-${t}`);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      log.push(`end-${t}`);
+      return [];
+    };
+    await runSessionChain(baseOpts, 3, runner);
+    // Sequential: start-1, end-1, start-2, end-2, ...
+    expect(log).toEqual([
+      "start-1", "end-1",
+      "start-2", "end-2",
+      "start-3", "end-3",
+    ]);
   });
 });

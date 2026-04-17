@@ -455,6 +455,30 @@ export async function runSession(options: SessionOptions) {
   return allResults;
 }
 
+// gs-126: run N back-to-back sessions. Each child session does its own
+// setup/digest/teardown; there is no shared state other than the on-disk
+// project state that runSession already persists. The runner parameter
+// is injected for unit tests so we can exercise the loop without spinning
+// up a real fleet.
+export async function runSessionChain(
+  options: SessionOptions,
+  chain: number,
+  runner: (opts: SessionOptions) => Promise<CycleResult[]> = runSession,
+): Promise<CycleResult[][]> {
+  if (!Number.isInteger(chain) || chain < 1) {
+    throw new Error(`--chain must be a positive integer (got ${chain})`);
+  }
+  const runs: CycleResult[][] = [];
+  for (let i = 0; i < chain; i++) {
+    if (chain > 1) {
+      console.log(`\n=== Chained session ${i + 1} of ${chain} ===`);
+    }
+    const r = await runner(options);
+    runs.push(r);
+  }
+  return runs;
+}
+
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
