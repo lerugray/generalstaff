@@ -500,7 +500,7 @@
   {
     "id": "gs-109",
     "title": "Produce a README outline proposal at `docs/README-PROPOSAL.md` following the matiassingers/awesome-readme checklist structure. Read README.md (existing), CLAUDE.md, DESIGN.md, PIVOT-2026-04-15.md, FUTURE-DIRECTIONS-2026-04-15.md, RULE-RELAXATION-2026-04-15.md, UI-VISION-2026-04-15.md, and the PHASE-1-*-2026-04-15 docs. Output section headers + one-bullet-per-section summary + cite which source doc each bullet draws from. Do NOT modify README.md itself. Do NOT write any narrative prose in the sections. Only propose structure and what-belongs-where. This is pure retrieval/outlining on behalf of the README dogfooding experiment proposed in FUTURE-DIRECTIONS §6 — the user will handle voice, positioning, and final prose in a later interactive session. Create the docs/ directory if it doesn't exist.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
