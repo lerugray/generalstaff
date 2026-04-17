@@ -1,0 +1,271 @@
+diff --git a/src/session.ts b/src/session.ts
+index e4fa1da..3efa31c 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -233,9 +233,28 @@ export async function runSession(options: SessionOptions) {
+       (new Date(result.ended_at).getTime() - new Date(result.started_at).getTime()) / 1000,
+     );
+     const cycleDurationStr = formatDuration(cycleDurationSec);
++    // ETA: project the session's natural end using the avg cycle duration
++    // observed so far. Need ≥2 cycles for a meaningful sample; a single
++    // data point would swing wildly on any cycle that happens to be fast
++    // or slow.
++    let etaStr = "";
++    if (allResults.length >= 2) {
++      const totalCycleMs = allResults.reduce((sum, r) => {
++        const d = new Date(r.ended_at).getTime() - new Date(r.started_at).getTime();
++        return sum + Math.max(0, d);
++      }, 0);
++      const avgCycleMs = totalCycleMs / allResults.length;
++      const remainingBudgetMs = Math.max(0, remainingMinutes() * 60_000);
++      const estRemainingCycles =
++        avgCycleMs > 0 ? Math.floor(remainingBudgetMs / avgCycleMs) : 0;
++      const projectedEnd = new Date(Date.now() + estRemainingCycles * avgCycleMs);
++      const hh = String(projectedEnd.getHours()).padStart(2, "0");
++      const mm = String(projectedEnd.getMinutes()).padStart(2, "0");
++      etaStr = `, projected end: ${hh}:${mm}`;
++    }
+     console.log(
+       `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
+-        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining)`,
++        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining${etaStr})`,
+     );
+ 
+     // Guard against runaway empty cycles
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index d57d136..e7bb693 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -314,7 +314,7 @@
+   {
+     "id": "gs-078",
+     "title": "Improve session console output to include an ETA: after each cycle completes, print 'Cycle N completed ... (projected end: HH:MM)'. Projected end = now + (remaining cycles estimate * avg cycle duration). Skip ETA if fewer than 2 cycles have completed (need a sample). Add test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+@@ -476,7 +476,7 @@
+   {
+     "id": "gs-105",
+     "title": "Remove the now-dead Telegram notify invocation from scripts/run_session.bat. src/notify.ts handles end-of-session notification directly from bun now (see 2026-04-17 notify refactor), so the powershell call in the .bat is redundant (and unreachable in detached launch contexts anyway). Keep scripts/notify_telegram.ps1 for manual re-sends. Update the .bat's comment block to reflect the new flow.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/helpers/verify_cycle_eta_log.ts b/tests/helpers/verify_cycle_eta_log.ts
+new file mode 100644
+index 0000000..9ab0cb2
+--- /dev/null
++++ b/tests/helpers/verify_cycle_eta_log.ts
+@@ -0,0 +1,182 @@
++// Isolated test helper: proves runSession emits an ETA hint on the
++// cycle-completion line once at least 2 cycles have completed, and
++// omits it for the first cycle.
++
++import { mock } from "bun:test";
++import { join } from "path";
++import { mkdirSync, rmSync } from "fs";
++import type { ProjectConfig, CycleResult } from "../../src/types";
++
++const TEST_DIR = join(import.meta.dir, "..", "fixtures", "session_eta_log_test");
++
++let executeCycleCalls = 0;
++
++const project: ProjectConfig = {
++  id: "test-proj",
++  path: TEST_DIR,
++  priority: 1,
++  engineer_command: "echo ok",
++  verification_command: "bun test",
++  cycle_budget_minutes: 1,
++  work_detection: "tasks_json",
++  concurrency_detection: "none",
++  branch: "bot/work",
++  auto_merge: false,
++  hands_off: [],
++};
++
++mock.module("../../src/projects", () => ({
++  loadProjectsYaml: async () => ({
++    projects: [project],
++    dispatcher: {
++      state_dir: join(TEST_DIR, "state"),
++      fleet_state_file: "fleet_state.json",
++      stop_file: "STOP",
++      override_file: "OVERRIDE",
++      picker: "priority_staleness",
++      max_cycles_per_project_per_session: 100,
++      log_dir: "logs",
++      digest_dir: "digests",
++    },
++  }),
++}));
++
++mock.module("../../src/cycle", () => ({
++  countCommitsAhead: async () => 0,
++  executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
++    executeCycleCalls++;
++    // Fixed 60s cycle duration so the ETA math is deterministic.
++    const start = new Date(Date.now() - 60_000).toISOString();
++    const end = new Date().toISOString();
++    return {
++      cycle_id: `cycle-${executeCycleCalls}`,
++      project_id: p.id,
++      started_at: start,
++      ended_at: end,
++      cycle_start_sha: "abc",
++      cycle_end_sha: "def",
++      engineer_exit_code: 0,
++      verification_outcome: "passed",
++      reviewer_verdict: "verified",
++      final_outcome: "verified",
++      reason: "ok",
++    };
++  },
++}));
++
++mock.module("../../src/dispatcher", () => ({
++  pickNextProject: async () => ({ project, reason: "test pick" }),
++  shouldChain: async () => ({ chain: true, reason: "more work" }),
++  estimateSessionPlan: () => ({
++    picks: [],
++    per_project: [],
++    total_cycles: 0,
++    budget_used_minutes: 0,
++    budget_remaining_minutes: 0,
++  }),
++}));
++
++mock.module("../../src/safety", () => ({
++  isStopFilePresent: async () => false,
++}));
++
++mock.module("../../src/state", () => ({
++  loadFleetState: async () => ({
++    version: 1,
++    updated_at: new Date().toISOString(),
++    projects: {},
++  }),
++  saveFleetState: async () => {},
++  loadProjectState: async (id: string) => ({
++    project_id: id,
++    current_cycle_id: null,
++    last_cycle_id: null,
++    last_cycle_outcome: null,
++    last_cycle_at: null,
++    cycles_this_session: 0,
++  }),
++  saveProjectState: async () => {},
++  getRootDir: () => TEST_DIR,
++}));
++
++mock.module("../../src/audit", () => ({
++  appendProgress: async () => {},
++}));
++
++mock.module("../../src/work_detection", () => ({
++  countRemainingWork: async () => 0,
++}));
++
++const { runSession } = await import("../../src/session");
++
++async function run() {
++  const captured: string[] = [];
++  const origLog = console.log;
++  console.log = (...args: unknown[]) => {
++    captured.push(args.map((a) => String(a)).join(" "));
++  };
++
++  try {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++    mkdirSync(join(TEST_DIR, "digests"), { recursive: true });
++
++    // maxCycles=2 to get exactly 2 cycles — enough to exercise both the
++    // pre-ETA (cycle 1, too few samples) and post-ETA (cycle 2) paths.
++    const results = await runSession({
++      budgetMinutes: 60,
++      dryRun: true,
++      maxCycles: 2,
++    });
++
++    console.log = origLog;
++
++    const joined = captured.join("\n");
++    const errors: string[] = [];
++
++    const cycle1Line = captured.find((l) => l.includes("Cycle 1 completed"));
++    const cycle2Line = captured.find((l) => l.includes("Cycle 2 completed"));
++
++    if (!cycle1Line) {
++      errors.push("missing Cycle 1 completion log line");
++    } else if (cycle1Line.includes("projected end:")) {
++      errors.push(
++        `Cycle 1 line should not include ETA (only 1 sample), got: ${cycle1Line}`,
++      );
++    }
++
++    if (!cycle2Line) {
++      errors.push("missing Cycle 2 completion log line");
++    } else if (!/projected end: \d{2}:\d{2}/.test(cycle2Line)) {
++      errors.push(
++        `Cycle 2 line should include 'projected end: HH:MM', got: ${cycle2Line}`,
++      );
++    }
++
++    if (executeCycleCalls !== 2) {
++      errors.push(`expected 2 executeCycle calls, got ${executeCycleCalls}`);
++    }
++    if (results.length !== 2) {
++      errors.push(`expected 2 cycle results, got ${results.length}`);
++    }
++
++    const output = {
++      pass: errors.length === 0,
++      execute_cycle_calls: executeCycleCalls,
++      result_count: results.length,
++      cycle1_line: cycle1Line ?? "",
++      cycle2_line: cycle2Line ?? "",
++      captured: joined,
++      errors,
++    };
++    process.stdout.write(JSON.stringify(output) + "\n");
++    process.exit(errors.length > 0 ? 1 : 0);
++  } catch (err) {
++    console.log = origLog;
++    console.error("Test helper crashed:", err);
++    process.exit(1);
++  } finally {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  }
++}
++
++run();
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 35bc82a..232ec0f 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -549,6 +549,22 @@ describe("runSession safeguards", () => {
+     );
+   }, 30_000);
+ 
++  it("emits an ETA on cycle completion once ≥2 cycles have completed (gs-078)", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_cycle_eta_log.ts",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    expect(result.execute_cycle_calls).toBe(2);
++    expect(result.result_count).toBe(2);
++    // Cycle 1: too few samples → no ETA
++    expect(String(result.cycle1_line)).not.toContain("projected end:");
++    // Cycle 2: enough samples → HH:MM ETA appears
++    expect(String(result.cycle2_line)).toMatch(/projected end: \d{2}:\d{2}/);
++  }, 30_000);
++
+   it("stops at max-cycles when maxCycles hits before budget", async () => {
+     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+       "verify_max_cycles.ts",
