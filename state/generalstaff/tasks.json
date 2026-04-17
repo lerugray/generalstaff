@@ -736,5 +736,11 @@
     "title": "Add a 'generalstaff history --outcome=<verified|verified_weak|verification_failed|cycle_skipped>' filter in src/cli.ts history command (alongside existing --verified-only). Threads into loadCycleHistory / loadCycleHistoryJson as an extra option (src/audit.ts collectCycleEnds). Error 'Error: unknown --outcome value' with the valid list when passed a bad value. If both --verified-only and --outcome are set, error 'Error: --verified-only and --outcome are mutually exclusive'. Add tests covering each valid value, invalid value, and mutual exclusion.",
     "status": "pending",
     "priority": 2
+  },
+  {
+    "id": "gs-149",
+    "title": "Fact-extraction research note. Append a dated section '## 2026-04-17 — pi-autoresearch + karpathy/autoresearch mechanisms' to research-notes.md documenting two mechanisms directly relevant to GeneralStaff Phase 2 design: (a) pi-autoresearch's CONFIDENCE SCORING (session noise floor, 2.0x threshold for 'real' improvement, green/yellow/red ranges) — extract the exact formula and how session noise is computed; (b) pi-autoresearch's AUTO-REVERT-ON-REGRESSION mechanism — extract what triggers a revert, what metric is measured, how state is restored. Also briefly summarize karpathy/autoresearch as the canonical inspiration and note what pi-autoresearch added on top. Use WebFetch on https://github.com/davebcn87/pi-autoresearch and https://github.com/karpathy/autoresearch. PURE FACT EXTRACTION — NO editorializing, NO recommendations, NO opinion, NO proposals for how to apply. Docs-only task: no code changes, no new tests. research-notes.md is NOT in the hands-off list, so this is safe. Verification will pass as a no-code diff.",
+    "status": "pending",
+    "priority": 3
   }
 ]
