@@ -250,5 +250,95 @@
     "title": "In audit.ts summarizeCosts, add per-project breakdown of reviewer_invoked events (currently aggregated across fleet). Return { byProject: Record<string, {invocations, estTokens}>, total: {...} }. Wire into 'history --costs' output as an extra column when --project is not specified. Add tests.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-068",
+    "title": "Add --json flag to 'generalstaff digest' (pair with --list/--latest/--date from gs-057). Emits the same data as the markdown digest but as a structured JSON object (duration, cycle count, per-cycle results array with outcome/sha/diff_stats). Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-069",
+    "title": "Add test coverage for countCommitsAhead in cycle.ts. Use a tmp git repo fixture: init repo, make a commit on master, create a branch, verify count=0. Add a commit on the branch, verify count=1. Merge branch into master, verify count=0. Also verify returns 0 when branch doesn't exist.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-070",
+    "title": "Add 'generalstaff bot-status [--project=<id>]' CLI command that prints the bot branch's commit count ahead of HEAD for each project (using countCommitsAhead). Indicates pending unmerged work. Format: 'myproject: 2 commit(s) on bot/work not yet on master'. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-071",
+    "title": "In work_detection.ts, add a 'git_unmerged' mode that counts commits on bot/work ahead of master as a proxy for pending work (alternative to tasks_json for projects without an explicit task file). Add VALID_WORK_DETECTION entry, cycle.ts dispatch, and tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-072",
+    "title": "Add a formatPercent helper to src/format.ts (0.42 -> '42%', 1.0 -> '100%', 0 -> '0%', handles NaN/Infinity/negatives by returning '?'). Include tests covering boundaries and invalid inputs.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-073",
+    "title": "In src/summary.ts, add a per-project success-rate line to the Cycles section of the fleet summary: 'Success rate: NN% (X/Y verified)' using formatPercent. Only shown when a project has at least one cycle. Add test.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-074",
+    "title": "Add a 'generalstaff log --level=error' filter that shows only cycle_skipped, verification_failed, and entries with event names ending in _error from PROGRESS.jsonl. Pair with existing --lines/--project flags. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-075",
+    "title": "Add test coverage for the OpenRouter reviewer code path in reviewer.ts. Mock the global fetch to return a well-formed chat-completion response; verify invokeOpenRouterReviewer builds the correct request body (model, messages, temperature), parses the response, and fail-safes correctly on HTTP errors and malformed JSON.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-076",
+    "title": "In state.ts, add a getRecentCycles(projectId, n) helper that returns the last N cycle results by reading PROGRESS.jsonl (cycle_end events only, newest first). Wire into the status --json output so the JSON includes a 'recent_cycles' array. Add tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-077",
+    "title": "Add a 'generalstaff history --verified-only' flag that filters out cycle_skipped and verification_failed rows from the history output. Works in both default and --format=compact modes. Add tests.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-078",
+    "title": "Improve session console output to include an ETA: after each cycle completes, print 'Cycle N completed ... (projected end: HH:MM)'. Projected end = now + (remaining cycles estimate * avg cycle duration). Skip ETA if fewer than 2 cycles have completed (need a sample). Add test.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-079",
+    "title": "Add a test for extractChangedFiles in cycle.ts that covers the --diff-filter=A added-only case: given a diff with only new files and no modifications, verify the function returns the added file paths correctly.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-080",
+    "title": "In src/audit.ts, add a function loadProgressEvents(projectId, filterFn) that returns a filtered array of parsed ProgressEntry objects from PROGRESS.jsonl. Use it to refactor existing readCycleEnds/summarizeCosts for consistency. Add tests covering filter matches, empty file, malformed lines.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-081",
+    "title": "Add a docs section to CLAUDE.md (Session context) documenting the OpenRouter reviewer opt-in (env vars GENERALSTAFF_REVIEWER_PROVIDER and OPENROUTER_API_KEY, where the key is sourced from on Ray's machines, how the .bat wrapper sets them). Update the memory-discipline note's cross-references.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-082",
+    "title": "In src/projects.ts, add a getProject(id) lookup helper with a typed 'not found' error that includes the list of available project ids. Refactor existing string-match fallbacks (like in cli.ts task list) to use it. Add tests.",
+    "status": "pending",
+    "priority": 3
   }
 ]
