@@ -936,7 +936,7 @@
   {
     "id": "gs-156",
     "title": "Create tests/providers.calibration.test.ts — a dual-run reviewer-calibration harness that takes an array of fixture diffs (create 3 minimal fixtures under tests/fixtures/reviewer_calibration/: verified_simple (small tests-added diff), hands_off_violation (touches src/safety.ts), verification_failed_scope_drift (diff unrelated to any stated task)). For each fixture, invoke invokeReviewerProvider from src/reviewer.ts TWICE: once with provider='claude' (skipped when CLAUDE_BINARY env not present — the test prints 'skip: no claude binary' and passes), once with provider='ollama' (skipped when Ollama is unreachable via checkOllamaReachable — also prints skip and passes). Parse both responses via parseReviewerResponse and assert the verdicts AGREE on each fixture (verified/verified, verification_failed/verification_failed). On disagreement, fail with a diff of the two responses. This is a GATE test for Phase 2 tier taxonomy — catches Ollama drifting from Claude on straightforward cases. Marked skip-when-unavailable so CI without local Ollama/claude still passes. Fixtures live under tests/fixtures/reviewer_calibration/ (new subdir). Do NOT modify src/reviewer.ts.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

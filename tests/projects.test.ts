@@ -24,7 +24,10 @@ function writeYaml(name: string, content: string): string {
 }
 
 function cleanup() {
-  rmSync(FIXTURES, { recursive: true, force: true });
+  // Only nuke this test's own yaml subdir — sibling fixture subdirs
+  // (e.g. tests/fixtures/reviewer_calibration/, which holds tracked
+  // data files) must not be collateral damage.
+  rmSync(join(FIXTURES, "yaml"), { recursive: true, force: true });
 }
 
 describe("projects.yaml loader", () => {
