@@ -530,7 +530,7 @@
   {
     "id": "gs-114",
     "title": "Add a regression test for the engineer timeout Windows process-tree kill (src/engineer.ts killChildTree). Since testing the actual spawn+kill path is cross-platform-flaky in a unit test, instead assert that on process.platform === 'win32', the code path uses spawnSync('taskkill', ['/pid', ..., '/f', '/t']) rather than child.kill('SIGTERM'). Mock spawnSync and verify the call shape. Also verify that on non-Windows platforms the signal path is used.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
