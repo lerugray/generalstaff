@@ -335,6 +335,33 @@ export async function invokeOllamaReviewer(prompt: string): Promise<string> {
   }
 }
 
+// Strips balanced <think>...</think> blocks from a reviewer response.
+// Qwen3 and other reasoning models emit their internal chain-of-thought
+// inside <think> tags before the final answer; those tags may themselves
+// contain JSON-looking text that would poison the brace-matching parse
+// below. Stack-based so nested tags are handled correctly. Unbalanced
+// closing tags (more </think> than <think>) are silently dropped.
+export function stripThinkTags(s: string): string {
+  let result = "";
+  let i = 0;
+  let depth = 0;
+  while (i < s.length) {
+    if (s.startsWith("<think>", i)) {
+      depth++;
+      i += 7;
+      continue;
+    }
+    if (s.startsWith("</think>", i)) {
+      if (depth > 0) depth--;
+      i += 8;
+      continue;
+    }
+    if (depth === 0) result += s[i];
+    i++;
+  }
+  return result;
+}
+
 export function parseReviewerResponse(raw: string): {
   verdict: ReviewerVerdict;
   response: ReviewerResponse | null;
@@ -343,7 +370,7 @@ export function parseReviewerResponse(raw: string): {
   // Try to extract JSON from the response
   // The reviewer is instructed to return JSON only, but might include
   // markdown fences or prose despite instructions
-  const trimmed = raw.trim();
+  const trimmed = stripThinkTags(raw).trim();
 
   // Try direct parse first
   try {

@@ -94,6 +94,42 @@ describe("parseReviewerResponse", () => {
     expect(result.verdict).toBe("verification_failed");
     expect(result.parseError).not.toBeNull();
   });
+
+  it("parses JSON that follows a <think>...</think> reasoning block", () => {
+    const raw =
+      "<think>Let me review the diff carefully and check each task.</think>\n" +
+      JSON.stringify(VALID_RESPONSE);
+    const result = parseReviewerResponse(raw);
+    expect(result.verdict).toBe("verified");
+    expect(result.response?.reason).toBe("All tasks completed correctly");
+    expect(result.parseError).toBeNull();
+  });
+
+  it("parses JSON correctly when <think> tags are nested", () => {
+    const raw =
+      "<think>outer reasoning <think>inner subthought</think> more outer</think>" +
+      JSON.stringify(VALID_RESPONSE);
+    const result = parseReviewerResponse(raw);
+    expect(result.verdict).toBe("verified");
+    expect(result.response?.reason).toBe("All tasks completed correctly");
+    expect(result.parseError).toBeNull();
+  });
+
+  it("ignores JSON-looking text inside <think> tags and parses the trailing real JSON", () => {
+    const decoyVerdict = {
+      verdict: "verification_failed",
+      reason: "this is the decoy inside think",
+    };
+    const raw =
+      "<think>Maybe the answer is " +
+      JSON.stringify(decoyVerdict) +
+      " but let me reconsider.</think>\n" +
+      JSON.stringify(VALID_RESPONSE);
+    const result = parseReviewerResponse(raw);
+    expect(result.verdict).toBe("verified");
+    expect(result.response?.reason).toBe("All tasks completed correctly");
+    expect(result.parseError).toBeNull();
+  });
 });
 
 describe("invokeOpenRouterReviewer", () => {

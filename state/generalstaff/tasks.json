@@ -566,7 +566,7 @@
   {
     "id": "gs-120",
     "title": "Add test coverage for parseReviewerResponse when the response contains `<think>...</think>` tags before the JSON (Qwen3 reasoning mode can emit these in Ollama responses). Expected behavior: strip the think-tags or scan past them, then parse the trailing JSON. Add fixtures covering: think-tags wrapping reasoning with JSON after, nested think-tags, think-tags that contain JSON-looking text that should NOT be parsed.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
