@@ -1,8 +1,9 @@
-// Isolated test helper: proves that executeCycle runs verification and
-// reviewer even when the engineer exits with a non-zero code.
-//
-// This runs in a subprocess so that mock.module calls don't leak into
-// other test files. Exits 0 and prints JSON on success, exits 1 on failure.
+// Isolated test helper: verifies executeCycle's handling of engineer
+// exit codes. Argv[2] selects the exit code to simulate:
+//   "0"    -> clean exit, cycle proceeds through verification + reviewer
+//   "1"    -> non-zero exit, cycle blocks before verification
+//   "null" -> killed by signal, cycle blocks before verification
+// (Regression test for gs-111.)
 
 import { mock } from "bun:test";
 import { join } from "path";
@@ -10,22 +11,28 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_test");
+const exitCodeArg = process.argv[2] ?? "0";
+const engineerExitCode: number | null =
+  exitCodeArg === "null" ? null : parseInt(exitCodeArg, 10);
+
+const TEST_DIR = join(
+  import.meta.dir,
+  "..",
+  "fixtures",
+  `cycle_test_exit_${exitCodeArg}`,
+);
 const PROJ_DIR = join(TEST_DIR, "proj");
 
 let verificationCalled = false;
 let reviewerCalled = false;
 
-// --- Module mocks (safe here — isolated subprocess) ---
-
 mock.module("../../src/engineer", () => ({
   runEngineer: async (project: ProjectConfig) => {
-    // Create a real commit so the cycle sees a non-empty diff
     writeFileSync(join(project.path, "bot-output.txt"), "engineer output\n");
     await $`git -C ${project.path} add bot-output.txt`.quiet();
     await $`git -C ${project.path} commit -m "mock engineer commit"`.quiet();
     return {
-      exitCode: 1,
+      exitCode: engineerExitCode,
       durationSeconds: 3,
       timedOut: false,
       logPath: join(TEST_DIR, "engineer.log"),
@@ -104,17 +111,15 @@ mock.module("../../src/audit", () => ({
 
 const { executeCycle } = await import("../../src/cycle");
 
-// --- Test setup ---
-
 async function run() {
   try {
     rmSync(TEST_DIR, { recursive: true, force: true });
     mkdirSync(PROJ_DIR, { recursive: true });
 
-    // Set up a real git repo for cycle.ts git commands
     await $`git -C ${PROJ_DIR} init`.quiet();
     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
+    await $`git -C ${PROJ_DIR} config commit.gpgsign false`.quiet();
     writeFileSync(join(PROJ_DIR, "README.md"), "initial\n");
     await $`git -C ${PROJ_DIR} add README.md`.quiet();
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
@@ -148,31 +153,17 @@ async function run() {
     const result = await executeCycle(project, config);
 
     const output = {
-      pass: true,
       engineer_exit_code: result.engineer_exit_code,
       verification_called: verificationCalled,
       reviewer_called: reviewerCalled,
       verification_outcome: result.verification_outcome,
       reviewer_verdict: result.reviewer_verdict,
       final_outcome: result.final_outcome,
+      reason: result.reason,
     };
 
-    // Validate assertions
-    const errors: string[] = [];
-    if (result.engineer_exit_code !== 1) errors.push(`engineer_exit_code: expected 1, got ${result.engineer_exit_code}`);
-    if (!verificationCalled) errors.push("verification was NOT called");
-    if (!reviewerCalled) errors.push("reviewer was NOT called");
-    if (result.verification_outcome !== "passed") errors.push(`verification_outcome: expected "passed", got "${result.verification_outcome}"`);
-    if (result.reviewer_verdict !== "verified") errors.push(`reviewer_verdict: expected "verified", got "${result.reviewer_verdict}"`);
-    if (result.final_outcome !== "verified") errors.push(`final_outcome: expected "verified", got "${result.final_outcome}"`);
-
-    if (errors.length > 0) {
-      output.pass = false;
-      console.error("Assertion failures:\n" + errors.join("\n"));
-    }
-
     console.log(JSON.stringify(output));
-    process.exit(errors.length > 0 ? 1 : 0);
+    process.exit(0);
   } catch (err) {
     console.error("Test helper crashed:", err);
     process.exit(1);
