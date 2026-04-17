@@ -970,7 +970,7 @@
   {
     "id": "gs-161",
     "title": "Add 'provider_invoked' and 'provider_fallback' entries to ProgressEventType union AND VALID_EVENTS runtime list in src/types.ts (mirror the pattern gs-134 fixed for worktree_preflight — both lists must match or isProgressEntry silently rejects). provider_invoked fires when any non-reviewer provider is invoked (initially only from src/digest_llm.ts and src/cycle_summary_llm.ts); data shape { provider_id: string, role: 'digest'|'cycle_summary'|'classifier', prompt_length: number, duration_ms: number, success: boolean }. provider_fallback fires when a provider fails and the caller falls back to the templated path; data shape { provider_id: string, role: string, error: string }. Add a test in tests/types.test.ts extending the 'accepts all valid event types' list so omission can't silently recur. Do NOT emit these events from src/reviewer.ts — the reviewer already has its own reviewer_invoked / reviewer_fallback events; those stay as-is per Phase 2 scoping. Actually emitting the new events from digest_llm.ts / cycle_summary_llm.ts is a follow-up (can land in the same task or as a trivial follow-on — draft handles this as a one-line appendProgress call site if time permits).",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
