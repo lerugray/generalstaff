@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -531,6 +531,89 @@ describe("loadCycleHistory --verified-only filter", () => {
     expect(rows.every((r) => r.outcome !== "cycle_skipped" && r.outcome !== "verification_failed"))
       .toBe(true);
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe("loadCycleHistoryJson", () => {
+  it("returns empty array when no state dir exists", async () => {
+    rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
+    const rows = await loadCycleHistoryJson(undefined);
+    expect(rows).toEqual([]);
+  });
+
+  it("emits the required keys for each cycle", async () => {
+    await appendProgress("proj-json", "cycle_end", {
+      outcome: "verified",
+      reason: "tests pass",
+      start_sha: "aaa111",
+      end_sha: "bbb222",
+      duration_seconds: 90,
+      diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
+    }, "cycle-json-abc");
+
+    const rows = await loadCycleHistoryJson("proj-json");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("cycle-json-abc");
+    expect(rows[0].project_id).toBe("proj-json");
+    expect(rows[0].outcome).toBe("verified");
+    expect(rows[0].reason).toBe("tests pass");
+    expect(rows[0].diff_stats).toEqual({ files_changed: 2, insertions: 10, deletions: 3 });
+    expect(typeof rows[0].started_at).toBe("string");
+    // started_at should be ISO 8601 (full form, not a truncated display string)
+    expect(rows[0].started_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it("computes started_at as ended_at minus duration_seconds", async () => {
+    writeCycleEnd("proj-json-t", "c-timed", "2026-04-15T12:00:00Z", 60);
+    const rows = await loadCycleHistoryJson("proj-json-t");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].started_at).toBe("2026-04-15T11:59:00.000Z");
+  });
+
+  it("defaults missing diff_stats to null and missing reason to empty string", async () => {
+    await appendProgress("proj-json-m", "cycle_end", {
+      outcome: "verified",
+      start_sha: "a",
+      end_sha: "b",
+      duration_seconds: 10,
+    }, "c-min");
+    const rows = await loadCycleHistoryJson("proj-json-m");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].diff_stats).toBeNull();
+    expect(rows[0].reason).toBe("");
+  });
+
+  it("respects limit, since/until, and verifiedOnly filters", async () => {
+    writeCycleEnd("proj-json-f", "c-old", "2026-04-10T12:00:00Z", 60);
+    writeCycleEnd("proj-json-f", "c-new", "2026-04-20T12:00:00Z", 60);
+    writeCycleEnd("proj-json-f", "c-fail", "2026-04-21T12:00:00Z", 60, "verification_failed");
+
+    const allRows = await loadCycleHistoryJson("proj-json-f");
+    expect(allRows).toHaveLength(3);
+
+    const sinceRows = await loadCycleHistoryJson("proj-json-f", 20, { since: "20260415" });
+    expect(sinceRows.map((r) => r.cycle_id)).toEqual(["c-new", "c-fail"]);
+
+    const verifiedRows = await loadCycleHistoryJson("proj-json-f", 20, { verifiedOnly: true });
+    expect(verifiedRows.every((r) => r.outcome !== "verification_failed")).toBe(true);
+
+    const limited = await loadCycleHistoryJson("proj-json-f", 1);
+    expect(limited).toHaveLength(1);
+    expect(limited[0].cycle_id).toBe("c-fail");
+  });
+
+  it("produces JSON-serializable output that round-trips", async () => {
+    await appendProgress("proj-json-rt", "cycle_end", {
+      outcome: "verified",
+      reason: "ok",
+      start_sha: "a",
+      end_sha: "b",
+      duration_seconds: 5,
+      diff_stats: { files_changed: 1, insertions: 1, deletions: 0 },
+    }, "c-rt");
+    const rows = await loadCycleHistoryJson("proj-json-rt");
+    const parsed = JSON.parse(JSON.stringify(rows));
+    expect(parsed).toEqual(rows);
   });
 });
 

@@ -380,7 +380,7 @@
   {
     "id": "gs-089",
     "title": "Add 'generalstaff history --format=json' for machine-readable cycle history output. Emit an array of cycle objects with { cycle_id, project_id, started_at, outcome, diff_stats, reason }. Parse-able by external tools. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

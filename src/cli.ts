@@ -15,7 +15,7 @@ import {
   ProjectNotFoundError,
 } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
-import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -68,11 +68,12 @@ Usage:
   generalstaff start                                      Remove STOP file (allow dispatch)
     Example: generalstaff start                         # resume after a stop
 
-  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
+  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact|json] [--costs]
                        [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
                                                           Cycle history (compact: tab-delimited, no headers)
     Example: generalstaff history --lines=50
     Example: generalstaff history --project=myapp --format=compact
+    Example: generalstaff history --format=json          # machine-readable cycle history
     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
@@ -297,22 +298,36 @@ switch (command) {
       },
       allowPositionals: false,
     });
+    const fmt = historyValues.format;
+    if (fmt !== "table" && fmt !== "compact" && fmt !== "json") {
+      console.error(`Error: unknown --format value: ${fmt} (supported: table, compact, json)`);
+      process.exit(1);
+    }
+    const loadOpts = {
+      since: historyValues.since,
+      until: historyValues.until,
+      verifiedOnly: historyValues["verified-only"],
+    };
+    const limit = parseInt(historyValues.lines!, 10);
+    if (fmt === "json") {
+      let jsonRows;
+      try {
+        jsonRows = await loadCycleHistoryJson(historyValues.project, limit, loadOpts);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(2);
+      }
+      console.log(JSON.stringify(jsonRows, null, 2));
+      break;
+    }
     let rows;
     try {
-      rows = await loadCycleHistory(
-        historyValues.project,
-        parseInt(historyValues.lines!, 10),
-        {
-          since: historyValues.since,
-          until: historyValues.until,
-          verifiedOnly: historyValues["verified-only"],
-        },
-      );
+      rows = await loadCycleHistory(historyValues.project, limit, loadOpts);
     } catch (err) {
       console.error(`Error: ${(err as Error).message}`);
       process.exit(2);
     }
-    if (historyValues.format === "compact") {
+    if (fmt === "compact") {
       if (historyValues.costs) {
         const summary = await summarizeCosts(historyValues.project);
         const byProject = historyValues.project ? undefined : summary.by_project;
