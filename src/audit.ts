@@ -65,6 +65,7 @@ export type LogLevel = "error";
 
 export interface TailProgressOptions {
   level?: LogLevel;
+  grep?: RegExp;
 }
 
 export function isErrorEntry(entry: ProgressEntry): boolean {
@@ -72,6 +73,24 @@ export function isErrorEntry(entry: ProgressEntry): boolean {
   if (entry.event.endsWith("_error")) return true;
   if (entry.data?.outcome === "verification_failed") return true;
   return false;
+}
+
+// Compile a user-supplied regex string with the case-insensitive flag. Throws a
+// clear Error on invalid syntax so callers can surface a single-line message
+// instead of the raw engine output.
+export function compileGrepPattern(pattern: string): RegExp {
+  try {
+    return new RegExp(pattern, "i");
+  } catch (err) {
+    throw new Error(
+      `Invalid --grep pattern '${pattern}': ${(err as Error).message}`,
+    );
+  }
+}
+
+export function matchesGrep(entry: ProgressEntry, pattern: RegExp): boolean {
+  const haystack = `${entry.event} ${JSON.stringify(entry.data ?? {})}`;
+  return pattern.test(haystack);
 }
 
 export async function tailProgressLog(
@@ -102,8 +121,12 @@ export async function tailProgressLog(
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
 
-    const filtered =
-      options.level === "error" ? entries.filter(isErrorEntry) : entries;
+    let filtered = entries;
+    if (options.level === "error") filtered = filtered.filter(isErrorEntry);
+    if (options.grep) {
+      const re = options.grep;
+      filtered = filtered.filter((e) => matchesGrep(e, re));
+    }
     const tail = filtered.slice(-lines);
     for (const entry of tail) {
       printEntry(entry);
@@ -111,8 +134,14 @@ export async function tailProgressLog(
 
     if (entries.length === 0) {
       console.log("No audit log entries found.");
-    } else if (filtered.length === 0 && options.level === "error") {
-      console.log("No error-level audit log entries found.");
+    } else if (filtered.length === 0) {
+      if (options.grep && options.level === "error") {
+        console.log("No error-level audit log entries matching grep pattern.");
+      } else if (options.grep) {
+        console.log("No audit log entries matching grep pattern.");
+      } else if (options.level === "error") {
+        console.log("No error-level audit log entries found.");
+      }
     }
   }
 }
@@ -131,14 +160,15 @@ async function tailSingleProject(
   const content = await readFile(filePath, "utf8");
   const allLines = content.trim().split("\n").filter(Boolean);
 
-  if (options.level === "error") {
+  if (options.level === "error" || options.grep) {
     const matches: string[] = [];
     for (const line of allLines) {
       try {
         const parsed = JSON.parse(line);
-        if (isProgressEntry(parsed) && isErrorEntry(parsed)) {
-          matches.push(line);
-        }
+        if (!isProgressEntry(parsed)) continue;
+        if (options.level === "error" && !isErrorEntry(parsed)) continue;
+        if (options.grep && !matchesGrep(parsed, options.grep)) continue;
+        matches.push(line);
       } catch {
         // skip malformed
       }
@@ -149,7 +179,17 @@ async function tailSingleProject(
       if (isProgressEntry(parsed)) printEntry(parsed);
     }
     if (matches.length === 0) {
-      console.log(`No error-level entries for project "${projectId}".`);
+      if (options.grep && options.level === "error") {
+        console.log(
+          `No error-level entries matching grep pattern for project "${projectId}".`,
+        );
+      } else if (options.grep) {
+        console.log(
+          `No entries matching grep pattern for project "${projectId}".`,
+        );
+      } else {
+        console.log(`No error-level entries for project "${projectId}".`);
+      }
     }
     return;
   }

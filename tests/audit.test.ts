@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -263,6 +263,147 @@ describe("tailProgressLog", () => {
     expect(lines[0]).toContain("session_start");
     // No bracket-delimited cycle id
     expect(lines[0]).not.toMatch(/\[.*\]/);
+  });
+});
+
+describe("tailProgressLog --grep filter", () => {
+  it("filters single-project entries by a case-insensitive regex against event + data", async () => {
+    await appendProgress("proj-g", "cycle_start", { start_sha: "aaa111" }, "c1");
+    await appendProgress("proj-g", "cycle_end", { outcome: "verified", reason: "tests pass" }, "c1");
+    await appendProgress("proj-g", "cycle_end", { outcome: "verification_failed", reason: "flaky" }, "c2");
+
+    const pattern = compileGrepPattern("VERIF");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-g", 10, { grep: pattern }),
+    );
+    // Matches both 'verified' and 'verification_failed' (case-insensitive, substring)
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("outcome=verified ");
+    expect(lines[1]).toContain("verification_failed");
+  });
+
+  it("matches against event name as well as data", async () => {
+    await appendProgress("proj-gn", "cycle_start", { start_sha: "abc" }, "c1");
+    await appendProgress("proj-gn", "engineer_invoked", { cmd: "test" }, "c1");
+    await appendProgress("proj-gn", "cycle_end", { outcome: "verified" }, "c1");
+
+    const pattern = compileGrepPattern("engineer");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-gn", 10, { grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("engineer_invoked");
+  });
+
+  it("filters all-projects output by grep", async () => {
+    await appendProgress("proj-ga", "cycle_skipped", { reason: "no work" }, "c1");
+    await new Promise((r) => setTimeout(r, 5));
+    await appendProgress("proj-gb", "cycle_end", { outcome: "verified" }, "c2");
+
+    const pattern = compileGrepPattern("skipped");
+    const lines = await captureLog(() =>
+      tailProgressLog(undefined, 10, { grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("cycle_skipped");
+  });
+
+  it("combines grep with level=error", async () => {
+    await appendProgress("proj-gc", "cycle_skipped", { reason: "empty diff" }, "c1");
+    await appendProgress("proj-gc", "cycle_skipped", { reason: "hands-off block" }, "c2");
+    await appendProgress("proj-gc", "cycle_end", { outcome: "verification_failed", reason: "tests failed" }, "c3");
+
+    const pattern = compileGrepPattern("empty");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-gc", 10, { level: "error", grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("empty diff");
+  });
+
+  it("prints a clear message when no entries match grep (single project)", async () => {
+    await appendProgress("proj-gn2", "cycle_end", { outcome: "verified" }, "c1");
+    const pattern = compileGrepPattern("nonexistent_token_xyz");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-gn2", 10, { grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No entries matching grep pattern");
+    expect(lines[0]).toContain("proj-gn2");
+  });
+
+  it("prints a clear message when no entries match grep (all projects)", async () => {
+    await appendProgress("proj-gn3", "cycle_end", { outcome: "verified" }, "c1");
+    const pattern = compileGrepPattern("nonexistent_token_xyz");
+    const lines = await captureLog(() =>
+      tailProgressLog(undefined, 10, { grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No audit log entries matching grep pattern");
+  });
+
+  it("prints a combined message when grep + level both exclude everything", async () => {
+    await appendProgress("proj-gn4", "cycle_end", { outcome: "verified" }, "c1");
+    const pattern = compileGrepPattern("verified");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-gn4", 10, { level: "error", grep: pattern }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No error-level entries matching grep pattern");
+  });
+
+  it("respects the lines limit when grep filter is active", async () => {
+    for (let i = 0; i < 5; i++) {
+      await appendProgress("proj-gl", "cycle_skipped", { reason: "x" }, `c${i}`);
+    }
+    const pattern = compileGrepPattern("skipped");
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-gl", 2, { grep: pattern }),
+    );
+    expect(lines).toHaveLength(2);
+  });
+});
+
+describe("compileGrepPattern", () => {
+  it("compiles a valid pattern with case-insensitive flag", () => {
+    const re = compileGrepPattern("hello");
+    expect(re.flags).toContain("i");
+    expect(re.test("HELLO world")).toBe(true);
+  });
+
+  it("accepts regex metacharacters", () => {
+    const re = compileGrepPattern("verified|skipped");
+    expect(re.test("outcome=verified")).toBe(true);
+    expect(re.test("cycle_skipped")).toBe(true);
+    expect(re.test("cycle_start")).toBe(false);
+  });
+
+  it("throws a clear error on invalid regex", () => {
+    expect(() => compileGrepPattern("[unterminated")).toThrow(/Invalid --grep pattern/);
+  });
+});
+
+describe("matchesGrep", () => {
+  function entry(event: string, data: Record<string, unknown> = {}): ProgressEntry {
+    return { timestamp: new Date().toISOString(), event: event as any, data };
+  }
+
+  it("matches against event name", () => {
+    expect(matchesGrep(entry("cycle_start"), /cycle/i)).toBe(true);
+    expect(matchesGrep(entry("cycle_start"), /verified/i)).toBe(false);
+  });
+
+  it("matches against data field values", () => {
+    expect(
+      matchesGrep(entry("cycle_end", { outcome: "verified" }), /verified/i),
+    ).toBe(true);
+    expect(
+      matchesGrep(entry("cycle_end", { reason: "tests pass" }), /tests/i),
+    ).toBe(true);
+  });
+
+  it("handles missing data gracefully", () => {
+    expect(matchesGrep(entry("cycle_start"), /cycle/i)).toBe(true);
   });
 });
 
