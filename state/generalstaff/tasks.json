@@ -404,7 +404,7 @@
   {
     "id": "gs-093",
     "title": "Add a formatFileCount(n: number) helper to src/format.ts that pluralizes: 0 -> '0 files', 1 -> '1 file', 2 -> '2 files'. Use it in writeDigest's 'What got done' list (replacing the current '${n} file(s)' template). Add tests covering 0, 1, 2, large numbers, and negative (should return '0 files').",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

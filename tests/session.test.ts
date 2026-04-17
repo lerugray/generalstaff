@@ -205,8 +205,8 @@ describe("writeDigest", () => {
 
     expect(content).toContain("## What got done");
     // Fake SHAs won't resolve to a commit subject, so label falls back to cycle_id
-    expect(content).toMatch(/1\. cycle-aaa\s+_\(3 file\(s\), \+42\/-5\)_/);
-    expect(content).toMatch(/2\. cycle-bbb\s+_\(1 file\(s\), \+8\/-0\)_/);
+    expect(content).toMatch(/1\. cycle-aaa\s+_\(3 files, \+42\/-5\)_/);
+    expect(content).toMatch(/2\. cycle-bbb\s+_\(1 file, \+8\/-0\)_/);
   });
 
   it("renders an 'Issues' section with 'None' when all cycles verified", async () => {
