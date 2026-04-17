@@ -290,7 +290,7 @@
   {
     "id": "gs-074",
     "title": "Add a 'generalstaff log --level=error' filter that shows only cycle_skipped, verification_failed, and entries with event names ending in _error from PROGRESS.jsonl. Pair with existing --lines/--project flags. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

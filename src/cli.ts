@@ -61,8 +61,10 @@ Usage:
     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
 
-  generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
+  generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
+                                                          Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
+    Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
 
   generalstaff summary [--no-tests] [--format=json]       Dashboard: cycles, outcomes, duration, tasks, tests
     Example: generalstaff summary                       # one-screen fleet overview
@@ -237,10 +239,17 @@ switch (command) {
       options: {
         project: { type: "string" },
         lines: { type: "string", default: "20" },
+        level: { type: "string" },
       },
       allowPositionals: false,
     });
-    await tailProgressLog(values.project, parseInt(values.lines!, 10));
+    if (values.level !== undefined && values.level !== "error") {
+      console.error(`Error: --level must be 'error' (got '${values.level}')`);
+      process.exit(2);
+    }
+    await tailProgressLog(values.project, parseInt(values.lines!, 10), {
+      level: values.level as "error" | undefined,
+    });
     break;
   }
 

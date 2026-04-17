@@ -44,12 +44,26 @@ export async function appendProgress(
   await appendFile(filePath, JSON.stringify(entry) + "\n", "utf8");
 }
 
+export type LogLevel = "error";
+
+export interface TailProgressOptions {
+  level?: LogLevel;
+}
+
+export function isErrorEntry(entry: ProgressEntry): boolean {
+  if (entry.event === "cycle_skipped") return true;
+  if (entry.event.endsWith("_error")) return true;
+  if (entry.data?.outcome === "verification_failed") return true;
+  return false;
+}
+
 export async function tailProgressLog(
   projectId: string | undefined,
   lines: number = 20,
+  options: TailProgressOptions = {},
 ) {
   if (projectId) {
-    await tailSingleProject(projectId, lines);
+    await tailSingleProject(projectId, lines, options);
   } else {
     // Show across all projects
     const stateDir = join(getRootDir(), "state");
@@ -83,18 +97,26 @@ export async function tailProgressLog(
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
     );
 
-    const tail = entries.slice(-lines);
+    const filtered =
+      options.level === "error" ? entries.filter(isErrorEntry) : entries;
+    const tail = filtered.slice(-lines);
     for (const entry of tail) {
       printEntry(entry);
     }
 
     if (entries.length === 0) {
       console.log("No audit log entries found.");
+    } else if (filtered.length === 0 && options.level === "error") {
+      console.log("No error-level audit log entries found.");
     }
   }
 }
 
-async function tailSingleProject(projectId: string, lines: number) {
+async function tailSingleProject(
+  projectId: string,
+  lines: number,
+  options: TailProgressOptions = {},
+) {
   const filePath = progressPath(projectId);
   if (!existsSync(filePath)) {
     console.log(`No PROGRESS.jsonl for project "${projectId}".`);
@@ -103,8 +125,31 @@ async function tailSingleProject(projectId: string, lines: number) {
 
   const content = await readFile(filePath, "utf8");
   const allLines = content.trim().split("\n").filter(Boolean);
-  const tail = allLines.slice(-lines);
 
+  if (options.level === "error") {
+    const matches: string[] = [];
+    for (const line of allLines) {
+      try {
+        const parsed = JSON.parse(line);
+        if (isProgressEntry(parsed) && isErrorEntry(parsed)) {
+          matches.push(line);
+        }
+      } catch {
+        // skip malformed
+      }
+    }
+    const tail = matches.slice(-lines);
+    for (const line of tail) {
+      const parsed = JSON.parse(line);
+      if (isProgressEntry(parsed)) printEntry(parsed);
+    }
+    if (matches.length === 0) {
+      console.log(`No error-level entries for project "${projectId}".`);
+    }
+    return;
+  }
+
+  const tail = allLines.slice(-lines);
   for (const line of tail) {
     try {
       const parsed = JSON.parse(line);
