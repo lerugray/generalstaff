@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   invokeOllamaReviewer,
   invokeOpenRouterReviewer,
+  invokeReviewerWithFallback,
   parseReviewerResponse,
 } from "../src/reviewer";
 
@@ -379,5 +380,139 @@ describe("invokeOllamaReviewer", () => {
     expect(result).toContain("fetch failed");
     expect(result).toContain("ECONNREFUSED");
     expect(result).toContain("Ollama server running");
+  });
+});
+
+describe("invokeReviewerWithFallback", () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.OPENROUTER_API_KEY;
+  const originalHost = process.env.OLLAMA_HOST;
+  const originalModel = process.env.GENERALSTAFF_REVIEWER_MODEL;
+
+  beforeEach(() => {
+    delete process.env.GENERALSTAFF_REVIEWER_MODEL;
+    delete process.env.OLLAMA_HOST;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalApiKey;
+    if (originalHost === undefined) delete process.env.OLLAMA_HOST;
+    else process.env.OLLAMA_HOST = originalHost;
+    if (originalModel === undefined) delete process.env.GENERALSTAFF_REVIEWER_MODEL;
+    else process.env.GENERALSTAFF_REVIEWER_MODEL = originalModel;
+  });
+
+  it("falls back when primary returns a [REVIEWER ERROR] response", async () => {
+    // Primary = openrouter with no API key → returns error synchronously.
+    // Fallback = ollama, mocked to succeed.
+    delete process.env.OPENROUTER_API_KEY;
+
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(
+        JSON.stringify({ message: { content: "fallback ok" } }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const fallbackLog: { value: string | null } = { value: null };
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "openrouter",
+      fallback: "ollama",
+      onFallback: (primaryError) => {
+        fallbackLog.value = primaryError;
+      },
+    });
+
+    expect(result.usedFallback).toBe(true);
+    expect(result.rawResponse).toBe("fallback ok");
+    expect(fallbackLog.value).not.toBeNull();
+    expect(fallbackLog.value).toContain("[REVIEWER ERROR]");
+    expect(fallbackLog.value).toContain("OPENROUTER_API_KEY");
+    expect(urls).toEqual(["http://localhost:11434/api/chat"]);
+  });
+
+  it("does not fall back when primary succeeds", async () => {
+    process.env.OPENROUTER_API_KEY = "sk-test";
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "primary ok" } }] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+
+    const fallbackLog: { value: string | null } = { value: null };
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "openrouter",
+      fallback: "ollama",
+      onFallback: (primaryError) => {
+        fallbackLog.value = primaryError;
+      },
+    });
+
+    expect(result.usedFallback).toBe(false);
+    expect(result.rawResponse).toBe("primary ok");
+    expect(fallbackLog.value).toBeNull();
+    expect(urls).toEqual(["https://openrouter.ai/api/v1/chat/completions"]);
+  });
+
+  it("returns the fallback error when both primary and fallback fail", async () => {
+    delete process.env.OPENROUTER_API_KEY;
+    globalThis.fetch = (async () => {
+      return new Response("ollama down", { status: 500, statusText: "Server Error" });
+    }) as unknown as typeof fetch;
+
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "openrouter",
+      fallback: "ollama",
+    });
+
+    expect(result.usedFallback).toBe(true);
+    expect(result.rawResponse).toContain("[REVIEWER ERROR]");
+    expect(result.rawResponse).toContain("Ollama 500");
+  });
+
+  it("does not retry when fallback equals primary", async () => {
+    let callCount = 0;
+    globalThis.fetch = (async () => {
+      callCount += 1;
+      return new Response("nope", { status: 500, statusText: "Server Error" });
+    }) as unknown as typeof fetch;
+
+    const fallbackLog: { value: string | null } = { value: null };
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "ollama",
+      fallback: "ollama",
+      onFallback: (primaryError) => {
+        fallbackLog.value = primaryError;
+      },
+    });
+
+    expect(result.usedFallback).toBe(false);
+    expect(result.rawResponse).toContain("[REVIEWER ERROR]");
+    expect(callCount).toBe(1);
+    expect(fallbackLog.value).toBeNull();
+  });
+
+  it("does not retry when fallback is unset", async () => {
+    let callCount = 0;
+    globalThis.fetch = (async () => {
+      callCount += 1;
+      return new Response("nope", { status: 500, statusText: "Server Error" });
+    }) as unknown as typeof fetch;
+
+    const result = await invokeReviewerWithFallback("prompt", "/tmp", {
+      provider: "ollama",
+      fallback: "",
+    });
+
+    expect(result.usedFallback).toBe(false);
+    expect(result.rawResponse).toContain("[REVIEWER ERROR]");
+    expect(callCount).toBe(1);
   });
 });

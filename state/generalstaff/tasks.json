@@ -386,7 +386,7 @@
   {
     "id": "gs-090",
     "title": "Add a reviewer provider fallback chain. In src/reviewer.ts, if the primary provider (from GENERALSTAFF_REVIEWER_PROVIDER) returns a response starting with '[REVIEWER ERROR]', retry once using the provider named in GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER (env var). Log the fallback attempt via appendProgress. Skip fallback if unset or equal to primary. Add tests for: fallback triggered, fallback not triggered (primary succeeded), fallback also fails, fallback equals primary (no retry).",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

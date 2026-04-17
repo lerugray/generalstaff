@@ -93,14 +93,19 @@ export async function runReviewer(
   // is structured JSON-in/JSON-out so a tools-capable agent is not
   // required on any of these paths.
   const provider = (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "claude").toLowerCase();
-  let rawResponse: string;
-  if (provider === "openrouter") {
-    rawResponse = await invokeOpenRouterReviewer(prompt);
-  } else if (provider === "ollama") {
-    rawResponse = await invokeOllamaReviewer(prompt);
-  } else {
-    rawResponse = await spawnClaude(prompt, cwdOverride ?? project.path);
-  }
+  const fallback = (process.env.GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER ?? "").toLowerCase();
+  const cwd = cwdOverride ?? project.path;
+  const { rawResponse } = await invokeReviewerWithFallback(prompt, cwd, {
+    provider,
+    fallback,
+    onFallback: async (primaryError) => {
+      await appendProgress(project.id, "reviewer_fallback", {
+        primary_provider: provider,
+        fallback_provider: fallback,
+        primary_error: primaryError.slice(0, 500),
+      }, cycleId);
+    },
+  });
 
   await writeCycleFile(
     project.id,
@@ -177,6 +182,54 @@ async function spawnClaude(prompt: string, cwd: string): Promise<string> {
       resolve(`[REVIEWER ERROR] Failed to spawn claude: ${err.message}`);
     });
   });
+}
+
+// Dispatches a single reviewer call to the configured provider.
+// "claude" (default) uses spawnClaude; "openrouter" and "ollama" use
+// the HTTP-based invokers below. Unknown provider names fall back to
+// claude rather than erroring — the env var is user-facing.
+export async function invokeReviewerProvider(
+  provider: string,
+  prompt: string,
+  cwd: string,
+): Promise<string> {
+  const p = provider.toLowerCase();
+  if (p === "openrouter") return invokeOpenRouterReviewer(prompt);
+  if (p === "ollama") return invokeOllamaReviewer(prompt);
+  return spawnClaude(prompt, cwd);
+}
+
+// Runs the primary reviewer provider and, if the response begins with
+// `[REVIEWER ERROR]` (the sentinel used by every provider invoker for
+// recoverable failures), retries once against the fallback provider.
+// Fallback is skipped when unset, equal to the primary, or when the
+// primary response is not an error. The onFallback callback fires
+// before the retry so callers can log the attempt.
+export async function invokeReviewerWithFallback(
+  prompt: string,
+  cwd: string,
+  opts: {
+    provider?: string;
+    fallback?: string;
+    onFallback?: (primaryError: string) => void | Promise<void>;
+  } = {},
+): Promise<{ rawResponse: string; usedFallback: boolean }> {
+  const provider = (opts.provider ?? "claude").toLowerCase();
+  const fallback = (opts.fallback ?? "").toLowerCase();
+  const primary = await invokeReviewerProvider(provider, prompt, cwd);
+
+  const shouldFallback =
+    primary.startsWith("[REVIEWER ERROR]") &&
+    fallback.length > 0 &&
+    fallback !== provider;
+
+  if (!shouldFallback) {
+    return { rawResponse: primary, usedFallback: false };
+  }
+
+  if (opts.onFallback) await opts.onFallback(primary);
+  const retry = await invokeReviewerProvider(fallback, prompt, cwd);
+  return { rawResponse: retry, usedFallback: true };
 }
 
 // OpenRouter-backed reviewer invocation. Uses the OpenAI-compatible
