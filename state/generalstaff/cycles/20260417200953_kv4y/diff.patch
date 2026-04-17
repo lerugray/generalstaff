@@ -1,0 +1,264 @@
+diff --git a/src/cycle_summary_llm.ts b/src/cycle_summary_llm.ts
+new file mode 100644
+index 0000000..b8d34ca
+--- /dev/null
++++ b/src/cycle_summary_llm.ts
+@@ -0,0 +1,86 @@
++// GeneralStaff — LLM-backed cycle description (gs-155, Phase 2)
++//
++// generateCycleDescription produces a single-line (<=120 char) human-
++// readable description of what a cycle did, suitable for digest
++// "What got done" sections. Standalone and side-effect-free so it
++// can be unit-tested with stub providers. Wiring into writeDigest is
++// a follow-up (gs-158 covers the narrative path; cycle description
++// replacement is deferred).
++
++import type { CycleResult } from "./types";
++import type { LLMProvider } from "./providers/types";
++
++export interface CycleDescriptionResult {
++  description: string;
++  fellBack: boolean;
++  error?: string;
++}
++
++const MAX_DESCRIPTION_CHARS = 120;
++
++export async function generateCycleDescription(
++  result: CycleResult,
++  diffStat: string,
++  provider: LLMProvider,
++): Promise<CycleDescriptionResult> {
++  const prompt = buildCycleDescriptionPrompt(result, diffStat);
++  try {
++    const { content, error } = await provider.invoke(prompt, {
++      maxTokens: 80,
++      temperature: 0,
++    });
++    if (error) {
++      return { description: "", fellBack: true, error };
++    }
++    const cleaned = normalizeDescription(content ?? "");
++    if (cleaned.length === 0) {
++      return {
++        description: "",
++        fellBack: true,
++        error: "empty provider content",
++      };
++    }
++    return { description: cleaned, fellBack: false };
++  } catch (err) {
++    return {
++      description: "",
++      fellBack: true,
++      error: err instanceof Error ? err.message : String(err),
++    };
++  }
++}
++
++export function buildCycleDescriptionPrompt(
++  result: CycleResult,
++  diffStat: string,
++): string {
++  const lines: string[] = [];
++  lines.push(`Cycle ${result.cycle_id} in project ${result.project_id}.`);
++  lines.push(`Outcome: ${result.final_outcome}.`);
++  if (result.diff_stats) {
++    const { files_changed, insertions, deletions } = result.diff_stats;
++    lines.push(
++      `Diff: ${files_changed} file(s), +${insertions}/-${deletions}.`,
++    );
++  }
++  const trimmedStat = diffStat.trim();
++  if (trimmedStat.length > 0) {
++    lines.push("Diff stat summary:");
++    lines.push(trimmedStat);
++  }
++  lines.push("");
++  lines.push(
++    "Write a single-line human-readable description (max ~80 characters) " +
++      "of what this cycle did. No bullets, no markdown, no newlines — just " +
++      "one short sentence.",
++  );
++  return lines.join("\n");
++}
++
++function normalizeDescription(raw: string): string {
++  const singleLine = raw.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
++  if (singleLine.length <= MAX_DESCRIPTION_CHARS) {
++    return singleLine;
++  }
++  return singleLine.slice(0, MAX_DESCRIPTION_CHARS - 1) + "…";
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 38cfb87..a98ba49 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -929,8 +929,9 @@
+   {
+     "id": "gs-155",
+     "title": "Create src/cycle_summary_llm.ts with generateCycleDescription(result: CycleResult, diffStat: string, provider: LLMProvider): Promise<{ description: string; fellBack: boolean; error?: string }>. Build a tiny prompt (~150 tokens) from cycle_id, project_id, final_outcome, diff_stats, and diff_stat summary; ask for a single-line (max ~80 char) human-readable description of what the cycle did. Currently the digest's 'What got done' section uses fetchCommitSubject in writeDigest; this new function produces a richer one-liner that can optionally replace it. Provider invoked with maxTokens=80, temperature=0. Strip newlines from output so it stays single-line; truncate at 120 chars with ellipsis. On error return fellBack=true. Add tests in tests/cycle_summary_llm.test.ts with a stub provider: (a) happy path returns description, (b) provider strips internal newlines, (c) truncates oversize output, (d) error path fellBack=true. Do NOT wire into writeDigest in this task — that's gs-158's job behind a feature flag.",
+-    "status": "pending",
+-    "priority": 1
++    "status": "done",
++    "priority": 1,
++    "completed_at": "2026-04-17T20:20:00.000Z"
+   },
+   {
+     "id": "gs-156",
+diff --git a/tests/cycle_summary_llm.test.ts b/tests/cycle_summary_llm.test.ts
+new file mode 100644
+index 0000000..a9ada40
+--- /dev/null
++++ b/tests/cycle_summary_llm.test.ts
+@@ -0,0 +1,150 @@
++import { describe, expect, it } from "bun:test";
++import {
++  buildCycleDescriptionPrompt,
++  generateCycleDescription,
++} from "../src/cycle_summary_llm";
++import type {
++  LLMProvider,
++  ProviderInvokeOptions,
++  ProviderInvokeResult,
++} from "../src/providers/types";
++import type { CycleResult } from "../src/types";
++
++function makeCycle(overrides: Partial<CycleResult> = {}): CycleResult {
++  return {
++    cycle_id: "c1",
++    project_id: "generalstaff",
++    started_at: "2026-04-17T20:00:00.000Z",
++    ended_at: "2026-04-17T20:05:00.000Z",
++    cycle_start_sha: "a".repeat(40),
++    cycle_end_sha: "b".repeat(40),
++    engineer_exit_code: 0,
++    verification_outcome: "passed",
++    reviewer_verdict: "verified",
++    final_outcome: "verified",
++    reason: "ok",
++    diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
++    ...overrides,
++  };
++}
++
++function stubProvider(
++  fn: (prompt: string, opts?: ProviderInvokeOptions) => Promise<ProviderInvokeResult>,
++): LLMProvider {
++  return { name: "stub", invoke: fn };
++}
++
++describe("generateCycleDescription (gs-155)", () => {
++  it("returns description on happy path", async () => {
++    const provider = stubProvider(async () => ({
++      content: "Added digest narrative generator with fallback.",
++    }));
++    const res = await generateCycleDescription(makeCycle(), " src/foo.ts | 5 +", provider);
++    expect(res.fellBack).toBe(false);
++    expect(res.description).toBe("Added digest narrative generator with fallback.");
++    expect(res.error).toBeUndefined();
++  });
++
++  it("strips internal newlines and collapses whitespace", async () => {
++    const provider = stubProvider(async () => ({
++      content: "Refactored\n  reviewer\nprompt   loader.\n",
++    }));
++    const res = await generateCycleDescription(makeCycle(), "", provider);
++    expect(res.fellBack).toBe(false);
++    expect(res.description).toBe("Refactored reviewer prompt loader.");
++    expect(res.description).not.toContain("\n");
++  });
++
++  it("truncates oversize output with ellipsis", async () => {
++    const longContent = "x".repeat(200);
++    const provider = stubProvider(async () => ({ content: longContent }));
++    const res = await generateCycleDescription(makeCycle(), "", provider);
++    expect(res.fellBack).toBe(false);
++    expect(res.description.length).toBe(120);
++    expect(res.description.endsWith("…")).toBe(true);
++  });
++
++  it("falls back when provider returns an error", async () => {
++    const provider = stubProvider(async () => ({ content: "", error: "HTTP 503" }));
++    const res = await generateCycleDescription(makeCycle(), "", provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.description).toBe("");
++    expect(res.error).toBe("HTTP 503");
++  });
++
++  it("falls back when provider returns empty content", async () => {
++    const provider = stubProvider(async () => ({ content: "   \n  " }));
++    const res = await generateCycleDescription(makeCycle(), "", provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.description).toBe("");
++    expect(res.error).toBeDefined();
++  });
++
++  it("falls back when provider throws", async () => {
++    const provider: LLMProvider = {
++      name: "throws",
++      invoke: async () => {
++        throw new Error("network down");
++      },
++    };
++    const res = await generateCycleDescription(makeCycle(), "", provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.error).toContain("network down");
++  });
++
++  it("passes maxTokens=80 and temperature=0 to the provider", async () => {
++    let captured: ProviderInvokeOptions | undefined;
++    const provider = stubProvider(async (_prompt, opts) => {
++      captured = opts;
++      return { content: "ok" };
++    });
++    await generateCycleDescription(makeCycle(), "", provider);
++    expect(captured).toEqual({ maxTokens: 80, temperature: 0 });
++  });
++});
++
++describe("buildCycleDescriptionPrompt (gs-155)", () => {
++  it("includes cycle_id, project_id, and final_outcome", () => {
++    const prompt = buildCycleDescriptionPrompt(
++      makeCycle({ cycle_id: "cycle-42", project_id: "proj_x", final_outcome: "verified" }),
++      "",
++    );
++    expect(prompt).toContain("cycle-42");
++    expect(prompt).toContain("proj_x");
++    expect(prompt).toContain("verified");
++  });
++
++  it("includes diff_stats when present", () => {
++    const prompt = buildCycleDescriptionPrompt(
++      makeCycle({ diff_stats: { files_changed: 5, insertions: 120, deletions: 7 } }),
++      "",
++    );
++    expect(prompt).toContain("5 file(s)");
++    expect(prompt).toContain("+120");
++    expect(prompt).toContain("-7");
++  });
++
++  it("omits diff_stats line when absent", () => {
++    const cycle = makeCycle();
++    delete (cycle as Partial<CycleResult>).diff_stats;
++    const prompt = buildCycleDescriptionPrompt(cycle, "");
++    expect(prompt).not.toContain("Diff:");
++  });
++
++  it("includes diff stat summary when non-empty", () => {
++    const prompt = buildCycleDescriptionPrompt(makeCycle(), "src/foo.ts | 10 +++");
++    expect(prompt).toContain("Diff stat summary:");
++    expect(prompt).toContain("src/foo.ts | 10 +++");
++  });
++
++  it("omits diff stat summary when empty or whitespace", () => {
++    const prompt = buildCycleDescriptionPrompt(makeCycle(), "   \n  ");
++    expect(prompt).not.toContain("Diff stat summary:");
++  });
++
++  it("asks for a single-line response with no markdown", () => {
++    const prompt = buildCycleDescriptionPrompt(makeCycle(), "");
++    expect(prompt).toMatch(/single-line/);
++    expect(prompt.toLowerCase()).toContain("no newlines");
++  });
++});
