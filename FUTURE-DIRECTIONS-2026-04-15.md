@@ -999,6 +999,154 @@ generality signal than just "GS ran cycles on a second repo."
 
 ---
 
+## 10. Non-Programmer Distribution + Use Cases (Phase 5+)
+
+**Captured:** 2026-04-17 morning. Ray noted that GS should be
+usable by "average people" running simple side hustles — the
+concrete persona he named is a music teacher running a lesson
+gig. Distribution needs to catch up to that reach, with an
+install package and a manual/wiki for non-programmers.
+
+This section pairs with the VOICE.md human-livability thesis:
+the tool only makes work more livable *for more people* if more
+people can actually install and use it. Reach is part of the
+product.
+
+### The distribution gap
+
+Current prerequisites: bun installed, git installed, Claude CLI
+installed, an API key or Ollama, command-line comfort, and
+willingness to edit `projects.yaml` by hand. That's a developer
+starter kit. A music teacher, freelance writer, or small-ecommerce
+operator has zero of those.
+
+Every barrier in that list is a person who can't use the tool.
+Every person who can't use the tool is someone the human-
+livability thesis doesn't reach.
+
+### The install-package shape
+
+Phase 4's planned Tauri UI is the natural distribution vehicle.
+Tauri bundles a native shell around a web UI and ships as a
+one-click installer per platform (`.msi` on Windows, `.dmg` on
+Mac, `.AppImage`/`.deb` on Linux). The installer should bundle
+everything a non-programmer can't reasonably install themselves:
+
+- **Bun runtime** — embedded in the app, not a system dependency
+- **The GS source** — compiled or bundled, not cloned from git
+- **Ollama check** — optional install flow if the user wants
+  the free-local-reviewer path
+- **Claude / OpenRouter key setup UI** — guided entry, not env
+  vars; stored locally (per Rule 10), never hosted
+- **First-run `generalstaff init` wizard** — walks through
+  registering the first project without touching YAML
+
+The user never sees a terminal unless they want to. They never
+edit a config file by hand unless they want to. The power-user
+CLI stays available alongside; nothing about the UI replaces
+the programmer workflow.
+
+### The manual / wiki
+
+Non-programmer docs need to be a different artifact from the
+developer docs. Two distinct surfaces, probably both living in
+the repo:
+
+- **Developer docs** (what we have now): CLAUDE.md, DESIGN.md,
+  the PHASE-* plans, VOICE.md, FUTURE-DIRECTIONS. Audience
+  assumed to be programmers auditing the tool or contributing.
+- **User manual** (new, Phase 5+): scenario-driven, plain-
+  language, ships alongside the install package. Structure
+  should be "I want to do X — here's the recipe" rather than
+  "here's the CLI reference."
+
+Sample chapters the user manual might include:
+
+- *Getting started* — install, first project, first cycle
+- *"I run music lessons"* — scheduling, invoicing, website
+  updates via GS
+- *"I sell handmade goods"* — inventory sheets, listing
+  maintenance, customer auto-replies
+- *"I do freelance writing"* — editorial calendar, submission
+  tracking, invoice follow-ups
+- *Safety* — plain-language version of Hard Rules (what the
+  bot will and won't do)
+- *When something goes wrong* — how to read the digest, how to
+  STOP the bot, how to roll back
+
+### The Rule-1 boundary still applies
+
+Side-hustle use cases look creative-adjacent, but the correct
+application of GS to those cases is still correctness work:
+
+- GS good at: maintaining a lesson-tracking spreadsheet's
+  schema, updating website copy when prices change, generating
+  invoice PDFs from structured data, keeping a social-media-
+  post schedule file valid, running backup scripts.
+- GS bad at: writing lesson plans, drafting teaching
+  philosophies, designing product descriptions, picking what
+  songs to teach. That's taste work; the teacher keeps it.
+
+The user manual should be explicit about this split. The
+temptation, once a user sees GS work, will be to delegate
+creative decisions. The manual should push back: *"GS makes
+the mechanical work of running your business disappear; it
+deliberately doesn't touch the creative work that is your
+business."* That's the human-livability frame restated for
+the non-programmer reader.
+
+### The onboarding-wizard coupling
+
+§9's `generalstaff bootstrap` command becomes much more
+valuable when the user population includes non-programmers,
+because the bootstrap output is the first thing a non-programmer
+would otherwise have to write from scratch. In a world with the
+bootstrap + Tauri installer + wizard, a music teacher's
+onboarding is:
+
+1. Download + install GS (one click)
+2. Point it at a folder with their business's files (drag-drop)
+3. Review the bootstrap proposal (plain language, not YAML)
+4. Approve → GS starts running
+
+Three minutes, zero command-line exposure, and the user still
+owns all the rules, files, and decisions. That is the product.
+
+### Phase
+
+Phase 5+ for the full install package, user manual, and
+non-programmer onboarding flow. Depends on:
+
+- Phase 4 Tauri UI shipping (the installer vehicle)
+- §9 bootstrap command existing (the onboarding wizard backend)
+- §7 remote-access pattern (so work-PC and home-PC are both
+  reachable by the non-programmer user who owns them)
+
+Before shipping non-programmer distribution, the dogfooding
+evidence from §Dogfooding (see VOICE.md) needs to be strong
+enough that "download and run this on your small business's
+files" is a claim the README can make without hedging. That
+probably means: a clean run of at least a few months on the
+GS repo itself, visible PROGRESS.jsonl, zero user-facing
+surprises from the verification gate.
+
+### Why this matters for the voice
+
+The non-programmer distribution story is the **concrete test**
+of the human-livability thesis. If the tool's reach stops at
+programmers, it's a better open-source alternative to Polsia
+but it's not a labor-economics intervention. If a music teacher
+can install it, use it, and get 5 hours a week back from
+admin work, that's the thesis in practice — the kind of
+specific, verifiable claim a README can lead with.
+
+The README can eventually carry a line like *"If you can
+install a printer driver, you can run GeneralStaff."* That
+sentence is a product commitment, not marketing — and shipping
+Phase 5+ means honoring it.
+
+---
+
 ## Market observation: why no one else has built this
 
 Captured for reference, not as a design decision. Reasons it's
