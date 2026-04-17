@@ -673,6 +673,7 @@ describe("summarizeCosts", () => {
     expect(summary.prompt_chars).toBe(0);
     expect(summary.estimated_tokens).toBe(0);
     expect(summary.by_cycle).toEqual({});
+    expect(summary.by_project).toEqual({});
   });
 
   it("returns zero totals when project has no PROGRESS.jsonl", async () => {
@@ -744,6 +745,31 @@ describe("summarizeCosts", () => {
     expect(summary.prompt_chars).toBe(0);
     expect(summary.estimated_tokens).toBe(0);
   });
+
+  it("breaks costs down by project across the fleet", async () => {
+    await appendProgress("proj-x", "reviewer_invoked", { prompt_length: 400 }, "cycle-xxx111222333");
+    await appendProgress("proj-x", "reviewer_invoked", { prompt_length: 100 }, "cycle-xxx111222333");
+    await appendProgress("proj-y", "reviewer_invoked", { prompt_length: 200 }, "cycle-yyy111222333");
+
+    const summary = await summarizeCosts();
+    expect(Object.keys(summary.by_project).sort()).toEqual(["proj-x", "proj-y"]);
+    expect(summary.by_project["proj-x"].reviewer_invocations).toBe(2);
+    expect(summary.by_project["proj-x"].prompt_chars).toBe(500);
+    // 500 / 4 = 125 tokens
+    expect(summary.by_project["proj-x"].estimated_tokens).toBe(125);
+    expect(summary.by_project["proj-y"].reviewer_invocations).toBe(1);
+    expect(summary.by_project["proj-y"].prompt_chars).toBe(200);
+    expect(summary.by_project["proj-y"].estimated_tokens).toBe(50);
+    // Per-project totals should sum to the fleet total.
+    expect(summary.prompt_chars).toBe(700);
+  });
+
+  it("by_project contains only the requested project when scoped", async () => {
+    await appendProgress("proj-only", "reviewer_invoked", { prompt_length: 800 }, "cycle-onl111222333");
+    const summary = await summarizeCosts("proj-only");
+    expect(Object.keys(summary.by_project)).toEqual(["proj-only"]);
+    expect(summary.by_project["proj-only"].estimated_tokens).toBe(200);
+  });
 });
 
 describe("printHistoryCompact with costs column", () => {
@@ -781,6 +807,39 @@ describe("printHistoryCompact with costs column", () => {
   it("preserves 6-field output when costs argument is omitted", async () => {
     const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, false)));
     expect(lines[0].split("\t")).toHaveLength(6);
+  });
+
+  it("appends a per-project tokens column when byProject is provided", async () => {
+    const multiProjectRows = [
+      { cycle_id: "cycle-abc123", project: "alpha", outcome: "verified", duration: "1m", sha_range: "a..b", timestamp: "2026-04-16 12:00:00Z" },
+      { cycle_id: "cycle-def456", project: "beta",  outcome: "verified", duration: "2m", sha_range: "c..d", timestamp: "2026-04-16 12:05:00Z" },
+    ];
+    const costs = {
+      "cycle-abc123": { cycle_id: "cycle-abc123", reviewer_invocations: 1, prompt_chars: 400, estimated_tokens: 100 },
+      "cycle-def456": { cycle_id: "cycle-def456", reviewer_invocations: 1, prompt_chars: 800, estimated_tokens: 200 },
+    };
+    const byProject = {
+      alpha: { project_id: "alpha", reviewer_invocations: 1, prompt_chars: 400, estimated_tokens: 100 },
+      beta:  { project_id: "beta",  reviewer_invocations: 1, prompt_chars: 800, estimated_tokens: 200 },
+    };
+    const lines = await captureLog(() =>
+      Promise.resolve(printHistoryCompact(multiProjectRows, false, costs, byProject)),
+    );
+    expect(lines[0].split("\t")).toHaveLength(9);
+    expect(lines[0].split("\t")[8]).toBe("100"); // alpha project total
+    expect(lines[1].split("\t")[8]).toBe("200"); // beta project total
+  });
+
+  it("emits 0 in the per-project column when byProject lacks the row's project", async () => {
+    const costs = {
+      "cycle-abc123": { cycle_id: "cycle-abc123", reviewer_invocations: 1, prompt_chars: 400, estimated_tokens: 100 },
+      "cycle-def456": { cycle_id: "cycle-def456", reviewer_invocations: 2, prompt_chars: 800, estimated_tokens: 200 },
+    };
+    const byProject = {}; // unknown projects
+    const lines = await captureLog(() =>
+      Promise.resolve(printHistoryCompact(rows, false, costs, byProject)),
+    );
+    expect(lines[0].split("\t")[8]).toBe("0");
   });
 });
 
