@@ -135,6 +135,8 @@ export type ProgressEventType =
   | "reviewer_hallucination"
   | "worktree_preflight"
   | "cycle_rollback"
+  | "provider_invoked"
+  | "provider_fallback"
   | "cycle_end"
   | "session_start"
   | "session_end"
@@ -188,6 +190,7 @@ const VALID_EVENTS: readonly string[] = [
   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
   "reviewer_fallback", "reviewer_hallucination",
   "worktree_preflight", "cycle_rollback",
+  "provider_invoked", "provider_fallback",
   "cycle_end", "session_start", "session_end", "session_complete",
 ];
 
