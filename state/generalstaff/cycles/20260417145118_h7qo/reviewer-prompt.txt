@@ -1,0 +1,715 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 4f21be5..7ee914e 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -36,6 +36,12 @@ import {
+ } from "./summary";
+ import { formatRelativeTime } from "./format";
+ import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
++import {
++  loadRecentSessions,
++  formatSessionsTable,
++  parseSessionsFlag,
++  stripSessionsArgs,
++} from "./sessions";
+ 
+ const VERSION = "0.0.1";
+ 
+@@ -55,11 +61,14 @@ Usage:
+     Example: generalstaff cycle --project=myapp
+     Example: generalstaff cycle --project=myapp --dry-run
+ 
+-  generalstaff status [--json] [--watch[=N]]              Show fleet state
++  generalstaff status [--json] [--watch[=N]] [--sessions[=N]]
++                                                          Show fleet state
+     Example: generalstaff status
+     Example: generalstaff status --json                 # machine-readable output
+     Example: generalstaff status --watch                # refresh every 5s until Ctrl-C
+     Example: generalstaff status --watch=10             # refresh every 10s
++    Example: generalstaff status --sessions             # last 10 sessions as a table
++    Example: generalstaff status --sessions=20 --json   # last 20 sessions, JSON
+ 
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+@@ -218,8 +227,9 @@ switch (command) {
+   case "status": {
+     const rawStatusArgs = args.slice(1);
+     const watch = parseWatchFlag(rawStatusArgs);
++    const sessionsFlag = parseSessionsFlag(rawStatusArgs);
+     const { values: statusValues } = parseArgs({
+-      args: stripWatchArgs(rawStatusArgs),
++      args: stripSessionsArgs(stripWatchArgs(rawStatusArgs)),
+       options: {
+         json: { type: "boolean", default: false },
+       },
+@@ -231,6 +241,19 @@ switch (command) {
+       const fleet = await loadFleetState();
+       const stopped = await isStopFilePresent();
+ 
++      if (sessionsFlag.enabled) {
++        const sessions = await loadRecentSessions(sessionsFlag.limit);
++        if (statusValues.json) {
++          console.log(JSON.stringify(sessions, null, 2));
++        } else {
++          console.log(
++            `=== Recent sessions (last ${sessionsFlag.limit}) ===\n`,
++          );
++          console.log(formatSessionsTable(sessions));
++        }
++        return;
++      }
++
+       if (statusValues.json) {
+         const summaries = await Promise.all(
+           projects.map((p) => getProjectSummary(p, fleet)),
+diff --git a/src/session.ts b/src/session.ts
+index 30a585c..3bdff05 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -408,12 +408,18 @@ export async function runSession(options: SessionOptions) {
+   // with aggregated stats; written to the "_fleet" pseudo-project log so
+   // it isn't tied to any individual project's PROGRESS.jsonl.
+   const fleetBuckets = categorizeResults(allResults);
++  const reviewerProvider = process.env.GENERALSTAFF_REVIEWER_PROVIDER || "claude";
++  const reviewerModel = process.env.GENERALSTAFF_REVIEWER_MODEL;
++  const reviewerLabel = reviewerModel
++    ? `${reviewerProvider} (${reviewerModel})`
++    : reviewerProvider;
+   await appendProgress("_fleet", "session_complete", {
+     duration_minutes: Math.round(elapsed),
+     total_cycles: allResults.length,
+     total_verified: fleetBuckets.verified.length,
+     total_failed: fleetBuckets.failed.length,
+     stop_reason: stopReason,
++    reviewer: reviewerLabel,
+   });
+ 
+   // End-of-session Telegram notification. Moved here from the .bat
+diff --git a/src/sessions.ts b/src/sessions.ts
+new file mode 100644
+index 0000000..508c1db
+--- /dev/null
++++ b/src/sessions.ts
+@@ -0,0 +1,129 @@
++// GeneralStaff — recent-session summary for `generalstaff status --sessions`
++// (gs-127). Reads session_complete events from the _fleet PROGRESS.jsonl and
++// renders them as a table.
++
++import { join } from "path";
++import { getRootDir } from "./state";
++import { readJsonl } from "./audit";
++import { isProgressEntry } from "./types";
++import { formatDuration, formatRelativeTime } from "./format";
++
++export interface SessionSummary {
++  started_at: string;
++  duration_minutes: number;
++  total_cycles: number;
++  total_verified: number;
++  total_failed: number;
++  stop_reason: string;
++  reviewer: string;
++}
++
++function asString(v: unknown, fallback = "-"): string {
++  return typeof v === "string" && v.length > 0 ? v : fallback;
++}
++
++function asNumber(v: unknown): number {
++  return typeof v === "number" && Number.isFinite(v) ? v : 0;
++}
++
++// Read session_complete events from the _fleet log and return the most recent
++// N entries, newest first. Missing file or no matching events yields [].
++export async function loadRecentSessions(
++  limit: number,
++  fleetLogPath?: string,
++): Promise<SessionSummary[]> {
++  const path =
++    fleetLogPath ?? join(getRootDir(), "state", "_fleet", "PROGRESS.jsonl");
++  const parsed = await readJsonl(path);
++  const sessions: SessionSummary[] = [];
++  for (const value of parsed) {
++    if (!isProgressEntry(value)) continue;
++    if (value.event !== "session_complete") continue;
++    const d = value.data;
++    // duration_minutes came out of the session_complete writer so trust it,
++    // but guard against a malformed historical line.
++    const durationMin = asNumber(d.duration_minutes);
++    const startedAtMs =
++      new Date(value.timestamp).getTime() - durationMin * 60_000;
++    sessions.push({
++      started_at: new Date(startedAtMs).toISOString(),
++      duration_minutes: durationMin,
++      total_cycles: asNumber(d.total_cycles),
++      total_verified: asNumber(d.total_verified),
++      total_failed: asNumber(d.total_failed),
++      stop_reason: asString(d.stop_reason, "-"),
++      reviewer: asString(d.reviewer, "-"),
++    });
++  }
++  sessions.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
++  return sessions.slice(0, limit);
++}
++
++export interface ParsedSessionsFlag {
++  enabled: boolean;
++  limit: number;
++}
++
++const DEFAULT_SESSIONS_LIMIT = 10;
++
++// Parse `--sessions` / `--sessions=N` from raw argv tail. Mirrors
++// parseWatchFlag so the status command can mix both flags cleanly.
++export function parseSessionsFlag(rawArgs: string[]): ParsedSessionsFlag {
++  let enabled = false;
++  let limit = DEFAULT_SESSIONS_LIMIT;
++  for (const arg of rawArgs) {
++    if (arg === "--sessions") {
++      enabled = true;
++    } else if (arg.startsWith("--sessions=")) {
++      enabled = true;
++      const raw = arg.slice("--sessions=".length);
++      const parsed = parseInt(raw, 10);
++      if (!isNaN(parsed) && parsed > 0) {
++        limit = parsed;
++      }
++    }
++  }
++  return { enabled, limit };
++}
++
++export function stripSessionsArgs(rawArgs: string[]): string[] {
++  return rawArgs.filter(
++    (a) => a !== "--sessions" && !a.startsWith("--sessions="),
++  );
++}
++
++export function formatSessionsTable(
++  sessions: SessionSummary[],
++  now: Date = new Date(),
++): string {
++  if (sessions.length === 0) {
++    return "No sessions recorded yet.";
++  }
++  const rows = sessions.map((s) => {
++    const pass = `${s.total_verified}/${s.total_cycles}`;
++    return [
++      formatRelativeTime(s.started_at, now),
++      formatDuration(s.duration_minutes * 60),
++      `${s.total_cycles} cycle${s.total_cycles === 1 ? "" : "s"}`,
++      `${pass} verified`,
++      s.reviewer,
++      s.stop_reason,
++    ];
++  });
++  const header = [
++    "Started",
++    "Duration",
++    "Cycles",
++    "Pass",
++    "Reviewer",
++    "Stop reason",
++  ];
++  const widths = header.map((h, i) =>
++    Math.max(h.length, ...rows.map((r) => r[i]!.length)),
++  );
++  const pad = (cells: string[]) =>
++    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
++  const lines = [pad(header), widths.map((w) => "-".repeat(w)).join("  ")];
++  for (const r of rows) lines.push(pad(r));
++  return lines.join("\n");
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 191069f..af9d32b 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -608,7 +608,7 @@
+   {
+     "id": "gs-127",
+     "title": "Add `generalstaff status --sessions` flag: table of last N sessions (start time, duration, cycle count, pass/fail, reviewer, stop reason). Reads session_complete PROGRESS events. Default N=10. Tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/sessions.test.ts b/tests/sessions.test.ts
+new file mode 100644
+index 0000000..082689f
+--- /dev/null
++++ b/tests/sessions.test.ts
+@@ -0,0 +1,205 @@
++import { describe, it, expect, beforeEach, afterEach } from "bun:test";
++import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
++import { join } from "path";
++import { tmpdir } from "os";
++import {
++  parseSessionsFlag,
++  stripSessionsArgs,
++  loadRecentSessions,
++  formatSessionsTable,
++  type SessionSummary,
++} from "../src/sessions";
++
++describe("parseSessionsFlag", () => {
++  it("returns disabled when --sessions absent", () => {
++    expect(parseSessionsFlag(["--json"])).toEqual({
++      enabled: false,
++      limit: 10,
++    });
++  });
++
++  it("defaults to 10 when --sessions given without value", () => {
++    expect(parseSessionsFlag(["--sessions"])).toEqual({
++      enabled: true,
++      limit: 10,
++    });
++  });
++
++  it("accepts a custom limit via --sessions=N", () => {
++    expect(parseSessionsFlag(["--sessions=25"])).toEqual({
++      enabled: true,
++      limit: 25,
++    });
++  });
++
++  it("ignores zero / negative / non-numeric values (keeps default)", () => {
++    expect(parseSessionsFlag(["--sessions=0"]).limit).toBe(10);
++    expect(parseSessionsFlag(["--sessions=-3"]).limit).toBe(10);
++    expect(parseSessionsFlag(["--sessions=abc"]).limit).toBe(10);
++  });
++});
++
++describe("stripSessionsArgs", () => {
++  it("removes --sessions and --sessions=N tokens", () => {
++    expect(
++      stripSessionsArgs(["--json", "--sessions", "--watch", "--sessions=5"]),
++    ).toEqual(["--json", "--watch"]);
++  });
++});
++
++describe("loadRecentSessions", () => {
++  let tmp: string;
++  let logPath: string;
++
++  beforeEach(() => {
++    tmp = mkdtempSync(join(tmpdir(), "gs-sessions-"));
++    logPath = join(tmp, "PROGRESS.jsonl");
++  });
++
++  afterEach(() => {
++    rmSync(tmp, { recursive: true, force: true });
++  });
++
++  it("returns [] when the file is missing", async () => {
++    const missing = join(tmp, "does-not-exist.jsonl");
++    expect(await loadRecentSessions(10, missing)).toEqual([]);
++  });
++
++  it("returns [] when no session_complete events are present", async () => {
++    writeFileSync(
++      logPath,
++      JSON.stringify({
++        timestamp: "2026-04-17T10:00:00.000Z",
++        event: "cycle_start",
++        project_id: "_fleet",
++        data: {},
++      }) + "\n",
++    );
++    expect(await loadRecentSessions(10, logPath)).toEqual([]);
++  });
++
++  it("parses session_complete events and sorts newest-first", async () => {
++    const lines = [
++      {
++        timestamp: "2026-04-17T10:00:00.000Z",
++        event: "session_complete",
++        project_id: "_fleet",
++        data: {
++          duration_minutes: 30,
++          total_cycles: 5,
++          total_verified: 4,
++          total_failed: 1,
++          stop_reason: "budget",
++          reviewer: "ollama (qwen3:8b)",
++        },
++      },
++      {
++        timestamp: "2026-04-17T14:00:00.000Z",
++        event: "session_complete",
++        project_id: "_fleet",
++        data: {
++          duration_minutes: 60,
++          total_cycles: 10,
++          total_verified: 10,
++          total_failed: 0,
++          stop_reason: "max-cycles",
++          reviewer: "claude",
++        },
++      },
++    ];
++    writeFileSync(logPath, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
++
++    const sessions = await loadRecentSessions(10, logPath);
++    expect(sessions).toHaveLength(2);
++    // newest first
++    expect(sessions[0]!.stop_reason).toBe("max-cycles");
++    expect(sessions[0]!.total_cycles).toBe(10);
++    expect(sessions[0]!.reviewer).toBe("claude");
++    // started_at back-computed from timestamp - duration
++    expect(sessions[0]!.started_at).toBe("2026-04-17T13:00:00.000Z");
++    expect(sessions[1]!.started_at).toBe("2026-04-17T09:30:00.000Z");
++  });
++
++  it("respects the limit (returns N most recent)", async () => {
++    const lines = Array.from({ length: 5 }, (_, i) => ({
++      timestamp: `2026-04-17T1${i}:00:00.000Z`,
++      event: "session_complete",
++      project_id: "_fleet",
++      data: {
++        duration_minutes: 10,
++        total_cycles: i,
++        total_verified: i,
++        total_failed: 0,
++        stop_reason: "budget",
++      },
++    }));
++    writeFileSync(logPath, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
++
++    const sessions = await loadRecentSessions(2, logPath);
++    expect(sessions).toHaveLength(2);
++    expect(sessions[0]!.total_cycles).toBe(4);
++    expect(sessions[1]!.total_cycles).toBe(3);
++  });
++
++  it("falls back to '-' for missing reviewer field (historical events)", async () => {
++    writeFileSync(
++      logPath,
++      JSON.stringify({
++        timestamp: "2026-04-17T10:00:00.000Z",
++        event: "session_complete",
++        project_id: "_fleet",
++        data: {
++          duration_minutes: 30,
++          total_cycles: 5,
++          total_verified: 5,
++          total_failed: 0,
++          stop_reason: "budget",
++        },
++      }) + "\n",
++    );
++    const sessions = await loadRecentSessions(10, logPath);
++    expect(sessions[0]!.reviewer).toBe("-");
++  });
++});
++
++describe("formatSessionsTable", () => {
++  it("returns a placeholder when there are no sessions", () => {
++    expect(formatSessionsTable([])).toBe("No sessions recorded yet.");
++  });
++
++  it("renders a header and one row per session", () => {
++    const now = new Date("2026-04-17T15:00:00.000Z");
++    const session: SessionSummary = {
++      started_at: "2026-04-17T14:00:00.000Z",
++      duration_minutes: 30,
++      total_cycles: 5,
++      total_verified: 4,
++      total_failed: 1,
++      stop_reason: "budget",
++      reviewer: "claude",
++    };
++    const out = formatSessionsTable([session], now);
++    const lines = out.split("\n");
++    expect(lines[0]).toMatch(/^Started\s+Duration\s+Cycles\s+Pass\s+Reviewer\s+Stop reason$/);
++    expect(lines[1]).toMatch(/^-+\s+-+/);
++    expect(lines[2]).toContain("30m");
++    expect(lines[2]).toContain("5 cycles");
++    expect(lines[2]).toContain("4/5 verified");
++    expect(lines[2]).toContain("claude");
++    expect(lines[2]).toContain("budget");
++  });
++
++  it("pluralizes cycle count correctly for single-cycle sessions", () => {
++    const now = new Date("2026-04-17T15:00:00.000Z");
++    const s: SessionSummary = {
++      started_at: "2026-04-17T14:00:00.000Z",
++      duration_minutes: 5,
++      total_cycles: 1,
++      total_verified: 1,
++      total_failed: 0,
++      stop_reason: "budget",
++      reviewer: "ollama",
++    };
++    expect(formatSessionsTable([s], now)).toContain("1 cycle ");
++  });
++});
+
+
+Diff summary: src/cli.ts                    |  27 +++++-
+ src/session.ts                |   6 ++
+ src/sessions.ts               | 129 ++++++++++++++++++++++++++
+ state/generalstaff/tasks.json |   2 +-
+ tests/sessions.test.ts        | 205 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 366 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T14:56:11.768Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145637.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145637.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_145638.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_145638.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\On
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
