@@ -368,7 +368,7 @@
   {
     "id": "gs-087",
     "title": "Add a test for parseDigest in src/session.ts that verifies compatibility with the new multi-section digest format (## What got done / ## Issues / ## Details headers before the per-cycle sections). The existing cycle-section regex expects '## <project> — <cycle_id>'; confirm the new headers don't accidentally match.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
