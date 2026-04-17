@@ -20,6 +20,12 @@ set "PROJECT_ROOT=C:\Users\rweis\OneDrive\Documents\GeneralStaff"
 set "BUDGET=%~1"
 if "%BUDGET%"=="" set "BUDGET=360"
 
+REM Ensure Git Bash, bun, and claude are on PATH. When launched via
+REM Explorer double-click (or Task Scheduler), the inherited PATH may
+REM not include these tools even though they're in the terminal PATH.
+REM Front-loading them makes the .bat work identically from any launcher.
+set "PATH=C:\Program Files\Git\bin;C:\Program Files\Git\usr\bin;%USERPROFILE%\.bun\bin;%USERPROFILE%\.local\bin;%APPDATA%\npm;%PATH%"
+
 cd /d "%PROJECT_ROOT%" || (
   echo ERROR: project root not found: %PROJECT_ROOT%
   exit /b 1
