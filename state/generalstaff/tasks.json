@@ -668,7 +668,7 @@
   {
     "id": "gs-137",
     "title": "Add test coverage for preflightCleanupWorktree in src/cycle.ts. Build a tmp project dir fixture with a fake .bot-worktree folder and exercise the three branches: (a) no stale worktree returns {wasStale:false,removed:false}, (b) stale worktree that is removable returns {wasStale:true,removed:true}, (c) stale worktree where the injected rmFn throws returns {wasStale:true,removed:false,warning:<message includes 'locked by another process'>}. Use the rmFn param so the test is deterministic on Windows and Unix.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
