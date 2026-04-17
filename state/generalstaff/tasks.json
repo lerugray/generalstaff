@@ -332,7 +332,7 @@
   {
     "id": "gs-081",
     "title": "Add a docs section to CLAUDE.md (Session context) documenting the OpenRouter reviewer opt-in (env vars GENERALSTAFF_REVIEWER_PROVIDER and OPENROUTER_API_KEY, where the key is sourced from on Ray's machines, how the .bat wrapper sets them). Update the memory-discipline note's cross-references.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
