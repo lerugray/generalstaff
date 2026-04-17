@@ -1,0 +1,17 @@
+{
+  "verdict": "verification_failed",
+  "reason": "The diff modifies src/reviewer.ts, which is listed in the hands-off violations",
+  "scope_drift_files": [],
+  "hands_off_violations": [
+    "src/reviewer.ts"
+  ],
+  "task_evidence": [
+    {
+      "task": "You claimed to complete: Refactor the cycle logic to improve modularity and testability",
+      "evidence": "Changes in src/cycle.ts suggest restructuring of cycle logic",
+      "confidence": "medium"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The hands-off list explicitly prohibits modifications to src/reviewer.ts, which was altered in the diff"
+}
