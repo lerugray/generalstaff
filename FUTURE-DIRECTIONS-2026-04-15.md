@@ -737,11 +737,9 @@ Open questions for this direction:
   layer on top of the existing file-based state, not a replacement.
 - Are there existing agent-fleet / multi-agent-coordination repos
   (MCP-based or otherwise) worth surveying before designing this
-  from scratch? Ray flagged this as "something we're overlooking
-  in the agent fleet repo" — unclear which specific repo, but a
-  survey pass in the 2026-04 timeframe should catch what's
-  emerged recently (Karpathy's recent work was also flagged in
-  §6; there may be overlap).
+  from scratch? Ray flagged **desplega-ai/agent-swarm** as one to
+  study. Survey notes on that repo are in §8a below; Karpathy's
+  recent work (flagged in §6) is still a separate open item.
 - What's the right level of observability into fleet state? The
   dispatcher should probably write a fleet-level PROGRESS entry
   for every cross-bot event (task claimed, task released, merge
@@ -780,6 +778,93 @@ mode. Don't design the MCP-dispatcher API until projects-parallel
 is actually running and we know what tools the bots wish they
 had — premature API design in a distributed system is a
 category of slop worth avoiding.
+
+### 8a. Survey: desplega-ai/agent-swarm
+
+**Captured:** 2026-04-17 morning, via WebFetch of the repo's README.
+
+Agent-swarm is a production multi-agent orchestration system that
+has independently arrived at almost the same design this document
+argues for. Worth capturing the points of agreement and the points
+of divergence so a future Phase 3+ design session can steal the
+good ideas and make informed choices on the rest.
+
+**Points of agreement (validates the §8 direction):**
+
+- **Centralized lead/worker model, not peer-to-peer.** Their
+  "lead agent" is functionally equivalent to the dispatcher-
+  mediated pattern (b) recommended above. One agent receives
+  tasks, breaks them down, delegates to workers, tracks progress.
+- **MCP as the coordination surface.** They expose an "MCP API
+  server" that manages agent coordination; workers connect to it.
+  This is the same MCP angle proposed in §8. Independent
+  convergence is a strong signal this is the right shape.
+- **Queue-based task assignment with dependencies.** Tasks enter
+  a priority queue; the lead plans and assigns. Supports pause/
+  resume across deployments. GeneralStaff's current `tasks.json`
+  is a simpler version of the same idea; the priority queue with
+  explicit dependencies is a Phase 4+ upgrade worth keeping in
+  mind.
+
+**Points of divergence (where GeneralStaff stays different by
+choice, not oversight):**
+
+- **Docker container isolation for workers.** Agent-swarm runs
+  each worker in a Docker container. GeneralStaff uses git
+  worktrees instead (per-cycle isolation, no containerization
+  overhead). The worktree approach is lighter weight and avoids
+  a Docker dependency for local-first self-hosting. Revisit only
+  if cross-project file contention becomes a real problem.
+- **SQLite backs the coordination DB.** Agent-swarm persists
+  coordination state in SQLite. GeneralStaff's Hard Rule 2 says
+  file-based SSOT (JSONL + JSON configs). These are defensible
+  for different reasons: SQLite for transactional consistency;
+  JSONL for grep-ability and simple audit trails. The MCP layer
+  could sit atop either. Phase 3+ design should pick deliberately,
+  not by default.
+- **A lead agent breaks tasks down.** Agent-swarm's lead agent
+  plans and decomposes work. GeneralStaff's Hard Rule 1 keeps
+  task decomposition with the user (it's taste work, not
+  correctness work — a lead agent breaking down tasks is exactly
+  the "confident creative slop" risk Rule 1 guards against).
+  This is a real philosophical divergence, not a gap — the whole
+  GeneralStaff framing is that the user is the lead officer,
+  the bots are the general staff.
+
+**Novel ideas from agent-swarm worth considering:**
+
+1. **Persistent agent identity files** — they keep `SOUL.md`,
+   `IDENTITY.md`, `TOOLS.md`, `CLAUDE.md` per agent, evolving
+   across sessions. GeneralStaff already has per-project
+   `CLAUDE.md`; the `SOUL.md` / `IDENTITY.md` split is an
+   interesting layering that could formalize "what this agent
+   *is* vs. what this project *is*." Might be Phase 4+ in
+   GeneralStaff when per-bot specialization shows up.
+2. **Compounding memory with task embeddings.** Automatic
+   session summaries and task embeddings indexed for future
+   context. GeneralStaff's PROGRESS.jsonl is the raw audit
+   trail; an indexed-summary layer on top is a reasonable
+   Phase 4+ observability win (and ties nicely to §6's vault
+   plugin — the same embedding infrastructure could index the
+   bot's own work history and the user's creative corpus).
+3. **Skill-scope resolution** — `agent → swarm → global`.
+   Equivalent to the scope inheritance Ray already uses in his
+   `~/.claude/CLAUDE.md` → project `CLAUDE.md` overrides.
+   Applied to bot skills (not just prompts), this is a clean
+   way to ship "standard bot behaviors" as a library that
+   users can override per project.
+4. **DAG-based human-in-the-loop workflows with approval nodes
+   and structured I/O schemas.** Most of GeneralStaff's
+   approval points are binary (merge / don't merge, STOP file).
+   A richer approval graph with typed schemas per node is
+   overkill for Phase 1 but could matter once there are
+   multiple project owners using the same fleet.
+
+**Immediate takeaway.** The agent-swarm survey doesn't change
+the Phase 3+ path outlined in §8 — it confirms it. The specific
+novel abstractions (identity layering, indexed summaries, skill
+scoping) are good candidates for Phase 4+ follow-on tasks once
+the basic multi-bot dispatcher is running.
 
 ---
 
