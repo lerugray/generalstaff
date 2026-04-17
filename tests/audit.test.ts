@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry } from "../src/audit";
+import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs";
@@ -188,6 +189,70 @@ describe("tailProgressLog", () => {
     expect(lines[0]).toContain("No state directory");
   });
 
+  it("filters to error-level entries for a single project when level=error", async () => {
+    await appendProgress("proj-err", "cycle_start", { start_sha: "abc" }, "c1");
+    await appendProgress("proj-err", "cycle_end", { outcome: "verified" }, "c1");
+    await appendProgress("proj-err", "cycle_skipped", { reason: "empty diff" }, "c2");
+    await appendProgress("proj-err", "cycle_end", { outcome: "verification_failed", reason: "tests failed" }, "c3");
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-err", 10, { level: "error" }),
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("cycle_skipped");
+    expect(lines[1]).toContain("verification_failed");
+    for (const line of lines) {
+      expect(line).not.toContain("cycle_start");
+      expect(line).not.toContain("outcome=verified ");
+    }
+  });
+
+  it("filters to error-level entries across all projects when level=error", async () => {
+    await appendProgress("proj-x", "cycle_start", { start_sha: "a" }, "cx1");
+    await new Promise((r) => setTimeout(r, 5));
+    await appendProgress("proj-x", "cycle_skipped", { reason: "no work" }, "cx2");
+    await new Promise((r) => setTimeout(r, 5));
+    await appendProgress("proj-y", "cycle_end", { outcome: "verified" }, "cy1");
+    await new Promise((r) => setTimeout(r, 5));
+    await appendProgress("proj-y", "cycle_end", { outcome: "verification_failed" }, "cy2");
+
+    const lines = await captureLog(() =>
+      tailProgressLog(undefined, 10, { level: "error" }),
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("proj-x");
+    expect(lines[0]).toContain("cycle_skipped");
+    expect(lines[1]).toContain("proj-y");
+    expect(lines[1]).toContain("verification_failed");
+  });
+
+  it("prints a clear message when no error-level entries exist (single project)", async () => {
+    await appendProgress("proj-clean", "cycle_start", { start_sha: "a" }, "c1");
+    await appendProgress("proj-clean", "cycle_end", { outcome: "verified" }, "c1");
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-clean", 10, { level: "error" }),
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("No error-level entries");
+    expect(lines[0]).toContain("proj-clean");
+  });
+
+  it("respects the lines limit when filtering to error level", async () => {
+    for (let i = 0; i < 5; i++) {
+      await appendProgress("proj-many", "cycle_skipped", { reason: `r${i}` }, `c-${i}`);
+    }
+
+    const lines = await captureLog(() =>
+      tailProgressLog("proj-many", 2, { level: "error" }),
+    );
+
+    expect(lines).toHaveLength(2);
+  });
+
   it("omits cycle tag when cycle_id is absent", async () => {
     await appendProgress("proj-nocycle", "session_start", { budget: 30 });
 
@@ -198,6 +263,32 @@ describe("tailProgressLog", () => {
     expect(lines[0]).toContain("session_start");
     // No bracket-delimited cycle id
     expect(lines[0]).not.toMatch(/\[.*\]/);
+  });
+});
+
+describe("isErrorEntry", () => {
+  function entry(event: string, data: Record<string, unknown> = {}): ProgressEntry {
+    return { timestamp: new Date().toISOString(), event: event as any, data };
+  }
+
+  it("returns true for cycle_skipped", () => {
+    expect(isErrorEntry(entry("cycle_skipped", { reason: "empty" }))).toBe(true);
+  });
+
+  it("returns true when data.outcome is verification_failed", () => {
+    expect(isErrorEntry(entry("cycle_end", { outcome: "verification_failed" }))).toBe(true);
+    expect(isErrorEntry(entry("verification_outcome", { outcome: "verification_failed" }))).toBe(true);
+  });
+
+  it("returns true for events ending in _error", () => {
+    expect(isErrorEntry(entry("engineer_error", {}))).toBe(true);
+    expect(isErrorEntry(entry("reviewer_error", {}))).toBe(true);
+  });
+
+  it("returns false for ordinary events", () => {
+    expect(isErrorEntry(entry("cycle_start", { start_sha: "a" }))).toBe(false);
+    expect(isErrorEntry(entry("cycle_end", { outcome: "verified" }))).toBe(false);
+    expect(isErrorEntry(entry("engineer_completed", { exit_code: 0 }))).toBe(false);
   });
 });
 
