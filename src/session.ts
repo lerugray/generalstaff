@@ -233,9 +233,28 @@ export async function runSession(options: SessionOptions) {
       (new Date(result.ended_at).getTime() - new Date(result.started_at).getTime()) / 1000,
     );
     const cycleDurationStr = formatDuration(cycleDurationSec);
+    // ETA: project the session's natural end using the avg cycle duration
+    // observed so far. Need ≥2 cycles for a meaningful sample; a single
+    // data point would swing wildly on any cycle that happens to be fast
+    // or slow.
+    let etaStr = "";
+    if (allResults.length >= 2) {
+      const totalCycleMs = allResults.reduce((sum, r) => {
+        const d = new Date(r.ended_at).getTime() - new Date(r.started_at).getTime();
+        return sum + Math.max(0, d);
+      }, 0);
+      const avgCycleMs = totalCycleMs / allResults.length;
+      const remainingBudgetMs = Math.max(0, remainingMinutes() * 60_000);
+      const estRemainingCycles =
+        avgCycleMs > 0 ? Math.floor(remainingBudgetMs / avgCycleMs) : 0;
+      const projectedEnd = new Date(Date.now() + estRemainingCycles * avgCycleMs);
+      const hh = String(projectedEnd.getHours()).padStart(2, "0");
+      const mm = String(projectedEnd.getMinutes()).padStart(2, "0");
+      etaStr = `, projected end: ${hh}:${mm}`;
+    }
     console.log(
       `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
-        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining)`,
+        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining${etaStr})`,
     );
 
     // Guard against runaway empty cycles
