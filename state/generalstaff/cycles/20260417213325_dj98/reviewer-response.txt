@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff correctly updates tasks.json to mark gs-160 as done, adds a new test helper for Ollama pre-flight warning verification, and extends session.test.ts with two new tests that fully implement the requirements of gs-160, with no scope drift or hands-off violations, and verification passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add test coverage in tests/session.test.ts for graceful degradation when GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is set but the underlying provider is unreachable. Scenario: set env var to 'ollama_llama3', provide a test provider_config.yaml fixture, stub the ollama provider's invoke() to return an error, run writeDigest — assert: (a) the session completes without throwing, (b) the digest file is written, (c) the digest contains the standard '**Summary:**' line and does NOT contain '**Narrative:**', (d) an appropriate console.log warning is emitted. Also add an integration-style test that the existing pre-flight Ollama reachability warning in runSession still prints when GENERALSTAFF_REVIEWER_PROVIDER=ollama and the server is down — regression guard since gs-158 wiring touches the same code area. Do NOT modify src/reviewer.ts or projects.yaml. No changes to src/ollama.ts needed — existing checkOllamaReachable is sufficient.",
+      "evidence": "The diff adds a new test suite in session.test.ts with a detailed test case for narrative provider degradation (asserting no throw, digest file written, Summary present, Narrative absent, and fallback log emitted), and adds a new helper test file verify_ollama_preflight_warning.ts with a subprocess test that verifies the pre-flight Ollama unreachable warning is printed during runSession, matching both parts of the task.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed (exit code 0), indicating all tests—including the newly added ones—passed. The changes are confined to test files and tasks.json, respecting all hands-off constraints. No modifications were made to any restricted files."
+}
