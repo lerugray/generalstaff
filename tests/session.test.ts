@@ -6,14 +6,14 @@ import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
 import type { CycleResult } from "../src/types";
 import type { SessionPlanEstimate } from "../src/dispatcher";
 
-async function runHelperSubprocess(helperName: string): Promise<{
+async function runHelperSubprocess(helperName: string, ...helperArgs: string[]): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
   result: Record<string, unknown>;
 }> {
   const helperPath = join(import.meta.dir, "helpers", helperName);
-  const proc = Bun.spawn(["bun", "run", helperPath], {
+  const proc = Bun.spawn(["bun", "run", helperPath, ...helperArgs], {
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -287,6 +287,47 @@ describe("runSession safeguards", () => {
     expect(String(result.captured)).toMatch(
       /Cycle 1 completed: test-proj \u2014 verified \([^)]+ remaining\)/,
     );
+  }, 30_000);
+
+  it("stops at max-cycles when maxCycles hits before budget", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_max_cycles.ts",
+      "max-cycles-hits-first",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(2);
+    expect(result.result_count).toBe(2);
+    expect(String(result.captured)).toContain("Max-cycles limit reached (2)");
+    expect(String(result.captured)).toContain("Stop reason: max-cycles");
+  }, 30_000);
+
+  it("stops on budget when budget hits before max-cycles", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_max_cycles.ts",
+      "budget-hits-first",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(0);
+    expect(String(result.captured)).toContain("Stop reason: insufficient-budget");
+  }, 30_000);
+
+  it("runs without maxCycles when flag is not supplied", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_max_cycles.ts",
+      "default",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(String(result.captured)).not.toContain("Max cycles:");
+    expect(String(result.captured)).toContain("Stop reason:");
   }, 30_000);
 
   it("adds capped projects to the skip set", async () => {

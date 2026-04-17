@@ -242,7 +242,7 @@
   {
     "id": "gs-066",
     "title": "Add --max-cycles=N flag to 'generalstaff session' as an alternative stopping condition alongside --budget. If both specified, stop at whichever hits first. Log which limit triggered ('max-cycles' vs 'budget'). Add tests covering max-cycles-hits-first, budget-hits-first, and default (only --budget).",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
