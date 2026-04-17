@@ -434,7 +434,7 @@
   {
     "id": "gs-098",
     "title": "Add a 'generalstaff session --exclude-project=<id>[,<id>...]' filter. When the project picker (src/dispatcher.ts pickNextProject) evaluates candidates, skip any project id in the exclude set. Parse comma-separated values from the flag. Useful for 'skip this project for tonight's run'. Add tests covering: single exclude, multiple excludes, excluded project is the only eligible project (session ends with no-project), excluded project id doesn't exist (warn but don't error).",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

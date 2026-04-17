@@ -627,3 +627,61 @@ describe("runSession safeguards", () => {
     expect(snapshots[snapshots.length - 1]).toContain("test-proj");
   }, 30_000);
 });
+
+describe("runSession --exclude-project", () => {
+  it("excludes a single project from the picker", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_exclude_project.ts",
+      "single",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.first_skip_snapshot).toContain("alpha");
+    expect(result.picked_ids).not.toContain("alpha");
+  }, 30_000);
+
+  it("excludes multiple projects (comma-separated)", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_exclude_project.ts",
+      "multiple",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.first_skip_snapshot).toContain("alpha");
+    expect(result.first_skip_snapshot).toContain("beta");
+    const picked = result.picked_ids as string[];
+    expect(picked).not.toContain("alpha");
+    expect(picked).not.toContain("beta");
+  }, 30_000);
+
+  it("ends with no cycles when every project is excluded", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_exclude_project.ts",
+      "all-excluded",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(0);
+  }, 30_000);
+
+  it("warns but does not error on unknown exclude ids", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_exclude_project.ts",
+      "unknown-id",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    const warns = (result.warn_messages as string[]).join("\n");
+    expect(warns).toContain("does-not-exist");
+    // session still ran against real projects
+    expect((result.picked_ids as string[]).length).toBeGreaterThan(0);
+  }, 30_000);
+});
