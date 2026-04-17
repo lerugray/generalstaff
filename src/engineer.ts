@@ -15,6 +15,45 @@ export interface EngineerResult {
   logPath: string;
 }
 
+// Minimal ChildProcess surface used by killChildTree — kept narrow so tests
+// can pass a fake without fabricating an entire ChildProcess instance.
+export interface KillableChild {
+  pid?: number;
+  kill(signal?: NodeJS.Signals | number): boolean;
+}
+
+export interface KillChildTreeOptions {
+  platform?: NodeJS.Platform;
+  spawnSyncFn?: typeof import("child_process").spawnSync;
+  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
+}
+
+// Kill the entire process tree rooted at `child`. On Windows,
+// `child.kill("SIGTERM")` only kills the direct child (bash.exe);
+// grandchildren (claude.exe spawned from run_bot.sh) keep running as
+// orphans. This was observed 2026-04-17 when cycle 10's engineer timeout
+// fired correctly but claude.exe ignored the kill and kept running for
+// another ~15 minutes until taskkilled manually. On *nix the signal
+// propagates through the process group when the shell forwards it; on
+// Windows we need taskkill /T /F to reach the tree.
+export function killChildTree(
+  child: KillableChild,
+  opts: KillChildTreeOptions = {},
+): void {
+  const platform = opts.platform ?? process.platform;
+  if (platform === "win32" && child.pid) {
+    const spawnSyncFn =
+      opts.spawnSyncFn ?? (require("child_process").spawnSync as typeof import("child_process").spawnSync);
+    spawnSyncFn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
+      stdio: "ignore",
+    });
+  } else {
+    child.kill("SIGTERM");
+    const setTimeoutFn = opts.setTimeoutFn ?? setTimeout;
+    setTimeoutFn(() => child.kill("SIGKILL"), 10_000);
+  }
+}
+
 export async function runEngineer(
   project: ProjectConfig,
   cycleId: string,
@@ -81,35 +120,13 @@ export async function runEngineer(
       process.stderr.write(chunk);
     });
 
-    // Kill the entire process tree rooted at `child`. On Windows,
-    // `child.kill("SIGTERM")` only kills the direct child (bash.exe);
-    // grandchildren (claude.exe spawned from run_bot.sh) keep running
-    // as orphans. This was observed 2026-04-17 when cycle 10's engineer
-    // timeout fired correctly but claude.exe ignored the kill and kept
-    // running for another ~15 minutes until taskkilled manually.
-    // On *nix the signal propagates through the process group when the
-    // shell forwards it; on Windows we need taskkill /T /F to reach the
-    // tree. Importing spawnSync locally to avoid adding a top-level
-    // import only used on the failure path.
-    const killChildTree = () => {
-      if (process.platform === "win32" && child.pid) {
-        const { spawnSync } = require("child_process");
-        spawnSync("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
-          stdio: "ignore",
-        });
-      } else {
-        child.kill("SIGTERM");
-        setTimeout(() => child.kill("SIGKILL"), 10_000);
-      }
-    };
-
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
       logStream.write(
         `\n\n=== TIMED OUT after ${project.cycle_budget_minutes + 5} min ===\n`,
       );
-      killChildTree();
+      killChildTree(child);
     }, timeoutMs);
 
     child.on("close", async (code) => {

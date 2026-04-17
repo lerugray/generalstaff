@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { runEngineer } from "../src/engineer";
+import { runEngineer, killChildTree } from "../src/engineer";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
@@ -106,6 +106,104 @@ describe("engineer module", () => {
 
       const invokedEvent = events.find((e: { event: string }) => e.event === "engineer_invoked");
       expect(invokedEvent.data.cycle_budget_minutes).toBe(45);
+    });
+  });
+
+  describe("killChildTree", () => {
+    it("uses taskkill /f /t on Windows when pid is set", () => {
+      const spawnCalls: Array<{ cmd: string; args: readonly string[]; opts: unknown }> = [];
+      const killCalls: Array<NodeJS.Signals | number | undefined> = [];
+      const fakeSpawnSync = ((cmd: string, args: readonly string[], opts: unknown) => {
+        spawnCalls.push({ cmd, args, opts });
+        return { status: 0, signal: null, pid: 0, output: [], stdout: "", stderr: "" } as unknown as ReturnType<typeof import("child_process").spawnSync>;
+      }) as unknown as typeof import("child_process").spawnSync;
+      const fakeChild = {
+        pid: 12345,
+        kill: (sig?: NodeJS.Signals | number) => {
+          killCalls.push(sig);
+          return true;
+        },
+      };
+
+      killChildTree(fakeChild, {
+        platform: "win32",
+        spawnSyncFn: fakeSpawnSync,
+      });
+
+      expect(spawnCalls.length).toBe(1);
+      expect(spawnCalls[0].cmd).toBe("taskkill");
+      expect(spawnCalls[0].args).toEqual(["/pid", "12345", "/f", "/t"]);
+      expect(spawnCalls[0].opts).toEqual({ stdio: "ignore" });
+      // On Windows we must NOT fall back to the signal path — signals don't
+      // propagate through the process tree on win32.
+      expect(killCalls.length).toBe(0);
+    });
+
+    it("uses SIGTERM then schedules SIGKILL on non-Windows platforms", () => {
+      const killCalls: Array<NodeJS.Signals | number | undefined> = [];
+      const spawnCalls: Array<unknown> = [];
+      let scheduledCb: (() => void) | null = null;
+      let scheduledDelay: number = -1;
+      const fakeSpawnSync = ((..._args: unknown[]) => {
+        spawnCalls.push(_args);
+        return {} as unknown as ReturnType<typeof import("child_process").spawnSync>;
+      }) as unknown as typeof import("child_process").spawnSync;
+      const fakeSetTimeout = (cb: () => void, ms: number) => {
+        scheduledCb = cb;
+        scheduledDelay = ms;
+        return 0;
+      };
+      const fakeChild = {
+        pid: 6789,
+        kill: (sig?: NodeJS.Signals | number) => {
+          killCalls.push(sig);
+          return true;
+        },
+      };
+
+      killChildTree(fakeChild, {
+        platform: "linux",
+        spawnSyncFn: fakeSpawnSync,
+        setTimeoutFn: fakeSetTimeout,
+      });
+
+      expect(spawnCalls.length).toBe(0);
+      expect(killCalls).toEqual(["SIGTERM"]);
+      expect(scheduledDelay).toBe(10_000);
+
+      // Fire the scheduled SIGKILL callback and confirm it escalates.
+      expect(scheduledCb).not.toBeNull();
+      scheduledCb!();
+      expect(killCalls).toEqual(["SIGTERM", "SIGKILL"]);
+    });
+
+    it("falls back to signal path on Windows when pid is missing", () => {
+      // Defensive: win32 branch is guarded by `child.pid` truthiness.
+      // Without a pid there's nothing for taskkill to target, so we fall
+      // through to child.kill — matches the current engineer.ts behavior.
+      const killCalls: Array<NodeJS.Signals | number | undefined> = [];
+      const spawnCalls: Array<unknown> = [];
+      const fakeSpawnSync = ((..._args: unknown[]) => {
+        spawnCalls.push(_args);
+        return {} as unknown as ReturnType<typeof import("child_process").spawnSync>;
+      }) as unknown as typeof import("child_process").spawnSync;
+      const fakeSetTimeout = (_cb: () => void, _ms: number) => 0;
+      const fakeChild = {
+        pid: undefined,
+        kill: (sig?: NodeJS.Signals | number) => {
+          killCalls.push(sig);
+          return true;
+        },
+      };
+
+      killChildTree(fakeChild, {
+        platform: "win32",
+        spawnSyncFn: fakeSpawnSync,
+        setTimeoutFn: fakeSetTimeout,
+      });
+
+      expect(spawnCalls.length).toBe(0);
+      expect(killCalls).toEqual(["SIGTERM"]);
     });
   });
 
