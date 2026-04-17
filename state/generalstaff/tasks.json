@@ -302,7 +302,7 @@
   {
     "id": "gs-076",
     "title": "In state.ts, add a getRecentCycles(projectId, n) helper that returns the last N cycle results by reading PROGRESS.jsonl (cycle_end events only, newest first). Wire into the status --json output so the JSON includes a 'recent_cycles' array. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
