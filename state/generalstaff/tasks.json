@@ -362,7 +362,7 @@
   {
     "id": "gs-086",
     "title": "Wire formatRelativeTime (from gs-085) into the 'generalstaff status' command output: replace the raw ISO timestamp on the 'Last cycle: ...' line with a relative version, but keep the ISO in parentheses for precision. Add tests. Only proceed after gs-085 lands.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

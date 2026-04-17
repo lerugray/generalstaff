@@ -33,6 +33,7 @@ import {
   countTests,
   formatSummary,
 } from "./summary";
+import { formatRelativeTime } from "./format";
 
 const VERSION = "0.0.1";
 
@@ -215,7 +216,13 @@ switch (command) {
         const state = fleet.projects[p.id];
         console.log(`  ${p.id} (priority ${p.priority})`);
         if (state) {
-          console.log(`    Last cycle: ${state.last_cycle_at ?? "never"}`);
+          if (state.last_cycle_at) {
+            console.log(
+              `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
+            );
+          } else {
+            console.log(`    Last cycle: never`);
+          }
           console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
           console.log(`    Total cycles: ${state.total_cycles}`);
         } else {
