@@ -1,0 +1,283 @@
+diff --git a/src/audit.ts b/src/audit.ts
+index e1520ab..22ffd19 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -66,6 +66,36 @@ export type LogLevel = "error";
+ export interface TailProgressOptions {
+   level?: LogLevel;
+   grep?: RegExp;
++  sinceMs?: number;
++}
++
++// Parse a --since flag value. Accepts relative durations (30s, 15m, 2h, 3d)
++// or an absolute ISO-8601 timestamp. Returns the resulting epoch-ms lower
++// bound. `now` is injected for deterministic testing.
++export function parseSinceFlag(input: string, now: Date = new Date()): number {
++  const relMatch = /^(\d+)([smhd])$/.exec(input.trim());
++  if (relMatch) {
++    const amount = parseInt(relMatch[1]!, 10);
++    const unit = relMatch[2]!;
++    const multiplier =
++      unit === "s" ? 1000 :
++      unit === "m" ? 60 * 1000 :
++      unit === "h" ? 60 * 60 * 1000 :
++      24 * 60 * 60 * 1000;
++    return now.getTime() - amount * multiplier;
++  }
++  const ts = Date.parse(input);
++  if (Number.isNaN(ts)) {
++    throw new Error(
++      `Invalid --since value '${input}': expected ISO timestamp or relative duration (e.g. 30m, 2h, 1d)`,
++    );
++  }
++  return ts;
++}
++
++function matchesSince(entry: ProgressEntry, sinceMs: number): boolean {
++  const t = Date.parse(entry.timestamp);
++  return !Number.isNaN(t) && t >= sinceMs;
+ }
+ 
+ export function isErrorEntry(entry: ProgressEntry): boolean {
+@@ -127,6 +157,10 @@ export async function tailProgressLog(
+       const re = options.grep;
+       filtered = filtered.filter((e) => matchesGrep(e, re));
+     }
++    if (options.sinceMs !== undefined) {
++      const since = options.sinceMs;
++      filtered = filtered.filter((e) => matchesSince(e, since));
++    }
+     const tail = filtered.slice(-lines);
+     for (const entry of tail) {
+       printEntry(entry);
+@@ -141,6 +175,8 @@ export async function tailProgressLog(
+         console.log("No audit log entries matching grep pattern.");
+       } else if (options.level === "error") {
+         console.log("No error-level audit log entries found.");
++      } else if (options.sinceMs !== undefined) {
++        console.log("No audit log entries since the given time.");
+       }
+     }
+   }
+@@ -160,7 +196,7 @@ async function tailSingleProject(
+   const content = await readFile(filePath, "utf8");
+   const allLines = content.trim().split("\n").filter(Boolean);
+ 
+-  if (options.level === "error" || options.grep) {
++  if (options.level === "error" || options.grep || options.sinceMs !== undefined) {
+     const matches: string[] = [];
+     for (const line of allLines) {
+       try {
+@@ -168,6 +204,7 @@ async function tailSingleProject(
+         if (!isProgressEntry(parsed)) continue;
+         if (options.level === "error" && !isErrorEntry(parsed)) continue;
+         if (options.grep && !matchesGrep(parsed, options.grep)) continue;
++        if (options.sinceMs !== undefined && !matchesSince(parsed, options.sinceMs)) continue;
+         matches.push(line);
+       } catch {
+         // skip malformed
+@@ -187,8 +224,10 @@ async function tailSingleProject(
+         console.log(
+           `No entries matching grep pattern for project "${projectId}".`,
+         );
+-      } else {
++      } else if (options.level === "error") {
+         console.log(`No error-level entries for project "${projectId}".`);
++      } else if (options.sinceMs !== undefined) {
++        console.log(`No entries since the given time for project "${projectId}".`);
+       }
+     }
+     return;
+diff --git a/src/cli.ts b/src/cli.ts
+index c23c19f..4f21be5 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -15,7 +15,7 @@ import {
+   ProjectNotFoundError,
+ } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern } from "./audit";
++import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+@@ -84,11 +84,12 @@ Usage:
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+ 
+-  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>]
++  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>] [--since=<ts>]
+                                                           Tail PROGRESS.jsonl
+     Example: generalstaff log --project=myapp --lines=50
+     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
+     Example: generalstaff log --grep='verified|weak'     # case-insensitive regex over event + data
++    Example: generalstaff log --since=1h                 # last hour only (also: 30m, 2d, or ISO timestamp)
+ 
+   generalstaff summary [--no-tests] [--format=json] [--project=<id>]
+                                                           Dashboard: cycles, outcomes, duration, tasks, tests
+@@ -308,6 +309,7 @@ switch (command) {
+         lines: { type: "string", default: "20" },
+         level: { type: "string" },
+         grep: { type: "string" },
++        since: { type: "string" },
+       },
+       allowPositionals: false,
+     });
+@@ -324,9 +326,19 @@ switch (command) {
+         process.exit(2);
+       }
+     }
++    let sinceMs: number | undefined;
++    if (values.since !== undefined) {
++      try {
++        sinceMs = parseSinceFlag(values.since);
++      } catch (err) {
++        console.error(`Error: ${(err as Error).message}`);
++        process.exit(2);
++      }
++    }
+     await tailProgressLog(values.project, parseInt(values.lines!, 10), {
+       level: values.level as "error" | undefined,
+       grep: grepRegex,
++      sinceMs,
+     });
+     break;
+   }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ea64cc3..191069f 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -614,7 +614,7 @@
+   {
+     "id": "gs-128",
+     "title": "Add `generalstaff log --since=<ts>` filter (alongside --lines/--level/--grep). Accepts absolute ISO or relative forms like '1h'/'30m'/'2d'. Tests covering each form plus malformed and future timestamps.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index c5a74f7..4cf10f8 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag } from "../src/audit";
+ import type { ProgressEntry } from "../src/types";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+@@ -364,6 +364,113 @@ describe("tailProgressLog --grep filter", () => {
+   });
+ });
+ 
++describe("parseSinceFlag", () => {
++  const now = new Date("2026-04-17T12:00:00.000Z");
++
++  it("parses minute-relative durations", () => {
++    const ms = parseSinceFlag("30m", now);
++    expect(ms).toBe(now.getTime() - 30 * 60 * 1000);
++  });
++
++  it("parses hour-relative durations", () => {
++    const ms = parseSinceFlag("2h", now);
++    expect(ms).toBe(now.getTime() - 2 * 60 * 60 * 1000);
++  });
++
++  it("parses day-relative durations", () => {
++    const ms = parseSinceFlag("3d", now);
++    expect(ms).toBe(now.getTime() - 3 * 24 * 60 * 60 * 1000);
++  });
++
++  it("parses second-relative durations", () => {
++    const ms = parseSinceFlag("45s", now);
++    expect(ms).toBe(now.getTime() - 45 * 1000);
++  });
++
++  it("parses absolute ISO timestamps", () => {
++    const ms = parseSinceFlag("2026-04-01T00:00:00Z", now);
++    expect(ms).toBe(Date.parse("2026-04-01T00:00:00Z"));
++  });
++
++  it("accepts future timestamps (no clamping)", () => {
++    const future = parseSinceFlag("2999-01-01T00:00:00Z", now);
++    expect(future).toBeGreaterThan(now.getTime());
++  });
++
++  it("throws on malformed input", () => {
++    expect(() => parseSinceFlag("1x", now)).toThrow(/Invalid --since value/);
++    expect(() => parseSinceFlag("not-a-date", now)).toThrow(/Invalid --since value/);
++    expect(() => parseSinceFlag("", now)).toThrow(/Invalid --since value/);
++  });
++});
++
++describe("tailProgressLog --since filter", () => {
++  it("filters single-project entries newer than sinceMs", async () => {
++    // Write an entry, capture its timestamp, then write a later entry.
++    await appendProgress("proj-s1", "cycle_start", { start_sha: "old" }, "c1");
++    const boundary = Date.now() + 1;
++    await new Promise((r) => setTimeout(r, 20));
++    await appendProgress("proj-s1", "cycle_start", { start_sha: "new" }, "c2");
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-s1", 10, { sinceMs: boundary }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("sha=new");
++  });
++
++  it("filters all-projects entries by sinceMs", async () => {
++    await appendProgress("proj-s2a", "cycle_start", { start_sha: "oldA" }, "c1");
++    await appendProgress("proj-s2b", "cycle_start", { start_sha: "oldB" }, "c1");
++    const boundary = Date.now() + 1;
++    await new Promise((r) => setTimeout(r, 20));
++    await appendProgress("proj-s2a", "cycle_end", { outcome: "verified" }, "c1");
++
++    const lines = await captureLog(() =>
++      tailProgressLog(undefined, 10, { sinceMs: boundary }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("cycle_end");
++  });
++
++  it("prints a clear message when nothing is newer than sinceMs (single project)", async () => {
++    await appendProgress("proj-s3", "cycle_start", { start_sha: "old" }, "c1");
++    const future = Date.now() + 60 * 60 * 1000;
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-s3", 10, { sinceMs: future }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No entries since the given time");
++    expect(lines[0]).toContain("proj-s3");
++  });
++
++  it("prints a clear message when nothing is newer than sinceMs (all projects)", async () => {
++    await appendProgress("proj-s4", "cycle_start", { start_sha: "old" }, "c1");
++    const future = Date.now() + 60 * 60 * 1000;
++
++    const lines = await captureLog(() =>
++      tailProgressLog(undefined, 10, { sinceMs: future }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("No audit log entries since the given time");
++  });
++
++  it("combines --since with --level=error", async () => {
++    await appendProgress("proj-s5", "cycle_end", { outcome: "verification_failed", reason: "old-fail" }, "c1");
++    const boundary = Date.now() + 1;
++    await new Promise((r) => setTimeout(r, 20));
++    await appendProgress("proj-s5", "cycle_start", { start_sha: "x" }, "c2");
++    await appendProgress("proj-s5", "cycle_end", { outcome: "verification_failed", reason: "new-fail" }, "c2");
++
++    const lines = await captureLog(() =>
++      tailProgressLog("proj-s5", 10, { level: "error", sinceMs: boundary }),
++    );
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toContain("new-fail");
++  });
++});
++
+ describe("compileGrepPattern", () => {
+   it("compiles a valid pattern with case-insensitive flag", () => {
+     const re = compileGrepPattern("hello");
