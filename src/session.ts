@@ -20,6 +20,7 @@ import { fetchCommitSubject } from "./git";
 import { notifySessionEnd } from "./notify";
 import { countRemainingWork } from "./work_detection";
 import { categorizeResults } from "./results";
+import { checkOllamaReachable } from "./ollama";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
 export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
@@ -95,6 +96,27 @@ export async function runSession(options: SessionOptions) {
       config.max_cycles_per_project_per_session,
     );
     console.log(formatSessionPlanPreview(plan));
+  }
+
+  // Pre-flight Ollama reachability check. When the reviewer provider is
+  // Ollama, a down server causes every cycle to fail-safe to
+  // verification_failed — the warning here gives clearer error attribution
+  // than discovering it cycle-by-cycle. Non-fatal: the session proceeds,
+  // and the per-cycle fallback chain (GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER)
+  // is the real safety net.
+  if (
+    !dryRun &&
+    (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "").toLowerCase() ===
+      "ollama"
+  ) {
+    const check = await checkOllamaReachable();
+    if (!check.reachable) {
+      console.warn(
+        `Warning: Ollama unreachable at ${check.host} (${check.error ?? "unknown"}).\n` +
+          `  Start the server with 'ollama serve', or set\n` +
+          `  GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter to auto-fall-back.`,
+      );
+    }
   }
 
   // Reset per-session cycle counts
