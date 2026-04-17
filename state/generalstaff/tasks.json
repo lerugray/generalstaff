@@ -1,34 +1,184 @@
 [
-  { "id": "gs-001", "title": "Add verification module test", "status": "done", "priority": 1 },
-  { "id": "gs-002", "title": "Add reviewer prompt template test", "status": "done", "priority": 1 },
-  { "id": "gs-003", "title": "Add engineer module test", "status": "done", "priority": 2 },
-  { "id": "gs-004", "title": "Improve error messages in projects.ts", "status": "done", "priority": 3 },
-  { "id": "gs-005", "title": "Add CLI test", "status": "done", "priority": 2 },
-  { "id": "gs-006", "title": "Add work_detection test", "status": "done", "priority": 1 },
-  { "id": "gs-007", "title": "Add isBotRunning catalogdna test", "status": "done", "priority": 1 },
-  { "id": "gs-008", "title": "Add parseReviewerResponse test", "status": "done", "priority": 1 },
-  { "id": "gs-009", "title": "Add atomic write safety test", "status": "done", "priority": 2 },
-  { "id": "gs-010", "title": "Add tailProgressLog test", "status": "done", "priority": 2 },
-  { "id": "gs-011", "title": "Skip reviewer on empty diff", "status": "done", "priority": 1 },
-  { "id": "gs-012", "title": "Auto-update bot/work to HEAD", "status": "done", "priority": 1 },
-  { "id": "gs-013", "title": "Add --json flag to status", "status": "done", "priority": 2 },
-  { "id": "gs-014", "title": "Add digest writer tests", "status": "done", "priority": 2 },
-  { "id": "gs-015", "title": "Add dispatcher picker tests", "status": "done", "priority": 2 },
-  { "id": "gs-016", "title": "Add worktree detection tests", "status": "done", "priority": 1 },
-  { "id": "gs-017", "title": "Add engineer error handling test", "status": "done", "priority": 1 },
-  { "id": "gs-018", "title": "Add projects CLI command", "status": "done", "priority": 2 },
-  { "id": "gs-019", "title": "Add log --lines test", "status": "done", "priority": 2 },
-  { "id": "gs-020", "title": "Add type guards", "status": "done", "priority": 3 },
-  { "id": "gs-021", "title": "Programmatic hands-off check", "status": "done", "priority": 1 },
-  { "id": "gs-022", "title": "Skip verification on empty diff", "status": "done", "priority": 1 },
-  { "id": "gs-023", "title": "Add init command", "status": "done", "priority": 1 },
-  { "id": "gs-024", "title": "Validate project paths during load", "status": "done", "priority": 2 },
-  { "id": "gs-025", "title": "Add history command", "status": "done", "priority": 2 },
-  { "id": "gs-026", "title": "Add doctor command", "status": "done", "priority": 1 },
-  { "id": "gs-027", "title": "Improve engineer spawn error messages", "status": "done", "priority": 1 },
-  { "id": "gs-028", "title": "Add history --format=compact", "status": "done", "priority": 2 },
-  { "id": "gs-029", "title": "Session summary in PROGRESS.jsonl", "status": "done", "priority": 2 },
-  { "id": "gs-030", "title": "Init command edge case tests", "status": "done", "priority": 2 },
+  {
+    "id": "gs-001",
+    "title": "Add verification module test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-002",
+    "title": "Add reviewer prompt template test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-003",
+    "title": "Add engineer module test",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-004",
+    "title": "Improve error messages in projects.ts",
+    "status": "done",
+    "priority": 3
+  },
+  {
+    "id": "gs-005",
+    "title": "Add CLI test",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-006",
+    "title": "Add work_detection test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-007",
+    "title": "Add isBotRunning catalogdna test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-008",
+    "title": "Add parseReviewerResponse test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-009",
+    "title": "Add atomic write safety test",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-010",
+    "title": "Add tailProgressLog test",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-011",
+    "title": "Skip reviewer on empty diff",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-012",
+    "title": "Auto-update bot/work to HEAD",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-013",
+    "title": "Add --json flag to status",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-014",
+    "title": "Add digest writer tests",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-015",
+    "title": "Add dispatcher picker tests",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-016",
+    "title": "Add worktree detection tests",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-017",
+    "title": "Add engineer error handling test",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-018",
+    "title": "Add projects CLI command",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-019",
+    "title": "Add log --lines test",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-020",
+    "title": "Add type guards",
+    "status": "done",
+    "priority": 3
+  },
+  {
+    "id": "gs-021",
+    "title": "Programmatic hands-off check",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-022",
+    "title": "Skip verification on empty diff",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-023",
+    "title": "Add init command",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-024",
+    "title": "Validate project paths during load",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-025",
+    "title": "Add history command",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-026",
+    "title": "Add doctor command",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-027",
+    "title": "Improve engineer spawn error messages",
+    "status": "done",
+    "priority": 1
+  },
+  {
+    "id": "gs-028",
+    "title": "Add history --format=compact",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-029",
+    "title": "Session summary in PROGRESS.jsonl",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-030",
+    "title": "Init command edge case tests",
+    "status": "done",
+    "priority": 2
+  },
   {
     "id": "gs-031",
     "title": "Add clean command (implemented by interactive session)",
@@ -758,8 +908,9 @@
   {
     "id": "gs-152",
     "title": "Create src/providers/registry.ts with loadProviderRegistry(configPath?: string) that reads provider_config.yaml from the project root (default path getRootDir() + '/provider_config.yaml') and returns { providers: Map<string, ProviderDescriptor>, routes: Record<ProviderRole, string> }. Use the yaml package (already a dep per src/projects.ts). Validate: each provider entry has id, kind in {'ollama','openrouter','claude'}, model string, host optional. routes entry keys must be in {'digest','cycle_summary','classifier'}; values must reference a providers key. On malformed input throw a ProviderConfigError (new subclass of Error) naming the field and the offending value. getProviderForRole(registry, role): LLMProvider returns the instantiated provider for that role (dispatch on kind — only ollama implemented in Phase 2; openrouter/claude kinds throw 'not implemented in Phase 2 — see src/reviewer.ts for inline dispatch'). If provider_config.yaml is missing, return a registry with no providers and routes all pointing at 'noop' — callers should check with hasProviderForRole() before dispatching. Add tests in tests/providers.registry.test.ts covering valid config, missing file (returns empty registry), malformed (each required-field case throws ProviderConfigError), unknown kind rejected, unreferenced route rejected. Do NOT modify src/reviewer.ts or projects.yaml.",
-    "status": "pending",
-    "priority": 1
+    "status": "done",
+    "priority": 1,
+    "completed_at": "2026-04-17T19:55:43.121Z"
   },
   {
     "id": "gs-153",
