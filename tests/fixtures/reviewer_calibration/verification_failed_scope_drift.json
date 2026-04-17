@@ -1,0 +1,14 @@
+{
+  "expectedVerdict": "verification_failed",
+  "params": {
+    "projectId": "test-project",
+    "markedDoneTasks": "- gs-997: Fix a typo on line 42 of README.md",
+    "sessionNoteOrNone": "",
+    "fullDiff": "diff --git a/src/dispatcher.ts b/src/dispatcher.ts\nindex 3333333..4444444 100644\n--- a/src/dispatcher.ts\n+++ b/src/dispatcher.ts\n@@ -100,6 +100,12 @@ export async function dispatch(config: DispatcherConfig): Promise<DispatchResult> {\n   const result = await runCycle(next, config);\n+  // Extracted helper — unrelated refactor\n+  const emitCompletion = async (r: DispatchResult) => {\n+    console.log(`cycle ${r.cycleId} complete`);\n+  };\n+  await emitCompletion(result);\n+\n   return result;\n }\n",
+    "diffStat": " src/dispatcher.ts | 6 ++++++\n 1 file changed, 6 insertions(+)",
+    "verificationCommand": "bun test",
+    "verificationExitCode": 0,
+    "verificationOutputTruncated": "bun test v1.1.38\n\n100 pass\n 0 fail\n 300 expect() calls\nRan 100 tests across 40 files. [800.00ms]",
+    "handsOffList": ["run_bot*.sh"]
+  }
+}

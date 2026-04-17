@@ -1,0 +1,14 @@
+{
+  "expectedVerdict": "verified",
+  "params": {
+    "projectId": "test-project",
+    "markedDoneTasks": "- gs-999: Add greet() utility function with tests",
+    "sessionNoteOrNone": "",
+    "fullDiff": "diff --git a/src/greet.ts b/src/greet.ts\nnew file mode 100644\nindex 0000000..aaaaaaa\n--- /dev/null\n+++ b/src/greet.ts\n@@ -0,0 +1,3 @@\n+export function greet(name: string): string {\n+  return `Hello, ${name}!`;\n+}\ndiff --git a/tests/greet.test.ts b/tests/greet.test.ts\nnew file mode 100644\nindex 0000000..bbbbbbb\n--- /dev/null\n+++ b/tests/greet.test.ts\n@@ -0,0 +1,7 @@\n+import { describe, it, expect } from \"bun:test\";\n+import { greet } from \"../src/greet\";\n+describe(\"greet\", () => {\n+  it(\"greets by name\", () => {\n+    expect(greet(\"World\")).toBe(\"Hello, World!\");\n+  });\n+});\n",
+    "diffStat": " src/greet.ts        | 3 +++\n tests/greet.test.ts | 7 +++++++\n 2 files changed, 10 insertions(+)",
+    "verificationCommand": "bun test",
+    "verificationExitCode": 0,
+    "verificationOutputTruncated": "bun test v1.1.38\n\ntests/greet.test.ts:\n(pass) greet > greets by name\n\n 1 pass\n 0 fail\n 1 expect() calls\nRan 1 test across 1 files. [5.00ms]",
+    "handsOffList": ["run_bot*.sh", "scripts/setup_*.sh"]
+  }
+}
