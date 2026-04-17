@@ -680,7 +680,7 @@
   {
     "id": "gs-139",
     "title": "Add --dry-run to src/clean.ts runClean so operators can preview exactly what would be deleted before committing. Flag threads through from cli.ts clean command (existing --keep/--log-days are parsed there). In dry-run mode: enumerate each worktree/log/cycle that would be removed with a '[DRY RUN] Would remove: <path>' line, do not invoke rmSync or git worktree remove, and report the same 'Cleaned N item(s)' footer prefixed with '[DRY RUN] '. Add tests in tests/clean.test.ts covering each of the three cleanup phases.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

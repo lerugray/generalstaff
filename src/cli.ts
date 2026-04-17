@@ -122,9 +122,10 @@ Usage:
     Example: generalstaff doctor                        # diagnose only
     Example: generalstaff doctor --fix                  # prompt y/N for each fix
     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
-  generalstaff clean [--keep=N] [--log-days=N]            Remove stale worktrees + prune old cycles + rotate logs
+  generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
+    Example: generalstaff clean --dry-run                # preview without deleting
 
   generalstaff task list --project=<id>                   Show pending tasks for a project
     Example: generalstaff task list --project=myapp
@@ -562,6 +563,7 @@ switch (command) {
       options: {
         keep: { type: "string", default: "20" },
         "log-days": { type: "string", default: "30" },
+        "dry-run": { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -569,6 +571,7 @@ switch (command) {
     await runClean(
       parseInt(cleanValues.keep!, 10),
       parseInt(cleanValues["log-days"]!, 10),
+      cleanValues["dry-run"] === true,
     );
     break;
   }
