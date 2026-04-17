@@ -3,7 +3,7 @@
 import { parseArgs } from "util";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, join, resolve } from "path";
-import { runSession } from "./session";
+import { runSession, runSessionChain } from "./session";
 import { runSingleCycle, countCommitsAhead } from "./cycle";
 import { $ } from "bun";
 import { loadFleetState, getProjectSummary, getRootDir } from "./state";
@@ -51,13 +51,14 @@ function printUsage() {
 
 Usage:
   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
-                       [--exclude-project=<id>[,<id>...]] [--verbose]
+                       [--exclude-project=<id>[,<id>...]] [--verbose] [--chain=<n>]
                                                           Run a session (multiple cycles)
     Example: generalstaff session --budget=480          # overnight 8-hour run
     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
     Example: generalstaff session --dry-run             # preview without committing
     Example: generalstaff session --exclude-project=catalogdna,retrogaze
     Example: generalstaff session --verbose             # stream PROGRESS.jsonl events to stdout
+    Example: generalstaff session --chain=3             # run 3 back-to-back sessions with the same options
 
   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
     Example: generalstaff cycle --project=myapp
@@ -177,6 +178,7 @@ switch (command) {
         "dry-run": { type: "boolean", default: false },
         "exclude-project": { type: "string" },
         verbose: { type: "boolean", default: false },
+        chain: { type: "string" },
       },
       allowPositionals: false,
     });
@@ -201,13 +203,27 @@ switch (command) {
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
     }
-    await runSession({
+    let chain = 1;
+    if (values.chain !== undefined) {
+      const parsed = parseInt(values.chain, 10);
+      if (isNaN(parsed) || parsed < 1) {
+        console.error("Error: --chain must be a positive integer");
+        process.exit(1);
+      }
+      chain = parsed;
+    }
+    const sessionOpts = {
       budgetMinutes: budget,
       dryRun: values["dry-run"]!,
       maxCycles,
       excludeProjects,
       verbose: values.verbose!,
-    });
+    };
+    if (chain === 1) {
+      await runSession(sessionOpts);
+    } else {
+      await runSessionChain(sessionOpts, chain);
+    }
     break;
   }
 

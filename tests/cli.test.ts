@@ -63,6 +63,33 @@ describe("CLI", () => {
       expect(result.stdout).toContain("--verbose");
       expect(result.stdout).toContain("stream PROGRESS.jsonl events");
     });
+
+    it("advertises --chain on session", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("--chain");
+      expect(result.stdout).toContain("back-to-back sessions");
+    });
+  });
+
+  describe("session --chain validation", () => {
+    it("rejects --chain=0 with a clear error", async () => {
+      const result = await runCli(["session", "--chain=0"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--chain must be a positive integer");
+    });
+
+    it("rejects non-numeric --chain values", async () => {
+      const result = await runCli(["session", "--chain=abc"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--chain must be a positive integer");
+    });
+
+    it("rejects negative --chain values", async () => {
+      const result = await runCli(["session", "--chain=-1"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--chain must be a positive integer");
+    });
   });
 
   describe("no arguments", () => {

@@ -602,7 +602,7 @@
   {
     "id": "gs-126",
     "title": "Add `generalstaff session --chain=<N>` flag that queues N back-to-back sessions, each starting after the previous finishes. Same budget/reviewer across children. Enables unattended multi-hour runs past the 10-cycle-per-session cap. Add tests for --chain=0 (error), --chain=1 (equivalent to no flag), --chain=3.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
