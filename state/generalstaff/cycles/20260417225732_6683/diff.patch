@@ -1,0 +1,279 @@
+diff --git a/.gitignore b/.gitignore
+index 35de376..2866ee5 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -27,6 +27,7 @@ dist/
+ # subdir — those files (gs-156) are tracked data, not generated.
+ tests/fixtures/*
+ !tests/fixtures/reviewer_calibration/
++!tests/fixtures/provider_config_malformed/
+ 
+ # Bot worktree (created by scripts/run_bot.sh, cleaned on exit)
+ .bot-worktree/
+diff --git a/src/providers/registry.ts b/src/providers/registry.ts
+index 736fe11..1035965 100644
+--- a/src/providers/registry.ts
++++ b/src/providers/registry.ts
+@@ -5,9 +5,11 @@
+ // reviewer path is NOT a consumer of this module — reviewer dispatch
+ // remains inline in src/reviewer.ts per Phase 2 scoping.
+ //
+-// When provider_config.yaml is missing, the registry contains no
+-// providers and every route points at the string "noop"; callers should
+-// consult hasProviderForRole() before dispatching.
++// When provider_config.yaml is missing OR exists but is empty / all
++// whitespace, the registry contains no providers and every route points
++// at the string "noop"; callers should consult hasProviderForRole()
++// before dispatching. Any other malformed input surfaces as
++// ProviderConfigError so the caller sees a single error type.
+ 
+ import { existsSync } from "fs";
+ import { readFile } from "fs/promises";
+@@ -144,8 +146,19 @@ export async function loadProviderRegistry(
+     return emptyRegistry();
+   }
+   const raw = await readFile(filePath, "utf8");
+-  const parsed = parseYaml(raw);
+-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
++  let parsed: unknown;
++  try {
++    parsed = parseYaml(raw);
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    throw new ProviderConfigError(
++      `provider_config.yaml: YAML parse error — ${msg}`,
++    );
++  }
++  if (parsed === null || parsed === undefined) {
++    return emptyRegistry();
++  }
++  if (typeof parsed !== "object" || Array.isArray(parsed)) {
+     throw new ProviderConfigError(
+       "provider_config.yaml: root must be an object",
+     );
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 2ecd812..e444c8e 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -976,8 +976,9 @@
+   {
+     "id": "gs-162",
+     "title": "Add test coverage in tests/providers.registry.test.ts for every malformed-input branch of loadProviderRegistry (gs-152). Cases: (a) yaml parse failure (raw '{[ bad'), (b) top-level providers not a map, (c) provider entry missing id, (d) provider entry missing kind, (e) provider entry with unknown kind ('gemini' — not in Phase 2), (f) provider entry missing model, (g) routes referencing a provider id that is not declared, (h) routes with unknown role key, (i) empty file (returns empty registry, not an error — this is the 'no provider_config.yaml' equivalent for an existing-but-blank file). Each case asserts either a ProviderConfigError with the expected field name OR the documented lenient fallback. Also add a fixture at tests/fixtures/provider_config_malformed/ with one bad example per case. Do NOT touch provider_config.yaml.example — that stays as the golden-path reference.",
+-    "status": "pending",
+-    "priority": 3
++    "status": "done",
++    "priority": 3,
++    "updated_at": "2026-04-17"
+   },
+   {
+     "id": "gs-163",
+diff --git a/tests/fixtures/provider_config_malformed/README.md b/tests/fixtures/provider_config_malformed/README.md
+new file mode 100644
+index 0000000..060dd49
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/README.md
+@@ -0,0 +1,22 @@
++# Malformed provider_config.yaml fixtures
++
++One file per error case covered by `tests/providers.registry.test.ts`
++under the `loadProviderRegistry — malformed fixtures` suite. Each
++fixture targets a single branch of `validateDescriptor` /
++`validateRoutes` / the top-level parser so a regression in the
++registry loader produces a clear failing case.
++
++The golden-path example lives at `provider_config.yaml.example` in
++the repo root and is deliberately not duplicated here.
++
++| File | Branch |
++| --- | --- |
++| `a_yaml_parse_error.yaml` | raw YAML that fails `yaml.parse` |
++| `b_providers_not_array.yaml` | top-level `providers` is a map, not an array |
++| `c_missing_id.yaml` | provider entry missing `id` |
++| `d_missing_kind.yaml` | provider entry missing `kind` |
++| `e_unknown_kind.yaml` | provider entry with `kind: gemini` (not in Phase 2) |
++| `f_missing_model.yaml` | provider entry missing `model` |
++| `g_routes_unknown_provider.yaml` | route references an undeclared provider id |
++| `h_routes_unknown_role.yaml` | `routes` has an unknown role key (`reviewer`) |
++| `i_empty.yaml` | fully empty file — lenient fallback returns empty registry |
+diff --git a/tests/fixtures/provider_config_malformed/a_yaml_parse_error.yaml b/tests/fixtures/provider_config_malformed/a_yaml_parse_error.yaml
+new file mode 100644
+index 0000000..5fd03e0
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/a_yaml_parse_error.yaml
+@@ -0,0 +1 @@
++{[ bad
+diff --git a/tests/fixtures/provider_config_malformed/b_providers_not_array.yaml b/tests/fixtures/provider_config_malformed/b_providers_not_array.yaml
+new file mode 100644
+index 0000000..60a843e
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/b_providers_not_array.yaml
+@@ -0,0 +1,4 @@
++providers:
++  id: ollama_llama3
++  kind: ollama
++  model: llama3:8b
+diff --git a/tests/fixtures/provider_config_malformed/c_missing_id.yaml b/tests/fixtures/provider_config_malformed/c_missing_id.yaml
+new file mode 100644
+index 0000000..28212df
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/c_missing_id.yaml
+@@ -0,0 +1,3 @@
++providers:
++  - kind: ollama
++    model: llama3:8b
+diff --git a/tests/fixtures/provider_config_malformed/d_missing_kind.yaml b/tests/fixtures/provider_config_malformed/d_missing_kind.yaml
+new file mode 100644
+index 0000000..e38a077
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/d_missing_kind.yaml
+@@ -0,0 +1,3 @@
++providers:
++  - id: ollama_llama3
++    model: llama3:8b
+diff --git a/tests/fixtures/provider_config_malformed/e_unknown_kind.yaml b/tests/fixtures/provider_config_malformed/e_unknown_kind.yaml
+new file mode 100644
+index 0000000..0cf649c
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/e_unknown_kind.yaml
+@@ -0,0 +1,4 @@
++providers:
++  - id: gem
++    kind: gemini
++    model: gemini-2.5-flash
+diff --git a/tests/fixtures/provider_config_malformed/f_missing_model.yaml b/tests/fixtures/provider_config_malformed/f_missing_model.yaml
+new file mode 100644
+index 0000000..1fddf99
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/f_missing_model.yaml
+@@ -0,0 +1,3 @@
++providers:
++  - id: ollama_llama3
++    kind: ollama
+diff --git a/tests/fixtures/provider_config_malformed/g_routes_unknown_provider.yaml b/tests/fixtures/provider_config_malformed/g_routes_unknown_provider.yaml
+new file mode 100644
+index 0000000..8f9180f
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/g_routes_unknown_provider.yaml
+@@ -0,0 +1,6 @@
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: ghost_provider
+diff --git a/tests/fixtures/provider_config_malformed/h_routes_unknown_role.yaml b/tests/fixtures/provider_config_malformed/h_routes_unknown_role.yaml
+new file mode 100644
+index 0000000..581b877
+--- /dev/null
++++ b/tests/fixtures/provider_config_malformed/h_routes_unknown_role.yaml
+@@ -0,0 +1,6 @@
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  reviewer: ollama_llama3
+diff --git a/tests/fixtures/provider_config_malformed/i_empty.yaml b/tests/fixtures/provider_config_malformed/i_empty.yaml
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/providers.registry.test.ts b/tests/providers.registry.test.ts
+index e1410ca..0fbb4f7 100644
+--- a/tests/providers.registry.test.ts
++++ b/tests/providers.registry.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+ import { mkdtempSync, rmSync, writeFileSync } from "fs";
+ import { tmpdir } from "os";
+-import { join } from "path";
++import { join, resolve } from "path";
+ import {
+   getProviderForRole,
+   hasProviderForRole,
+@@ -9,6 +9,16 @@ import {
+   ProviderConfigError,
+ } from "../src/providers/registry";
+ 
++const MALFORMED_FIXTURE_DIR = resolve(
++  __dirname,
++  "fixtures",
++  "provider_config_malformed",
++);
++
++function fixturePath(name: string): string {
++  return join(MALFORMED_FIXTURE_DIR, name);
++}
++
+ function makeTempDir(): string {
+   return mkdtempSync(join(tmpdir(), "gs-registry-"));
+ }
+@@ -267,6 +277,70 @@ providers:
+   });
+ });
+ 
++describe("loadProviderRegistry — malformed fixtures (gs-162)", () => {
++  it("(a) wraps a YAML parse error in ProviderConfigError", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("a_yaml_parse_error.yaml")),
++    ).rejects.toThrow(ProviderConfigError);
++    await expect(
++      loadProviderRegistry(fixturePath("a_yaml_parse_error.yaml")),
++    ).rejects.toThrow(/YAML parse error/);
++  });
++
++  it("(b) rejects a top-level providers block that is a map, not a list", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("b_providers_not_array.yaml")),
++    ).rejects.toThrow(ProviderConfigError);
++    await expect(
++      loadProviderRegistry(fixturePath("b_providers_not_array.yaml")),
++    ).rejects.toThrow(/array/);
++  });
++
++  it("(c) rejects a provider entry missing id", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("c_missing_id.yaml")),
++    ).rejects.toThrow(/\.id/);
++  });
++
++  it("(d) rejects a provider entry missing kind", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("d_missing_kind.yaml")),
++    ).rejects.toThrow(/\.kind/);
++  });
++
++  it("(e) rejects unknown provider kind 'gemini'", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("e_unknown_kind.yaml")),
++    ).rejects.toThrow(/gemini/);
++  });
++
++  it("(f) rejects a provider entry missing model", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("f_missing_model.yaml")),
++    ).rejects.toThrow(/\.model/);
++  });
++
++  it("(g) rejects a route referencing an undeclared provider id", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("g_routes_unknown_provider.yaml")),
++    ).rejects.toThrow(/ghost_provider/);
++  });
++
++  it("(h) rejects an unknown role key in routes", async () => {
++    await expect(
++      loadProviderRegistry(fixturePath("h_routes_unknown_role.yaml")),
++    ).rejects.toThrow(/reviewer/);
++  });
++
++  it("(i) treats an empty file as an empty registry (lenient fallback)", async () => {
++    const registry = await loadProviderRegistry(fixturePath("i_empty.yaml"));
++    expect(registry.providers.size).toBe(0);
++    expect(registry.routes.digest).toBe("noop");
++    expect(registry.routes.cycle_summary).toBe("noop");
++    expect(registry.routes.classifier).toBe("noop");
++  });
++});
++
+ describe("hasProviderForRole / getProviderForRole (gs-152)", () => {
+   let dir: string;
+ 
