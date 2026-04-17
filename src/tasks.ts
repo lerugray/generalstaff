@@ -157,3 +157,32 @@ export async function markTaskDone(
   await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
   return { kind: "done", task: updated[idx]! };
 }
+
+export type MarkTaskPendingResult =
+  | { kind: "reopened"; task: GreenfieldTask }
+  | { kind: "already_pending"; task: GreenfieldTask }
+  | { kind: "task_not_found"; availableIds: string[] }
+  | { kind: "project_not_found"; path: string };
+
+export async function markTaskPending(
+  projectId: string,
+  taskId: string,
+): Promise<MarkTaskPendingResult> {
+  const path = tasksPath(projectId);
+  if (!existsSync(path)) {
+    return { kind: "project_not_found", path };
+  }
+  const tasks = await loadTasks(projectId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx === -1) {
+    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
+  }
+  const task = tasks[idx]!;
+  if (task.status === "pending") {
+    return { kind: "already_pending", task };
+  }
+  const updated = [...tasks];
+  updated[idx] = { ...task, status: "pending" };
+  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  return { kind: "reopened", task: updated[idx]! };
+}
