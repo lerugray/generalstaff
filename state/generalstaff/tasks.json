@@ -424,5 +424,41 @@
     "title": "Add a 'generalstaff task count [--project=<id>]' subcommand that reports the number of pending vs done tasks per project (or for all projects when --project is omitted). Output format: 'myproj: 5 pending, 12 done (17 total)'. Add tests.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-097",
+    "title": "(BUG) Investigate why writeDigest's first cycle of a session sometimes falls back to cycle_id instead of the commit subject in the 'What got done' list. The 2026-04-17 morning run's digest showed cycle 1 as '20260417100252_4z21' instead of 'gs-087: add parseDigest tests' even though the commit landed cleanly. Reproduce with a git fixture: init repo, commit A, branch bot/work, commit B on bot/work, merge B into main, then call fetchCommitSubject(A, B) and expect B's subject. If the fixture test passes, instrument session.ts's cycle_start_sha / cycle_end_sha assignment for the first cycle — the bug may be that cycle 1's start SHA equals the session-init-commit SHA created at session start, and the cycle_end_sha reflects post-auto-merge state rather than the bot's own commit. Add regression test either way.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-098",
+    "title": "Add a 'generalstaff session --exclude-project=<id>[,<id>...]' filter. When the project picker (src/dispatcher.ts pickNextProject) evaluates candidates, skip any project id in the exclude set. Parse comma-separated values from the flag. Useful for 'skip this project for tonight's run'. Add tests covering: single exclude, multiple excludes, excluded project is the only eligible project (session ends with no-project), excluded project id doesn't exist (warn but don't error).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-099",
+    "title": "Add a 'session_complete' ProgressEntry event type (fleet-level, not per-project) that emits once at session end with aggregated stats: total_cycles, total_verified, total_failed, duration_minutes, stop_reason. Complements the existing per-project session_end entries. Add to ProgressEventType union in types.ts, emit from session.ts after the per-project session_end loop, and add tests verifying the event fires exactly once per session.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-100",
+    "title": "Add a 'generalstaff status --watch[=N]' flag that refreshes the status output every N seconds until killed (Ctrl-C). Default N=5 when --watch is specified without a value. Minimum N=1. Use setInterval and clear the terminal between renders (ANSI clear-screen, suppressed when not a TTY — fall back to repeated output). Add tests with a mocked timer covering: default interval, custom interval, interval clamping at 1.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-101",
+    "title": "Extract the result-categorization logic from src/session.ts (the verified/failed/skipped filtering used in the notification block and session-end logging) into a helper `categorizeResults(results: CycleResult[]): { verified: CycleResult[]; failed: CycleResult[]; skipped: CycleResult[] }` in a new src/results.ts module. verified_weak counts as verified (per existing convention). Refactor session.ts and src/summary.ts to use it. Add tests covering each bucket plus edge cases (empty array, all one type).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-102",
+    "title": "Include the reviewer provider name in the digest header so multi-provider runs are traceable from the digest alone. Read from GENERALSTAFF_REVIEWER_PROVIDER (default 'claude') at session start, thread it through writeDigest's config param, and emit a '**Reviewer:** <provider>' line in the digest header (e.g., '**Reviewer:** ollama (qwen3:8b)'). When GENERALSTAFF_REVIEWER_MODEL is set, include the model in parentheses. Add tests covering default, openrouter, ollama, and unknown-provider cases.",
+    "status": "pending",
+    "priority": 2
   }
 ]

@@ -48,6 +48,10 @@ if not exist digests mkdir digests
 for /f %%i in ('powershell -nologo -command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%i"
 set "LOG=logs\session_%TS%.log"
 
+REM Export the log path so session.ts can include it in its end-of-session
+REM Telegram notification (see src/notify.ts).
+set "GENERALSTAFF_SESSION_LOG=%LOG%"
+
 REM Provider-specific credential loading. OpenRouter needs an API key
 REM from Ray's shared provider .env (stored under OPENAI_API_KEY — that
 REM field name predates this routing). Ollama and claude need nothing:
@@ -108,9 +112,10 @@ echo Exit code: %EXITCODE%
 echo Log:       %LOG%
 echo Summary:   digests\LAST_RUN.md
 
-REM Fire an end-of-session Telegram notification. Non-fatal: the script
-REM bails quietly if the bot token / chat_id aren't reachable, so an
-REM unrelated config issue never crashes a session.
-powershell -nologo -noprofile -ExecutionPolicy Bypass -File "scripts\notify_telegram.ps1" -ExitCode "%EXITCODE%" -BudgetMin "%BUDGET%" -LogPath "%LOG%" -DigestDir "digests"
+REM End-of-session Telegram notification is now fired from session.ts
+REM itself (src/notify.ts) so any launcher path — including this .bat
+REM when spawned in a detached context — produces the notification.
+REM The legacy scripts\notify_telegram.ps1 script is still around for
+REM manual re-sends but is no longer invoked automatically here.
 
 endlocal & exit /b %EXITCODE%

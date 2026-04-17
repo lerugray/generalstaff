@@ -17,6 +17,7 @@ import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher"
 import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration } from "./format";
 import { fetchCommitSubject } from "./git";
+import { notifySessionEnd } from "./notify";
 import { countRemainingWork } from "./work_detection";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
@@ -311,6 +312,39 @@ export async function runSession(options: SessionOptions) {
       total_failed: projectResults.filter(
         (r) => r.final_outcome === "verification_failed",
       ).length,
+    });
+  }
+
+  // End-of-session Telegram notification. Moved here from the .bat
+  // wrapper because post-bun steps in run_session.bat weren't reliably
+  // reached when the .bat was spawned from a detached context. Running
+  // it here means any launcher path — .bat, direct `bun src/cli.ts
+  // session`, Task Scheduler, whatever — produces the notification.
+  // notifySessionEnd silently skips if credentials aren't configured,
+  // and all internal failures are swallowed so this can never crash
+  // the session.
+  if (!dryRun) {
+    const verifiedResults = allResults.filter(
+      (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
+    );
+    const failedResults = allResults.filter(
+      (r) => r.final_outcome === "verification_failed",
+    );
+    const skippedResults = allResults.filter(
+      (r) => r.final_outcome === "cycle_skipped",
+    );
+    const tasksDone = verifiedResults.map(
+      (r) => fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id,
+    );
+    await notifySessionEnd({
+      success: failedResults.length === 0,
+      budgetMinutes,
+      durationMinutes: elapsed,
+      verified: verifiedResults.length,
+      failed: failedResults.length,
+      skipped: skippedResults.length,
+      tasksDone,
+      logPath: process.env.GENERALSTAFF_SESSION_LOG,
     });
   }
 
