@@ -218,6 +218,10 @@ describe("formatSummary", () => {
     duration_seconds: 600,
     tasks_pending: 5,
     tasks_by_project: { alpha: 3, beta: 2 },
+    cycles_by_project: {
+      alpha: { verified: 4, total: 5 },
+      beta: { verified: 3, total: 5 },
+    },
   };
 
   it("renders header, cycles, durations, tasks, tests", () => {
@@ -253,6 +257,7 @@ describe("formatSummary", () => {
         duration_seconds: 0,
         tasks_pending: 0,
         tasks_by_project: {},
+        cycles_by_project: {},
       },
       null,
     );
@@ -282,6 +287,43 @@ describe("formatSummary", () => {
     expect(out).toContain("digests/:      1.0 KB");
     expect(out).toContain("state/:        512 B");
     expect(out).toContain("Total:         3.5 KB");
+  });
+
+  it("renders a per-project success rate line for each project with cycles", () => {
+    const out = formatSummary(baseSummary, null);
+    expect(out).toContain("By project:");
+    expect(out).toContain("alpha: Success rate: 80% (4/5 verified)");
+    expect(out).toContain("beta: Success rate: 60% (3/5 verified)");
+  });
+
+  it("omits the By project section when no project has cycles", () => {
+    const out = formatSummary(
+      { ...baseSummary, cycles_by_project: {} },
+      null,
+    );
+    expect(out).not.toContain("By project:");
+    expect(out).not.toContain("Success rate:");
+  });
+
+  it("buildFleetSummary populates cycles_by_project with verified counts", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    mkdirSync(join(stateDir, "beta"), { recursive: true });
+
+    const alphaLog = [
+      cycleEnd({ project: "alpha", cycleId: "c-a1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified" }),
+      cycleEnd({ project: "alpha", cycleId: "c-a2", ts: "2026-04-16T10:05:00.000Z", outcome: "verified" }),
+      cycleEnd({ project: "alpha", cycleId: "c-a3", ts: "2026-04-16T10:10:00.000Z", outcome: "verification_failed" }),
+    ].join("\n") + "\n";
+    const betaLog = [
+      cycleEnd({ project: "beta", cycleId: "c-b1", ts: "2026-04-16T11:00:00.000Z", outcome: "cycle_skipped" }),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), alphaLog);
+    writeFileSync(join(stateDir, "beta", "PROGRESS.jsonl"), betaLog);
+
+    const s = await buildFleetSummary();
+    expect(s.cycles_by_project.alpha).toEqual({ verified: 2, total: 3 });
+    expect(s.cycles_by_project.beta).toEqual({ verified: 0, total: 1 });
   });
 
   it("omits Disk Usage section when disk is null or undefined", () => {
