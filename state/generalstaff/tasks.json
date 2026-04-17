@@ -314,7 +314,7 @@
   {
     "id": "gs-078",
     "title": "Improve session console output to include an ETA: after each cycle completes, print 'Cycle N completed ... (projected end: HH:MM)'. Projected end = now + (remaining cycles estimate * avg cycle duration). Skip ETA if fewer than 2 cycles have completed (need a sample). Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
@@ -476,7 +476,7 @@
   {
     "id": "gs-105",
     "title": "Remove the now-dead Telegram notify invocation from scripts/run_session.bat. src/notify.ts handles end-of-session notification directly from bun now (see 2026-04-17 notify refactor), so the powershell call in the .bat is redundant (and unreachable in detached launch contexts anyway). Keep scripts/notify_telegram.ps1 for manual re-sends. Update the .bat's comment block to reflect the new flow.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

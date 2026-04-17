@@ -549,6 +549,22 @@ describe("runSession safeguards", () => {
     );
   }, 30_000);
 
+  it("emits an ETA on cycle completion once ≥2 cycles have completed (gs-078)", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_cycle_eta_log.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(2);
+    expect(result.result_count).toBe(2);
+    // Cycle 1: too few samples → no ETA
+    expect(String(result.cycle1_line)).not.toContain("projected end:");
+    // Cycle 2: enough samples → HH:MM ETA appears
+    expect(String(result.cycle2_line)).toMatch(/projected end: \d{2}:\d{2}/);
+  }, 30_000);
+
   it("stops at max-cycles when maxCycles hits before budget", async () => {
     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
       "verify_max_cycles.ts",
