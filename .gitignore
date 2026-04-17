@@ -27,6 +27,7 @@ dist/
 # subdir — those files (gs-156) are tracked data, not generated.
 tests/fixtures/*
 !tests/fixtures/reviewer_calibration/
+!tests/fixtures/provider_config_malformed/
 
 # Bot worktree (created by scripts/run_bot.sh, cleaned on exit)
 .bot-worktree/
