@@ -242,11 +242,10 @@ function startedAtMs(entry: ProgressEntry): number {
   return typeof dur === "number" ? endMs - dur * 1000 : endMs;
 }
 
-export async function loadCycleHistory(
+async function collectCycleEnds(
   projectId: string | undefined,
-  limit: number = 20,
-  options: LoadCycleHistoryOptions = {},
-): Promise<CycleHistoryRow[]> {
+  options: LoadCycleHistoryOptions,
+): Promise<ProgressEntry[]> {
   const sinceMs = options.since !== undefined
     ? parseDateFlag(options.since, false)
     : undefined;
@@ -295,6 +294,15 @@ export async function loadCycleHistory(
     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
   );
 
+  return entries;
+}
+
+export async function loadCycleHistory(
+  projectId: string | undefined,
+  limit: number = 20,
+  options: LoadCycleHistoryOptions = {},
+): Promise<CycleHistoryRow[]> {
+  const entries = await collectCycleEnds(projectId, options);
   return entries.slice(-limit).map((e) => ({
     cycle_id: (e.cycle_id ?? "?").slice(0, 12),
     project: e.project_id ?? "?",
@@ -304,6 +312,31 @@ export async function loadCycleHistory(
       : "?",
     sha_range: shaRange(e.data.start_sha, e.data.end_sha),
     timestamp: e.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z"),
+  }));
+}
+
+export interface CycleHistoryJsonRow {
+  cycle_id: string;
+  project_id: string;
+  started_at: string;
+  outcome: string;
+  diff_stats: unknown;
+  reason: string;
+}
+
+export async function loadCycleHistoryJson(
+  projectId: string | undefined,
+  limit: number = 20,
+  options: LoadCycleHistoryOptions = {},
+): Promise<CycleHistoryJsonRow[]> {
+  const entries = await collectCycleEnds(projectId, options);
+  return entries.slice(-limit).map((e) => ({
+    cycle_id: e.cycle_id ?? "",
+    project_id: e.project_id ?? "",
+    started_at: new Date(startedAtMs(e)).toISOString(),
+    outcome: String(e.data.outcome ?? ""),
+    diff_stats: e.data.diff_stats ?? null,
+    reason: String(e.data.reason ?? ""),
   }));
 }
 
