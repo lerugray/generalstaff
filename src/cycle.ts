@@ -473,6 +473,16 @@ export async function executeCycle(
     );
     result.engineer_exit_code = engineerResult.exitCode;
 
+    // 4a. If the STOP file was written mid-engineer (gs-131), the session
+    //     watcher will have killed the subprocess. Route to cycle_skipped
+    //     rather than the gs-111 abnormal-exit path — the operator didn't
+    //     observe a bug, they asked for a stop.
+    if (await isStopFilePresent()) {
+      console.log("STOP file detected during engineer run — skipping cycle.");
+      result.reason = "STOP file triggered during engineer";
+      break assemble;
+    }
+
     // 5. Capture end SHA on the bot's branch
     const cycleEndSha = await getGitSha(project.path, branch);
     result.cycle_end_sha = cycleEndSha;

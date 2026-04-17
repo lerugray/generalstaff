@@ -6,6 +6,15 @@ import { createWriteStream, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { ensureCycleDir, writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
+import {
+  setActiveEngineerChild,
+  clearActiveEngineerChild,
+  killChildTree,
+} from "./active_engineer";
+import type {
+  KillableChild,
+  KillChildTreeOptions,
+} from "./active_engineer";
 import type { ProjectConfig, DispatcherConfig } from "./types";
 
 export interface EngineerResult {
@@ -15,44 +24,12 @@ export interface EngineerResult {
   logPath: string;
 }
 
-// Minimal ChildProcess surface used by killChildTree — kept narrow so tests
-// can pass a fake without fabricating an entire ChildProcess instance.
-export interface KillableChild {
-  pid?: number;
-  kill(signal?: NodeJS.Signals | number): boolean;
-}
-
-export interface KillChildTreeOptions {
-  platform?: NodeJS.Platform;
-  spawnSyncFn?: typeof import("child_process").spawnSync;
-  setTimeoutFn?: (cb: () => void, ms: number) => unknown;
-}
-
-// Kill the entire process tree rooted at `child`. On Windows,
-// `child.kill("SIGTERM")` only kills the direct child (bash.exe);
-// grandchildren (claude.exe spawned from run_bot.sh) keep running as
-// orphans. This was observed 2026-04-17 when cycle 10's engineer timeout
-// fired correctly but claude.exe ignored the kill and kept running for
-// another ~15 minutes until taskkilled manually. On *nix the signal
-// propagates through the process group when the shell forwards it; on
-// Windows we need taskkill /T /F to reach the tree.
-export function killChildTree(
-  child: KillableChild,
-  opts: KillChildTreeOptions = {},
-): void {
-  const platform = opts.platform ?? process.platform;
-  if (platform === "win32" && child.pid) {
-    const spawnSyncFn =
-      opts.spawnSyncFn ?? (require("child_process").spawnSync as typeof import("child_process").spawnSync);
-    spawnSyncFn("taskkill", ["/pid", String(child.pid), "/f", "/t"], {
-      stdio: "ignore",
-    });
-  } else {
-    child.kill("SIGTERM");
-    const setTimeoutFn = opts.setTimeoutFn ?? setTimeout;
-    setTimeoutFn(() => child.kill("SIGKILL"), 10_000);
-  }
-}
+// Re-exports preserve the public surface for callers (and tests) that
+// import these directly from "./engineer". The live registry now lives
+// in ./active_engineer so session.ts can reach it without transitively
+// importing state.ts / audit.ts (gs-131).
+export { killChildTree, getActiveEngineerChild, killActiveEngineer } from "./active_engineer";
+export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
 
 export async function runEngineer(
   project: ProjectConfig,
@@ -109,6 +86,7 @@ export async function runEngineer(
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
+    setActiveEngineerChild(child);
 
     child.stdout?.on("data", (chunk: Buffer) => {
       logStream.write(chunk);
@@ -131,6 +109,7 @@ export async function runEngineer(
 
     child.on("close", async (code) => {
       clearTimeout(timer);
+      clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 
       logStream.write(
@@ -157,6 +136,7 @@ export async function runEngineer(
 
     child.on("error", async (err) => {
       clearTimeout(timer);
+      clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 
       const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";

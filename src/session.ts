@@ -12,7 +12,10 @@ import {
 } from "./state";
 import { appendProgress, loadProgressEvents, setVerboseMode } from "./audit";
 import { isStopFilePresent } from "./safety";
+import { join as pathJoin } from "path";
 import { executeCycle, countCommitsAhead } from "./cycle";
+import { killActiveEngineer } from "./active_engineer";
+import { startStopFileWatcher } from "./stop_watcher";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
 import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration, formatFileCount } from "./format";
@@ -196,6 +199,28 @@ export async function runSession(options: SessionOptions) {
   const MAX_CONSECUTIVE_EMPTY = 3;
 
   let stopReason: "budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+
+  // gs-131: mid-cycle STOP file detection. isStopFilePresent() is only
+  // checked at cycle boundaries; this fs.watch on the STOP path kills the
+  // live engineer subprocess the moment the STOP file is created, so the
+  // bot doesn't keep working for 30+ minutes after an operator asked it
+  // to stop. Wrapped in try/catch because mocked/partial safety modules
+  // (in subprocess test helpers) may not expose stopFilePath — the outer
+  // cycle-boundary check is still a safety net in that case.
+  let stopWatcher: { close(): void } = { close: () => {} };
+  try {
+    // Compute the STOP path directly rather than importing stopFilePath
+    // from safety.ts — several subprocess test helpers mock safety.ts
+    // with only `isStopFilePresent`, and a named import would fail
+    // module resolution in those fixtures.
+    const path = pathJoin(getRootDir(), "STOP");
+    stopWatcher = startStopFileWatcher(path, () => {
+      console.log("\nSTOP file detected mid-cycle — killing active engineer.");
+      killActiveEngineer();
+    });
+  } catch {
+    /* watcher is optional; continue with the cycle-boundary check */
+  }
 
   while (remainingMinutes() > 0) {
     // Max-cycles cap — stops before running another cycle
@@ -451,6 +476,7 @@ export async function runSession(options: SessionOptions) {
     });
   }
 
+  stopWatcher.close();
   setVerboseMode(false);
   return allResults;
 }
