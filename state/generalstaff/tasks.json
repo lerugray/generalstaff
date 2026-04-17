@@ -356,7 +356,7 @@
   {
     "id": "gs-085",
     "title": "Add a formatRelativeTime(iso: string, now?: Date) helper to src/format.ts that converts an ISO timestamp to a human relative string: 'just now' (<60s), '3 min ago', '2h ago', 'yesterday at HH:MM', 'N days ago'. Handles future dates gracefully ('in N min'). Include tests covering each bucket and invalid input.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
