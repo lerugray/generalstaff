@@ -397,6 +397,77 @@ describe("writeDigest narrative (gs-158)", () => {
   });
 });
 
+describe("writeDigest narrative (gs-160) — registry-path graceful degradation", () => {
+  const NARRATIVE_ENV = "GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER";
+  let savedEnv: string | undefined;
+  let logs: string[] = [];
+  let origLog: typeof console.log;
+
+  beforeEach(() => {
+    savedEnv = process.env[NARRATIVE_ENV];
+    delete process.env[NARRATIVE_ENV];
+    logs = [];
+    origLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "));
+    };
+  });
+
+  afterEach(() => {
+    console.log = origLog;
+    if (savedEnv === undefined) delete process.env[NARRATIVE_ENV];
+    else process.env[NARRATIVE_ENV] = savedEnv;
+  });
+
+  it("degrades gracefully when the registry-loaded provider is unreachable", async () => {
+    // No narrativeProvider override — exercises the full registry-load
+    // path in resolveDigestNarrative. Ollama provider points at a
+    // closed port so fetch fails instantly (ECONNREFUSED on
+    // localhost:1), and the adapter returns {content:"", error:...},
+    // which generateDigestNarrative surfaces as fellBack=true.
+    const configYaml = [
+      "providers:",
+      "  - id: ollama_llama3",
+      "    kind: ollama",
+      "    model: llama3:8b",
+      "    host: http://127.0.0.1:1",
+      "routes:",
+      "  digest: ollama_llama3",
+      "",
+    ].join("\n");
+    writeFileSync(join(TEST_DIR, "provider_config.yaml"), configYaml, "utf8");
+
+    process.env[NARRATIVE_ENV] = "ollama_llama3";
+
+    // (a) Must not throw — writeDigest is called at session-end and
+    // any exception here would crash the session after all work was
+    // already committed.
+    await writeDigest(
+      [makeCycleResult({ final_outcome: "verified" })],
+      1,
+      { digest_dir: "digests" },
+    );
+
+    // (b) Digest file is written.
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    expect(files).toHaveLength(1);
+
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    // (c) Standard Summary line present; Narrative line absent.
+    expect(content).toContain("**Summary:** 1 verified, 0 failed");
+    expect(content).not.toContain("**Narrative:**");
+
+    // (d) A console.log diagnosing the fall-back was emitted so the
+    // operator can tell narrative was attempted-and-failed, not
+    // silently skipped.
+    const fellBackLog = logs.find((l) =>
+      l.includes("digest narrative: fell back"),
+    );
+    expect(fellBackLog).toBeDefined();
+  });
+});
+
 function makePlan(overrides: Partial<SessionPlanEstimate> = {}): SessionPlanEstimate {
   return {
     picks: [],
@@ -913,6 +984,17 @@ describe("runSession safeguards", () => {
       "empty-cycles",
     ];
     expect(validStopReasons).toContain(data.stop_reason as string);
+  }, 30_000);
+
+  it("prints the pre-flight Ollama warning when the server is unreachable (gs-160 regression guard)", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_ollama_preflight_warning.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.has_preflight_warning).toBe(true);
   }, 30_000);
 
   it("adds capped projects to the skip set", async () => {
