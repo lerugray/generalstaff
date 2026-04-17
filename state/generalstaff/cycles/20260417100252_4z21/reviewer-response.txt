@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the marked-done task, no scope drift, no hands-off violations, and task evidence is present.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add a test for parseDigest in src/session.ts to ensure it correctly ignores summary headers",
+      "evidence": "tests/session.test.ts contains three new tests for parseDigest: 1) ignoring summary headers, 2) round-tripping writeDigest output, 3) handling zero cycles",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification output shows all tests passed, confirming the implementation works as intended."
+}

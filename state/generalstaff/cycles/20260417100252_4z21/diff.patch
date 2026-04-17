@@ -1,0 +1,153 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 47cca2b..8ff0ddc 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -368,7 +368,7 @@
+   {
+     "id": "gs-087",
+     "title": "Add a test for parseDigest in src/session.ts that verifies compatibility with the new multi-section digest format (## What got done / ## Issues / ## Details headers before the per-cycle sections). The existing cycle-section regex expects '## <project> — <cycle_id>'; confirm the new headers don't accidentally match.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 3b74c39..fe6a7ca 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { writeDigest, formatSessionPlanPreview } from "../src/session";
++import { writeDigest, formatSessionPlanPreview, parseDigest } from "../src/session";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+ import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
+@@ -350,6 +350,128 @@ describe("formatSessionPlanPreview", () => {
+   });
+ });
+ 
++describe("parseDigest", () => {
++  it("ignores the 'What got done', 'Issues', and 'Details' multi-section headers", () => {
++    // Synthetic digest matching the format writeDigest emits today. The
++    // per-cycle section header format is '## <project> — <cycle_id>' (em
++    // dash). The summary section headers ('## What got done', '## Issues',
++    // '## Details') have no em dash and must not be parsed as cycle rows.
++    const markdown = [
++      "# GeneralStaff Session Digest",
++      "",
++      "**Date:** 2026-04-17T09:00:00.000Z",
++      "**Duration:** 10m0s",
++      "**Cycles:** 1",
++      "**Summary:** 1 verified, 0 failed",
++      "",
++      "## What got done",
++      "",
++      "1. Some commit subject  _(2 file(s), +10/-3)_",
++      "",
++      "## Issues",
++      "",
++      "_None — all cycles passed verification._",
++      "",
++      "---",
++      "",
++      "## Details",
++      "",
++      "_Per-cycle technical detail (SHAs, reviewer verdicts) below._",
++      "",
++      "## myproj \u2014 cycle-42",
++      "",
++      "- **Outcome:** verified",
++      "- **Reason:** tests pass",
++      "- **SHA:** abcdef12 \u2192 12345678",
++      "- **Diff:** 2 file(s), +10/-3",
++      "- **Engineer exit:** 0",
++      "- **Verification:** passed",
++      "- **Reviewer:** verified",
++      "",
++    ].join("\n");
++
++    const parsed = parseDigest(markdown);
++
++    expect(parsed.cycle_count).toBe(1);
++    expect(parsed.cycles).toHaveLength(1);
++    expect(parsed.cycles[0].project_id).toBe("myproj");
++    expect(parsed.cycles[0].cycle_id).toBe("cycle-42");
++    expect(parsed.cycles[0].outcome).toBe("verified");
++    expect(parsed.cycles[0].reason).toBe("tests pass");
++    // No phantom cycles parsed from the summary headers
++    const ids = parsed.cycles.map((c) => c.project_id);
++    expect(ids).not.toContain("What got done");
++    expect(ids).not.toContain("Issues");
++    expect(ids).not.toContain("Details");
++  });
++
++  it("round-trips a writeDigest output", async () => {
++    const results = [
++      makeCycleResult({
++        project_id: "proj-a",
++        cycle_id: "c-1",
++        final_outcome: "verified",
++        reason: "tests pass, scope matches",
++        cycle_start_sha: "aaaaaaaa11111111",
++        cycle_end_sha: "bbbbbbbb22222222",
++        engineer_exit_code: 0,
++        verification_outcome: "passed",
++        reviewer_verdict: "verified",
++        diff_stats: { files_changed: 1, insertions: 5, deletions: 2 },
++      }),
++      makeCycleResult({
++        project_id: "proj-b",
++        cycle_id: "c-2",
++        final_outcome: "verification_failed",
++        reason: "reviewer rejected scope drift",
++        engineer_exit_code: 1,
++        verification_outcome: "failed",
++        reviewer_verdict: "verification_failed",
++      }),
++    ];
++    await writeDigest(results, 7, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    const parsed = parseDigest(content);
++
++    expect(parsed.cycle_count).toBe(2);
++    expect(parsed.cycles).toHaveLength(2);
++    expect(parsed.cycles[0].project_id).toBe("proj-a");
++    expect(parsed.cycles[0].cycle_id).toBe("c-1");
++    expect(parsed.cycles[0].outcome).toBe("verified");
++    expect(parsed.cycles[0].sha_start).toBe("aaaaaaaa");
++    expect(parsed.cycles[0].sha_end).toBe("bbbbbbbb");
++    expect(parsed.cycles[0].diff_stats).toEqual({
++      files_changed: 1,
++      insertions: 5,
++      deletions: 2,
++    });
++    expect(parsed.cycles[1].project_id).toBe("proj-b");
++    expect(parsed.cycles[1].cycle_id).toBe("c-2");
++    expect(parsed.cycles[1].outcome).toBe("verification_failed");
++    expect(parsed.cycles[1].reason).toBe("reviewer rejected scope drift");
++  });
++
++  it("returns an empty cycles array for a digest with zero cycles", () => {
++    const markdown = [
++      "# GeneralStaff Session Digest",
++      "",
++      "**Date:** 2026-04-17T09:00:00.000Z",
++      "**Duration:** 0m30s",
++      "**Cycles:** 0",
++      "",
++    ].join("\n");
++
++    const parsed = parseDigest(markdown);
++
++    expect(parsed.cycle_count).toBe(0);
++    expect(parsed.cycles).toHaveLength(0);
++    expect(parsed.duration).toBe("0m30s");
++  });
++});
++
+ describe("runSession safeguards", () => {
+   it("exits after 3 consecutive empty-diff cycles", async () => {
+     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
