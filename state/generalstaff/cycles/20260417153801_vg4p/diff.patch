@@ -1,0 +1,214 @@
+diff --git a/DESIGN.md b/DESIGN.md
+index 05bf809..5d19190 100644
+--- a/DESIGN.md
++++ b/DESIGN.md
+@@ -524,3 +524,196 @@ See `RULE-RELAXATION-2026-04-15.md` §4 for the canonical list:
+ 4. Telemetry policy (default: none)
+ 5. Distribution channel (GitHub, Homebrew, winget, npx)
+ 6. Verification gate edge cases (no tests, noop verification)
++
++## v3 — Session-budget vs cycle-budget reservation math (2026-04-17, gs-125)
++
++This section documents how the session loop reserves budget for each
++cycle, the inefficiency that falls out of it, and the options for
++handling that inefficiency. No code is changing here — this is a
++design-doc capture so the trade-off is explicit before a future
++session decides.
++
++### The math today
++
++The session loop (`src/session.ts`) pre-checks whether there is
++enough budget remaining before starting a cycle:
++
++```ts
++// src/session.ts, ~line 237
++const needed = currentProject.cycle_budget_minutes + 5;
++if (remainingMinutes() < needed) {
++  stopReason = "insufficient-budget";
++  break;
++}
++```
++
++The planner (`estimateSessionPlan` in `src/dispatcher.ts`, ~line 171)
++mirrors this with `needed = top.project.cycle_budget_minutes + 5`.
++
++That `+5` is a safety buffer covering reviewer invocation, digest
++write, PROGRESS append, and general slop around the hard engineer
++timeout. It is per cycle, not per session.
++
++`cycle_budget_minutes` is declared per project in `projects.yaml`.
++The example file currently recommends 45–60 min.
++
++### Why this produces wasted session budget
++
++A concrete example for a project with `cycle_budget_minutes: 30`
++launched as `generalstaff session --budget=60`:
++
++```
++Session budget:           60 min
++Reservation (cycle 1):    30 + 5 = 35 min
++After cycle 1 starts:     60 - 35 = 25 min remaining
++Can cycle 2 start?        needs 35 ≤ 25?   No.
++→ only ONE cycle fits, and the loop exits with stopReason = "insufficient-budget".
++```
++
++In practice, cycles on well-scoped tasks run **4–8 min of wall
++time** (observed on the GeneralStaff bot itself across 2026-04-16
++and 2026-04-17 runs). So the reservation model leaves the session
++wallclock mostly idle: one cycle runs for ~6 min, the remaining
++~54 min of session budget are returned unused.
++
++With `cycle_budget_minutes: 60` (closer to the example file's
++current recommendation for GeneralStaff-shaped projects) the
++effect is more extreme: a 60-min session fits **zero** cycles
++(needed 65, have 60) and exits immediately.
++
++The root cause is that `cycle_budget_minutes` is doing two jobs at
++once:
++
++1. **Hard timeout for the engineer subprocess** — needs to be high
++   enough that a legitimate slow cycle (big refactor, large diff,
++   reviewer retry) finishes rather than getting killed mid-edit.
++2. **Reservation unit for the session picker** — smaller is better
++   here, because the picker should admit a cycle whenever
++   `remaining ≥ P(actual duration)` for most cycles, not whenever
++   `remaining ≥ worst-case timeout`.
++
++These two uses pull in opposite directions.
++
++### Observed cycle durations (calibration input)
++
++From the 2026-04-16 and 2026-04-17 bot-on-GeneralStaff runs
++(PROGRESS.jsonl `cycle_end` events):
++
++- p50 cycle duration: ~4–5 min
++- p90 cycle duration: ~8 min
++- p99 cycle duration: ~12 min (usually a reviewer retry or a
++  watchdog-flagged stall)
++- Observed max: ~18 min (bot stalled on a big test refactor,
++  watchdog warned, eventually completed)
++
++No cycle has legitimately hit the 30-min or 45-min ceiling on this
++project. The ceiling exists to catch pathological cases (engineer
++hung on a reviewer, infinite regeneration loop, etc.) where the
++hard kill is the right answer.
++
++This is informative but not conclusive — other projects will have
++different distributions. catalogdna cycles (larger test suite,
++more agent tool calls) are likely slower. The observed numbers
++above are the GeneralStaff self-run baseline.
++
++### Options
++
++#### (a) Lower `cycle_budget_minutes` to match observed p99
++
++Set the recommended default to something like `15` min for a
++GeneralStaff-shaped project — still 2x the p90, comfortably above
++the p99. The engineer hard-kill still protects against pathological
++stalls. The reservation stops wasting budget.
++
++**Pros:** simplest change. One-line edit to the example file.
++Retroactively unblocks short sessions (a 60-min session can now
++fit ~3 cycles instead of 1).
++
++**Cons:** the budget is now per-project and every project author
++has to calibrate it themselves. Under-set → legitimate cycles get
++killed mid-task (lost work). Needs a migration note for existing
++projects.yaml configs.
++
++**Also:** projects that really do occasionally hit 25-min cycles
++(catalogdna's larger refactors) now have their worst-case cycles
++killed. The fix there is per-project tuning, not a shared default.
++
++#### (b) Adapt based on moving-average cycle duration
++
++Track the last N cycle durations per project in fleet state,
++maintain an EWMA or p95, and use `max(ewma * k, floor_minutes)` as
++the reservation unit while keeping `cycle_budget_minutes` as the
++hard kill. `k` around 1.5–2, `floor_minutes` around 5 to prevent
++cold-start starvation.
++
++**Pros:** self-calibrating. New projects converge to their own
++distribution after a handful of cycles. No per-project tuning
++required. Handles the "catalogdna cycles are slow, GeneralStaff
++cycles are fast" case naturally.
++
++**Cons:** more code, more state in fleet_state.json, more tests,
++more failure modes (e.g. what if a project has run zero cycles?
++a single outlier cycle dragging the average up for days?). Adds
++complexity to the planner's `estimateSessionPlan` preview.
++Adaptive systems are also harder to reason about — "why did the
++session pick only 2 cycles?" needs a second answer beyond "check
++the budget math".
++
++This is the "right" option but probably not the right option for
++*right now*.
++
++#### (c) Document as-is (status quo)
++
++Leave the math alone. Treat wasted session budget as the price of
++a simple, predictable reservation model. Document the math in this
++design doc and the projects.yaml.example comments so users can
++set `cycle_budget_minutes` sensibly themselves.
++
++**Pros:** zero code change. Lowest risk. Aligned with the
++"shipping matters more than perfecting" discipline from CLAUDE.md
++§Project stakes. Preserves the one-variable-per-project mental
++model.
++
++**Cons:** continues wasting session-budget minutes. Makes short
++sessions feel broken ("why did my 60-min run stop after one
++cycle?") for new users who set `cycle_budget_minutes` at the
++example file's 45–60 value.
++
++### Proposal
++
++**Adopt (a) now, keep (b) as a v3+ consideration.**
++
++- Lower the `projects.yaml.example` recommended default from
++  45–60 min to **15 min** for new projects. Add an inline
++  comment explaining the two-jobs tension and pointing at this
++  design section.
++- Document the reservation math in the projects.yaml.example
++  header block so users calibrate deliberately rather than
++  copying the example default blindly.
++- **Do not** change existing projects.yaml configs — this is a
++  new-project default, not a retroactive rewrite. Existing users
++  who want the benefit re-tune their own file.
++- Revisit (b) only if multiple projects with very different cycle
++  distributions are registered and the static default starts
++  causing friction. The moving-average approach earns its code
++  complexity only when per-project tuning stops scaling — not
++  before.
++
++This is a calibration change, not an architecture change. It
++reads as boring on purpose. The reservation model itself stays.
++
++### Open follow-ups (no code yet)
++
++1. Should `cycle_budget_minutes` be split into two separate fields
++   (`engineer_timeout_minutes` + `reservation_minutes`) to make
++   the two-jobs tension explicit? Probably yes, eventually, but
++   only once option (a) has been in production long enough to
++   show whether the split is actually clarifying or just more
++   knobs.
++2. Should the session loop surface a one-line warning when it
++   exits with `insufficient-budget` and only ran ≤1 cycle? e.g.
++   "Hit the insufficient-budget stop after 1 cycle — your
++   cycle_budget_minutes may be larger than your actual cycles
++   need; see DESIGN.md §v3." This is cheap, catches the "my
++   session stopped early" confusion, and is independent of
++   whether (a), (b), or (c) is ultimately chosen.
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index c9f682f..cf5f373 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -596,7 +596,7 @@
+   {
+     "id": "gs-125",
+     "title": "Design doc: the session-budget vs cycle-budget reservation math. A 60-min session only allows 25 usable min of cycles (60 - 35-min reservation). Document in DESIGN.md. Propose one of: (a) lower cycle_budget_minutes since real cycles are 4-8 min, (b) adapt based on moving-average cycle duration, (c) document as-is. No code.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
