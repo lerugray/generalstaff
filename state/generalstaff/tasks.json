@@ -915,8 +915,9 @@
   {
     "id": "gs-153",
     "title": "Create provider_config.yaml.example at repo root documenting the Phase 2 schema. Mirror projects.yaml.example style — heavy comments explaining each field, rationale for defaults, a warning that reviewer routing does NOT go here (it's controlled via GENERALSTAFF_REVIEWER_PROVIDER env var as of Phase 1). Structure: a top-level 'providers:' map with one ollama entry (id: ollama_llama3, kind: ollama, model: llama3:8b, host: http://localhost:11434) and a 'routes:' block mapping digest/cycle_summary/classifier to ollama_llama3. Include a comment block at top stating the file is NOT hands-off (bots can edit it) and pointing to FUTURE-DIRECTIONS §2 tier taxonomy for the rationale. Also create tests/providers.example.test.ts that loads this file via loadProviderRegistry from gs-152 and asserts the registry parses without error and routes resolve — keeps the example file from rotting away from the loader. Do NOT create provider_config.yaml (the real one) — that's user setup, not a task deliverable.",
-    "status": "pending",
-    "priority": 1
+    "status": "done",
+    "priority": 1,
+    "completed_at": "2026-04-17T20:02:48.718Z"
   },
   {
     "id": "gs-154",

@@ -1,0 +1,74 @@
+# GeneralStaff provider routing — example schema (Phase 2)
+#
+# This file is the schema reference for provider_config.yaml at the
+# repo root. Copy it to `provider_config.yaml` and edit to wire up
+# local LLM providers for non-reviewer roles (digest, cycle_summary,
+# classifier). The real file is NOT gitignored by default but is
+# user-managed — edits by bots are permitted (this file is NOT in
+# any project's hands_off list).
+#
+# ----------------------------------------------------------------------
+# Scope: what this file controls, and what it does NOT control
+# ----------------------------------------------------------------------
+#
+# This file controls routing for THREE roles:
+#   - digest          end-of-session narrative (see gs-154, gs-158)
+#   - cycle_summary   per-cycle plain-English summaries (Phase 2+)
+#   - classifier      work-item classification (Phase 2+)
+#
+# The REVIEWER role is NOT controlled here. Reviewer dispatch remains
+# inline in src/reviewer.ts and is selected at launch via the
+# GENERALSTAFF_REVIEWER_PROVIDER environment variable (see
+# CLAUDE.md §"Reviewer provider configuration"). This split is
+# intentional for Phase 2 — reviewer is load-bearing (Hard Rule 6)
+# and stays on its own dispatch path until the registry has matured.
+#
+# Consumers read this file via loadProviderRegistry() in
+# src/providers/registry.ts. When the file is absent every route
+# resolves to the sentinel string "noop" and callers must check
+# hasProviderForRole() before dispatching.
+#
+# ----------------------------------------------------------------------
+# Provider tier taxonomy
+# ----------------------------------------------------------------------
+#
+# Rationale for provider choice at each role lives in
+# FUTURE-DIRECTIONS-2026-04-15.md §2 ("Model Plurality / Provider
+# Routing"). Short version:
+#
+#   - ollama       local, free, offline. Best for unattended / cheap
+#                  work (digest narratives, cycle summaries).
+#   - openrouter   paid-per-token, many free models. Use for work
+#                  needing more quality than Ollama can give.
+#                  NOT IMPLEMENTED in Phase 2 registry — attempts to
+#                  route here will throw 'not implemented in Phase 2'.
+#   - claude       Anthropic API (BYOK). Use for judgment-heavy work.
+#                  NOT IMPLEMENTED in Phase 2 registry — attempts to
+#                  route here will throw 'not implemented in Phase 2'.
+#
+# The Phase 2 registry ships with ollama as the only fully-wired
+# provider. openrouter and claude descriptors parse successfully but
+# getProviderForRole() for them throws — the hooks are there for
+# later phases, not usable yet.
+
+# ----------------------------------------------------------------------
+# Provider catalogue — ids referenced by the routes: block below
+# ----------------------------------------------------------------------
+providers:
+  - id: ollama_llama3                       # stable id; routes: references it
+    kind: ollama                            # one of: ollama | openrouter | claude
+    model: llama3:8b                        # model name as Ollama sees it
+    host: http://localhost:11434            # optional; default is localhost:11434
+
+# ----------------------------------------------------------------------
+# Routes — which provider handles which role
+# ----------------------------------------------------------------------
+#
+# Any role omitted here defaults to "noop" and hasProviderForRole()
+# will return false for it — callers then fall back to their templated
+# non-LLM path. It is safe (and common) to wire up only the roles
+# you care about.
+routes:
+  digest: ollama_llama3
+  cycle_summary: ollama_llama3
+  classifier: ollama_llama3
