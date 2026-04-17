@@ -578,7 +578,7 @@
   {
     "id": "gs-122",
     "title": "Improve the 'bot/work branch has unmerged commits' error message in src/cycle.ts to interpolate the resolved project path in the suggested git command — e.g., `git -C /full/path/to/project merge --no-ff bot/work` rather than the current placeholder. Also suggest the alternative `auto_merge: true` config change with the exact project id. Add a test.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

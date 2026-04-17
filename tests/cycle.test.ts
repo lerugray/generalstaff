@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { join } from "path";
+import { join, resolve as resolvePath } from "path";
 import { tmpdir } from "os";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
@@ -9,6 +9,7 @@ import {
   diffSummaryStats,
   countCommitsAhead,
   preflightCleanupWorktree,
+  formatUnmergedBranchError,
 } from "../src/cycle";
 import type { ProjectConfig } from "../src/types";
 
@@ -494,4 +495,35 @@ describe("executeCycle", () => {
     expect(result.final_outcome).toBe("verification_failed");
     expect(result.reason).toContain("hands-off violation");
   }, 30_000);
+});
+
+describe("formatUnmergedBranchError", () => {
+  it("interpolates a resolved absolute path into the git command", () => {
+    // Relative path input — the message must resolve it to absolute.
+    const project = makeProject({
+      id: "myapp",
+      path: "./some/relative/dir",
+      branch: "bot/work",
+    });
+    const msg = formatUnmergedBranchError(project, "bot/work", 3);
+    const expectedAbs = resolvePath("./some/relative/dir");
+
+    expect(msg).toContain("bot/work has 3 unmerged commit(s)");
+    expect(msg).toContain(`git -C ${expectedAbs} merge --no-ff bot/work`);
+    // Relative form should NOT appear in the command (only the resolved one).
+    expect(msg).not.toContain("git -C ./some/relative/dir merge");
+  });
+
+  it("names the exact project id in the auto_merge suggestion", () => {
+    const project = makeProject({ id: "retrogaze", path: "/abs/p" });
+    const msg = formatUnmergedBranchError(project, "bot/work", 1);
+    expect(msg).toContain("auto_merge: true in projects.yaml for project retrogaze");
+  });
+
+  it("keeps absolute paths unchanged", () => {
+    const absPath = resolvePath("/tmp/already-abs");
+    const project = makeProject({ id: "p", path: absPath });
+    const msg = formatUnmergedBranchError(project, "bot/work", 2);
+    expect(msg).toContain(`git -C ${absPath} merge --no-ff bot/work`);
+  });
 });
