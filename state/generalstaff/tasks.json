@@ -596,7 +596,7 @@
   {
     "id": "gs-125",
     "title": "Design doc: the session-budget vs cycle-budget reservation math. A 60-min session only allows 25 usable min of cycles (60 - 35-min reservation). Document in DESIGN.md. Propose one of: (a) lower cycle_budget_minutes since real cycles are 4-8 min, (b) adapt based on moving-average cycle duration, (c) document as-is. No code.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
