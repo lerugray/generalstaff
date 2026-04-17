@@ -315,6 +315,21 @@ export async function runSession(options: SessionOptions) {
     });
   }
 
+  // Fleet-level session_complete event. Fires exactly once per session
+  // with aggregated stats; written to the "_fleet" pseudo-project log so
+  // it isn't tied to any individual project's PROGRESS.jsonl.
+  await appendProgress("_fleet", "session_complete", {
+    duration_minutes: Math.round(elapsed),
+    total_cycles: allResults.length,
+    total_verified: allResults.filter(
+      (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
+    ).length,
+    total_failed: allResults.filter(
+      (r) => r.final_outcome === "verification_failed",
+    ).length,
+    stop_reason: stopReason,
+  });
+
   // End-of-session Telegram notification. Moved here from the .bat
   // wrapper because post-bun steps in run_session.bat weren't reliably
   // reached when the .bat was spawned from a detached context. Running

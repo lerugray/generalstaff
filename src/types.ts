@@ -134,7 +134,8 @@ export type ProgressEventType =
   | "reviewer_fallback"
   | "cycle_end"
   | "session_start"
-  | "session_end";
+  | "session_end"
+  | "session_complete";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -181,7 +182,7 @@ const VALID_EVENTS: readonly string[] = [
   "verification_run", "verification_outcome", "diff_summary",
   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
   "reviewer_fallback",
-  "cycle_end", "session_start", "session_end",
+  "cycle_end", "session_start", "session_end", "session_complete",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {
