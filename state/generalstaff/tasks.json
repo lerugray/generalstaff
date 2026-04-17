@@ -260,7 +260,7 @@
   {
     "id": "gs-069",
     "title": "Add test coverage for countCommitsAhead in cycle.ts. Use a tmp git repo fixture: init repo, make a commit on master, create a branch, verify count=0. Add a commit on the branch, verify count=1. Merge branch into master, verify count=0. Also verify returns 0 when branch doesn't exist.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

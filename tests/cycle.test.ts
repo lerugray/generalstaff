@@ -1,7 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "path";
+import { tmpdir } from "os";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
-import { extractChangedFiles, diffSummaryStats } from "../src/cycle";
+import {
+  extractChangedFiles,
+  diffSummaryStats,
+  countCommitsAhead,
+} from "../src/cycle";
 
 describe("extractChangedFiles", () => {
   it("extracts file paths from a unified diff", () => {
@@ -202,6 +208,80 @@ describe("diffSummaryStats", () => {
       insertions: 0,
       deletions: 0,
     });
+  });
+});
+
+describe("countCommitsAhead", () => {
+  async function initRepo(path: string): Promise<void> {
+    mkdirSync(path, { recursive: true });
+    await $`git -C ${path} init -b master`.quiet();
+    // Isolate from global git identity / signing config so commits work in CI
+    // and on machines with commit.gpgsign=true.
+    await $`git -C ${path} config user.email test@example.com`.quiet();
+    await $`git -C ${path} config user.name test`.quiet();
+    await $`git -C ${path} config commit.gpgsign false`.quiet();
+  }
+
+  async function commitFile(
+    path: string,
+    file: string,
+    content: string,
+    message: string,
+  ): Promise<void> {
+    writeFileSync(join(path, file), content, "utf8");
+    await $`git -C ${path} add ${file}`.quiet();
+    await $`git -C ${path} commit -m ${message}`.quiet();
+  }
+
+  it("returns 0 for a branch even with master unless that branch has its own commits", async () => {
+    const repo = join(tmpdir(), "gs-cca-even-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "a.txt", "one", "initial");
+      await $`git -C ${repo} branch feature`.quiet();
+      expect(await countCommitsAhead(repo, "feature", "master")).toBe(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 1 when the branch has one commit not on master", async () => {
+    const repo = join(tmpdir(), "gs-cca-ahead-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "a.txt", "one", "initial");
+      await $`git -C ${repo} checkout -b feature`.quiet();
+      await commitFile(repo, "b.txt", "two", "branch work");
+      expect(await countCommitsAhead(repo, "feature", "master")).toBe(1);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 0 after the branch is merged into master", async () => {
+    const repo = join(tmpdir(), "gs-cca-merged-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "a.txt", "one", "initial");
+      await $`git -C ${repo} checkout -b feature`.quiet();
+      await commitFile(repo, "b.txt", "two", "branch work");
+      await $`git -C ${repo} checkout master`.quiet();
+      await $`git -C ${repo} merge --no-ff --no-edit feature`.quiet();
+      expect(await countCommitsAhead(repo, "feature", "master")).toBe(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 0 when the branch does not exist", async () => {
+    const repo = join(tmpdir(), "gs-cca-missing-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "a.txt", "one", "initial");
+      expect(await countCommitsAhead(repo, "nonexistent-branch", "master")).toBe(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 
