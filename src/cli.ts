@@ -12,7 +12,7 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
-import { loadTasks, pendingTasks, addTask, TasksLoadError } from "./tasks";
+import { loadTasks, pendingTasks, addTask, markTaskDone, TasksLoadError } from "./tasks";
 import {
   buildFleetSummary,
   computeDiskUsage,
@@ -78,6 +78,8 @@ Usage:
   generalstaff task add --project=<id> [--priority=N] <title>
                                                           Append a new task to tasks.json
     Example: generalstaff task add --project=myapp "Fix login bug"
+  generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
+    Example: generalstaff task done --project=myapp --task=my-042
 
   generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
                                                           Print a session digest to stdout, or list all
@@ -380,11 +382,57 @@ switch (command) {
         throw err;
       }
       console.log(`Added ${task.id}: ${task.title}`);
+    } else if (sub === "done") {
+      const { values: doneValues } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          task: { type: "string" },
+        },
+        allowPositionals: false,
+      });
+      if (!doneValues.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      if (!doneValues.task) {
+        console.error("Error: --task=<task-id> is required");
+        process.exit(1);
+      }
+      let result;
+      try {
+        result = await markTaskDone(doneValues.project, doneValues.task);
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (result.kind === "project_not_found") {
+        console.error(
+          `Error: no tasks file for project '${doneValues.project}' (${result.path})`,
+        );
+        process.exit(1);
+      } else if (result.kind === "task_not_found") {
+        console.error(
+          `Error: task '${doneValues.task}' not found in project '${doneValues.project}'`,
+        );
+        if (result.availableIds.length > 0) {
+          console.error(`  Available: ${result.availableIds.join(", ")}`);
+        }
+        process.exit(1);
+      } else if (result.kind === "already_done") {
+        console.log(`${result.task.id} is already done.`);
+      } else {
+        console.log(`Marked ${result.task.id} as done: ${result.task.title}`);
+      }
     } else {
       console.error(
-        "Error: task subcommand required (list or add)\n" +
+        "Error: task subcommand required (list, add, or done)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
-          "         generalstaff task add --project=<id> <title>",
+          "         generalstaff task add --project=<id> <title>\n" +
+          "         generalstaff task done --project=<id> --task=<task-id>",
       );
       process.exit(1);
     }

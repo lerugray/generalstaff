@@ -230,7 +230,7 @@
   {
     "id": "gs-064",
     "title": "Add CLI subcommand 'generalstaff task done --project=<id> --task=<task-id>' to mark a single task as done without hand-editing tasks.json. Error if project or task not found. Print a notice (don't error) if already done. Add tests for success, not-found, already-done.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
