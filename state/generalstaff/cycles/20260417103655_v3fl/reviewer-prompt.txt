@@ -1,0 +1,457 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/audit.ts b/src/audit.ts
+index 2ec9ffb..9235808 100644
+--- a/src/audit.ts
++++ b/src/audit.ts
+@@ -242,11 +242,10 @@ function startedAtMs(entry: ProgressEntry): number {
+   return typeof dur === "number" ? endMs - dur * 1000 : endMs;
+ }
+ 
+-export async function loadCycleHistory(
++async function collectCycleEnds(
+   projectId: string | undefined,
+-  limit: number = 20,
+-  options: LoadCycleHistoryOptions = {},
+-): Promise<CycleHistoryRow[]> {
++  options: LoadCycleHistoryOptions,
++): Promise<ProgressEntry[]> {
+   const sinceMs = options.since !== undefined
+     ? parseDateFlag(options.since, false)
+     : undefined;
+@@ -295,6 +294,15 @@ export async function loadCycleHistory(
+     (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+   );
+ 
++  return entries;
++}
++
++export async function loadCycleHistory(
++  projectId: string | undefined,
++  limit: number = 20,
++  options: LoadCycleHistoryOptions = {},
++): Promise<CycleHistoryRow[]> {
++  const entries = await collectCycleEnds(projectId, options);
+   return entries.slice(-limit).map((e) => ({
+     cycle_id: (e.cycle_id ?? "?").slice(0, 12),
+     project: e.project_id ?? "?",
+@@ -307,6 +315,31 @@ export async function loadCycleHistory(
+   }));
+ }
+ 
++export interface CycleHistoryJsonRow {
++  cycle_id: string;
++  project_id: string;
++  started_at: string;
++  outcome: string;
++  diff_stats: unknown;
++  reason: string;
++}
++
++export async function loadCycleHistoryJson(
++  projectId: string | undefined,
++  limit: number = 20,
++  options: LoadCycleHistoryOptions = {},
++): Promise<CycleHistoryJsonRow[]> {
++  const entries = await collectCycleEnds(projectId, options);
++  return entries.slice(-limit).map((e) => ({
++    cycle_id: e.cycle_id ?? "",
++    project_id: e.project_id ?? "",
++    started_at: new Date(startedAtMs(e)).toISOString(),
++    outcome: String(e.data.outcome ?? ""),
++    diff_stats: e.data.diff_stats ?? null,
++    reason: String(e.data.reason ?? ""),
++  }));
++}
++
+ const ANSI = {
+   reset: "\x1b[0m",
+   green: "\x1b[32m",
+diff --git a/src/cli.ts b/src/cli.ts
+index d198cd3..34ad954 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -15,7 +15,7 @@ import {
+   ProjectNotFoundError,
+ } from "./projects";
+ import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+-import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
++import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+ import { runClean } from "./clean";
+@@ -68,11 +68,12 @@ Usage:
+   generalstaff start                                      Remove STOP file (allow dispatch)
+     Example: generalstaff start                         # resume after a stop
+ 
+-  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
++  generalstaff history [--project=<id>] [--lines=<n>] [--format=compact|json] [--costs]
+                        [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
+                                                           Cycle history (compact: tab-delimited, no headers)
+     Example: generalstaff history --lines=50
+     Example: generalstaff history --project=myapp --format=compact
++    Example: generalstaff history --format=json          # machine-readable cycle history
+     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
+     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
+     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+@@ -297,22 +298,36 @@ switch (command) {
+       },
+       allowPositionals: false,
+     });
++    const fmt = historyValues.format;
++    if (fmt !== "table" && fmt !== "compact" && fmt !== "json") {
++      console.error(`Error: unknown --format value: ${fmt} (supported: table, compact, json)`);
++      process.exit(1);
++    }
++    const loadOpts = {
++      since: historyValues.since,
++      until: historyValues.until,
++      verifiedOnly: historyValues["verified-only"],
++    };
++    const limit = parseInt(historyValues.lines!, 10);
++    if (fmt === "json") {
++      let jsonRows;
++      try {
++        jsonRows = await loadCycleHistoryJson(historyValues.project, limit, loadOpts);
++      } catch (err) {
++        console.error(`Error: ${(err as Error).message}`);
++        process.exit(2);
++      }
++      console.log(JSON.stringify(jsonRows, null, 2));
++      break;
++    }
+     let rows;
+     try {
+-      rows = await loadCycleHistory(
+-        historyValues.project,
+-        parseInt(historyValues.lines!, 10),
+-        {
+-          since: historyValues.since,
+-          until: historyValues.until,
+-          verifiedOnly: historyValues["verified-only"],
+-        },
+-      );
++      rows = await loadCycleHistory(historyValues.project, limit, loadOpts);
+     } catch (err) {
+       console.error(`Error: ${(err as Error).message}`);
+       process.exit(2);
+     }
+-    if (historyValues.format === "compact") {
++    if (fmt === "compact") {
+       if (historyValues.costs) {
+         const summary = await summarizeCosts(historyValues.project);
+         const byProject = historyValues.project ? undefined : summary.by_project;
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 15d722c..61959d6 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -380,7 +380,7 @@
+   {
+     "id": "gs-089",
+     "title": "Add 'generalstaff history --format=json' for machine-readable cycle history output. Emit an array of cycle objects with { cycle_id, project_id, started_at, outcome, diff_stats, reason }. Parse-able by external tools. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/audit.test.ts b/tests/audit.test.ts
+index 52e71b8..f1ad24c 100644
+--- a/tests/audit.test.ts
++++ b/tests/audit.test.ts
+@@ -1,5 +1,5 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
++import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
+ import type { ProgressEntry } from "../src/types";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+@@ -534,6 +534,89 @@ describe("loadCycleHistory --verified-only filter", () => {
+   });
+ });
+ 
++describe("loadCycleHistoryJson", () => {
++  it("returns empty array when no state dir exists", async () => {
++    rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
++    const rows = await loadCycleHistoryJson(undefined);
++    expect(rows).toEqual([]);
++  });
++
++  it("emits the required keys for each cycle", async () => {
++    await appendProgress("proj-json", "cycle_end", {
++      outcome: "verified",
++      reason: "tests pass",
++      start_sha: "aaa111",
++      end_sha: "bbb222",
++      duration_seconds: 90,
++      diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
++    }, "cycle-json-abc");
++
++    const rows = await loadCycleHistoryJson("proj-json");
++    expect(rows).toHaveLength(1);
++    expect(rows[0].cycle_id).toBe("cycle-json-abc");
++    expect(rows[0].project_id).toBe("proj-json");
++    expect(rows[0].outcome).toBe("verified");
++    expect(rows[0].reason).toBe("tests pass");
++    expect(rows[0].diff_stats).toEqual({ files_changed: 2, insertions: 10, deletions: 3 });
++    expect(typeof rows[0].started_at).toBe("string");
++    // started_at should be ISO 8601 (full form, not a truncated display string)
++    expect(rows[0].started_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
++  });
++
++  it("computes started_at as ended_at minus duration_seconds", async () => {
++    writeCycleEnd("proj-json-t", "c-timed", "2026-04-15T12:00:00Z", 60);
++    const rows = await loadCycleHistoryJson("proj-json-t");
++    expect(rows).toHaveLength(1);
++    expect(rows[0].started_at).toBe("2026-04-15T11:59:00.000Z");
++  });
++
++  it("defaults missing diff_stats to null and missing reason to empty string", async () => {
++    await appendProgress("proj-json-m", "cycle_end", {
++      outcome: "verified",
++      start_sha: "a",
++      end_sha: "b",
++      duration_seconds: 10,
++    }, "c-min");
++    const rows = await loadCycleHistoryJson("proj-json-m");
++    expect(rows).toHaveLength(1);
++    expect(rows[0].diff_stats).toBeNull();
++    expect(rows[0].reason).toBe("");
++  });
++
++  it("respects limit, since/until, and verifiedOnly filters", async () => {
++    writeCycleEnd("proj-json-f", "c-old", "2026-04-10T12:00:00Z", 60);
++    writeCycleEnd("proj-json-f", "c-new", "2026-04-20T12:00:00Z", 60);
++    writeCycleEnd("proj-json-f", "c-fail", "2026-04-21T12:00:00Z", 60, "verification_failed");
++
++    const allRows = await loadCycleHistoryJson("proj-json-f");
++    expect(allRows).toHaveLength(3);
++
++    const sinceRows = await loadCycleHistoryJson("proj-json-f", 20, { since: "20260415" });
++    expect(sinceRows.map((r) => r.cycle_id)).toEqual(["c-new", "c-fail"]);
++
++    const verifiedRows = await loadCycleHistoryJson("proj-json-f", 20, { verifiedOnly: true });
++    expect(verifiedRows.every((r) => r.outcome !== "verification_failed")).toBe(true);
++
++    const limited = await loadCycleHistoryJson("proj-json-f", 1);
++    expect(limited).toHaveLength(1);
++    expect(limited[0].cycle_id).toBe("c-fail");
++  });
++
++  it("produces JSON-serializable output that round-trips", async () => {
++    await appendProgress("proj-json-rt", "cycle_end", {
++      outcome: "verified",
++      reason: "ok",
++      start_sha: "a",
++      end_sha: "b",
++      duration_seconds: 5,
++      diff_stats: { files_changed: 1, insertions: 1, deletions: 0 },
++    }, "c-rt");
++    const rows = await loadCycleHistoryJson("proj-json-rt");
++    const parsed = JSON.parse(JSON.stringify(rows));
++    expect(parsed).toEqual(rows);
++  });
++});
++
+ describe("parseDateFlag", () => {
+   it("parses YYYYMMDD at start of UTC day", () => {
+     const ms = parseDateFlag("20260415", false);
+
+
+Diff summary: src/audit.ts                  | 41 +++++++++++++++++++--
+ src/cli.ts                    | 39 ++++++++++++++------
+ state/generalstaff/tasks.json |  2 +-
+ tests/audit.test.ts           | 85 ++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 149 insertions(+), 18 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T10:41:02.308Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104119.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104120.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104120.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104120.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_104120.md
+
+ 502 pass
+ 0 fail
+ 1512 expect() calls
+Ran 502 tests across 21 files. [27.25s]
+
+========================================
+Exit code: 0
+Duration: 29.0s
+Ended: 2026-04-17T10:41:31.299Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
