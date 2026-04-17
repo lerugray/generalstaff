@@ -1,0 +1,200 @@
+diff --git a/src/cycle.ts b/src/cycle.ts
+index 354410a..a311259 100644
+--- a/src/cycle.ts
++++ b/src/cycle.ts
+@@ -114,6 +114,45 @@ async function cleanupWorktree(project: ProjectConfig): Promise<void> {
+   }
+ }
+ 
++// Pre-cycle cleanup. If the prior cycle was killed (engineer timeout,
++// STOP file mid-run, manual taskkill, host crash), cleanupWorktree may
++// not have fired — leaving .bot-worktree behind. The next `git worktree
++// add` then fails. This runs defensively before engineer spawn, removes
++// any stale worktree, and surfaces a warning (but does not crash) when
++// removal fails — e.g. another process holds an open handle on Windows.
++export async function preflightCleanupWorktree(
++  project: ProjectConfig,
++  rmFn?: (path: string) => void,
++): Promise<{ wasStale: boolean; removed: boolean; warning?: string }> {
++  const wt = worktreePath(project);
++  if (!existsSync(wt)) {
++    return { wasStale: false, removed: false };
++  }
++  try {
++    await $`git -C ${project.path} worktree remove ${wt} --force`.quiet();
++  } catch {
++    // not tracked or already pruned — fall through to fs rm
++  }
++  if (!existsSync(wt)) {
++    return { wasStale: true, removed: true };
++  }
++  const rm = rmFn ?? ((p: string) => {
++    const { rmSync } = require("fs");
++    rmSync(p, { recursive: true, force: true });
++  });
++  try {
++    rm(wt);
++  } catch (err) {
++    const msg = err instanceof Error ? err.message : String(err);
++    return {
++      wasStale: true,
++      removed: false,
++      warning: `stale ${wt} could not be removed (likely locked by another process): ${msg}`,
++    };
++  }
++  return { wasStale: true, removed: !existsSync(wt) };
++}
++
+ async function getGitDiff(
+   projectPath: string,
+   startSha: string,
+@@ -314,6 +353,22 @@ export async function executeCycle(
+     return skipResult(cycleId, project.id, startedAt, treeCheck.reason!);
+   }
+ 
++  const preflight = await preflightCleanupWorktree(project);
++  if (preflight.wasStale) {
++    if (preflight.removed) {
++      console.log("Removed stale .bot-worktree from a prior cycle.");
++      await appendProgress(project.id, "worktree_preflight", {
++        status: "removed",
++      }, cycleId);
++    } else {
++      console.error(`Warning: ${preflight.warning}`);
++      await appendProgress(project.id, "worktree_preflight", {
++        status: "warning",
++        warning: preflight.warning,
++      }, cycleId);
++    }
++  }
++
+   // 2. Before resetting bot branch to HEAD, check whether it has unmerged
+   //    work. `branch -f <branch> HEAD` is destructive — without this guard,
+   //    a verified cycle's commits sit on bot/work, then the next cycle starts
+diff --git a/src/types.ts b/src/types.ts
+index 0fb686f..ab5b841 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -132,6 +132,7 @@ export type ProgressEventType =
+   | "reviewer_response"
+   | "reviewer_verdict"
+   | "reviewer_fallback"
++  | "worktree_preflight"
+   | "cycle_end"
+   | "session_start"
+   | "session_end"
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index fed60b0..6b72c72 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -542,7 +542,7 @@
+   {
+     "id": "gs-116",
+     "title": "Investigate and fix `.bot-worktree` cleanup after abnormal cycle termination. When a cycle is killed (engineer timeout, manual taskkill, STOP file), does cleanupWorktree() still fire? If not, stale worktrees accumulate and the next cycle's `git worktree add` fails. Add a pre-cycle cleanup pass that removes any existing `.bot-worktree` before `git worktree add`. Add tests covering: clean run (no stale worktree), stale worktree present (removed + replaced), worktree locked by another process (warn but don't crash).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index abf3f24..ce8bc33 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -3,11 +3,31 @@ import { join } from "path";
+ import { tmpdir } from "os";
+ import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { $ } from "bun";
++import { existsSync } from "fs";
+ import {
+   extractChangedFiles,
+   diffSummaryStats,
+   countCommitsAhead,
++  preflightCleanupWorktree,
+ } from "../src/cycle";
++import type { ProjectConfig } from "../src/types";
++
++function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
++  return {
++    id: "test",
++    path: "/tmp/test",
++    priority: 1,
++    engineer_command: "echo",
++    verification_command: "echo",
++    cycle_budget_minutes: 60,
++    work_detection: "tasks_json",
++    concurrency_detection: "none",
++    branch: "bot/work",
++    auto_merge: false,
++    hands_off: ["x"],
++    ...overrides,
++  };
++}
+ 
+ describe("extractChangedFiles", () => {
+   it("extracts file paths from a unified diff", () => {
+@@ -320,6 +340,65 @@ describe("countCommitsAhead", () => {
+   });
+ });
+ 
++describe("preflightCleanupWorktree", () => {
++  async function initRepo(path: string): Promise<void> {
++    mkdirSync(path, { recursive: true });
++    await $`git -C ${path} init -b master`.quiet();
++    await $`git -C ${path} config user.email test@example.com`.quiet();
++    await $`git -C ${path} config user.name test`.quiet();
++    await $`git -C ${path} config commit.gpgsign false`.quiet();
++  }
++
++  it("no-ops on a clean run (no stale worktree)", async () => {
++    const repo = join(tmpdir(), "gs-pf-clean-" + Date.now());
++    try {
++      await initRepo(repo);
++      const project = makeProject({ path: repo });
++      const result = await preflightCleanupWorktree(project);
++      expect(result).toEqual({ wasStale: false, removed: false });
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("removes a stale .bot-worktree directory left behind by a killed cycle", async () => {
++    const repo = join(tmpdir(), "gs-pf-stale-" + Date.now());
++    try {
++      await initRepo(repo);
++      const wt = join(repo, ".bot-worktree");
++      mkdirSync(wt, { recursive: true });
++      writeFileSync(join(wt, "leftover.txt"), "partial work", "utf8");
++      const project = makeProject({ path: repo });
++      const result = await preflightCleanupWorktree(project);
++      expect(result.wasStale).toBe(true);
++      expect(result.removed).toBe(true);
++      expect(existsSync(wt)).toBe(false);
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("warns but does not crash when the stale worktree is locked", async () => {
++    const repo = join(tmpdir(), "gs-pf-locked-" + Date.now());
++    try {
++      await initRepo(repo);
++      const wt = join(repo, ".bot-worktree");
++      mkdirSync(wt, { recursive: true });
++      const project = makeProject({ path: repo });
++      const rmFn = () => {
++        throw new Error("EBUSY: resource busy or locked");
++      };
++      const result = await preflightCleanupWorktree(project, rmFn);
++      expect(result.wasStale).toBe(true);
++      expect(result.removed).toBe(false);
++      expect(result.warning).toContain("locked");
++      expect(result.warning).toContain("EBUSY");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++});
++
+ describe("executeCycle", () => {
+   async function runEngineerExitHelper(exitCodeArg: string) {
+     const helperPath = join(import.meta.dir, "helpers", "verify_engineer_exit_handling.ts");
