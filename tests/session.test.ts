@@ -405,6 +405,66 @@ describe("formatSessionPlanPreview", () => {
     expect(out).toContain("Project");
     expect(out).toContain("Cycles");
   });
+
+  it("(empty plan) emits literal 'No cycles fit in the budget.' line", () => {
+    const out = formatSessionPlanPreview(makePlan({ total_cycles: 0 }));
+    expect(out.split("\n")).toEqual([
+      "=== Session Plan Preview ===",
+      "No cycles fit in the budget.",
+      "",
+    ]);
+  });
+
+  it("(single short-id project) pads under the 'Project' header width", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [{ project_id: "x", start_minute: 0, duration_minutes: 30 }],
+        per_project: [{ project_id: "x", cycle_count: 1 }],
+        total_cycles: 1,
+        budget_used_minutes: 30,
+        budget_remaining_minutes: 0,
+      }),
+    );
+    // Header "Project" (7 chars) is the floor for column width when ids are
+    // shorter. The data row's project id must pad to the same 7 chars so the
+    // count column lines up with "Cycles" in the header row.
+    expect(out.split("\n")).toEqual([
+      "=== Session Plan Preview ===",
+      "Total: 1 cycle(s), 30 min used, 0 min remaining",
+      "  Project  Cycles",
+      "  -------  ------",
+      "  x        1",
+      "",
+    ]);
+  });
+
+  it("(mixed-width ids) widens column to longest id and aligns header", () => {
+    const out = formatSessionPlanPreview(
+      makePlan({
+        picks: [
+          { project_id: "generalstaff", start_minute: 0, duration_minutes: 60 },
+        ],
+        per_project: [
+          { project_id: "x", cycle_count: 1 },
+          { project_id: "generalstaff", cycle_count: 3 },
+        ],
+        total_cycles: 4,
+        budget_used_minutes: 120,
+        budget_remaining_minutes: 0,
+      }),
+    );
+    // "generalstaff" (12 chars) becomes the column width; both "Project"
+    // and "x" pad to 12 so the Cycles column lines up across all rows.
+    expect(out.split("\n")).toEqual([
+      "=== Session Plan Preview ===",
+      "Total: 4 cycle(s), 120 min used, 0 min remaining",
+      "  Project       Cycles",
+      "  ------------  ------",
+      "  x             1",
+      "  generalstaff  3",
+      "",
+    ]);
+  });
 });
 
 describe("parseDigest", () => {
