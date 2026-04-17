@@ -527,6 +527,110 @@ output.
 
 ---
 
+## 7. Live Fleet Viewer + Remote Access (Phase 5+)
+
+**Captured:** 2026-04-17 morning, during the Ollama practice run.
+Ray flagged two distinct-but-related user-interface ideas. Both
+depend on the Phase 4 local dashboard shipping first — premature
+to design either now, but worth capturing the framing.
+
+### (a) Live fleet viewer — Kriegspiel campaign-map as animation
+
+UI-VISION-2026-04-15.md already establishes the static aesthetic
+(lithograph paper, brass fittings, Prussian palette, project pins
+on a stylized campaign map). This extension adds **motion**: the
+campaign map becomes alive with tiny figures representing each
+registered project's bot, showing current state in real time.
+
+Reference point: **pablodelucca/pixel-agents** on GitHub — a
+pixel-style real-time visualization of AI agents at work. The
+goal isn't to copy the pixel-agents visual style (that's modern
+8-bit video-game; GeneralStaff's style is 19th-century
+lithograph) but to copy the **information density + motion
+pattern**: each bot is a visible figure, its current activity is
+legible at a glance, status changes animate smoothly.
+
+**Shape.**
+
+- Each registered project occupies a sector on the campaign map
+- A tiny figure moves between sectors representing the currently-
+  running bot
+- The figure's pose/color indicates cycle phase: engineering
+  (writing dispatches), verifying (consulting the staff officer),
+  under review (awaiting the reviewer's verdict)
+- Verified cycles produce a brief "advance" animation; failed
+  cycles produce a "retreat" animation
+- Completed tasks accumulate as flags planted on sectors
+- STOP file dropped → everyone stands down visibly
+
+**Why this isn't kitschy.** The military-staff visual language is
+already this project's brand per UI-VISION. Animating it isn't
+dressing up a generic dashboard; it's making the *existing*
+metaphor more vivid. The Kriegspiel table at the Kriegsakademie
+had literal pieces being moved by duty officers — the animation
+is showing what the metaphor has always been.
+
+**Risk.** Over-investment in visualization before the product
+works is a classic Phase-5 trap. Guardrail: the animation must
+add zero latency to actual bot throughput (runs in a separate
+process or read-only tail of PROGRESS.jsonl) and must be
+optional (`--no-ui` or just not launching the viewer). The bot
+never waits on the UI.
+
+### (b) Remote access from a second device
+
+**Problem.** If the user runs GeneralStaff on a home PC, they
+want to check on it — and optionally direct it — from a work
+computer or phone during the day. Right now there's no way; the
+CLI is terminal-only on the home machine.
+
+**Shape.** The Phase 4 local dashboard already plans a browser
+interface running on the home PC. The missing piece is *reaching
+that dashboard from a different device* without exposing it to
+the public internet.
+
+**Recommended default: Tailscale.** Peer-to-peer VPN mesh, free
+tier covers personal use, single-click install on both machines.
+The work PC (or phone) joins the same tailnet as the home PC
+and reaches `http://home-pc.tail1234.ts.net:8080` (or whatever
+port the dashboard serves) directly. No public exposure, no
+hosted middleman, no open firewall ports on the home router.
+This is compatible with Hard Rule 10 (local-first, no SaaS
+middleman — the Tailscale control plane is out-of-band for
+auth/discovery only; the actual dashboard traffic is P2P).
+
+**Alternatives (all more work for the user).**
+
+- SSH tunnel + port forwarding — requires CLI comfort
+- Cloudflare Tunnel — exposes over their edge network, public by
+  default unless you layer Cloudflare Access auth
+- Self-hosted WireGuard — most private but most setup burden
+- Local-network-only access — works only on the same WiFi,
+  doesn't help with work-from-anywhere
+
+Tailscale is the right default for a non-programmer user. If the
+installer were ever automated (`generalstaff setup-remote` that
+walks through `tailscale up` on both ends), it would be a strong
+differentiator vs. Polsia (which is cloud-only) and vs. most
+self-hosted alternatives (which assume the user can configure
+VPNs).
+
+**Authentication model.** The dashboard needs some protection
+even inside the tailnet — the user might share the tailnet with
+family, roommates, etc. A simple shared-secret auth ("enter the
+key printed by `generalstaff key show` on the home machine") is
+probably sufficient for Phase 5, with real OAuth / device-bound
+creds as a Phase 6+ upgrade.
+
+**Why both of these are Phase 5+.** Both depend on the Phase 4
+local web dashboard shipping in a usable state. Designing the
+animation layer or the remote-access layer before the static
+dashboard exists is solving the wrong problem. The right order
+is: functional dashboard → theming (UI-VISION) → motion (§7a) →
+remote access (§7b).
+
+---
+
 ## Market observation: why no one else has built this
 
 Captured for reference, not as a design decision. Reasons it's
