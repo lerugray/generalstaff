@@ -67,11 +67,16 @@ describe("isProgressEntry", () => {
       "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
       "verification_run", "verification_outcome", "diff_summary",
       "reviewer_invoked", "reviewer_response", "reviewer_verdict",
-      "cycle_end", "session_start", "session_end",
+      "reviewer_fallback", "worktree_preflight",
+      "cycle_end", "session_start", "session_end", "session_complete",
     ];
     for (const e of events) {
       expect(isProgressEntry({ ...valid, event: e })).toBe(true);
     }
+  });
+
+  it("accepts worktree_preflight event (regression for gs-134)", () => {
+    expect(isProgressEntry({ ...valid, event: "worktree_preflight" })).toBe(true);
   });
 
   it("rejects null, undefined, and non-objects", () => {
