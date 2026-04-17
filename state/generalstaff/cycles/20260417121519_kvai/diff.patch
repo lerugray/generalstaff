@@ -1,0 +1,78 @@
+diff --git a/src/session.ts b/src/session.ts
+index a5be114..2bbd26b 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -206,9 +206,14 @@ export async function runSession(options: SessionOptions) {
+ 
+     // Live progress between cycles — makes long sessions readable
+     const remainingStr = formatDuration(Math.max(0, remainingMinutes()) * 60);
++    const cycleDurationSec = Math.max(
++      0,
++      (new Date(result.ended_at).getTime() - new Date(result.started_at).getTime()) / 1000,
++    );
++    const cycleDurationStr = formatDuration(cycleDurationSec);
+     console.log(
+       `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
+-        `${result.final_outcome} (${remainingStr} remaining)`,
++        `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining)`,
+     );
+ 
+     // Guard against runaway empty cycles
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 8645413..c6b13e8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -470,7 +470,7 @@
+   {
+     "id": "gs-104",
+     "title": "Include per-cycle engineer duration in the 'Cycle N completed' log line so users can spot slowdowns in real time. Change `Cycle N completed: generalstaff — verified (58m50s remaining)` to `Cycle N completed: generalstaff — verified (took 6m12s, 58m50s remaining)`. Compute duration from cycle.started_at and cycle.ended_at. Add test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/helpers/verify_cycle_completion_log.ts b/tests/helpers/verify_cycle_completion_log.ts
+index 71a431e..9be4d67 100644
+--- a/tests/helpers/verify_cycle_completion_log.ts
++++ b/tests/helpers/verify_cycle_completion_log.ts
+@@ -49,12 +49,15 @@ mock.module("../../src/cycle", () => ({
+   countCommitsAhead: async () => 0,
+   executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
+     executeCycleCalls++;
+-    const now = new Date().toISOString();
++    // Fixed ~90s cycle duration so the "took" field in the log line has
++    // a non-trivial value to assert on (gs-104).
++    const start = new Date(Date.now() - 90_000).toISOString();
++    const end = new Date().toISOString();
+     return {
+       cycle_id: `cycle-${executeCycleCalls}`,
+       project_id: p.id,
+-      started_at: now,
+-      ended_at: now,
++      started_at: start,
++      ended_at: end,
+       cycle_start_sha: "abc",
+       cycle_end_sha: "def",
+       engineer_exit_code: 0,
+@@ -137,7 +140,7 @@ async function run() {
+     const errors: string[] = [];
+ 
+     const regex =
+-      /Cycle 1 completed: test-proj \u2014 verified \([^)]+ remaining\)/;
++      /Cycle 1 completed: test-proj \u2014 verified \(took 1m\d+s, [^)]+ remaining\)/;
+     if (!regex.test(joined)) {
+       errors.push(
+         `expected cycle completion log line matching regex, output was:\n${joined}`,
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 9f21bbe..b769f14 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -545,7 +545,7 @@ describe("runSession safeguards", () => {
+     expect(result.execute_cycle_calls).toBe(1);
+     expect(result.result_count).toBe(1);
+     expect(String(result.captured)).toMatch(
+-      /Cycle 1 completed: test-proj \u2014 verified \([^)]+ remaining\)/,
++      /Cycle 1 completed: test-proj \u2014 verified \(took [^,]+, [^)]+ remaining\)/,
+     );
+   }, 30_000);
+ 
