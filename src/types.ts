@@ -151,6 +151,7 @@ export interface SessionOptions {
   budgetMinutes: number;
   dryRun: boolean;
   maxCycles?: number;
+  excludeProjects?: string[];
 }
 
 export interface SingleCycleOptions {

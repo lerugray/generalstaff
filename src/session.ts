@@ -49,7 +49,7 @@ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
 }
 
 export async function runSession(options: SessionOptions) {
-  const { budgetMinutes, dryRun, maxCycles } = options;
+  const { budgetMinutes, dryRun, maxCycles, excludeProjects } = options;
   const sessionStart = Date.now();
 
   console.log(`\n=== GeneralStaff Session ===`);
@@ -65,9 +65,31 @@ export async function runSession(options: SessionOptions) {
   const config = yaml.dispatcher;
   const fleet = await loadFleetState(config);
 
-  if (!dryRun && projects.length > 0) {
+  // Validate and initialize exclude set. Unknown ids warn but don't abort —
+  // the operator likely has a stale project list in their head and shouldn't
+  // lose the rest of the session over a typo.
+  const excludeSet = new Set<string>();
+  if (excludeProjects && excludeProjects.length > 0) {
+    const known = new Set(projects.map((p) => p.id));
+    for (const id of excludeProjects) {
+      if (!known.has(id)) {
+        console.warn(
+          `Warning: --exclude-project="${id}" does not match any registered project (ignored)`,
+        );
+        continue;
+      }
+      excludeSet.add(id);
+    }
+    if (excludeSet.size > 0) {
+      console.log(`Excluding: ${[...excludeSet].join(", ")}\n`);
+    }
+  }
+
+  const eligibleProjects = projects.filter((p) => !excludeSet.has(p.id));
+
+  if (!dryRun && eligibleProjects.length > 0) {
     const plan = estimateSessionPlan(
-      projects,
+      eligibleProjects,
       fleet,
       budgetMinutes,
       config.max_cycles_per_project_per_session,
@@ -84,7 +106,7 @@ export async function runSession(options: SessionOptions) {
 
   const allResults: CycleResult[] = [];
   const cyclesPerProject = new Map<string, number>();
-  const skippedProjects = new Set<string>();
+  const skippedProjects = new Set<string>(excludeSet);
 
   function elapsedMinutes(): number {
     return (Date.now() - sessionStart) / 60_000;

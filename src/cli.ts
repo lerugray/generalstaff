@@ -42,10 +42,12 @@ function printUsage() {
 
 Usage:
   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
+                       [--exclude-project=<id>[,<id>...]]
                                                           Run a session (multiple cycles)
     Example: generalstaff session --budget=480          # overnight 8-hour run
     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
     Example: generalstaff session --dry-run             # preview without committing
+    Example: generalstaff session --exclude-project=catalogdna,retrogaze
 
   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
     Example: generalstaff cycle --project=myapp
@@ -149,6 +151,7 @@ switch (command) {
         budget: { type: "string", default: "480" },
         "max-cycles": { type: "string" },
         "dry-run": { type: "boolean", default: false },
+        "exclude-project": { type: "string" },
       },
       allowPositionals: false,
     });
@@ -166,10 +169,18 @@ switch (command) {
       }
       maxCycles = parsed;
     }
+    let excludeProjects: string[] | undefined;
+    if (values["exclude-project"] !== undefined) {
+      excludeProjects = values["exclude-project"]
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    }
     await runSession({
       budgetMinutes: budget,
       dryRun: values["dry-run"]!,
       maxCycles,
+      excludeProjects,
     });
     break;
   }
