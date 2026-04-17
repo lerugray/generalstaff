@@ -113,3 +113,113 @@ describe("runClean log rotation", () => {
     await expect(runClean(20, 30)).resolves.toBeUndefined();
   });
 });
+
+describe("runClean --dry-run", () => {
+  it("previews log-file deletions without removing them", async () => {
+    const logsDir = join(TEST_DIR, "logs");
+    mkdirSync(logsDir, { recursive: true });
+
+    const oldFile = join(logsDir, "old.log");
+    const freshFile = join(logsDir, "fresh.log");
+    writeFileSync(oldFile, "stale");
+    writeFileSync(freshFile, "fresh");
+    setMtimeDaysAgo(oldFile, 45);
+    setMtimeDaysAgo(freshFile, 1);
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runClean(20, 30, true);
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(existsSync(oldFile)).toBe(true);
+    expect(existsSync(freshFile)).toBe(true);
+    const output = lines.join("\n");
+    expect(output).toContain(`[DRY RUN] Would remove: ${oldFile}`);
+    expect(output).toContain("[DRY RUN] Would delete 1 log file(s) older than 30 day(s)");
+    expect(output).toMatch(/\[DRY RUN\] Cleaned 1 item\(s\)\./);
+  });
+
+  it("previews cycle-directory pruning without removing them", async () => {
+    const cyclesDir = join(TEST_DIR, "state", "alpha", "cycles");
+    mkdirSync(cyclesDir, { recursive: true });
+    // Create 5 cycle directories; keep=2 means 3 would be pruned
+    const cycleIds = ["c1", "c2", "c3", "c4", "c5"];
+    for (const id of cycleIds) {
+      mkdirSync(join(cyclesDir, id), { recursive: true });
+    }
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runClean(2, 30, true);
+    } finally {
+      console.log = originalLog;
+    }
+
+    for (const id of cycleIds) {
+      expect(existsSync(join(cyclesDir, id))).toBe(true);
+    }
+    const output = lines.join("\n");
+    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c1")}`);
+    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c2")}`);
+    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c3")}`);
+    expect(output).toContain("[DRY RUN] Would prune 3 old cycle(s) from alpha (would keep last 2)");
+    expect(output).toMatch(/\[DRY RUN\] Cleaned 3 item\(s\)\./);
+  });
+
+  it("previews stale-worktree removal without deleting the directory", async () => {
+    const projectPath = join(TEST_DIR, "alpha-project");
+    mkdirSync(projectPath, { recursive: true });
+    const worktreePath = join(projectPath, ".bot-worktree");
+    mkdirSync(worktreePath, { recursive: true });
+    writeFileSync(join(worktreePath, "marker"), "x");
+
+    const customYaml = MINIMAL_PROJECTS_YAML.replace(
+      "/tmp/clean-alpha-nonexistent",
+      projectPath.replace(/\\/g, "/"),
+    );
+    writeFileSync(join(TEST_DIR, "projects.yaml"), customYaml);
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runClean(20, 30, true);
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(existsSync(worktreePath)).toBe(true);
+    expect(existsSync(join(worktreePath, "marker"))).toBe(true);
+    const output = lines.join("\n");
+    expect(output).toContain(`[DRY RUN] Would remove: ${worktreePath}`);
+    expect(output).toMatch(/\[DRY RUN\] Cleaned 1 item\(s\)\./);
+  });
+
+  it("reports nothing-to-clean with the dry-run prefix when state is empty", async () => {
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    };
+    try {
+      await runClean(20, 30, true);
+    } finally {
+      console.log = originalLog;
+    }
+
+    const output = lines.join("\n");
+    expect(output).toContain("[DRY RUN] Nothing to clean.");
+  });
+});

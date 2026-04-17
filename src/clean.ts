@@ -10,22 +10,28 @@ import { loadProjects } from "./projects";
 export async function runClean(
   keepCycles: number = 20,
   logDays: number = 30,
+  dryRun: boolean = false,
 ) {
   const projects = await loadProjects();
   const root = getRootDir();
+  const prefix = dryRun ? "[DRY RUN] " : "";
   let cleaned = 0;
 
   // 1. Clean stale worktrees for each project
   for (const p of projects) {
     const wt = join(p.path, ".bot-worktree");
     if (existsSync(wt)) {
-      try {
-        await $`git -C ${p.path} worktree remove ${wt} --force`.quiet().nothrow();
-      } catch { /* ignore */ }
-      if (existsSync(wt)) {
-        rmSync(wt, { recursive: true, force: true });
+      if (dryRun) {
+        console.log(`  [DRY RUN] Would remove: ${wt}`);
+      } else {
+        try {
+          await $`git -C ${p.path} worktree remove ${wt} --force`.quiet().nothrow();
+        } catch { /* ignore */ }
+        if (existsSync(wt)) {
+          rmSync(wt, { recursive: true, force: true });
+        }
+        console.log(`  Removed stale worktree: ${wt}`);
       }
-      console.log(`  Removed stale worktree: ${wt}`);
       cleaned++;
     }
   }
@@ -45,16 +51,27 @@ export async function runClean(
       }
       if (!st.isFile()) continue;
       if (st.mtimeMs < cutoffMs) {
-        try {
-          rmSync(full, { force: true });
+        if (dryRun) {
+          console.log(`  [DRY RUN] Would remove: ${full}`);
           deletedLogs++;
-        } catch { /* ignore */ }
+        } else {
+          try {
+            rmSync(full, { force: true });
+            deletedLogs++;
+          } catch { /* ignore */ }
+        }
       }
     }
     if (deletedLogs > 0) {
-      console.log(
-        `  Deleted ${deletedLogs} log file(s) older than ${logDays} day(s)`,
-      );
+      if (dryRun) {
+        console.log(
+          `  [DRY RUN] Would delete ${deletedLogs} log file(s) older than ${logDays} day(s)`,
+        );
+      } else {
+        console.log(
+          `  Deleted ${deletedLogs} log file(s) older than ${logDays} day(s)`,
+        );
+      }
       cleaned += deletedLogs;
     }
   }
@@ -62,7 +79,11 @@ export async function runClean(
   // 3. Prune old cycle directories (keep last N per project)
   const stateDir = join(root, "state");
   if (!existsSync(stateDir)) {
-    if (cleaned === 0) console.log("Nothing to clean.");
+    if (cleaned === 0) {
+      console.log(`${prefix}Nothing to clean.`);
+    } else {
+      console.log(`\n${prefix}Cleaned ${cleaned} item(s).`);
+    }
     return;
   }
 
@@ -81,17 +102,28 @@ export async function runClean(
 
     const toRemove = cycles.slice(0, cycles.length - keepCycles);
     for (const c of toRemove) {
-      rmSync(join(cyclesDir, c), { recursive: true, force: true });
+      const full = join(cyclesDir, c);
+      if (dryRun) {
+        console.log(`  [DRY RUN] Would remove: ${full}`);
+      } else {
+        rmSync(full, { recursive: true, force: true });
+      }
       cleaned++;
     }
-    console.log(
-      `  Pruned ${toRemove.length} old cycle(s) from ${dir} (kept last ${keepCycles})`,
-    );
+    if (dryRun) {
+      console.log(
+        `  [DRY RUN] Would prune ${toRemove.length} old cycle(s) from ${dir} (would keep last ${keepCycles})`,
+      );
+    } else {
+      console.log(
+        `  Pruned ${toRemove.length} old cycle(s) from ${dir} (kept last ${keepCycles})`,
+      );
+    }
   }
 
   if (cleaned === 0) {
-    console.log("Nothing to clean.");
+    console.log(`${prefix}Nothing to clean.`);
   } else {
-    console.log(`\nCleaned ${cleaned} item(s).`);
+    console.log(`\n${prefix}Cleaned ${cleaned} item(s).`);
   }
 }
