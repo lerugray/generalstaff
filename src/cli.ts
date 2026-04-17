@@ -15,7 +15,7 @@ import {
   ProjectNotFoundError,
 } from "./projects";
 import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -78,10 +78,11 @@ Usage:
     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
 
-  generalstaff log [--project=<id>] [--lines=<n>] [--level=error]
+  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>]
                                                           Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
+    Example: generalstaff log --grep='verified|weak'     # case-insensitive regex over event + data
 
   generalstaff summary [--no-tests] [--format=json] [--project=<id>]
                                                           Dashboard: cycles, outcomes, duration, tasks, tests
@@ -271,6 +272,7 @@ switch (command) {
         project: { type: "string" },
         lines: { type: "string", default: "20" },
         level: { type: "string" },
+        grep: { type: "string" },
       },
       allowPositionals: false,
     });
@@ -278,8 +280,18 @@ switch (command) {
       console.error(`Error: --level must be 'error' (got '${values.level}')`);
       process.exit(2);
     }
+    let grepRegex: RegExp | undefined;
+    if (values.grep !== undefined) {
+      try {
+        grepRegex = compileGrepPattern(values.grep);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(2);
+      }
+    }
     await tailProgressLog(values.project, parseInt(values.lines!, 10), {
       level: values.level as "error" | undefined,
+      grep: grepRegex,
     });
     break;
   }

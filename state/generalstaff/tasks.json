@@ -398,7 +398,7 @@
   {
     "id": "gs-092",
     "title": "Add a 'generalstaff log --grep=<pattern>' flag that filters log output by a case-insensitive regex pattern against the event+data fields of PROGRESS.jsonl. Rejects invalid regex with a clear error. Works alongside --lines/--project/--level. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
