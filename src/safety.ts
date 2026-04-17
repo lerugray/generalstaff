@@ -1,10 +1,11 @@
 // GeneralStaff — safety module (build step 5)
 // STOP file, working-tree-clean check, hands_off glob, isBotRunning (Q3)
 
-import { existsSync, statSync, readdirSync } from "fs";
+import { existsSync, statSync, readdirSync, mkdirSync, readFileSync } from "fs";
 import { readFile, writeFile, unlink } from "fs/promises";
-import { join } from "path";
+import { dirname, join } from "path";
 import { $ } from "bun";
+import { spawnSync as realSpawnSync } from "child_process";
 import type { ProjectConfig, BotRunningResult } from "./types";
 import { getRootDir } from "./state";
 
@@ -31,6 +32,124 @@ export async function removeStopFile(): Promise<void> {
   if (existsSync(path)) {
     await unlink(path);
   }
+}
+
+// --- Session PID tracking ---
+// gs-119: record the running session's PID so `stop --force` can locate
+// and terminate it. Written at session start, removed on clean exit.
+// Best-effort — if the process is killed mid-cycle the file is left
+// stale, which is why stop --force ignores failures and why the file
+// is overwritten, not appended to, on each session start.
+
+export function sessionPidFilePath(): string {
+  return join(getRootDir(), "state", "session.pid");
+}
+
+export async function writeSessionPid(pid: number): Promise<void> {
+  const path = sessionPidFilePath();
+  const dir = dirname(path);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  await writeFile(path, String(pid), "utf8");
+}
+
+export function readSessionPid(): number | null {
+  const path = sessionPidFilePath();
+  if (!existsSync(path)) return null;
+  try {
+    const raw = readFileSync(path, "utf8").trim();
+    const pid = parseInt(raw, 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function removeSessionPid(): Promise<void> {
+  const path = sessionPidFilePath();
+  if (existsSync(path)) {
+    await unlink(path);
+  }
+}
+
+// --- Force-stop (gs-119) ---
+
+export interface KillProcessTreeOptions {
+  spawnSyncFn?: typeof realSpawnSync;
+  killFn?: (pid: number, signal?: NodeJS.Signals | number) => void;
+  platform?: NodeJS.Platform;
+}
+
+export interface KillProcessTreeResult {
+  killed: boolean;
+  method: "taskkill" | "signal";
+  error?: string;
+}
+
+export function killProcessTree(
+  pid: number,
+  opts: KillProcessTreeOptions = {},
+): KillProcessTreeResult {
+  const platform = opts.platform ?? process.platform;
+  try {
+    if (platform === "win32") {
+      const spawnSyncFn = opts.spawnSyncFn ?? realSpawnSync;
+      const result = spawnSyncFn(
+        "taskkill",
+        ["/pid", String(pid), "/f", "/t"],
+        { stdio: "ignore" },
+      );
+      if (result.error) {
+        return {
+          killed: false,
+          method: "taskkill",
+          error: String(result.error),
+        };
+      }
+      // taskkill exits non-zero when the pid no longer exists. Treat
+      // "already gone" as success — stop --force is idempotent.
+      return { killed: true, method: "taskkill" };
+    }
+    const killFn =
+      opts.killFn ?? ((p: number, s?: NodeJS.Signals | number) => process.kill(p, s));
+    killFn(pid, "SIGTERM");
+    return { killed: true, method: "signal" };
+  } catch (e) {
+    return {
+      killed: false,
+      method: platform === "win32" ? "taskkill" : "signal",
+      error: String(e),
+    };
+  }
+}
+
+export interface StopForceResult {
+  stopFileCreated: boolean;
+  pid: number | null;
+  killed: boolean;
+  method?: "taskkill" | "signal";
+  error?: string;
+}
+
+export async function stopForce(
+  opts: KillProcessTreeOptions = {},
+): Promise<StopForceResult> {
+  await createStopFile();
+  const pid = readSessionPid();
+  if (pid === null) {
+    return { stopFileCreated: true, pid: null, killed: false };
+  }
+  const result = killProcessTree(pid, opts);
+  // Clear the pid file regardless — the process is either dead or gone.
+  await removeSessionPid();
+  return {
+    stopFileCreated: true,
+    pid,
+    killed: result.killed,
+    method: result.method,
+    error: result.error,
+  };
 }
 
 // --- Working tree clean check ---

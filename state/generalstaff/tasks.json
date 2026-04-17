@@ -560,7 +560,7 @@
   {
     "id": "gs-119",
     "title": "Add a `generalstaff stop --force` subcommand that writes the STOP file AND attempts to kill any running bun/claude processes associated with the current session. On Windows, use `taskkill /pid X /f /t` matching PIDs from running sessions (read from state if tracked). Current `stop` just writes the file, which doesn't interrupt a hung cycle. Add tests using mocked process table.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

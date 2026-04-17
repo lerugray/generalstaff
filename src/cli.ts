@@ -14,7 +14,14 @@ import {
   getProject,
   ProjectNotFoundError,
 } from "./projects";
-import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
+import {
+  isStopFilePresent,
+  createStopFile,
+  removeStopFile,
+  stopForce,
+  writeSessionPid,
+  removeSessionPid,
+} from "./safety";
 import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
@@ -80,8 +87,9 @@ Usage:
     Example: generalstaff init ./myapp
     Example: generalstaff init ../other-repo --id=other
 
-  generalstaff stop                                       Create STOP file (halt dispatcher)
+  generalstaff stop [--force]                             Create STOP file (halt dispatcher)
     Example: generalstaff stop                          # halt before next cycle
+    Example: generalstaff stop --force                  # also kill the running session process
 
   generalstaff start                                      Remove STOP file (allow dispatch)
     Example: generalstaff start                         # resume after a stop
@@ -221,10 +229,27 @@ switch (command) {
       excludeProjects,
       verbose: values.verbose!,
     };
-    if (chain === 1) {
-      await runSession(sessionOpts);
-    } else {
-      await runSessionChain(sessionOpts, chain);
+    // gs-119: record this process's PID so `stop --force` can locate
+    // and kill it. Best-effort — failure must not prevent the session
+    // from running. Cleared in a finally block on normal exit; abnormal
+    // exits leave the file stale, which stop --force tolerates.
+    try {
+      await writeSessionPid(process.pid);
+    } catch {
+      // Writable state/ is nice-to-have, not load-bearing.
+    }
+    try {
+      if (chain === 1) {
+        await runSession(sessionOpts);
+      } else {
+        await runSessionChain(sessionOpts, chain);
+      }
+    } finally {
+      try {
+        await removeSessionPid();
+      } catch {
+        // May already be gone if stop --force ran concurrently.
+      }
     }
     break;
   }
@@ -338,8 +363,32 @@ switch (command) {
   }
 
   case "stop": {
-    await createStopFile();
-    console.log("STOP file created. Dispatcher will halt before next cycle.");
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: { force: { type: "boolean", default: false } },
+      allowPositionals: true,
+    });
+    if (values.force) {
+      const result = await stopForce();
+      if (result.pid === null) {
+        console.log(
+          "STOP file created. No running session pid on record — nothing to kill.",
+        );
+      } else if (result.killed) {
+        console.log(
+          `STOP file created. Killed session pid ${result.pid} via ${result.method}.`,
+        );
+      } else {
+        console.error(
+          `STOP file created, but failed to kill pid ${result.pid}` +
+            (result.error ? `: ${result.error}` : "") +
+            ". The process may already be gone.",
+        );
+      }
+    } else {
+      await createStopFile();
+      console.log("STOP file created. Dispatcher will halt before next cycle.");
+    }
     break;
   }
 
