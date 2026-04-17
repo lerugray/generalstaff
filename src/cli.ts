@@ -114,7 +114,7 @@ Usage:
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
 
-  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path]
+  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path] [--regen=<file>]
                                                           Print a session digest to stdout, or list all
     Example: generalstaff digest --latest                # most recent digest
     Example: generalstaff digest --date=20260416         # first digest from that day
@@ -122,6 +122,7 @@ Usage:
     Example: generalstaff digest --latest --json         # structured JSON of the latest digest
     Example: generalstaff digest --list --json           # JSON array of digest summaries
     Example: generalstaff digest --latest --path         # absolute path of the latest digest (for scripting)
+    Example: generalstaff digest --regen=digests/digest_20260417_100000.md  # re-render from PROGRESS.jsonl
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
@@ -631,6 +632,7 @@ switch (command) {
         list: { type: "boolean", default: false },
         json: { type: "boolean", default: false },
         path: { type: "boolean", default: false },
+        regen: { type: "string" },
       },
       allowPositionals: false,
     });
@@ -642,7 +644,34 @@ switch (command) {
       console.error("Error: --list cannot be combined with --latest or --date");
       process.exit(1);
     }
+    if (
+      digestValues.regen &&
+      (digestValues.latest || digestValues.date || digestValues.list || digestValues.path)
+    ) {
+      console.error(
+        "Error: --regen cannot be combined with --latest, --date, --list, or --path",
+      );
+      process.exit(1);
+    }
     const dispatcher = await loadDispatcherConfig();
+    if (digestValues.regen) {
+      const sourcePath = resolve(getRootDir(), digestValues.regen);
+      if (!existsSync(sourcePath)) {
+        console.error(`Error: digest file not found: ${sourcePath}`);
+        process.exit(1);
+      }
+      const { regenerateDigest } = await import("./session");
+      const { missing } = await regenerateDigest(sourcePath, {
+        digest_dir: dispatcher.digest_dir,
+      });
+      if (missing.length > 0) {
+        console.error(
+          `Warning: ${missing.length} cycle(s) had no matching cycle_end event in PROGRESS.jsonl ` +
+            `(used digest-only fallback): ${missing.map((m) => `${m.project_id}/${m.cycle_id}`).join(", ")}`,
+        );
+      }
+      break;
+    }
     const digestDir = resolve(getRootDir(), dispatcher.digest_dir);
     const files = existsSync(digestDir)
       ? readdirSync(digestDir)

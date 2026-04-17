@@ -10,7 +10,7 @@ import {
   saveProjectState,
   getRootDir,
 } from "./state";
-import { appendProgress } from "./audit";
+import { appendProgress, loadProgressEvents } from "./audit";
 import { isStopFilePresent } from "./safety";
 import { executeCycle, countCommitsAhead } from "./cycle";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
@@ -610,5 +610,115 @@ export function parseDigest(markdown: string): ParsedDigest {
     duration: durationMatch ? durationMatch[1].trim() : null,
     cycle_count: cyclesMatch ? Number(cyclesMatch[1]) : null,
     cycles,
+  };
+}
+
+// Reverse formatDuration: "1h15m" / "2m30s" / "45s" → fractional minutes.
+// Returns 0 for unparseable input (regen still produces output, just with
+// an unknown duration line).
+export function parseFormattedDuration(s: string): number {
+  const m = s.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
+  if (!m || (!m[1] && !m[2] && !m[3])) return 0;
+  const h = m[1] ? Number(m[1]) : 0;
+  const min = m[2] ? Number(m[2]) : 0;
+  const sec = m[3] ? Number(m[3]) : 0;
+  return h * 60 + min + sec / 60;
+}
+
+// gs-113: rebuild a digest from PROGRESS.jsonl cycle_end events. Reads the
+// source digest to learn the cycle list (project_id + cycle_id pairs) and
+// reviewer/duration metadata, then loads the matching cycle_end entries and
+// hands them to writeDigest. writeDigest uses a fresh timestamp so the new
+// file never overwrites the source.
+export async function regenerateDigest(
+  sourceDigestPath: string,
+  config: { digest_dir: string },
+): Promise<{ results: CycleResult[]; missing: Array<{ project_id: string; cycle_id: string }> }> {
+  const { readFileSync } = require("fs");
+  const markdown = readFileSync(sourceDigestPath, "utf8");
+  const parsed = parseDigest(markdown);
+
+  // Reviewer line: "**Reviewer:** provider" or "**Reviewer:** provider (model)".
+  // Keeping the model optional matches writeDigest's own conditional.
+  const reviewerMatch = markdown.match(/\*\*Reviewer:\*\*\s*(\S+)(?:\s*\(([^)]+)\))?/);
+  const reviewerProvider = reviewerMatch ? reviewerMatch[1] : undefined;
+  const reviewerModel = reviewerMatch && reviewerMatch[2] ? reviewerMatch[2] : undefined;
+
+  const results: CycleResult[] = [];
+  const missing: Array<{ project_id: string; cycle_id: string }> = [];
+
+  for (const c of parsed.cycles) {
+    const events = await loadProgressEvents(
+      c.project_id,
+      (e) => e.event === "cycle_end" && e.cycle_id === c.cycle_id,
+    );
+    if (events.length === 0) {
+      missing.push({ project_id: c.project_id, cycle_id: c.cycle_id });
+      const fallback = resultFromDigestCycle(c);
+      if (fallback) results.push(fallback);
+      continue;
+    }
+    results.push(resultFromProgressEntry(events[0], c));
+  }
+
+  const durationMinutes = parsed.duration ? parseFormattedDuration(parsed.duration) : 0;
+
+  await writeDigest(results, durationMinutes, {
+    digest_dir: config.digest_dir,
+    reviewer_provider: reviewerProvider,
+    reviewer_model: reviewerModel,
+  });
+
+  return { results, missing };
+}
+
+function resultFromProgressEntry(
+  entry: { timestamp: string; data: Record<string, unknown> },
+  c: ParsedDigestCycle,
+): CycleResult {
+  const d = entry.data;
+  const endedAt = entry.timestamp;
+  const durSec = typeof d.duration_seconds === "number" ? d.duration_seconds : 0;
+  const startedAt = new Date(new Date(endedAt).getTime() - durSec * 1000).toISOString();
+  const diff = d.diff_stats as { files_changed: number; insertions: number; deletions: number } | undefined;
+  return {
+    cycle_id: c.cycle_id,
+    project_id: c.project_id,
+    started_at: startedAt,
+    ended_at: endedAt,
+    cycle_start_sha: typeof d.start_sha === "string" ? d.start_sha : "",
+    cycle_end_sha: typeof d.end_sha === "string" ? d.end_sha : "",
+    engineer_exit_code:
+      typeof d.engineer_exit_code === "number" ? d.engineer_exit_code : null,
+    verification_outcome: (d.verification_outcome ?? "failed") as CycleResult["verification_outcome"],
+    reviewer_verdict: (d.reviewer_verdict ?? "verification_failed") as CycleResult["reviewer_verdict"],
+    final_outcome: (d.outcome ?? "verification_failed") as CycleResult["final_outcome"],
+    reason: typeof d.reason === "string" ? d.reason : "",
+    diff_stats: diff && typeof diff === "object"
+      ? {
+          files_changed: Number(diff.files_changed) || 0,
+          insertions: Number(diff.insertions) || 0,
+          deletions: Number(diff.deletions) || 0,
+        }
+      : undefined,
+  };
+}
+
+function resultFromDigestCycle(c: ParsedDigestCycle): CycleResult | null {
+  if (!c.outcome) return null;
+  const now = new Date().toISOString();
+  return {
+    cycle_id: c.cycle_id,
+    project_id: c.project_id,
+    started_at: now,
+    ended_at: now,
+    cycle_start_sha: c.sha_start ?? "",
+    cycle_end_sha: c.sha_end ?? "",
+    engineer_exit_code: c.engineer_exit,
+    verification_outcome: (c.verification ?? "failed") as CycleResult["verification_outcome"],
+    reviewer_verdict: (c.reviewer ?? "verification_failed") as CycleResult["reviewer_verdict"],
+    final_outcome: c.outcome as CycleResult["final_outcome"],
+    reason: c.reason ?? "",
+    diff_stats: c.diff_stats ?? undefined,
   };
 }

@@ -123,6 +123,7 @@ mock.module("../../src/audit", () => ({
   ) => {
     capturedEvents.push({ projectId, event, data });
   },
+  loadProgressEvents: async () => [],
 }));
 
 mock.module("../../src/work_detection", () => ({

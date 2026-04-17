@@ -524,7 +524,7 @@
   {
     "id": "gs-113",
     "title": "Add `generalstaff digest --regen=<digest-file-path>` that re-renders an existing digest markdown from the underlying PROGRESS.jsonl cycle_end events. Useful for recovering when a digest rendered with a bug (like the 2026-04-17 cycle-1 subject fallback) needs a fresh pass with the corrected code. Reads the digest file's date range, finds matching cycle_end entries, rebuilds CycleResult objects, calls writeDigest. Writes to a new timestamped file rather than overwriting. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
