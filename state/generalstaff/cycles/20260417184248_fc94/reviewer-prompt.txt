@@ -1,0 +1,675 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cycle.ts b/src/cycle.ts
+index dbca87a..0679334 100644
+--- a/src/cycle.ts
++++ b/src/cycle.ts
+@@ -18,7 +18,7 @@ import {
+ import { appendProgress } from "./audit";
+ import { runEngineer } from "./engineer";
+ import { runVerification } from "./verification";
+-import { runReviewer } from "./reviewer";
++import { runReviewer, type ReviewerResult } from "./reviewer";
+ import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
+ import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
+ import type {
+@@ -212,6 +212,64 @@ export function extractChangedFiles(diff: string): string[] {
+   return files;
+ }
+ 
++// gs-133: cross-reference reviewer-reported hands_off_violations against
++// the actual diff. Returns which violations are real (a file in the diff
++// matches the violation string as a glob, using matchesHandsOff for
++// parity with the cycle's own hands-off gate) and which are hallucinated.
++export function crossCheckReviewerHandsOff(
++  reviewerViolations: string[],
++  changedFiles: string[],
++): { real: string[]; dropped: string[] } {
++  const real: string[] = [];
++  const dropped: string[] = [];
++  for (const v of reviewerViolations) {
++    const hasMatch = changedFiles.some(
++      (f) => matchesHandsOff(f, [v]) !== null,
++    );
++    if (hasMatch) real.push(v);
++    else dropped.push(v);
++  }
++  return { real, dropped };
++}
++
++// gs-133: mutates the reviewer result in place — drops hallucinated
++// hands_off_violations and, when the reviewer's only failure reason was
++// those hallucinations, flips the verdict from verification_failed to
++// verified. Returns the dropped list + whether the verdict was flipped so
++// the caller can emit a reviewer_hallucination progress event.
++export function applyReviewerSanityCheck(
++  reviewerResult: ReviewerResult,
++  changedFiles: string[],
++): { dropped: string[]; flipped: boolean } {
++  const resp = reviewerResult.response;
++  if (!resp || resp.hands_off_violations.length === 0) {
++    return { dropped: [], flipped: false };
++  }
++  const { real, dropped } = crossCheckReviewerHandsOff(
++    resp.hands_off_violations,
++    changedFiles,
++  );
++  if (dropped.length === 0) {
++    return { dropped: [], flipped: false };
++  }
++  resp.hands_off_violations = real;
++  let flipped = false;
++  if (
++    reviewerResult.verdict === "verification_failed" &&
++    real.length === 0 &&
++    resp.scope_drift_files.length === 0 &&
++    resp.silent_failures.length === 0
++  ) {
++    reviewerResult.verdict = "verified";
++    resp.verdict = "verified";
++    resp.reason =
++      `verdict flipped: all reported hands_off_violations were hallucinated ` +
++      `(${dropped.join(", ")})`;
++    flipped = true;
++  }
++  return { dropped, flipped };
++}
++
+ export function diffSummaryStats(diff: string): DiffStats {
+   if (!diff) {
+     return { files_changed: 0, insertions: 0, deletions: 0 };
+@@ -625,6 +683,31 @@ export async function executeCycle(
+       console.log(`Reviewer parse error: ${reviewerResult.parseError}`);
+     }
+ 
++    // 8a. Sanity-check reviewer hands_off_violations against actual
++    //     changed files. Some reviewer models (observed on Ollama
++    //     qwen3:8b, 2026-04-17) hallucinate violations naming files
++    //     not present in the diff, which then fails cycles that should
++    //     pass. See gs-133.
++    const sanity = applyReviewerSanityCheck(reviewerResult, changedFiles);
++    if (sanity.dropped.length > 0) {
++      await appendProgress(project.id, "reviewer_hallucination", {
++        dropped_violations: sanity.dropped,
++        changed_files: changedFiles,
++        verdict_flipped: sanity.flipped,
++      }, cycleId);
++      if (sanity.flipped) {
++        console.log(
++          `Reviewer verdict flipped verification_failed → verified ` +
++          `(all hands_off_violations hallucinated: ${sanity.dropped.join(", ")})`,
++        );
++      } else {
++        console.log(
++          `Dropped ${sanity.dropped.length} hallucinated hands_off_violation(s): ` +
++          `${sanity.dropped.join(", ")}`,
++        );
++      }
++    }
++
+     // 9. Determine final outcome
+     if (verResult.outcome === "failed") {
+       result.final_outcome = "verification_failed";
+diff --git a/src/types.ts b/src/types.ts
+index 633f90f..4f86ee3 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -132,6 +132,7 @@ export type ProgressEventType =
+   | "reviewer_response"
+   | "reviewer_verdict"
+   | "reviewer_fallback"
++  | "reviewer_hallucination"
+   | "worktree_preflight"
+   | "cycle_rollback"
+   | "cycle_end"
+@@ -185,7 +186,8 @@ const VALID_EVENTS: readonly string[] = [
+   "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
+   "verification_run", "verification_outcome", "diff_summary",
+   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
+-  "reviewer_fallback", "worktree_preflight", "cycle_rollback",
++  "reviewer_fallback", "reviewer_hallucination",
++  "worktree_preflight", "cycle_rollback",
+   "cycle_end", "session_start", "session_end", "session_complete",
+ ];
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 47fedc4..c627b10 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -644,7 +644,7 @@
+   {
+     "id": "gs-133",
+     "title": "(BUG) Reviewer producing false-positive hands_off_violations. On 2026-04-17's second session (Ollama qwen3:8b), 3 of 6 failed cycles had reviewer-reported hands_off_violations naming files that were NOT in the diff — e.g., gs-131 (cycle juzs) reported ['src/safety.ts','src/reviewer.ts','src/prompts/'] as violations but the diff_summary shows the bot only touched active_engineer.ts/cycle.ts/engineer.ts/session.ts/stop_watcher.ts and their tests. Cycles eosu (gs-115) and ek00 (gs-121) had the same pattern. These false positives wasted ~25 minutes of session budget. Fix: in src/cycle.ts after the reviewer verdict returns, cross-reference reviewer-reported hands_off_violations against the actual changed-files list (already computed upstream via extractChangedFiles). Drop any violation whose named file/pattern does not match any file in the diff (reuse matchesHandsOff's pattern-matching semantics for parity). If dropping violations leaves no real violations AND no other failure signals (scope_drift_files, silent_failures), flip the verdict from verification_failed to verified. Emit a 'reviewer_hallucination' PROGRESS event (add to ProgressEventType + VALID_EVENTS in src/types.ts) naming the dropped file list for observability, regardless of whether the verdict flipped. Add tests in tests/cycle.test.ts covering: (a) reviewer reports a file IS in the diff — violation stands, (b) reviewer reports a file NOT in the diff — violation dropped, hallucination event emitted, (c) all violations hallucinated AND no other failures — verdict flips to verified, (d) mixed real + hallucinated — real stands, hallucinated dropped. Do NOT modify src/reviewer.ts — the sanity-check layer lives in cycle.ts.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index b21f924..e733b3b 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -10,8 +10,11 @@ import {
+   countCommitsAhead,
+   preflightCleanupWorktree,
+   formatUnmergedBranchError,
++  crossCheckReviewerHandsOff,
++  applyReviewerSanityCheck,
+ } from "../src/cycle";
+-import type { ProjectConfig } from "../src/types";
++import type { ProjectConfig, ReviewerResponse } from "../src/types";
++import type { ReviewerResult } from "../src/reviewer";
+ 
+ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+   return {
+@@ -577,6 +580,178 @@ describe("cycle rollback on verification_failed (gs-132)", () => {
+   }, 30_000);
+ });
+ 
++describe("reviewer hands_off_violations sanity check (gs-133)", () => {
++  function makeReviewerResult(overrides: Partial<ReviewerResponse> = {}): ReviewerResult {
++    const response: ReviewerResponse = {
++      verdict: "verification_failed",
++      reason: "hands-off violation",
++      scope_drift_files: [],
++      hands_off_violations: [],
++      task_evidence: [],
++      silent_failures: [],
++      notes: "",
++      ...overrides,
++    };
++    return {
++      verdict: response.verdict,
++      response,
++      rawResponse: "{}",
++      parseError: null,
++    };
++  }
++
++  describe("crossCheckReviewerHandsOff", () => {
++    it("keeps a violation that names a file actually in the diff", () => {
++      const result = crossCheckReviewerHandsOff(
++        ["src/safety.ts"],
++        ["src/safety.ts", "src/cycle.ts"],
++      );
++      expect(result.real).toEqual(["src/safety.ts"]);
++      expect(result.dropped).toEqual([]);
++    });
++
++    it("drops a violation that names a file NOT in the diff", () => {
++      const result = crossCheckReviewerHandsOff(
++        ["src/safety.ts"],
++        ["src/engineer.ts", "src/cycle.ts"],
++      );
++      expect(result.real).toEqual([]);
++      expect(result.dropped).toEqual(["src/safety.ts"]);
++    });
++
++    it("keeps a glob-style violation that matches a changed file", () => {
++      // The reviewer frequently emits a prefix like src/prompts/; this
++      // must still match src/prompts/reviewer.ts for parity with the
++      // cycle's hands-off gate.
++      const result = crossCheckReviewerHandsOff(
++        ["src/prompts/"],
++        ["src/prompts/reviewer.ts"],
++      );
++      expect(result.real).toEqual(["src/prompts/"]);
++      expect(result.dropped).toEqual([]);
++    });
++
++    it("splits mixed real + hallucinated violations", () => {
++      const result = crossCheckReviewerHandsOff(
++        ["src/safety.ts", "src/cycle.ts", "src/prompts/"],
++        ["src/cycle.ts", "src/engineer.ts"],
++      );
++      expect(result.real).toEqual(["src/cycle.ts"]);
++      expect(result.dropped).toEqual(["src/safety.ts", "src/prompts/"]);
++    });
++
++    it("returns empty lists when reviewer reported nothing", () => {
++      const result = crossCheckReviewerHandsOff([], ["src/cycle.ts"]);
++      expect(result.real).toEqual([]);
++      expect(result.dropped).toEqual([]);
++    });
++  });
++
++  describe("applyReviewerSanityCheck", () => {
++    it("(a) reviewer reports a file IS in the diff — violation stands, verdict unchanged", () => {
++      const rr = makeReviewerResult({
++        verdict: "verification_failed",
++        hands_off_violations: ["src/safety.ts"],
++      });
++      const outcome = applyReviewerSanityCheck(rr, ["src/safety.ts", "src/cycle.ts"]);
++      expect(outcome.dropped).toEqual([]);
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verification_failed");
++      expect(rr.response!.hands_off_violations).toEqual(["src/safety.ts"]);
++    });
++
++    it("(b) reviewer reports a file NOT in the diff — violation dropped, hallucination flagged", () => {
++      const rr = makeReviewerResult({
++        verdict: "verification_failed",
++        hands_off_violations: ["src/safety.ts"],
++        scope_drift_files: ["something.ts"], // prevents the flip
++      });
++      const outcome = applyReviewerSanityCheck(rr, ["src/engineer.ts"]);
++      expect(outcome.dropped).toEqual(["src/safety.ts"]);
++      // flip blocked by scope_drift_files
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verification_failed");
++      expect(rr.response!.hands_off_violations).toEqual([]);
++    });
++
++    it("(c) all violations hallucinated AND no other failures — verdict flips to verified", () => {
++      const rr = makeReviewerResult({
++        verdict: "verification_failed",
++        hands_off_violations: ["src/safety.ts", "src/reviewer.ts", "src/prompts/"],
++      });
++      const outcome = applyReviewerSanityCheck(rr, [
++        "src/engineer.ts",
++        "src/cycle.ts",
++      ]);
++      expect(outcome.dropped).toEqual([
++        "src/safety.ts",
++        "src/reviewer.ts",
++        "src/prompts/",
++      ]);
++      expect(outcome.flipped).toBe(true);
++      expect(rr.verdict).toBe("verified");
++      expect(rr.response!.verdict).toBe("verified");
++      expect(rr.response!.hands_off_violations).toEqual([]);
++      expect(rr.response!.reason).toContain("hallucinated");
++    });
++
++    it("(d) mixed real + hallucinated — real stands, hallucinated dropped, no flip", () => {
++      const rr = makeReviewerResult({
++        verdict: "verification_failed",
++        hands_off_violations: ["src/cycle.ts", "src/safety.ts"],
++      });
++      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
++      expect(outcome.dropped).toEqual(["src/safety.ts"]);
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verification_failed");
++      expect(rr.response!.hands_off_violations).toEqual(["src/cycle.ts"]);
++    });
++
++    it("does not flip when silent_failures is non-empty", () => {
++      const rr = makeReviewerResult({
++        verdict: "verification_failed",
++        hands_off_violations: ["src/safety.ts"],
++        silent_failures: ["tests skipped"],
++      });
++      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
++      expect(outcome.dropped).toEqual(["src/safety.ts"]);
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verification_failed");
++    });
++
++    it("does not flip when primary verdict was already verified_weak", () => {
++      const rr = makeReviewerResult({
++        verdict: "verified_weak",
++        hands_off_violations: ["src/safety.ts"],
++      });
++      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
++      expect(outcome.dropped).toEqual(["src/safety.ts"]);
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verified_weak");
++    });
++
++    it("is a no-op when response is null", () => {
++      const rr: ReviewerResult = {
++        verdict: "verification_failed",
++        response: null,
++        rawResponse: "",
++        parseError: "bad json",
++      };
++      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
++      expect(outcome.dropped).toEqual([]);
++      expect(outcome.flipped).toBe(false);
++      expect(rr.verdict).toBe("verification_failed");
++    });
++
++    it("is a no-op when reviewer reported no hands_off_violations", () => {
++      const rr = makeReviewerResult({ hands_off_violations: [] });
++      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
++      expect(outcome.dropped).toEqual([]);
++      expect(outcome.flipped).toBe(false);
++    });
++  });
++});
++
+ describe("formatUnmergedBranchError", () => {
+   it("interpolates a resolved absolute path into the git command", () => {
+     // Relative path input — the message must resolve it to absolute.
+
+
+Diff summary: src/cycle.ts                  |  85 +++++++++++++++++++-
+ src/types.ts                  |   4 +-
+ state/generalstaff/tasks.json |   2 +-
+ tests/cycle.test.ts           | 177 +++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 264 insertions(+), 4 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T18:48:19.090Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_184848.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_184848.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rwe
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

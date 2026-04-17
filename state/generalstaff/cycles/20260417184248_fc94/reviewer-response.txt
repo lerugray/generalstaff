@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All marked-done tasks have clear evidence in the diff, no scope drift or hands-off violations, and verification passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "\"status\": \"done\"",
+      "evidence": "The task 'gs-133' was marked as done in state/generalstaff/tasks.json, and the diff shows implementation of the sanity check for reviewer hands_off_violations, including new functions crossCheckReviewerHandsOff and applyReviewerSanityCheck, integration into executeCycle, and addition of the 'reviewer_hallucination' progress event type.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) exited with code 0, confirming that all tests pass and type checking succeeds. The diff fully implements the requirements described in task gs-133, including test coverage for the new functionality."
+}
