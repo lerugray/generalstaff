@@ -1,0 +1,284 @@
+diff --git a/src/clean.ts b/src/clean.ts
+index d96810e..31d22cd 100644
+--- a/src/clean.ts
++++ b/src/clean.ts
+@@ -10,22 +10,28 @@ import { loadProjects } from "./projects";
+ export async function runClean(
+   keepCycles: number = 20,
+   logDays: number = 30,
++  dryRun: boolean = false,
+ ) {
+   const projects = await loadProjects();
+   const root = getRootDir();
++  const prefix = dryRun ? "[DRY RUN] " : "";
+   let cleaned = 0;
+ 
+   // 1. Clean stale worktrees for each project
+   for (const p of projects) {
+     const wt = join(p.path, ".bot-worktree");
+     if (existsSync(wt)) {
+-      try {
+-        await $`git -C ${p.path} worktree remove ${wt} --force`.quiet().nothrow();
+-      } catch { /* ignore */ }
+-      if (existsSync(wt)) {
+-        rmSync(wt, { recursive: true, force: true });
++      if (dryRun) {
++        console.log(`  [DRY RUN] Would remove: ${wt}`);
++      } else {
++        try {
++          await $`git -C ${p.path} worktree remove ${wt} --force`.quiet().nothrow();
++        } catch { /* ignore */ }
++        if (existsSync(wt)) {
++          rmSync(wt, { recursive: true, force: true });
++        }
++        console.log(`  Removed stale worktree: ${wt}`);
+       }
+-      console.log(`  Removed stale worktree: ${wt}`);
+       cleaned++;
+     }
+   }
+@@ -45,16 +51,27 @@ export async function runClean(
+       }
+       if (!st.isFile()) continue;
+       if (st.mtimeMs < cutoffMs) {
+-        try {
+-          rmSync(full, { force: true });
++        if (dryRun) {
++          console.log(`  [DRY RUN] Would remove: ${full}`);
+           deletedLogs++;
+-        } catch { /* ignore */ }
++        } else {
++          try {
++            rmSync(full, { force: true });
++            deletedLogs++;
++          } catch { /* ignore */ }
++        }
+       }
+     }
+     if (deletedLogs > 0) {
+-      console.log(
+-        `  Deleted ${deletedLogs} log file(s) older than ${logDays} day(s)`,
+-      );
++      if (dryRun) {
++        console.log(
++          `  [DRY RUN] Would delete ${deletedLogs} log file(s) older than ${logDays} day(s)`,
++        );
++      } else {
++        console.log(
++          `  Deleted ${deletedLogs} log file(s) older than ${logDays} day(s)`,
++        );
++      }
+       cleaned += deletedLogs;
+     }
+   }
+@@ -62,7 +79,11 @@ export async function runClean(
+   // 3. Prune old cycle directories (keep last N per project)
+   const stateDir = join(root, "state");
+   if (!existsSync(stateDir)) {
+-    if (cleaned === 0) console.log("Nothing to clean.");
++    if (cleaned === 0) {
++      console.log(`${prefix}Nothing to clean.`);
++    } else {
++      console.log(`\n${prefix}Cleaned ${cleaned} item(s).`);
++    }
+     return;
+   }
+ 
+@@ -81,17 +102,28 @@ export async function runClean(
+ 
+     const toRemove = cycles.slice(0, cycles.length - keepCycles);
+     for (const c of toRemove) {
+-      rmSync(join(cyclesDir, c), { recursive: true, force: true });
++      const full = join(cyclesDir, c);
++      if (dryRun) {
++        console.log(`  [DRY RUN] Would remove: ${full}`);
++      } else {
++        rmSync(full, { recursive: true, force: true });
++      }
+       cleaned++;
+     }
+-    console.log(
+-      `  Pruned ${toRemove.length} old cycle(s) from ${dir} (kept last ${keepCycles})`,
+-    );
++    if (dryRun) {
++      console.log(
++        `  [DRY RUN] Would prune ${toRemove.length} old cycle(s) from ${dir} (would keep last ${keepCycles})`,
++      );
++    } else {
++      console.log(
++        `  Pruned ${toRemove.length} old cycle(s) from ${dir} (kept last ${keepCycles})`,
++      );
++    }
+   }
+ 
+   if (cleaned === 0) {
+-    console.log("Nothing to clean.");
++    console.log(`${prefix}Nothing to clean.`);
+   } else {
+-    console.log(`\nCleaned ${cleaned} item(s).`);
++    console.log(`\n${prefix}Cleaned ${cleaned} item(s).`);
+   }
+ }
+diff --git a/src/cli.ts b/src/cli.ts
+index 3d9947f..c8be7b0 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -122,9 +122,10 @@ Usage:
+     Example: generalstaff doctor                        # diagnose only
+     Example: generalstaff doctor --fix                  # prompt y/N for each fix
+     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
+-  generalstaff clean [--keep=N] [--log-days=N]            Remove stale worktrees + prune old cycles + rotate logs
++  generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
+     Example: generalstaff clean --keep=10
+     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
++    Example: generalstaff clean --dry-run                # preview without deleting
+ 
+   generalstaff task list --project=<id>                   Show pending tasks for a project
+     Example: generalstaff task list --project=myapp
+@@ -562,6 +563,7 @@ switch (command) {
+       options: {
+         keep: { type: "string", default: "20" },
+         "log-days": { type: "string", default: "30" },
++        "dry-run": { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -569,6 +571,7 @@ switch (command) {
+     await runClean(
+       parseInt(cleanValues.keep!, 10),
+       parseInt(cleanValues["log-days"]!, 10),
++      cleanValues["dry-run"] === true,
+     );
+     break;
+   }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index c627b10..c25aabf 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -680,7 +680,7 @@
+   {
+     "id": "gs-139",
+     "title": "Add --dry-run to src/clean.ts runClean so operators can preview exactly what would be deleted before committing. Flag threads through from cli.ts clean command (existing --keep/--log-days are parsed there). In dry-run mode: enumerate each worktree/log/cycle that would be removed with a '[DRY RUN] Would remove: <path>' line, do not invoke rmSync or git worktree remove, and report the same 'Cleaned N item(s)' footer prefixed with '[DRY RUN] '. Add tests in tests/clean.test.ts covering each of the three cleanup phases.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/clean.test.ts b/tests/clean.test.ts
+index 3545f16..1f80ce3 100644
+--- a/tests/clean.test.ts
++++ b/tests/clean.test.ts
+@@ -113,3 +113,113 @@ describe("runClean log rotation", () => {
+     await expect(runClean(20, 30)).resolves.toBeUndefined();
+   });
+ });
++
++describe("runClean --dry-run", () => {
++  it("previews log-file deletions without removing them", async () => {
++    const logsDir = join(TEST_DIR, "logs");
++    mkdirSync(logsDir, { recursive: true });
++
++    const oldFile = join(logsDir, "old.log");
++    const freshFile = join(logsDir, "fresh.log");
++    writeFileSync(oldFile, "stale");
++    writeFileSync(freshFile, "fresh");
++    setMtimeDaysAgo(oldFile, 45);
++    setMtimeDaysAgo(freshFile, 1);
++
++    const originalLog = console.log;
++    const lines: string[] = [];
++    console.log = (...args: unknown[]) => {
++      lines.push(args.map(String).join(" "));
++    };
++    try {
++      await runClean(20, 30, true);
++    } finally {
++      console.log = originalLog;
++    }
++
++    expect(existsSync(oldFile)).toBe(true);
++    expect(existsSync(freshFile)).toBe(true);
++    const output = lines.join("\n");
++    expect(output).toContain(`[DRY RUN] Would remove: ${oldFile}`);
++    expect(output).toContain("[DRY RUN] Would delete 1 log file(s) older than 30 day(s)");
++    expect(output).toMatch(/\[DRY RUN\] Cleaned 1 item\(s\)\./);
++  });
++
++  it("previews cycle-directory pruning without removing them", async () => {
++    const cyclesDir = join(TEST_DIR, "state", "alpha", "cycles");
++    mkdirSync(cyclesDir, { recursive: true });
++    // Create 5 cycle directories; keep=2 means 3 would be pruned
++    const cycleIds = ["c1", "c2", "c3", "c4", "c5"];
++    for (const id of cycleIds) {
++      mkdirSync(join(cyclesDir, id), { recursive: true });
++    }
++
++    const originalLog = console.log;
++    const lines: string[] = [];
++    console.log = (...args: unknown[]) => {
++      lines.push(args.map(String).join(" "));
++    };
++    try {
++      await runClean(2, 30, true);
++    } finally {
++      console.log = originalLog;
++    }
++
++    for (const id of cycleIds) {
++      expect(existsSync(join(cyclesDir, id))).toBe(true);
++    }
++    const output = lines.join("\n");
++    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c1")}`);
++    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c2")}`);
++    expect(output).toContain(`[DRY RUN] Would remove: ${join(cyclesDir, "c3")}`);
++    expect(output).toContain("[DRY RUN] Would prune 3 old cycle(s) from alpha (would keep last 2)");
++    expect(output).toMatch(/\[DRY RUN\] Cleaned 3 item\(s\)\./);
++  });
++
++  it("previews stale-worktree removal without deleting the directory", async () => {
++    const projectPath = join(TEST_DIR, "alpha-project");
++    mkdirSync(projectPath, { recursive: true });
++    const worktreePath = join(projectPath, ".bot-worktree");
++    mkdirSync(worktreePath, { recursive: true });
++    writeFileSync(join(worktreePath, "marker"), "x");
++
++    const customYaml = MINIMAL_PROJECTS_YAML.replace(
++      "/tmp/clean-alpha-nonexistent",
++      projectPath.replace(/\\/g, "/"),
++    );
++    writeFileSync(join(TEST_DIR, "projects.yaml"), customYaml);
++
++    const originalLog = console.log;
++    const lines: string[] = [];
++    console.log = (...args: unknown[]) => {
++      lines.push(args.map(String).join(" "));
++    };
++    try {
++      await runClean(20, 30, true);
++    } finally {
++      console.log = originalLog;
++    }
++
++    expect(existsSync(worktreePath)).toBe(true);
++    expect(existsSync(join(worktreePath, "marker"))).toBe(true);
++    const output = lines.join("\n");
++    expect(output).toContain(`[DRY RUN] Would remove: ${worktreePath}`);
++    expect(output).toMatch(/\[DRY RUN\] Cleaned 1 item\(s\)\./);
++  });
++
++  it("reports nothing-to-clean with the dry-run prefix when state is empty", async () => {
++    const originalLog = console.log;
++    const lines: string[] = [];
++    console.log = (...args: unknown[]) => {
++      lines.push(args.map(String).join(" "));
++    };
++    try {
++      await runClean(20, 30, true);
++    } finally {
++      console.log = originalLog;
++    }
++
++    const output = lines.join("\n");
++    expect(output).toContain("[DRY RUN] Nothing to clean.");
++  });
++});
