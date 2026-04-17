@@ -1,0 +1,75 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 6471fe5..8645413 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -488,7 +488,7 @@
+   {
+     "id": "gs-107",
+     "title": "Enforce Hard Rule 5 (mandatory hands-off lists) with a pre-flight validator in src/projects.ts loadProjectsYaml: if any registered project has an empty or missing hands_off array, reject the config at load time with a clear error pointing at the offending project id and Rule 5. Add tests covering: valid config, missing hands_off, empty hands_off, multiple projects where one is invalid.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/projects.test.ts b/tests/projects.test.ts
+index 70b3211..200d5ca 100644
+--- a/tests/projects.test.ts
++++ b/tests/projects.test.ts
+@@ -62,7 +62,7 @@ dispatcher:
+     cleanup();
+   });
+ 
+-  it("rejects empty hands_off with specific message", async () => {
++  it("rejects empty hands_off with specific message (names project + Rule 5)", async () => {
+     const path = writeYaml(
+       "no-handsoff.yaml",
+       `
+@@ -77,10 +77,12 @@ projects:
+ `,
+     );
+     await expect(loadProjectsYaml(path)).rejects.toThrow("must not be empty");
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad"/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
+     cleanup();
+   });
+ 
+-  it("rejects missing hands_off with 'required but missing'", async () => {
++  it("rejects missing hands_off with 'required but missing' (names project + Rule 5)", async () => {
+     const path = writeYaml(
+       "missing-handsoff.yaml",
+       `
+@@ -94,6 +96,34 @@ projects:
+ `,
+     );
+     await expect(loadProjectsYaml(path)).rejects.toThrow("required but missing");
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad"/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
++    cleanup();
++  });
++
++  it("rejects config when only one of multiple projects has empty hands_off", async () => {
++    const path = writeYaml(
++      "mixed-handsoff.yaml",
++      `
++projects:
++  - id: good
++    path: /tmp/a
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [secret/]
++  - id: bad-one
++    path: /tmp/b
++    priority: 2
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: []
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/"bad-one"/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow("must not be empty");
+     cleanup();
+   });
+ 
