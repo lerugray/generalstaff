@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from "fs";
 import { readFile, writeFile, rename, unlink } from "fs/promises";
 import { join, dirname } from "path";
 import { countRemainingWork } from "./work_detection";
+import { isProgressEntry } from "./types";
 import type {
   FleetState,
   ProjectState,
@@ -15,13 +16,26 @@ import type {
   ProjectConfig,
 } from "./types";
 
+export interface RecentCycle {
+  cycle_id: string;
+  timestamp: string;
+  outcome: string;
+  duration_seconds: number | null;
+  start_sha: string | null;
+  end_sha: string | null;
+  reason: string | null;
+}
+
 export interface ProjectSummary {
   id: string;
   priority: number;
   state: ProjectFleetState | null;
   project_state: ProjectState;
   remaining_tasks: number;
+  recent_cycles: RecentCycle[];
 }
+
+export const DEFAULT_RECENT_CYCLES = 5;
 
 let _rootDir: string | null = null;
 
@@ -180,9 +194,10 @@ export async function getProjectSummary(
   fleet: FleetState,
   config?: DispatcherConfig,
 ): Promise<ProjectSummary> {
-  const [projectState, remaining] = await Promise.all([
+  const [projectState, remaining, recentCycles] = await Promise.all([
     loadProjectState(project.id, config),
     countRemainingWork(project),
+    getRecentCycles(project.id, DEFAULT_RECENT_CYCLES, config),
   ]);
   return {
     id: project.id,
@@ -190,7 +205,46 @@ export async function getProjectSummary(
     state: fleet.projects[project.id] ?? null,
     project_state: projectState,
     remaining_tasks: remaining,
+    recent_cycles: recentCycles,
   };
+}
+
+// Read PROGRESS.jsonl cycle_end events and return the most recent N, newest first.
+// Uses a tail-scan so large logs don't fully materialize in memory.
+export async function getRecentCycles(
+  projectId: string,
+  n: number,
+  config?: DispatcherConfig,
+): Promise<RecentCycle[]> {
+  if (n <= 0) return [];
+  const filePath = join(projectStateDir(projectId, config), "PROGRESS.jsonl");
+  if (!existsSync(filePath)) return [];
+
+  const raw = await readFile(filePath, "utf8");
+  const lines = raw.split("\n");
+  const result: RecentCycle[] = [];
+  for (let i = lines.length - 1; i >= 0 && result.length < n; i--) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isProgressEntry(parsed) || parsed.event !== "cycle_end") continue;
+    const d = parsed.data;
+    result.push({
+      cycle_id: parsed.cycle_id ?? "",
+      timestamp: parsed.timestamp,
+      outcome: typeof d.outcome === "string" ? d.outcome : "?",
+      duration_seconds: typeof d.duration_seconds === "number" ? d.duration_seconds : null,
+      start_sha: typeof d.start_sha === "string" ? d.start_sha : null,
+      end_sha: typeof d.end_sha === "string" ? d.end_sha : null,
+      reason: typeof d.reason === "string" ? d.reason : null,
+    });
+  }
+  return result;
 }
 
 // --- Cycle directory setup ---

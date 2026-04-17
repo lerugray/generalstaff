@@ -13,6 +13,7 @@ import {
   writeStateFile,
   readStateFile,
   getProjectSummary,
+  getRecentCycles,
 } from "../src/state";
 import type { ProjectConfig } from "../src/types";
 import { join } from "path";
@@ -267,6 +268,7 @@ describe("getProjectSummary", () => {
     expect(summary.project_state.project_id).toBe("summary-proj");
     expect(summary.project_state.cycles_this_session).toBe(0);
     expect(summary.remaining_tasks).toBe(0);
+    expect(summary.recent_cycles).toEqual([]);
   });
 
   it("aggregates fleet state, project state, and remaining tasks", async () => {
@@ -310,5 +312,133 @@ describe("getProjectSummary", () => {
     expect(summary.project_state.last_cycle_id).toBe("cycle-xyz");
     expect(summary.project_state.cycles_this_session).toBe(3);
     expect(summary.remaining_tasks).toBe(2);
+  });
+
+  it("includes recent cycles from PROGRESS.jsonl", async () => {
+    const project = makeProject({ id: "recent-proj" });
+    const projectDir = join(TEST_DIR, "state", "recent-proj");
+    mkdirSync(projectDir, { recursive: true });
+    const lines = [
+      makeCycleEnd("c-1", "2026-04-10T00:00:00.000Z", "verified", 30, "abc1234", "def5678"),
+      makeCycleEnd("c-2", "2026-04-11T00:00:00.000Z", "verification_failed", 12, "def5678", "aaa0000"),
+    ];
+    writeFileSync(join(projectDir, "PROGRESS.jsonl"), lines.join("\n") + "\n");
+
+    const fleet = await loadFleetState();
+    const summary = await getProjectSummary(project, fleet);
+    expect(summary.recent_cycles).toHaveLength(2);
+    expect(summary.recent_cycles[0].cycle_id).toBe("c-2");
+    expect(summary.recent_cycles[0].outcome).toBe("verification_failed");
+    expect(summary.recent_cycles[1].cycle_id).toBe("c-1");
+  });
+});
+
+function makeCycleEnd(
+  cycleId: string,
+  timestamp: string,
+  outcome: string,
+  durationSeconds: number,
+  startSha: string,
+  endSha: string,
+): string {
+  return JSON.stringify({
+    timestamp,
+    event: "cycle_end",
+    cycle_id: cycleId,
+    project_id: "recent-proj",
+    data: {
+      outcome,
+      duration_seconds: durationSeconds,
+      start_sha: startSha,
+      end_sha: endSha,
+      reason: "",
+    },
+  });
+}
+
+describe("getRecentCycles", () => {
+  it("returns empty array when PROGRESS.jsonl is missing", async () => {
+    const result = await getRecentCycles("missing-proj", 5);
+    expect(result).toEqual([]);
+  });
+
+  it("returns at most N cycle_end entries, newest first", async () => {
+    const projectDir = join(TEST_DIR, "state", "rc-proj");
+    mkdirSync(projectDir, { recursive: true });
+    const entries = [
+      { cycle_id: "c-1", ts: "2026-04-10T00:00:00.000Z", outcome: "verified" },
+      { cycle_id: "c-2", ts: "2026-04-11T00:00:00.000Z", outcome: "verified_weak" },
+      { cycle_id: "c-3", ts: "2026-04-12T00:00:00.000Z", outcome: "verification_failed" },
+      { cycle_id: "c-4", ts: "2026-04-13T00:00:00.000Z", outcome: "verified" },
+    ];
+    const lines = entries.map((e) =>
+      JSON.stringify({
+        timestamp: e.ts,
+        event: "cycle_end",
+        cycle_id: e.cycle_id,
+        project_id: "rc-proj",
+        data: { outcome: e.outcome, duration_seconds: 60, start_sha: "a".repeat(40), end_sha: "b".repeat(40) },
+      }),
+    );
+    writeFileSync(join(projectDir, "PROGRESS.jsonl"), lines.join("\n") + "\n");
+
+    const result = await getRecentCycles("rc-proj", 2);
+    expect(result).toHaveLength(2);
+    expect(result[0].cycle_id).toBe("c-4");
+    expect(result[1].cycle_id).toBe("c-3");
+    expect(result[0].duration_seconds).toBe(60);
+    expect(result[0].outcome).toBe("verified");
+  });
+
+  it("skips non-cycle_end events", async () => {
+    const projectDir = join(TEST_DIR, "state", "filter-proj");
+    mkdirSync(projectDir, { recursive: true });
+    const lines = [
+      JSON.stringify({ timestamp: "2026-04-10T00:00:00.000Z", event: "cycle_start", cycle_id: "c-1", data: {} }),
+      JSON.stringify({ timestamp: "2026-04-10T00:01:00.000Z", event: "reviewer_invoked", cycle_id: "c-1", data: {} }),
+      JSON.stringify({ timestamp: "2026-04-10T00:02:00.000Z", event: "cycle_end", cycle_id: "c-1", data: { outcome: "verified" } }),
+    ];
+    writeFileSync(join(projectDir, "PROGRESS.jsonl"), lines.join("\n") + "\n");
+
+    const result = await getRecentCycles("filter-proj", 10);
+    expect(result).toHaveLength(1);
+    expect(result[0].cycle_id).toBe("c-1");
+    expect(result[0].outcome).toBe("verified");
+  });
+
+  it("skips malformed JSON lines", async () => {
+    const projectDir = join(TEST_DIR, "state", "bad-proj");
+    mkdirSync(projectDir, { recursive: true });
+    const good = JSON.stringify({
+      timestamp: "2026-04-10T00:00:00.000Z",
+      event: "cycle_end",
+      cycle_id: "c-good",
+      data: { outcome: "verified" },
+    });
+    writeFileSync(
+      join(projectDir, "PROGRESS.jsonl"),
+      `not-json\n${good}\n{broken`,
+    );
+
+    const result = await getRecentCycles("bad-proj", 5);
+    expect(result).toHaveLength(1);
+    expect(result[0].cycle_id).toBe("c-good");
+  });
+
+  it("returns empty when n is 0 or negative", async () => {
+    const projectDir = join(TEST_DIR, "state", "zero-proj");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "PROGRESS.jsonl"),
+      JSON.stringify({
+        timestamp: "2026-04-10T00:00:00.000Z",
+        event: "cycle_end",
+        cycle_id: "c-x",
+        data: { outcome: "verified" },
+      }) + "\n",
+    );
+
+    expect(await getRecentCycles("zero-proj", 0)).toEqual([]);
+    expect(await getRecentCycles("zero-proj", -1)).toEqual([]);
   });
 });
