@@ -605,7 +605,19 @@ describe("runSession safeguards", () => {
     expect(data.total_cycles).toBe(result.execute_cycle_calls);
     expect(data.total_failed).toBe(0);
     expect(typeof data.duration_minutes).toBe("number");
+    // gs-108: duration_minutes must be non-negative
+    expect(data.duration_minutes as number).toBeGreaterThanOrEqual(0);
     expect(typeof data.stop_reason).toBe("string");
+    // gs-108: stop_reason must come from the fixed set enumerated in session.ts
+    const validStopReasons = [
+      "budget",
+      "max-cycles",
+      "stop-file",
+      "no-project",
+      "insufficient-budget",
+      "empty-cycles",
+    ];
+    expect(validStopReasons).toContain(data.stop_reason as string);
   }, 30_000);
 
   it("adds capped projects to the skip set", async () => {
