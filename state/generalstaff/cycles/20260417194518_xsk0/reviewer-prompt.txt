@@ -1,0 +1,1348 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+{
+"id": "gs-001",
+"title": "Add verification module test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-002",
+"title": "Add reviewer prompt template test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-003",
+"title": "Add engineer module test",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-004",
+"title": "Improve error messages in projects.ts",
+"status": "done",
+"priority": 3
+},
+{
+"id": "gs-005",
+"title": "Add CLI test",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-006",
+"title": "Add work_detection test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-007",
+"title": "Add isBotRunning catalogdna test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-008",
+"title": "Add parseReviewerResponse test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-009",
+"title": "Add atomic write safety test",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-010",
+"title": "Add tailProgressLog test",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-011",
+"title": "Skip reviewer on empty diff",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-012",
+"title": "Auto-update bot/work to HEAD",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-013",
+"title": "Add --json flag to status",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-014",
+"title": "Add digest writer tests",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-015",
+"title": "Add dispatcher picker tests",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-016",
+"title": "Add worktree detection tests",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-017",
+"title": "Add engineer error handling test",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-018",
+"title": "Add projects CLI command",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-019",
+"title": "Add log --lines test",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-020",
+"title": "Add type guards",
+"status": "done",
+"priority": 3
+},
+{
+"id": "gs-021",
+"title": "Programmatic hands-off check",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-022",
+"title": "Skip verification on empty diff",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-023",
+"title": "Add init command",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-024",
+"title": "Validate project paths during load",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-025",
+"title": "Add history command",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-026",
+"title": "Add doctor command",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-027",
+"title": "Improve engineer spawn error messages",
+"status": "done",
+"priority": 1
+},
+{
+"id": "gs-028",
+"title": "Add history --format=compact",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-029",
+"title": "Session summary in PROGRESS.jsonl",
+"status": "done",
+"priority": 2
+},
+{
+"id": "gs-030",
+"title": "Init command edge case tests",
+"status": "done",
+"priority": 2
+},
+"status": "done",
+"priority": 1,
+"completed_at": "2026-04-17T19:55:43.121Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/providers/registry.ts b/src/providers/registry.ts
+new file mode 100644
+index 0000000..a86c053
+--- /dev/null
++++ b/src/providers/registry.ts
+@@ -0,0 +1,211 @@
++// GeneralStaff — provider registry loader (gs-152, Phase 2)
++//
++// Loads provider_config.yaml and exposes a typed registry of providers
++// plus role routes for digest / cycle_summary / classifier callers. The
++// reviewer path is NOT a consumer of this module — reviewer dispatch
++// remains inline in src/reviewer.ts per Phase 2 scoping.
++//
++// When provider_config.yaml is missing, the registry contains no
++// providers and every route points at the string "noop"; callers should
++// consult hasProviderForRole() before dispatching.
++
++import { existsSync } from "fs";
++import { readFile } from "fs/promises";
++import { join } from "path";
++import { parse as parseYaml } from "yaml";
++import { getRootDir } from "../state";
++import { createOllamaProvider } from "./ollama";
++import type {
++  LLMProvider,
++  ProviderDescriptor,
++  ProviderKind,
++  ProviderRole,
++} from "./types";
++
++const NOOP_PROVIDER_ID = "noop";
++const ALLOWED_KINDS: readonly ProviderKind[] = ["ollama", "openrouter", "claude"];
++const ALLOWED_ROLES: readonly ProviderRole[] = [
++  "digest",
++  "cycle_summary",
++  "classifier",
++];
++
++export class ProviderConfigError extends Error {
++  constructor(message: string) {
++    super(message);
++    this.name = "ProviderConfigError";
++  }
++}
++
++export interface ProviderRegistry {
++  providers: Map<string, ProviderDescriptor>;
++  routes: Record<ProviderRole, string>;
++}
++
++function emptyRoutes(): Record<ProviderRole, string> {
++  return {
++    digest: NOOP_PROVIDER_ID,
++    cycle_summary: NOOP_PROVIDER_ID,
++    classifier: NOOP_PROVIDER_ID,
++  };
++}
++
++function emptyRegistry(): ProviderRegistry {
++  return { providers: new Map(), routes: emptyRoutes() };
++}
++
++function validateDescriptor(raw: unknown, index: number): ProviderDescriptor {
++  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}] must be an object`,
++    );
++  }
++  const r = raw as Record<string, unknown>;
++  if (typeof r.id !== "string" || r.id.length === 0) {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}].id must be a non-empty string (got ${JSON.stringify(r.id)})`,
++    );
++  }
++  if (
++    typeof r.kind !== "string" ||
++    !ALLOWED_KINDS.includes(r.kind as ProviderKind)
++  ) {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}].kind must be one of ${ALLOWED_KINDS.join(", ")} (got ${JSON.stringify(r.kind)})`,
++    );
++  }
++  if (typeof r.model !== "string" || r.model.length === 0) {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}].model must be a non-empty string (got ${JSON.stringify(r.model)})`,
++    );
++  }
++  if (r.host !== undefined && typeof r.host !== "string") {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}].host must be a string when present (got ${JSON.stringify(r.host)})`,
++    );
++  }
++  if (r.api_key_env !== undefined && typeof r.api_key_env !== "string") {
++    throw new ProviderConfigError(
++      `provider_config.yaml: providers[${index}].api_key_env must be a string when present (got ${JSON.stringify(r.api_key_env)})`,
++    );
++  }
++  const descriptor: ProviderDescriptor = {
++    id: r.id,
++    kind: r.kind as ProviderKind,
++    model: r.model,
++  };
++  if (r.host !== undefined) descriptor.host = r.host as string;
++  if (r.api_key_env !== undefined) {
++    descriptor.api_key_env = r.api_key_env as string;
++  }
++  return descriptor;
++}
++
++function validateRoutes(
++  raw: unknown,
++  providers: Map<string, ProviderDescriptor>,
++): Record<ProviderRole, string> {
++  const routes = emptyRoutes();
++  if (raw === undefined || raw === null) return routes;
++  if (typeof raw !== "object" || Array.isArray(raw)) {
++    throw new ProviderConfigError(
++      "provider_config.yaml: routes must be an object",
++    );
++  }
++  const r = raw as Record<string, unknown>;
++  for (const key of Object.keys(r)) {
++    if (!ALLOWED_ROLES.includes(key as ProviderRole)) {
++      throw new ProviderConfigError(
++        `provider_config.yaml: routes contains unknown role '${key}' (allowed: ${ALLOWED_ROLES.join(", ")})`,
++      );
++    }
++    const value = r[key];
++    if (typeof value !== "string" || value.length === 0) {
++      throw new ProviderConfigError(
++        `provider_config.yaml: routes.${key} must be a non-empty string (got ${JSON.stringify(value)})`,
++      );
++    }
++    if (!providers.has(value)) {
++      throw new ProviderConfigError(
++        `provider_config.yaml: routes.${key} references unknown provider '${value}'`,
++      );
++    }
++    routes[key as ProviderRole] = value;
++  }
++  return routes;
++}
++
++export async function loadProviderRegistry(
++  configPath?: string,
++): Promise<ProviderRegistry> {
++  const filePath =
++    configPath ?? join(getRootDir(), "provider_config.yaml");
++  if (!existsSync(filePath)) {
++    return emptyRegistry();
++  }
++  const raw = await readFile(filePath, "utf8");
++  const parsed = parseYaml(raw);
++  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
++    throw new ProviderConfigError(
++      "provider_config.yaml: root must be an object",
++    );
++  }
++  const parsedObj = parsed as Record<string, unknown>;
++  const rawProviders = parsedObj.providers;
++  if (!Array.isArray(rawProviders)) {
++    throw new ProviderConfigError(
++      "provider_config.yaml: 'providers' must be an array",
++    );
++  }
++  const providers = new Map<string, ProviderDescriptor>();
++  rawProviders.forEach((entry, i) => {
++    const descriptor = validateDescriptor(entry, i);
++    if (providers.has(descriptor.id)) {
++      throw new ProviderConfigError(
++        `provider_config.yaml: duplicate provider id '${descriptor.id}'`,
++      );
++    }
++    providers.set(descriptor.id, descriptor);
++  });
++  const routes = validateRoutes(parsedObj.routes, providers);
++  return { providers, routes };
++}
++
++export function hasProviderForRole(
++  registry: ProviderRegistry,
++  role: ProviderRole,
++): boolean {
++  const id = registry.routes[role];
++  return id !== NOOP_PROVIDER_ID && registry.providers.has(id);
++}
++
++export function getProviderForRole(
++  registry: ProviderRegistry,
++  role: ProviderRole,
++): LLMProvider {
++  const id = registry.routes[role];
++  if (id === NOOP_PROVIDER_ID) {
++    throw new ProviderConfigError(
++      `No provider routed for role '${role}' (routes.${role} is unset). Call hasProviderForRole() first.`,
++    );
++  }
++  const descriptor = registry.providers.get(id);
++  if (!descriptor) {
++    throw new ProviderConfigError(
++      `Role '${role}' references unknown provider '${id}'`,
++    );
++  }
++  switch (descriptor.kind) {
++    case "ollama":
++      return createOllamaProvider(descriptor);
++    case "openrouter":
++    case "claude":
++      throw new ProviderConfigError(
++        `Provider kind '${descriptor.kind}' not implemented in Phase 2 — see src/reviewer.ts for inline dispatch`,
++      );
++    default:
++      throw new ProviderConfigError(
++        `Unknown provider kind '${String(descriptor.kind)}'`,
++      );
++  }
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 00d3074..18c0258 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1,34 +1,184 @@
+ [
+-  { "id": "gs-001", "title": "Add verification module test", "status": "done", "priority": 1 },
+-  { "id": "gs-002", "title": "Add reviewer prompt template test", "status": "done", "priority": 1 },
+-  { "id": "gs-003", "title": "Add engineer module test", "status": "done", "priority": 2 },
+-  { "id": "gs-004", "title": "Improve error messages in projects.ts", "status": "done", "priority": 3 },
+-  { "id": "gs-005", "title": "Add CLI test", "status": "done", "priority": 2 },
+-  { "id": "gs-006", "title": "Add work_detection test", "status": "done", "priority": 1 },
+-  { "id": "gs-007", "title": "Add isBotRunning catalogdna test", "status": "done", "priority": 1 },
+-  { "id": "gs-008", "title": "Add parseReviewerResponse test", "status": "done", "priority": 1 },
+-  { "id": "gs-009", "title": "Add atomic write safety test", "status": "done", "priority": 2 },
+-  { "id": "gs-010", "title": "Add tailProgressLog test", "status": "done", "priority": 2 },
+-  { "id": "gs-011", "title": "Skip reviewer on empty diff", "status": "done", "priority": 1 },
+-  { "id": "gs-012", "title": "Auto-update bot/work to HEAD", "status": "done", "priority": 1 },
+-  { "id": "gs-013", "title": "Add --json flag to status", "status": "done", "priority": 2 },
+-  { "id": "gs-014", "title": "Add digest writer tests", "status": "done", "priority": 2 },
+-  { "id": "gs-015", "title": "Add dispatcher picker tests", "status": "done", "priority": 2 },
+-  { "id": "gs-016", "title": "Add worktree detection tests", "status": "done", "priority": 1 },
+-  { "id": "gs-017", "title": "Add engineer error handling test", "status": "done", "priority": 1 },
+-  { "id": "gs-018", "title": "Add projects CLI command", "status": "done", "priority": 2 },
+-  { "id": "gs-019", "title": "Add log --lines test", "status": "done", "priority": 2 },
+-  { "id": "gs-020", "title": "Add type guards", "status": "done", "priority": 3 },
+-  { "id": "gs-021", "title": "Programmatic hands-off check", "status": "done", "priority": 1 },
+-  { "id": "gs-022", "title": "Skip verification on empty diff", "status": "done", "priority": 1 },
+-  { "id": "gs-023", "title": "Add init command", "status": "done", "priority": 1 },
+-  { "id": "gs-024", "title": "Validate project paths during load", "status": "done", "priority": 2 },
+-  { "id": "gs-025", "title": "Add history command", "status": "done", "priority": 2 },
+-  { "id": "gs-026", "title": "Add doctor command", "status": "done", "priority": 1 },
+-  { "id": "gs-027", "title": "Improve engineer spawn error messages", "status": "done", "priority": 1 },
+-  { "id": "gs-028", "title": "Add history --format=compact", "status": "done", "priority": 2 },
+-  { "id": "gs-029", "title": "Session summary in PROGRESS.jsonl", "status": "done", "priority": 2 },
+-  { "id": "gs-030", "title": "Init command edge case tests", "status": "done", "priority": 2 },
++  {
++    "id": "gs-001",
++    "title": "Add verification module test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-002",
++    "title": "Add reviewer prompt template test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-003",
++    "title": "Add engineer module test",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-004",
++    "title": "Improve error messages in projects.ts",
++    "status": "done",
++    "priority": 3
++  },
++  {
++    "id": "gs-005",
++    "title": "Add CLI test",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-006",
++    "title": "Add work_detection test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-007",
++    "title": "Add isBotRunning catalogdna test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-008",
++    "title": "Add parseReviewerResponse test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-009",
++    "title": "Add atomic write safety test",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-010",
++    "title": "Add tailProgressLog test",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-011",
++    "title": "Skip reviewer on empty diff",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-012",
++    "title": "Auto-update bot/work to HEAD",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-013",
++    "title": "Add --json flag to status",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-014",
++    "title": "Add digest writer tests",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-015",
++    "title": "Add dispatcher picker tests",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-016",
++    "title": "Add worktree detection tests",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-017",
++    "title": "Add engineer error handling test",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-018",
++    "title": "Add projects CLI command",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-019",
++    "title": "Add log --lines test",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-020",
++    "title": "Add type guards",
++    "status": "done",
++    "priority": 3
++  },
++  {
++    "id": "gs-021",
++    "title": "Programmatic hands-off check",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-022",
++    "title": "Skip verification on empty diff",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-023",
++    "title": "Add init command",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-024",
++    "title": "Validate project paths during load",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-025",
++    "title": "Add history command",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-026",
++    "title": "Add doctor command",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-027",
++    "title": "Improve engineer spawn error messages",
++    "status": "done",
++    "priority": 1
++  },
++  {
++    "id": "gs-028",
++    "title": "Add history --format=compact",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-029",
++    "title": "Session summary in PROGRESS.jsonl",
++    "status": "done",
++    "priority": 2
++  },
++  {
++    "id": "gs-030",
++    "title": "Init command edge case tests",
++    "status": "done",
++    "priority": 2
++  },
+   {
+     "id": "gs-031",
+     "title": "Add clean command (implemented by interactive session)",
+@@ -758,8 +908,9 @@
+   {
+     "id": "gs-152",
+     "title": "Create src/providers/registry.ts with loadProviderRegistry(configPath?: string) that reads provider_config.yaml from the project root (default path getRootDir() + '/provider_config.yaml') and returns { providers: Map<string, ProviderDescriptor>, routes: Record<ProviderRole, string> }. Use the yaml package (already a dep per src/projects.ts). Validate: each provider entry has id, kind in {'ollama','openrouter','claude'}, model string, host optional. routes entry keys must be in {'digest','cycle_summary','classifier'}; values must reference a providers key. On malformed input throw a ProviderConfigError (new subclass of Error) naming the field and the offending value. getProviderForRole(registry, role): LLMProvider returns the instantiated provider for that role (dispatch on kind — only ollama implemented in Phase 2; openrouter/claude kinds throw 'not implemented in Phase 2 — see src/reviewer.ts for inline dispatch'). If provider_config.yaml is missing, return a registry with no providers and routes all pointing at 'noop' — callers should check with hasProviderForRole() before dispatching. Add tests in tests/providers.registry.test.ts covering valid config, missing file (returns empty registry), malformed (each required-field case throws ProviderConfigError), unknown kind rejected, unreferenced route rejected. Do NOT modify src/reviewer.ts or projects.yaml.",
+-    "status": "pending",
+-    "priority": 1
++    "status": "done",
++    "priority": 1,
++    "completed_at": "2026-04-17T19:55:43.121Z"
+   },
+   {
+     "id": "gs-153",
+diff --git a/tests/providers.registry.test.ts b/tests/providers.registry.test.ts
+new file mode 100644
+index 0000000..e1410ca
+--- /dev/null
++++ b/tests/providers.registry.test.ts
+@@ -0,0 +1,377 @@
++import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { mkdtempSync, rmSync, writeFileSync } from "fs";
++import { tmpdir } from "os";
++import { join } from "path";
++import {
++  getProviderForRole,
++  hasProviderForRole,
++  loadProviderRegistry,
++  ProviderConfigError,
++} from "../src/providers/registry";
++
++function makeTempDir(): string {
++  return mkdtempSync(join(tmpdir(), "gs-registry-"));
++}
++
++function writeCfg(dir: string, content: string): string {
++  const path = join(dir, "provider_config.yaml");
++  writeFileSync(path, content, "utf8");
++  return path;
++}
++
++describe("loadProviderRegistry (gs-152)", () => {
++  let dir: string;
++
++  beforeEach(() => {
++    dir = makeTempDir();
++  });
++
++  afterEach(() => {
++    rmSync(dir, { recursive: true, force: true });
++  });
++
++  it("loads a valid config with all three routes", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++    host: http://localhost:11434
++  - id: ollama_qwen
++    kind: ollama
++    model: qwen3:8b
++routes:
++  digest: ollama_llama3
++  cycle_summary: ollama_qwen
++  classifier: ollama_llama3
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(registry.providers.size).toBe(2);
++    expect(registry.providers.get("ollama_llama3")?.model).toBe("llama3:8b");
++    expect(registry.providers.get("ollama_llama3")?.host).toBe(
++      "http://localhost:11434",
++    );
++    expect(registry.providers.get("ollama_qwen")?.host).toBeUndefined();
++    expect(registry.routes.digest).toBe("ollama_llama3");
++    expect(registry.routes.cycle_summary).toBe("ollama_qwen");
++    expect(registry.routes.classifier).toBe("ollama_llama3");
++  });
++
++  it("returns an empty registry when the file is missing", async () => {
++    const path = join(dir, "nonexistent.yaml");
++    const registry = await loadProviderRegistry(path);
++    expect(registry.providers.size).toBe(0);
++    expect(registry.routes.digest).toBe("noop");
++    expect(registry.routes.cycle_summary).toBe("noop");
++    expect(registry.routes.classifier).toBe("noop");
++  });
++
++  it("routes omitted for a role default to 'noop'", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: ollama_llama3
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(registry.routes.digest).toBe("ollama_llama3");
++    expect(registry.routes.cycle_summary).toBe("noop");
++    expect(registry.routes.classifier).toBe("noop");
++  });
++
++  it("accepts an empty routes block and defaults every role to 'noop'", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes: {}
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(registry.routes.digest).toBe("noop");
++    expect(registry.routes.cycle_summary).toBe("noop");
++    expect(registry.routes.classifier).toBe("noop");
++  });
++
++  it("accepts a config with no routes key at all", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(registry.providers.size).toBe(1);
++    expect(registry.routes.digest).toBe("noop");
++  });
++
++  it("rejects missing provider id", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - kind: ollama
++    model: llama3:8b
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/\.id/);
++  });
++
++  it("rejects missing provider kind", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: x
++    model: llama3:8b
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/\.kind/);
++  });
++
++  it("rejects missing provider model", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: x
++    kind: ollama
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/\.model/);
++  });
++
++  it("rejects unknown provider kind", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: x
++    kind: gemini
++    model: gemini-2.5
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/gemini/);
++  });
++
++  it("rejects non-string host when present", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: x
++    kind: ollama
++    model: llama3:8b
++    host: 42
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/host/);
++  });
++
++  it("rejects route that references an unknown provider", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: missing_provider
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/missing_provider/);
++  });
++
++  it("rejects unknown role in routes", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  reviewer: ollama_llama3
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/reviewer/);
++  });
++
++  it("rejects duplicate provider id", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: dup
++    kind: ollama
++    model: a
++  - id: dup
++    kind: ollama
++    model: b
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/dup/);
++  });
++
++  it("rejects a config where 'providers' is not an array", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  id: ollama_llama3
++`,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(
++      ProviderConfigError,
++    );
++    await expect(loadProviderRegistry(path)).rejects.toThrow(/array/);
++  });
++});
++
++describe("hasProviderForRole / getProviderForRole (gs-152)", () => {
++  let dir: string;
++
++  beforeEach(() => {
++    dir = makeTempDir();
++  });
++
++  afterEach(() => {
++    rmSync(dir, { recursive: true, force: true });
++  });
++
++  it("hasProviderForRole is false for noop routes", async () => {
++    const registry = await loadProviderRegistry(join(dir, "absent.yaml"));
++    expect(hasProviderForRole(registry, "digest")).toBe(false);
++    expect(hasProviderForRole(registry, "cycle_summary")).toBe(false);
++    expect(hasProviderForRole(registry, "classifier")).toBe(false);
++  });
++
++  it("hasProviderForRole is true when a provider is routed", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: ollama_llama3
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(hasProviderForRole(registry, "digest")).toBe(true);
++    expect(hasProviderForRole(registry, "cycle_summary")).toBe(false);
++  });
++
++  it("getProviderForRole instantiates an ollama provider", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: ollama_llama3
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    const provider = getProviderForRole(registry, "digest");
++    expect(provider.name).toBe("ollama_llama3");
++    expect(typeof provider.invoke).toBe("function");
++  });
++
++  it("getProviderForRole throws for unrouted roles", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: ollama_llama3
++    kind: ollama
++    model: llama3:8b
++routes:
++  digest: ollama_llama3
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(() => getProviderForRole(registry, "cycle_summary")).toThrow(
++      ProviderConfigError,
++    );
++  });
++
++  it("getProviderForRole throws 'not implemented in Phase 2' for openrouter", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: or_qwen
++    kind: openrouter
++    model: qwen/qwen3-coder-plus
++    api_key_env: OPENROUTER_API_KEY
++routes:
++  digest: or_qwen
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(() => getProviderForRole(registry, "digest")).toThrow(
++      /not implemented in Phase 2/,
++    );
++  });
++
++  it("getProviderForRole throws 'not implemented in Phase 2' for claude", async () => {
++    const path = writeCfg(
++      dir,
++      `
++providers:
++  - id: claude_sonnet
++    kind: claude
++    model: claude-sonnet-4-6
++routes:
++  classifier: claude_sonnet
++`,
++    );
++    const registry = await loadProviderRegistry(path);
++    expect(() => getProviderForRole(registry, "classifier")).toThrow(
++      /not implemented in Phase 2/,
++    );
++  });
++});
+
+
+Diff summary: src/providers/registry.ts        | 211 ++++++++++++++++++++++
+ state/generalstaff/tasks.json    | 215 ++++++++++++++++++----
+ tests/providers.registry.test.ts | 377 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 771 insertions(+), 32 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T19:56:03.237Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.112 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195635.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195635.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195635.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195635.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195635.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_195636.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195636.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195636.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195636.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_195636.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneD
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
