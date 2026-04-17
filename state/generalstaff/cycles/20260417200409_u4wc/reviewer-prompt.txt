@@ -1,0 +1,575 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+"priority": 1,
+"completed_at": "2026-04-17T20:10:00.000Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/digest_llm.ts b/src/digest_llm.ts
+new file mode 100644
+index 0000000..18762b2
+--- /dev/null
++++ b/src/digest_llm.ts
+@@ -0,0 +1,79 @@
++// GeneralStaff — LLM-backed digest narrative (gs-154, Phase 2)
++//
++// generateDigestNarrative produces a short plain-English paragraph
++// summarizing what happened in a session. Wiring into writeDigest lives
++// in gs-158; this module stays standalone and side-effect-free so it
++// can be unit-tested with stub providers.
++
++import type { CycleResult } from "./types";
++import type { LLMProvider } from "./providers/types";
++import { categorizeResults } from "./results";
++import { fetchCommitSubject } from "./git";
++
++export interface DigestNarrativeResult {
++  narrative: string;
++  fellBack: boolean;
++  error?: string;
++}
++
++export async function generateDigestNarrative(
++  results: CycleResult[],
++  durationMinutes: number,
++  provider: LLMProvider,
++): Promise<DigestNarrativeResult> {
++  const prompt = buildDigestNarrativePrompt(results, durationMinutes);
++  try {
++    const { content, error } = await provider.invoke(prompt, {
++      maxTokens: 200,
++      temperature: 0,
++    });
++    if (error) {
++      return { narrative: "", fellBack: true, error };
++    }
++    const trimmed = (content ?? "").trim();
++    if (trimmed.length === 0) {
++      return { narrative: "", fellBack: true, error: "empty provider content" };
++    }
++    return { narrative: trimmed, fellBack: false };
++  } catch (err) {
++    return {
++      narrative: "",
++      fellBack: true,
++      error: err instanceof Error ? err.message : String(err),
++    };
++  }
++}
++
++export function buildDigestNarrativePrompt(
++  results: CycleResult[],
++  durationMinutes: number,
++): string {
++  const { verified, failed } = categorizeResults(results);
++  const lines: string[] = [];
++  lines.push(
++    `A GeneralStaff bot session ran for ${durationMinutes} minute(s) and produced ` +
++      `${verified.length} verified cycle(s) and ${failed.length} failed cycle(s).`,
++  );
++  if (verified.length > 0) {
++    lines.push("");
++    lines.push("Verified cycles:");
++    for (const r of verified) {
++      const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
++      lines.push(`- ${r.project_id}: ${subject}`);
++    }
++  }
++  if (failed.length > 0) {
++    lines.push("");
++    lines.push("Failed cycles:");
++    for (const r of failed) {
++      lines.push(`- ${r.project_id} (${r.final_outcome}): ${r.reason}`);
++    }
++  }
++  lines.push("");
++  lines.push(
++    "Write a 2-4 sentence plain-English narrative of what happened this session. " +
++      "No bullets, no headings, no markdown — just prose. Summarize what was " +
++      "accomplished and what (if anything) went wrong.",
++  );
++  return lines.join("\n");
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index e91bacb..38cfb87 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -922,8 +922,9 @@
+   {
+     "id": "gs-154",
+     "title": "Create src/digest_llm.ts with generateDigestNarrative(results: CycleResult[], durationMinutes: number, provider: LLMProvider): Promise<{ narrative: string; fellBack: boolean; error?: string }>. Build a compact prompt (~300 tokens) summarizing cycles: verified count, failed count, one-line-per-verified-cycle with the commit subject (use fetchCommitSubject from src/git.ts — already imported in session.ts), one-line-per-failed-cycle with the reason. Prompt asks for a 2-4 sentence plain-English narrative of what happened this session — no bullets, no headings, just prose. Invoke the provider with maxTokens=200, temperature=0. On provider error or empty content, return { narrative: '', fellBack: true, error } so callers can fall back to the existing templated line. On success return { narrative: content.trim(), fellBack: false }. Add tests in tests/digest_llm.test.ts using a stub LLMProvider: (a) happy path returns narrative, (b) provider returns empty content triggers fellBack, (c) provider returns error triggers fellBack, (d) narrative is trimmed. Do NOT modify src/session.ts in this task — wiring happens in gs-158.",
+-    "status": "pending",
+-    "priority": 1
++    "status": "done",
++    "priority": 1,
++    "completed_at": "2026-04-17T20:10:00.000Z"
+   },
+   {
+     "id": "gs-155",
+diff --git a/tests/digest_llm.test.ts b/tests/digest_llm.test.ts
+new file mode 100644
+index 0000000..b282c0a
+--- /dev/null
++++ b/tests/digest_llm.test.ts
+@@ -0,0 +1,131 @@
++import { describe, expect, it } from "bun:test";
++import {
++  buildDigestNarrativePrompt,
++  generateDigestNarrative,
++} from "../src/digest_llm";
++import type {
++  LLMProvider,
++  ProviderInvokeOptions,
++  ProviderInvokeResult,
++} from "../src/providers/types";
++import type { CycleResult } from "../src/types";
++
++function makeCycle(overrides: Partial<CycleResult> = {}): CycleResult {
++  return {
++    cycle_id: "c1",
++    project_id: "generalstaff",
++    started_at: "2026-04-17T20:00:00.000Z",
++    ended_at: "2026-04-17T20:05:00.000Z",
++    // Identical start/end short-circuits fetchCommitSubject so tests don't
++    // emit "bad object" warnings; the cycle_id is used as fallback subject.
++    cycle_start_sha: "a".repeat(40),
++    cycle_end_sha: "a".repeat(40),
++    engineer_exit_code: 0,
++    verification_outcome: "passed",
++    reviewer_verdict: "verified",
++    final_outcome: "verified",
++    reason: "ok",
++    ...overrides,
++  };
++}
++
++function stubProvider(
++  fn: (prompt: string, opts?: ProviderInvokeOptions) => Promise<ProviderInvokeResult>,
++): LLMProvider {
++  return { name: "stub", invoke: fn };
++}
++
++describe("generateDigestNarrative (gs-154)", () => {
++  it("returns narrative on happy path", async () => {
++    const provider = stubProvider(async () => ({ content: "All verified, no issues." }));
++    const res = await generateDigestNarrative([makeCycle()], 15, provider);
++    expect(res.fellBack).toBe(false);
++    expect(res.narrative).toBe("All verified, no issues.");
++    expect(res.error).toBeUndefined();
++  });
++
++  it("trims leading and trailing whitespace from the narrative", async () => {
++    const provider = stubProvider(async () => ({ content: "   trimmed output\n\n  " }));
++    const res = await generateDigestNarrative([makeCycle()], 15, provider);
++    expect(res.fellBack).toBe(false);
++    expect(res.narrative).toBe("trimmed output");
++  });
++
++  it("falls back when provider returns empty content", async () => {
++    const provider = stubProvider(async () => ({ content: "   " }));
++    const res = await generateDigestNarrative([makeCycle()], 15, provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.narrative).toBe("");
++    expect(res.error).toBeDefined();
++  });
++
++  it("falls back when provider returns an error", async () => {
++    const provider = stubProvider(async () => ({ content: "", error: "HTTP 500" }));
++    const res = await generateDigestNarrative([makeCycle()], 15, provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.narrative).toBe("");
++    expect(res.error).toBe("HTTP 500");
++  });
++
++  it("falls back when provider throws", async () => {
++    const provider: LLMProvider = {
++      name: "throws",
++      invoke: async () => {
++        throw new Error("boom");
++      },
++    };
++    const res = await generateDigestNarrative([makeCycle()], 15, provider);
++    expect(res.fellBack).toBe(true);
++    expect(res.error).toContain("boom");
++  });
++
++  it("passes maxTokens=200 and temperature=0 to the provider", async () => {
++    let capturedOpts: ProviderInvokeOptions | undefined;
++    const provider = stubProvider(async (_prompt, opts) => {
++      capturedOpts = opts;
++      return { content: "ok" };
++    });
++    await generateDigestNarrative([makeCycle()], 30, provider);
++    expect(capturedOpts).toEqual({ maxTokens: 200, temperature: 0 });
++  });
++});
++
++describe("buildDigestNarrativePrompt (gs-154)", () => {
++  it("includes counts, duration, and verified/failed sections", () => {
++    const prompt = buildDigestNarrativePrompt(
++      [
++        makeCycle({ cycle_id: "v1", project_id: "proj_a", final_outcome: "verified" }),
++        makeCycle({
++          cycle_id: "f1",
++          project_id: "proj_b",
++          final_outcome: "verification_failed",
++          reviewer_verdict: "verification_failed",
++          reason: "scope drift",
++        }),
++      ],
++      42,
++    );
++    expect(prompt).toContain("42 minute(s)");
++    expect(prompt).toContain("1 verified cycle(s)");
++    expect(prompt).toContain("1 failed cycle(s)");
++    expect(prompt).toContain("Verified cycles:");
++    expect(prompt).toContain("Failed cycles:");
++    expect(prompt).toContain("proj_a");
++    expect(prompt).toContain("proj_b");
++    expect(prompt).toContain("scope drift");
++  });
++
++  it("omits verified/failed sections when those arrays are empty", () => {
++    const prompt = buildDigestNarrativePrompt([], 0);
++    expect(prompt).not.toContain("Verified cycles:");
++    expect(prompt).not.toContain("Failed cycles:");
++    expect(prompt).toContain("0 verified cycle(s)");
++    expect(prompt).toContain("0 failed cycle(s)");
++  });
++
++  it("asks for 2-4 sentence prose with no markdown", () => {
++    const prompt = buildDigestNarrativePrompt([makeCycle()], 10);
++    expect(prompt).toMatch(/2-4 sentence/);
++    expect(prompt.toLowerCase()).toContain("no bullets");
++  });
++});
+
+
+Diff summary: src/digest_llm.ts             |  79 +++++++++++++++++++++++++
+ state/generalstaff/tasks.json |   5 +-
+ tests/digest_llm.test.ts      | 131 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 213 insertions(+), 2 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T20:08:57.397Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_200926.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200926.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneD
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff are directly related to the claimed task gs-154, no hands-off violations, and the diff provides strong evidence for task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Create src/digest_llm.ts with generateDigestNarrative(results: CycleResult[], durationMinutes: number, provider: LLMProvider): Promise<{ narrative: string; fellBack: boolean; error?: string }>. Build a compact prompt (~300 tokens) summarizing cycles: verified count, failed count, one-line-per-verified-cycle with the commit subject (use fetchCommitSubject from src/git.ts — already imported in session.ts), one-line-per-failed-cycle with the reason. Prompt asks for a 2-4 sentence plain-English narrative of what happened this session — no bullets, no headings, just prose. Invoke the provider with maxTokens=200, temperature=0. On provider error or empty content, return { narrative: '', fellBack: true, error } so callers can fall back to the existing templated line. On success return { narrative: content.trim(), fellBack: false }. Add tests in tests/digest_llm.test.ts using a stub LLMProvider: (a) happy path returns narrative, (b) provider returns empty content triggers fellBack, (c) provider returns error triggers fellBack, (d) narrative is trimmed. Do NOT modify src/session.ts in this task — wiring happens in gs-158.",
+      "evidence": "The diff includes the creation of src/digest_llm.ts with the generateDigestNarrative function and buildDigestNarrativePrompt function as specified, and tests/digest_llm.test.ts with comprehensive tests covering all the required behaviors including happy path, empty content fallback, error fallback, and trimming.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, and the diff fully implements the requirements of task gs-154. The tests cover all specified scenarios and the implementation matches the task description precisely."
+}
