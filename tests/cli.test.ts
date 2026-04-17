@@ -681,6 +681,91 @@ projects:
         expect(result.stderr).toContain("--list cannot be combined");
       });
     });
+
+    describe("--json", () => {
+      const FULL_DIGEST = `# GeneralStaff Session Digest
+
+**Date:** 2026-04-16T10:00:00.000Z
+**Duration:** 5m
+**Cycles:** 2
+
+## alpha — c1
+
+- **Outcome:** verified
+- **Reason:** tests pass
+- **SHA:** aaaaaaaa → bbbbbbbb
+- **Diff:** 3 file(s), +12/-4
+- **Engineer exit:** 0
+- **Verification:** pass
+- **Reviewer:** scope_ok
+
+## alpha — c2
+
+- **Outcome:** verification_failed
+- **Reason:** test failed
+- **SHA:** bbbbbbbb → cccccccc
+- **Engineer exit:** 1
+- **Verification:** fail
+- **Reviewer:** skipped
+`;
+
+      it("emits null for --latest when no digests exist", async () => {
+        const result = await runCli(["digest", "--latest", "--json"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.trim()).toBe("null");
+      });
+
+      it("emits [] for --list when no digests exist", async () => {
+        const result = await runCli(["digest", "--list", "--json"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual([]);
+      });
+
+      it("emits structured JSON for --latest", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_100000.md"), FULL_DIGEST);
+        const result = await runCli(["digest", "--latest", "--json"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.file).toBe("digest_20260416_100000.md");
+        expect(parsed.duration).toBe("5m");
+        expect(parsed.cycle_count).toBe(2);
+        expect(parsed.cycles).toHaveLength(2);
+        expect(parsed.cycles[0]).toMatchObject({
+          project_id: "alpha",
+          cycle_id: "c1",
+          outcome: "verified",
+          sha_start: "aaaaaaaa",
+          sha_end: "bbbbbbbb",
+          diff_stats: { files_changed: 3, insertions: 12, deletions: 4 },
+          engineer_exit: 0,
+        });
+        expect(parsed.cycles[1].outcome).toBe("verification_failed");
+        expect(parsed.cycles[1].diff_stats).toBeNull();
+      });
+
+      it("emits JSON array for --list", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), FULL_DIGEST);
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), FULL_DIGEST);
+        const result = await runCli(["digest", "--list", "--json"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed).toHaveLength(2);
+        expect(parsed[0].file).toBe("digest_20260416_090000.md");
+        expect(parsed[0].cycles).toBe(2);
+        expect(parsed[0].verified).toBe(1);
+        expect(parsed[0].failed).toBe(1);
+      });
+
+      it("emits null for --date with no match", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_100000.md"), FULL_DIGEST);
+        const result = await runCli(
+          ["digest", "--date=20260101", "--json"],
+          DIGEST_TEST_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.trim()).toBe("null");
+      });
+    });
   });
 
   describe("summary --format=json", () => {

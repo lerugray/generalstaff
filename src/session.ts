@@ -355,3 +355,78 @@ export async function writeDigest(
   await writeFile(digestPath, content, "utf8");
   console.log(`\nDigest written to: ${digestPath}`);
 }
+
+export interface ParsedDigestCycle {
+  project_id: string;
+  cycle_id: string;
+  outcome: string | null;
+  reason: string | null;
+  sha_start: string | null;
+  sha_end: string | null;
+  diff_stats: { files_changed: number; insertions: number; deletions: number } | null;
+  engineer_exit: number | null;
+  verification: string | null;
+  reviewer: string | null;
+}
+
+export interface ParsedDigest {
+  date: string | null;
+  duration: string | null;
+  cycle_count: number | null;
+  cycles: ParsedDigestCycle[];
+}
+
+export function parseDigest(markdown: string): ParsedDigest {
+  const dateMatch = markdown.match(/\*\*Date:\*\*\s*(.+)/);
+  const durationMatch = markdown.match(/\*\*Duration:\*\*\s*(.+)/);
+  const cyclesMatch = markdown.match(/\*\*Cycles:\*\*\s*(\d+)/);
+
+  const cycles: ParsedDigestCycle[] = [];
+  const sectionRe = /^## (.+?) — (.+?)$/gm;
+  const sections: { project_id: string; cycle_id: string; start: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = sectionRe.exec(markdown)) !== null) {
+    sections.push({
+      project_id: m[1].trim(),
+      cycle_id: m[2].trim(),
+      start: m.index + m[0].length,
+    });
+  }
+  for (let i = 0; i < sections.length; i++) {
+    const s = sections[i];
+    const end = i + 1 < sections.length ? sections[i + 1].start : markdown.length;
+    const body = markdown.slice(s.start, end);
+    const outcome = body.match(/\*\*Outcome:\*\*\s*(.+)/);
+    const reason = body.match(/\*\*Reason:\*\*\s*(.+)/);
+    const sha = body.match(/\*\*SHA:\*\*\s*(\S+)\s*(?:→|->)\s*(\S+)/);
+    const diff = body.match(/\*\*Diff:\*\*\s*(\d+)\s*file.*?,\s*\+(\d+)\/-(\d+)/);
+    const engineer = body.match(/\*\*Engineer exit:\*\*\s*(-?\d+)/);
+    const verification = body.match(/\*\*Verification:\*\*\s*(.+)/);
+    const reviewer = body.match(/\*\*Reviewer:\*\*\s*(.+)/);
+    cycles.push({
+      project_id: s.project_id,
+      cycle_id: s.cycle_id,
+      outcome: outcome ? outcome[1].trim() : null,
+      reason: reason ? reason[1].trim() : null,
+      sha_start: sha ? sha[1] : null,
+      sha_end: sha ? sha[2] : null,
+      diff_stats: diff
+        ? {
+            files_changed: Number(diff[1]),
+            insertions: Number(diff[2]),
+            deletions: Number(diff[3]),
+          }
+        : null,
+      engineer_exit: engineer ? Number(engineer[1]) : null,
+      verification: verification ? verification[1].trim() : null,
+      reviewer: reviewer ? reviewer[1].trim() : null,
+    });
+  }
+
+  return {
+    date: dateMatch ? dateMatch[1].trim() : null,
+    duration: durationMatch ? durationMatch[1].trim() : null,
+    cycle_count: cyclesMatch ? Number(cyclesMatch[1]) : null,
+    cycles,
+  };
+}

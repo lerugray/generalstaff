@@ -85,11 +85,13 @@ Usage:
   generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
     Example: generalstaff task done --project=myapp --task=my-042
 
-  generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
+  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json]
                                                           Print a session digest to stdout, or list all
     Example: generalstaff digest --latest                # most recent digest
     Example: generalstaff digest --date=20260416         # first digest from that day
     Example: generalstaff digest --list                  # enumerate digests, newest first
+    Example: generalstaff digest --latest --json         # structured JSON of the latest digest
+    Example: generalstaff digest --list --json           # JSON array of digest summaries
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
@@ -471,6 +473,7 @@ switch (command) {
         latest: { type: "boolean", default: false },
         date: { type: "string" },
         list: { type: "boolean", default: false },
+        json: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -491,16 +494,17 @@ switch (command) {
       : [];
     if (digestValues.list) {
       if (files.length === 0) {
-        console.log("No digests found.");
+        if (digestValues.json) console.log("[]");
+        else console.log("No digests found.");
         break;
       }
       const sorted = [...files].sort().reverse();
-      for (const f of sorted) {
+      const entries = sorted.map((f) => {
         const content = readFileSync(join(digestDir, f), "utf8");
         const m = f.match(/^digest_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.md$/);
         const date = m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
         const cyclesMatch = content.match(/\*\*Cycles:\*\*\s*(\d+)/);
-        const cycles = cyclesMatch ? cyclesMatch[1] : "?";
+        const cycles = cyclesMatch ? Number(cyclesMatch[1]) : null;
         let verified = 0;
         let failed = 0;
         let skipped = 0;
@@ -510,14 +514,22 @@ switch (command) {
           else if (o === "verification_failed") failed++;
           else if (o === "cycle_skipped") skipped++;
         }
-        console.log(
-          `${f}  ${date}  cycles=${cycles}  verified=${verified} failed=${failed} skipped=${skipped}`,
-        );
+        return { file: f, date, cycles, verified, failed, skipped };
+      });
+      if (digestValues.json) {
+        console.log(JSON.stringify(entries, null, 2));
+      } else {
+        for (const e of entries) {
+          console.log(
+            `${e.file}  ${e.date}  cycles=${e.cycles ?? "?"}  verified=${e.verified} failed=${e.failed} skipped=${e.skipped}`,
+          );
+        }
       }
       break;
     }
     if (files.length === 0) {
-      console.log("No digests found.");
+      if (digestValues.json) console.log("null");
+      else console.log("No digests found.");
       break;
     }
     let chosen: string | undefined;
@@ -528,13 +540,20 @@ switch (command) {
       }
       chosen = files.find((f) => f.startsWith(`digest_${digestValues.date}_`));
       if (!chosen) {
-        console.log(`No digests found for date ${digestValues.date}.`);
+        if (digestValues.json) console.log("null");
+        else console.log(`No digests found for date ${digestValues.date}.`);
         break;
       }
     } else {
       chosen = files[files.length - 1];
     }
-    process.stdout.write(readFileSync(join(digestDir, chosen), "utf8"));
+    const chosenContent = readFileSync(join(digestDir, chosen), "utf8");
+    if (digestValues.json) {
+      const { parseDigest } = await import("./session");
+      console.log(JSON.stringify({ file: chosen, ...parseDigest(chosenContent) }, null, 2));
+    } else {
+      process.stdout.write(chosenContent);
+    }
     break;
   }
 
