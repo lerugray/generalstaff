@@ -848,8 +848,9 @@
   {
     "id": "gs-142",
     "title": "Add --priority=N filter to 'generalstaff task list' (cli.ts) so operators can say 'task list --project=myapp --priority=1' to see only P1 tasks. Parse N as integer, error with 'Error: --priority must be a positive integer' on bad input. Add tests for filter match, empty filter result (prints 'No pending tasks at priority N.'), and mixing with no filter (existing behavior preserved).",
-    "status": "pending",
-    "priority": 2
+    "status": "done",
+    "priority": 2,
+    "completed_at": "2026-04-17T20:41:04.168Z"
   },
   {
     "id": "gs-143",

@@ -128,8 +128,9 @@ Usage:
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
     Example: generalstaff clean --dry-run                # preview without deleting
 
-  generalstaff task list --project=<id>                   Show pending tasks for a project
+  generalstaff task list --project=<id> [--priority=N]    Show pending tasks for a project
     Example: generalstaff task list --project=myapp
+    Example: generalstaff task list --project=myapp --priority=1
   generalstaff task add --project=<id> [--priority=N] <title>
                                                           Append a new task to tasks.json
     Example: generalstaff task add --project=myapp "Fix login bug"
@@ -584,12 +585,28 @@ switch (command) {
     if (sub === "list") {
       const { values } = parseArgs({
         args: args.slice(2),
-        options: { project: { type: "string" } },
+        options: {
+          project: { type: "string" },
+          priority: { type: "string" },
+        },
         allowPositionals: false,
       });
       if (!values.project) {
         console.error("Error: --project=<id> is required");
         process.exit(1);
+      }
+      let priorityFilter: number | undefined;
+      if (values.priority !== undefined) {
+        const parsed = parseInt(values.priority, 10);
+        if (
+          isNaN(parsed) ||
+          parsed < 1 ||
+          String(parsed) !== values.priority.trim()
+        ) {
+          console.error("Error: --priority must be a positive integer");
+          process.exit(1);
+        }
+        priorityFilter = parsed;
       }
       let tasks;
       try {
@@ -601,9 +618,16 @@ switch (command) {
         }
         throw err;
       }
-      const pending = pendingTasks(tasks);
+      let pending = pendingTasks(tasks);
+      if (priorityFilter !== undefined) {
+        pending = pending.filter((t) => t.priority === priorityFilter);
+      }
       if (pending.length === 0) {
-        console.log("No pending tasks.");
+        if (priorityFilter !== undefined) {
+          console.log(`No pending tasks at priority ${priorityFilter}.`);
+        } else {
+          console.log("No pending tasks.");
+        }
       } else {
         for (const t of pending) {
           console.log(`${t.id}  p${t.priority}  ${t.status.padEnd(11)}  ${t.title}`);

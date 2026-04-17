@@ -484,6 +484,89 @@ describe("CLI task command", () => {
       expect(result.stdout).not.toContain("gs-002");
       expect(result.stdout).not.toContain("gs-003");
     });
+
+    it("filters pending tasks by --priority=N", async () => {
+      const tasks: GreenfieldTask[] = [
+        { id: "gs-p1a", title: "p1 first", status: "pending", priority: 1 },
+        { id: "gs-p1b", title: "p1 second", status: "pending", priority: 1 },
+        { id: "gs-p2a", title: "p2 item", status: "pending", priority: 2 },
+        { id: "gs-p3a", title: "p3 item", status: "pending", priority: 3 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(tasks),
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj", "--priority=1"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("gs-p1a");
+      expect(result.stdout).toContain("gs-p1b");
+      expect(result.stdout).not.toContain("gs-p2a");
+      expect(result.stdout).not.toContain("gs-p3a");
+    });
+
+    it("prints 'No pending tasks at priority N.' when filter has no matches", async () => {
+      const tasks: GreenfieldTask[] = [
+        { id: "gs-p2a", title: "p2 item", status: "pending", priority: 2 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(tasks),
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj", "--priority=5"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No pending tasks at priority 5.");
+      expect(result.stdout).not.toContain("gs-p2a");
+    });
+
+    it("preserves existing behavior when --priority is absent", async () => {
+      const tasks: GreenfieldTask[] = [
+        { id: "gs-p1a", title: "p1", status: "pending", priority: 1 },
+        { id: "gs-p2a", title: "p2", status: "pending", priority: 2 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(tasks),
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("gs-p1a");
+      expect(result.stdout).toContain("gs-p2a");
+    });
+
+    it("errors on non-integer --priority value", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        "[]\n",
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj", "--priority=abc"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--priority must be a positive integer");
+    });
+
+    it("errors on zero --priority value", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        "[]\n",
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj", "--priority=0"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--priority must be a positive integer");
+    });
   });
 
   describe("task add", () => {
