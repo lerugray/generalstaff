@@ -426,3 +426,199 @@ automation to OSS users is the line.
 2026-04-16, one day before the launch. Non-trivial corporate
 signal that Anthropic is committed to the design market — the
 tool won't be abandoned.
+
+## 2026-04-17 — pi-autoresearch + karpathy/autoresearch mechanisms
+
+Fact extraction from
+https://github.com/davebcn87/pi-autoresearch (5,473 stars,
+TypeScript, MIT, default branch `main`) and
+https://github.com/karpathy/autoresearch (73,845 stars,
+Python, MIT, default branch `master`). Source artefacts read
+in full: pi-autoresearch `README.md` and
+`extensions/pi-autoresearch/index.ts` (2,896 lines);
+karpathy/autoresearch `README.md` and `program.md`.
+
+### karpathy/autoresearch — canonical inspiration
+
+- **Purpose:** "AI agents running research on single-GPU
+  nanochat training automatically." Agent edits `train.py`,
+  trains for a fixed 5-minute wall-clock budget, reads
+  `val_bpb` (validation bits per byte, lower is better) from
+  the run log, logs a row to `results.tsv`, keeps or discards.
+- **Files that matter:** `prepare.py` (fixed constants, data
+  prep, tokenizer, dataloader, evaluation — **do not
+  modify**), `train.py` (the only file the agent edits),
+  `program.md` (the agent's instructions, edited by the
+  human).
+- **Keep/discard rule (program.md §"The experiment loop"):**
+  "If val_bpb improved (lower), you 'advance' the branch,
+  keeping the git commit. If val_bpb is equal or worse, you
+  git reset back to where you started." Crashes get a
+  `crash` row and a revert; a run exceeding 10 minutes is
+  killed and treated as a failure (discard + revert).
+- **Results log format (`results.tsv`, tab-separated):** five
+  columns — commit (short hash), val_bpb (float, 0.000000 on
+  crash), memory_gb (float, 0.0 on crash), status (`keep` |
+  `discard` | `crash`), description. Left untracked by git.
+- **Loop discipline:** program.md instructs the agent
+  "NEVER STOP" once the loop has begun — no "should I keep
+  going?" check-ins. The loop runs until the human
+  interrupts.
+- **No confidence score, no auto-revert tool.** The keep/
+  discard decision is the agent's, and the revert is a
+  `git reset` the agent issues directly when val_bpb is
+  equal or worse.
+
+### pi-autoresearch — what it added on top
+
+Extension for the `pi` coding agent. Packages karpathy's
+loop as reusable infrastructure: three tools
+(`init_experiment`, `run_experiment`, `log_experiment`),
+a `/autoresearch` command with a live dashboard, and two
+persistent files (`autoresearch.jsonl` append-only log +
+`autoresearch.md` living session document) that let a fresh
+agent resume after restarts or context resets.
+
+Additions directly relevant to extraction:
+
+#### (a) Confidence scoring
+
+Defined in the README §"Confidence scoring" and implemented
+in `extensions/pi-autoresearch/index.ts` at `computeConfidence`
+(lines 417–448). Verbatim mechanics:
+
+- **Noise floor metric:** Median Absolute Deviation (MAD) of
+  all metric values in the current segment.
+  - `median = sortedMedian(values)` where `values` is every
+    `metric` field (filtered to `metric > 0`) across results
+    in the current segment.
+  - `deviations = values.map(v => Math.abs(v - median))`
+  - `mad = sortedMedian(deviations)`
+- **Confidence formula:** `|best_delta| / MAD`, where
+  `best_delta = |best_kept_metric - baseline|`.
+  - `best_kept_metric` is the best (per direction —
+    "lower" or "higher") metric value among entries whose
+    `status === "keep"` in the current segment.
+  - `baseline` is pulled from `findBaselineMetric(results,
+    segment)` — the first run in the segment.
+- **Null cases (no score shown):**
+  - Fewer than 3 data points in the segment (`cur.length
+    < 3`).
+  - MAD is 0 (all values identical — no measurable noise).
+  - No kept entries, or `bestKept === baseline`.
+- **Thresholds (README §"Confidence scoring" table):**
+  - `≥ 2.0×` — green — "Improvement is likely real"
+  - `1.0×–2.0×` — yellow — "Above noise but marginal"
+  - `< 1.0×` — red — "Within noise — consider re-running
+    to confirm"
+- **Display surface:** widget above editor (e.g.
+  `★ total_µs: 15,200 (-12.3%) │ conf: 2.1×`), expanded
+  dashboard (`Ctrl+X`), fullscreen overlay
+  (`Ctrl+Shift+X`), `log_experiment` output, and each
+  `autoresearch.jsonl` row's `confidence` field.
+- **Advisory only:** README states "never auto-discards.
+  The agent is guided to re-run experiments when confidence
+  is low, but the final keep/discard decision stays with
+  the agent." The index.ts agent-facing hint (line 2062)
+  says: "If confidence is below 1.0×, consider re-running
+  the same experiment to confirm before keeping. The score
+  is advisory — it never auto-discards."
+- **Session noise computation is segment-scoped.**
+  Starting a new segment resets baseline tracking and
+  `state.confidence = null` (index.ts around line 1463),
+  so the noise floor recomputes per segment.
+
+#### (b) Auto-revert on regression
+
+Implemented in `extensions/pi-autoresearch/index.ts` inside
+the `log_experiment` tool handler (lines ~2231–2302).
+Verbatim mechanics:
+
+- **Trigger:** `log_experiment` is called with
+  `params.status !== "keep"`. The set of non-keep statuses
+  is `"discard" | "crash" | "checks_failed"` (schema at
+  line 190).
+- **Metric measured:** the PRIMARY metric passed in
+  `params.metric`. Agent-facing guidance (line 2061): "Use
+  status 'keep' if the PRIMARY metric improved. 'discard'
+  if worse or unchanged. 'crash' if it failed. Secondary
+  metrics are for monitoring — they almost never affect
+  keep/discard."
+- **What counts as a regression:** agent decides and passes
+  the status — there is no auto-threshold on the metric
+  itself for triggering revert. The extension reverts
+  whenever the agent logs anything other than `keep`.
+  (Confidence score is *advisory only* and does not drive
+  the revert.)
+- **Backpressure integration:** if `autoresearch.checks.sh`
+  exists, it runs after every benchmark that exits 0. A
+  non-zero check run forces status `checks_failed`
+  (gate at lines 2083–2088: "Cannot keep —
+  autoresearch.checks.sh failed"). This path feeds the
+  same non-keep revert branch.
+- **How state is restored (lines 2292–2301, verbatim
+  command):**
+  ```
+  const protectedFiles = ["autoresearch.jsonl",
+    "autoresearch.md", "autoresearch.ideas.md",
+    "autoresearch.sh", "autoresearch.checks.sh"];
+  const stageCmd = protectedFiles
+    .map(f => `git add "${path.join(workDir, f)}"
+               2>/dev/null || true`)
+    .join("; ");
+  await pi.exec("bash", ["-c",
+    `${stageCmd}; git checkout -- .;
+     git clean -fd 2>/dev/null`],
+    { cwd: workDir, timeout: 10000 });
+  ```
+  The five session files are `git add`-staged first (so
+  `checkout -- .` won't touch them), then every other
+  working-tree change is discarded by
+  `git checkout -- .` and untracked files/directories
+  removed with `git clean -fd`. Timeout 10 seconds.
+- **Keep path (line 2232):** on `params.status === "keep"`
+  the extension instead runs `git add -A && git commit`
+  with a generated message; no revert.
+- **Append-only audit survives the revert:** the JSONL row
+  is written *before* the revert block, so every attempt
+  (kept or reverted) lands in `autoresearch.jsonl` with
+  `status`, `commit`, `metric`, `confidence`, and any
+  `asi` structured hints (`hypothesis`, `rollback_reason`,
+  `next_action_hint`) the agent attached. Agent-facing
+  hint (line 2064): "This is the only structured memory
+  that survives reverts."
+
+#### Relationship to karpathy's original
+
+pi-autoresearch's README states directly: "Inspired by
+[karpathy/autoresearch](https://github.com/karpathy/autoresearch).
+Works for any optimization target: test speed, bundle size,
+LLM training, build times, Lighthouse scores."
+
+What pi-autoresearch generalises from karpathy's design:
+- Domain-agnostic: `run_experiment` takes any command that
+  emits `METRIC name=number` lines; karpathy's is hardcoded
+  to `uv run train.py` and `val_bpb`.
+- Metric direction: pi-autoresearch takes `"lower" |
+  "higher"` as config; karpathy is hardcoded to lower.
+- Persistent log: `autoresearch.jsonl` (one JSON per row,
+  richer fields including `confidence` and `asi`) vs
+  karpathy's 5-column `results.tsv`.
+
+What pi-autoresearch adds that karpathy's baseline lacks:
+- The MAD-based confidence score (karpathy has no noise
+  estimator — the agent keeps/discards on raw val_bpb
+  comparison).
+- The in-tool auto-revert (karpathy instructs the agent
+  in `program.md` to `git reset` manually).
+- Optional `autoresearch.checks.sh` backpressure
+  (correctness gate separate from the primary metric).
+- Session-resume via `autoresearch.md` + `autoresearch.jsonl`
+  (karpathy's `results.tsv` is the only artefact, and
+  `program.md` is static human-authored context).
+- Segment concept (`currentSegment`) allowing a loop to
+  start fresh without losing dashboard history.
+- `/autoresearch export` live browser dashboard, widget
+  status line, keyboard shortcuts (`Ctrl+X`,
+  `Ctrl+Shift+X`), `autoresearch-finalize` skill that
+  regroups kept commits into independent branches.
