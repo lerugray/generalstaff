@@ -662,7 +662,7 @@
   {
     "id": "gs-136",
     "title": "Add a test in tests/session.test.ts covering formatSessionPlanPreview from src/session.ts. Exercise: (a) empty plan (total_cycles=0) returns the 'No cycles fit in the budget.' line; (b) single-project plan formats the Project/Cycles header with correct padding; (c) multiple projects with differing id widths (short 'x' alongside 'generalstaff') align under a width-matched header. Asserts the literal line structure so future column-layout regressions are caught.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
