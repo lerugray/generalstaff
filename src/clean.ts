@@ -4,7 +4,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "fs";
 import { join } from "path";
 import { $ } from "bun";
-import { getRootDir } from "./state";
+import { getRootDir, botWorktreePath } from "./state";
 import { loadProjects } from "./projects";
 
 export async function runClean(
@@ -19,7 +19,7 @@ export async function runClean(
 
   // 1. Clean stale worktrees for each project
   for (const p of projects) {
-    const wt = join(p.path, ".bot-worktree");
+    const wt = botWorktreePath(p);
     if (existsSync(wt)) {
       if (dryRun) {
         console.log(`  [DRY RUN] Would remove: ${wt}`);
