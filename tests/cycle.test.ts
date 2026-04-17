@@ -321,10 +321,9 @@ describe("countCommitsAhead", () => {
 });
 
 describe("executeCycle", () => {
-  it("runs verification and reviewer even when engineer exits non-zero", async () => {
-    // Run in a subprocess so mock.module calls don't leak into other test files
-    const helperPath = join(import.meta.dir, "helpers", "verify_nonzero_engineer_continues.ts");
-    const proc = Bun.spawn(["bun", "run", helperPath], {
+  async function runEngineerExitHelper(exitCodeArg: string) {
+    const helperPath = join(import.meta.dir, "helpers", "verify_engineer_exit_handling.ts");
+    const proc = Bun.spawn(["bun", "run", helperPath, exitCodeArg], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -337,14 +336,36 @@ describe("executeCycle", () => {
         `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
       );
     }
-
-    // Parse the JSON output for detailed assertions
     const lastLine = stdout.trim().split("\n").pop()!;
-    const result = JSON.parse(lastLine);
-    expect(result.engineer_exit_code).toBe(1);
+    return JSON.parse(lastLine);
+  }
+
+  it("proceeds through verification and reviewer when engineer exits 0", async () => {
+    const result = await runEngineerExitHelper("0");
+    expect(result.engineer_exit_code).toBe(0);
     expect(result.verification_called).toBe(true);
     expect(result.reviewer_called).toBe(true);
     expect(result.final_outcome).toBe("verified");
+  }, 30_000);
+
+  it("blocks verification and reviewer when engineer exits non-zero", async () => {
+    const result = await runEngineerExitHelper("1");
+    expect(result.engineer_exit_code).toBe(1);
+    expect(result.verification_called).toBe(false);
+    expect(result.reviewer_called).toBe(false);
+    expect(result.final_outcome).toBe("verification_failed");
+    expect(result.reason).toContain("engineer exited abnormally");
+    expect(result.reason).toContain("code=1");
+  }, 30_000);
+
+  it("blocks verification and reviewer when engineer is killed (exit=null)", async () => {
+    const result = await runEngineerExitHelper("null");
+    expect(result.engineer_exit_code).toBeNull();
+    expect(result.verification_called).toBe(false);
+    expect(result.reviewer_called).toBe(false);
+    expect(result.final_outcome).toBe("verification_failed");
+    expect(result.reason).toContain("engineer exited abnormally");
+    expect(result.reason).toContain("code=null");
   }, 30_000);
 
   it("skips verification and reviewer on empty diff", async () => {

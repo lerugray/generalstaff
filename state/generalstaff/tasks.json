@@ -512,7 +512,7 @@
   {
     "id": "gs-111",
     "title": "(BUG) When the engineer subprocess exits abnormally (exit code null, meaning killed by signal, OR any non-zero exit code), the cycle should skip the verification gate + reviewer entirely and mark itself verification_failed with reason 'engineer exited abnormally (code=X)'. Currently src/cycle.ts proceeds through verification on whatever partial diff exists, which accepted a killed-mid-task engineer's partial work as verified on 2026-04-17 cycle 10. Add early-return in executeCycle after engineer completes if engineerResult.exitCode === null || engineerResult.exitCode !== 0. Add tests covering: exit=0 (proceeds), exit=1 (blocks), exit=null i.e. killed (blocks), with verification of the cycle_end event's reason field.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

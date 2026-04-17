@@ -418,6 +418,67 @@ export async function executeCycle(
     diff_length: fullDiff.length,
   }, cycleId);
 
+  // 6a. If engineer exited abnormally (killed mid-task or non-zero exit),
+  //     block verification + reviewer. Partial work from a killed engineer
+  //     must never be accepted as verified. (Fix: gs-111 — observed
+  //     2026-04-17 cycle 10 when engineer timeout killed claude.exe but the
+  //     partial diff was still reviewed and marked verified.)
+  if (engineerResult.exitCode === null || engineerResult.exitCode !== 0) {
+    const finalOutcome: CycleOutcome = "verification_failed";
+    const reason = `engineer exited abnormally (code=${engineerResult.exitCode})`;
+    console.log(`\nSkipping verification and reviewer: ${reason}`);
+    const stats = diffSummaryStats(fullDiff);
+
+    const endedAt = new Date().toISOString();
+    console.log(`Cycle outcome: ${finalOutcome} — ${reason}`);
+
+    await appendProgress(project.id, "cycle_end", {
+      outcome: finalOutcome,
+      reason,
+      start_sha: cycleStartSha,
+      end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "failed",
+      reviewer_verdict: "verification_failed",
+      diff_stats: stats,
+      duration_seconds: Math.round(
+        (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000,
+      ),
+    }, cycleId);
+
+    const fleet = await loadFleetState(config);
+    const durationMinutes =
+      (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
+    updateProjectFleetState(fleet, project.id, finalOutcome, durationMinutes);
+    await saveFleetState(fleet, config);
+
+    const projState = await loadProjectState(project.id, config);
+    projState.current_cycle_id = null;
+    projState.last_cycle_id = cycleId;
+    projState.last_cycle_outcome = finalOutcome;
+    projState.last_cycle_at = endedAt;
+    projState.cycles_this_session += 1;
+    await saveProjectState(projState, config);
+
+    await cleanupWorktree(project);
+    await autoCommitState(project, cycleId, finalOutcome);
+
+    return {
+      cycle_id: cycleId,
+      project_id: project.id,
+      started_at: startedAt,
+      ended_at: endedAt,
+      cycle_start_sha: cycleStartSha,
+      cycle_end_sha: cycleEndSha,
+      engineer_exit_code: engineerResult.exitCode,
+      verification_outcome: "failed",
+      reviewer_verdict: "verification_failed",
+      final_outcome: finalOutcome,
+      reason,
+      diff_stats: stats,
+    };
+  }
+
   // 6b. Skip verification and reviewer if diff is empty — nothing to test or review
   if (!fullDiff.trim()) {
     const finalOutcome: CycleOutcome = "verified_weak";
