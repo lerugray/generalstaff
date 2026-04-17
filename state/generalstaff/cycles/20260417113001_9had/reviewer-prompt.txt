@@ -1,0 +1,675 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 8d7f048..7cf0893 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -42,10 +42,12 @@ function printUsage() {
+ 
+ Usage:
+   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
++                       [--exclude-project=<id>[,<id>...]]
+                                                           Run a session (multiple cycles)
+     Example: generalstaff session --budget=480          # overnight 8-hour run
+     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
+     Example: generalstaff session --dry-run             # preview without committing
++    Example: generalstaff session --exclude-project=catalogdna,retrogaze
+ 
+   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
+     Example: generalstaff cycle --project=myapp
+@@ -149,6 +151,7 @@ switch (command) {
+         budget: { type: "string", default: "480" },
+         "max-cycles": { type: "string" },
+         "dry-run": { type: "boolean", default: false },
++        "exclude-project": { type: "string" },
+       },
+       allowPositionals: false,
+     });
+@@ -166,10 +169,18 @@ switch (command) {
+       }
+       maxCycles = parsed;
+     }
++    let excludeProjects: string[] | undefined;
++    if (values["exclude-project"] !== undefined) {
++      excludeProjects = values["exclude-project"]
++        .split(",")
++        .map((s) => s.trim())
++        .filter((s) => s.length > 0);
++    }
+     await runSession({
+       budgetMinutes: budget,
+       dryRun: values["dry-run"]!,
+       maxCycles,
++      excludeProjects,
+     });
+     break;
+   }
+diff --git a/src/session.ts b/src/session.ts
+index ac8c48c..21b50d4 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -49,7 +49,7 @@ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
+ }
+ 
+ export async function runSession(options: SessionOptions) {
+-  const { budgetMinutes, dryRun, maxCycles } = options;
++  const { budgetMinutes, dryRun, maxCycles, excludeProjects } = options;
+   const sessionStart = Date.now();
+ 
+   console.log(`\n=== GeneralStaff Session ===`);
+@@ -65,9 +65,31 @@ export async function runSession(options: SessionOptions) {
+   const config = yaml.dispatcher;
+   const fleet = await loadFleetState(config);
+ 
+-  if (!dryRun && projects.length > 0) {
++  // Validate and initialize exclude set. Unknown ids warn but don't abort —
++  // the operator likely has a stale project list in their head and shouldn't
++  // lose the rest of the session over a typo.
++  const excludeSet = new Set<string>();
++  if (excludeProjects && excludeProjects.length > 0) {
++    const known = new Set(projects.map((p) => p.id));
++    for (const id of excludeProjects) {
++      if (!known.has(id)) {
++        console.warn(
++          `Warning: --exclude-project="${id}" does not match any registered project (ignored)`,
++        );
++        continue;
++      }
++      excludeSet.add(id);
++    }
++    if (excludeSet.size > 0) {
++      console.log(`Excluding: ${[...excludeSet].join(", ")}\n`);
++    }
++  }
++
++  const eligibleProjects = projects.filter((p) => !excludeSet.has(p.id));
++
++  if (!dryRun && eligibleProjects.length > 0) {
+     const plan = estimateSessionPlan(
+-      projects,
++      eligibleProjects,
+       fleet,
+       budgetMinutes,
+       config.max_cycles_per_project_per_session,
+@@ -84,7 +106,7 @@ export async function runSession(options: SessionOptions) {
+ 
+   const allResults: CycleResult[] = [];
+   const cyclesPerProject = new Map<string, number>();
+-  const skippedProjects = new Set<string>();
++  const skippedProjects = new Set<string>(excludeSet);
+ 
+   function elapsedMinutes(): number {
+     return (Date.now() - sessionStart) / 60_000;
+diff --git a/src/types.ts b/src/types.ts
+index 3ecd342..0fb686f 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -151,6 +151,7 @@ export interface SessionOptions {
+   budgetMinutes: number;
+   dryRun: boolean;
+   maxCycles?: number;
++  excludeProjects?: string[];
+ }
+ 
+ export interface SingleCycleOptions {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 4eb34ff..4a78d80 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -434,7 +434,7 @@
+   {
+     "id": "gs-098",
+     "title": "Add a 'generalstaff session --exclude-project=<id>[,<id>...]' filter. When the project picker (src/dispatcher.ts pickNextProject) evaluates candidates, skip any project id in the exclude set. Parse comma-separated values from the flag. Useful for 'skip this project for tonight's run'. Add tests covering: single exclude, multiple excludes, excluded project is the only eligible project (session ends with no-project), excluded project id doesn't exist (warn but don't error).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/helpers/verify_exclude_project.ts b/tests/helpers/verify_exclude_project.ts
+new file mode 100644
+index 0000000..fc42e21
+--- /dev/null
++++ b/tests/helpers/verify_exclude_project.ts
+@@ -0,0 +1,266 @@
++// Isolated test helper: proves runSession honors the excludeProjects
++// option by (1) seeding the skip set passed to pickNextProject with the
++// excluded ids, (2) warning (not erroring) on unknown ids, and (3)
++// ending with stop_reason="no-project" when every eligible project is
++// excluded.
++//
++// Runs in a subprocess so mock.module calls don't leak.
++
++import { mock } from "bun:test";
++import { join } from "path";
++import { mkdirSync, rmSync } from "fs";
++import type { ProjectConfig, CycleResult } from "../../src/types";
++
++const scenario = process.argv[2];
++if (!scenario) {
++  console.error("scenario arg required: single|multiple|all-excluded|unknown-id");
++  process.exit(1);
++}
++
++const TEST_DIR = join(
++  import.meta.dir,
++  "..",
++  "fixtures",
++  `session_exclude_${scenario}_test`,
++);
++
++const makeProject = (id: string): ProjectConfig => ({
++  id,
++  path: TEST_DIR,
++  priority: 1,
++  engineer_command: "echo ok",
++  verification_command: "bun test",
++  cycle_budget_minutes: 1,
++  work_detection: "tasks_json",
++  concurrency_detection: "none",
++  branch: "bot/work",
++  auto_merge: false,
++  hands_off: [],
++});
++
++const projects: ProjectConfig[] = [
++  makeProject("alpha"),
++  makeProject("beta"),
++  makeProject("gamma"),
++];
++
++let executeCycleCalls = 0;
++const pickSkipSnapshots: string[][] = [];
++const pickedIds: string[] = [];
++
++mock.module("../../src/projects", () => ({
++  loadProjectsYaml: async () => ({
++    projects,
++    dispatcher: {
++      state_dir: join(TEST_DIR, "state"),
++      fleet_state_file: "fleet_state.json",
++      stop_file: "STOP",
++      override_file: "OVERRIDE",
++      picker: "priority_staleness",
++      max_cycles_per_project_per_session: 1,
++      log_dir: "logs",
++      digest_dir: "digests",
++    },
++  }),
++}));
++
++mock.module("../../src/cycle", () => ({
++  countCommitsAhead: async () => 0,
++  executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
++    executeCycleCalls++;
++    const now = new Date().toISOString();
++    return {
++      cycle_id: `cycle-${executeCycleCalls}`,
++      project_id: p.id,
++      started_at: now,
++      ended_at: now,
++      cycle_start_sha: "abc",
++      cycle_end_sha: "def",
++      engineer_exit_code: 0,
++      verification_outcome: "passed",
++      reviewer_verdict: "verified",
++      final_outcome: "verified",
++      reason: "ok",
++    };
++  },
++}));
++
++mock.module("../../src/dispatcher", () => ({
++  pickNextProject: async (
++    availableProjects: ProjectConfig[],
++    _config: unknown,
++    _fleet: unknown,
++    skipProjectIds: Set<string> = new Set(),
++  ) => {
++    pickSkipSnapshots.push([...skipProjectIds]);
++    const pick = availableProjects.find(
++      (p) => !skipProjectIds.has(p.id),
++    );
++    if (!pick) return null;
++    pickedIds.push(pick.id);
++    return { project: pick, reason: "test pick" };
++  },
++  // Return cap-reached so session.ts adds the current project to the skip
++  // set after each cycle (the loop would otherwise keep re-picking the same
++  // project since our stubbed executeCycle returns "verified", not "skipped").
++  shouldChain: async () => ({
++    chain: false,
++    reason: "per-project cycle cap reached",
++  }),
++  estimateSessionPlan: () => ({
++    picks: [],
++    per_project: [],
++    total_cycles: 0,
++    budget_used_minutes: 0,
++    budget_remaining_minutes: 0,
++  }),
++}));
++
++mock.module("../../src/safety", () => ({
++  isStopFilePresent: async () => false,
++}));
++
++mock.module("../../src/state", () => ({
++  loadFleetState: async () => ({
++    version: 1,
++    updated_at: new Date().toISOString(),
++    projects: {},
++  }),
++  saveFleetState: async () => {},
++  loadProjectState: async (id: string) => ({
++    project_id: id,
++    current_cycle_id: null,
++    last_cycle_id: null,
++    last_cycle_outcome: null,
++    last_cycle_at: null,
++    cycles_this_session: 0,
++  }),
++  saveProjectState: async () => {},
++  getRootDir: () => TEST_DIR,
++}));
++
++mock.module("../../src/audit", () => ({
++  appendProgress: async () => {},
++}));
++
++mock.module("../../src/work_detection", () => ({
++  countRemainingWork: async () => 0,
++}));
++
++mock.module("../../src/notify", () => ({
++  notifySessionEnd: async () => {},
++}));
++
++const { runSession } = await import("../../src/session");
++
++async function run() {
++  const origLog = console.log;
++  const origWarn = console.warn;
++  const warnMessages: string[] = [];
++  const logMessages: string[] = [];
++  console.log = (...args: unknown[]) => {
++    logMessages.push(args.map(String).join(" "));
++  };
++  console.warn = (...args: unknown[]) => {
++    warnMessages.push(args.map(String).join(" "));
++  };
++
++  try {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++    mkdirSync(join(TEST_DIR, "digests"), { recursive: true });
++
++    let excludeProjects: string[] = [];
++    switch (scenario) {
++      case "single":
++        excludeProjects = ["alpha"];
++        break;
++      case "multiple":
++        excludeProjects = ["alpha", "beta"];
++        break;
++      case "all-excluded":
++        excludeProjects = ["alpha", "beta", "gamma"];
++        break;
++      case "unknown-id":
++        excludeProjects = ["does-not-exist"];
++        break;
++    }
++
++    const results = await runSession({
++      budgetMinutes: 60,
++      dryRun: true,
++      excludeProjects,
++    });
++
++    console.log = origLog;
++    console.warn = origWarn;
++
++    const errors: string[] = [];
++    const firstSnap = pickSkipSnapshots[0] ?? [];
++
++    if (scenario === "single") {
++      if (!firstSnap.includes("alpha")) {
++        errors.push(
++          `first pickNextProject skip set missing "alpha": ${JSON.stringify(firstSnap)}`,
++        );
++      }
++      if (pickedIds.includes("alpha")) {
++        errors.push(`"alpha" was picked despite being excluded`);
++      }
++      if (pickedIds.length === 0) {
++        errors.push(`no projects were picked (expected beta and/or gamma)`);
++      }
++    } else if (scenario === "multiple") {
++      if (!firstSnap.includes("alpha") || !firstSnap.includes("beta")) {
++        errors.push(
++          `first pickNextProject skip set missing alpha and/or beta: ${JSON.stringify(firstSnap)}`,
++        );
++      }
++      if (pickedIds.some((id) => id === "alpha" || id === "beta")) {
++        errors.push(`excluded project was picked: ${JSON.stringify(pickedIds)}`);
++      }
++    } else if (scenario === "all-excluded") {
++      if (results.length !== 0) {
++        errors.push(`expected 0 cycles when all projects excluded, got ${results.length}`);
++      }
++      if (executeCycleCalls !== 0) {
++        errors.push(`expected 0 executeCycle calls, got ${executeCycleCalls}`);
++      }
++      if (!logMessages.some((m) => m.includes("No eligible project"))) {
++        errors.push(
++          `expected "No eligible project" log message; logs=${JSON.stringify(logMessages)}`,
++        );
++      }
++    } else if (scenario === "unknown-id") {
++      if (!warnMessages.some((m) => m.includes("does-not-exist"))) {
++        errors.push(
++          `expected warning mentioning unknown id; warns=${JSON.stringify(warnMessages)}`,
++        );
++      }
++      // Session should still run normally against the real projects
++      if (pickedIds.length === 0) {
++        errors.push(`no projects were picked — unknown id should not halt the session`);
++      }
++    }
++
++    const output = {
++      pass: errors.length === 0,
++      scenario,
++      execute_cycle_calls: executeCycleCalls,
++      picked_ids: pickedIds,
++      first_skip_snapshot: firstSnap,
++      warn_messages: warnMessages,
++      errors,
++    };
++    console.log(JSON.stringify(output));
++    process.exit(errors.length > 0 ? 1 : 0);
++  } catch (err) {
++    console.log = origLog;
++    console.warn = origWarn;
++    console.error("Test helper crashed:", err);
++    process.exit(1);
++  } finally {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  }
++}
++
++run();
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 86b5c5a..1029121 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -627,3 +627,61 @@ describe("runSession safeguards", () => {
+     expect(snapshots[snapshots.length - 1]).toContain("test-proj");
+   }, 30_000);
+ });
++
++describe("runSession --exclude-project", () => {
++  it("excludes a single project from the picker", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_exclude_project.ts",
++      "single",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    expect(result.first_skip_snapshot).toContain("alpha");
++    expect(result.picked_ids).not.toContain("alpha");
++  }, 30_000);
++
++  it("excludes multiple projects (comma-separated)", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_exclude_project.ts",
++      "multiple",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    expect(result.first_skip_snapshot).toContain("alpha");
++    expect(result.first_skip_snapshot).toContain("beta");
++    const picked = result.picked_ids as string[];
++    expect(picked).not.toContain("alpha");
++    expect(picked).not.toContain("beta");
++  }, 30_000);
++
++  it("ends with no cycles when every project is excluded", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_exclude_project.ts",
++      "all-excluded",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    expect(result.execute_cycle_calls).toBe(0);
++  }, 30_000);
++
++  it("warns but does not error on unknown exclude ids", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_exclude_project.ts",
++      "unknown-id",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    const warns = (result.warn_messages as string[]).join("\n");
++    expect(warns).toContain("does-not-exist");
++    // session still ran against real projects
++    expect((result.picked_ids as string[]).length).toBeGreaterThan(0);
++  }, 30_000);
++});
+
+
+Diff summary: src/cli.ts                              |  11 ++
+ src/session.ts                          |  30 +++-
+ src/types.ts                            |   1 +
+ state/generalstaff/tasks.json           |   2 +-
+ tests/helpers/verify_exclude_project.ts | 266 ++++++++++++++++++++++++++++++++
+ tests/session.test.ts                   |  58 +++++++
+ 6 files changed, 363 insertions(+), 5 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T11:37:40.572Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113806.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113807.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_113807.md
+
+ 560 pass
+ 0 fail
+ 1631 expect() calls
+Ran 560 tests across 23 files. [42.40s]
+
+========================================
+Exit code: 0
+Duration: 45.0s
+Ended: 2026-04-17T11:38:25.592Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
