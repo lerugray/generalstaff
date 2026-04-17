@@ -26,8 +26,10 @@ function printUsage() {
   console.log(`generalstaff v${VERSION}
 
 Usage:
-  generalstaff session [--budget=<minutes>] [--dry-run]   Run a session (multiple cycles)
+  generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
+                                                          Run a session (multiple cycles)
     Example: generalstaff session --budget=480          # overnight 8-hour run
+    Example: generalstaff session --max-cycles=5        # stop after 5 cycles
     Example: generalstaff session --dry-run             # preview without committing
 
   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
@@ -117,6 +119,7 @@ switch (command) {
       args: args.slice(1),
       options: {
         budget: { type: "string", default: "480" },
+        "max-cycles": { type: "string" },
         "dry-run": { type: "boolean", default: false },
       },
       allowPositionals: false,
@@ -126,7 +129,20 @@ switch (command) {
       console.error("Error: --budget must be a positive integer (minutes)");
       process.exit(1);
     }
-    await runSession({ budgetMinutes: budget, dryRun: values["dry-run"]! });
+    let maxCycles: number | undefined;
+    if (values["max-cycles"] !== undefined) {
+      const parsed = parseInt(values["max-cycles"], 10);
+      if (isNaN(parsed) || parsed <= 0) {
+        console.error("Error: --max-cycles must be a positive integer");
+        process.exit(1);
+      }
+      maxCycles = parsed;
+    }
+    await runSession({
+      budgetMinutes: budget,
+      dryRun: values["dry-run"]!,
+      maxCycles,
+    });
     break;
   }
 

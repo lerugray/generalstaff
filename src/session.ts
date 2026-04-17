@@ -45,11 +45,14 @@ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
 }
 
 export async function runSession(options: SessionOptions) {
-  const { budgetMinutes, dryRun } = options;
+  const { budgetMinutes, dryRun, maxCycles } = options;
   const sessionStart = Date.now();
 
   console.log(`\n=== GeneralStaff Session ===`);
   console.log(`Budget: ${budgetMinutes} min`);
+  if (maxCycles !== undefined) {
+    console.log(`Max cycles: ${maxCycles}`);
+  }
   console.log(`Dry run: ${dryRun}`);
   console.log(`Started: ${new Date().toISOString()}\n`);
 
@@ -118,10 +121,20 @@ export async function runSession(options: SessionOptions) {
   let consecutiveEmptyCycles = 0;
   const MAX_CONSECUTIVE_EMPTY = 3;
 
+  let stopReason: "budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+
   while (remainingMinutes() > 0) {
+    // Max-cycles cap — stops before running another cycle
+    if (maxCycles !== undefined && allResults.length >= maxCycles) {
+      console.log(`\nMax-cycles limit reached (${maxCycles}) — ending session.`);
+      stopReason = "max-cycles";
+      break;
+    }
+
     // Check STOP file
     if (await isStopFilePresent()) {
       console.log("\nSTOP file detected — ending session.");
+      stopReason = "stop-file";
       break;
     }
 
@@ -136,6 +149,7 @@ export async function runSession(options: SessionOptions) {
       );
       if (!pick) {
         console.log("\nNo eligible project — ending session.");
+        stopReason = "no-project";
         break;
       }
       currentProject = pick.project;
@@ -152,6 +166,7 @@ export async function runSession(options: SessionOptions) {
         `\nInsufficient budget for ${currentProject.id} ` +
           `(need ${needed} min, have ${remainingMinutes().toFixed(0)} min)`,
       );
+      stopReason = "insufficient-budget";
       break;
     }
 
@@ -178,6 +193,7 @@ export async function runSession(options: SessionOptions) {
         console.log(
           `\n${MAX_CONSECUTIVE_EMPTY} consecutive empty cycles — ending session.`,
         );
+        stopReason = "empty-cycles";
         break;
       }
     } else {
@@ -252,6 +268,7 @@ export async function runSession(options: SessionOptions) {
   console.log(`\n=== Session Complete ===`);
   console.log(`Duration: ${elapsed.toFixed(1)} min`);
   console.log(`Cycles: ${allResults.length}`);
+  console.log(`Stop reason: ${stopReason}`);
 
   for (const [projectId, count] of cyclesPerProject) {
     const projectResults = allResults.filter(

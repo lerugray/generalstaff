@@ -144,6 +144,7 @@ export interface ProgressEntry {
 export interface SessionOptions {
   budgetMinutes: number;
   dryRun: boolean;
+  maxCycles?: number;
 }
 
 export interface SingleCycleOptions {
