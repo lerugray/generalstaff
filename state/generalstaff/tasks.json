@@ -410,7 +410,7 @@
   {
     "id": "gs-094",
     "title": "Extract fetchCommitSubject from src/session.ts into a new module src/git.ts with its own tests. session.ts imports from there. The new module should be a natural home for future git helpers (countCommitsAhead currently lives in cycle.ts and could also move here in a later task).",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

@@ -2,7 +2,6 @@
 // Outer loop: time budget → pick project → cycle → chain or rotate → repeat
 
 import { $ } from "bun";
-import { spawnSync } from "child_process";
 import { loadProjectsYaml } from "./projects";
 import {
   loadFleetState,
@@ -17,6 +16,7 @@ import { executeCycle, countCommitsAhead } from "./cycle";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
 import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration } from "./format";
+import { fetchCommitSubject } from "./git";
 import { countRemainingWork } from "./work_detection";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
@@ -315,21 +315,6 @@ export async function runSession(options: SessionOptions) {
   }
 
   return allResults;
-}
-
-export function fetchCommitSubject(startSha: string, endSha: string): string {
-  if (!endSha || endSha === startSha) return "";
-  try {
-    const result = spawnSync("git", ["log", "-1", "--format=%s", endSha], {
-      cwd: getRootDir(),
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5_000,
-    });
-    if (result.status !== 0) return "";
-    return (result.stdout ?? "").toString().trim();
-  } catch {
-    return "";
-  }
 }
 
 export async function writeDigest(
