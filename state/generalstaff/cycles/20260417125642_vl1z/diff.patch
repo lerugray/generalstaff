@@ -1,0 +1,393 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index ea23627..8fad0b4 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -35,6 +35,7 @@ import {
+   formatSummary,
+ } from "./summary";
+ import { formatRelativeTime } from "./format";
++import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
+ 
+ const VERSION = "0.0.1";
+ 
+@@ -54,9 +55,11 @@ Usage:
+     Example: generalstaff cycle --project=myapp
+     Example: generalstaff cycle --project=myapp --dry-run
+ 
+-  generalstaff status [--json]                            Show fleet state
++  generalstaff status [--json] [--watch[=N]]              Show fleet state
+     Example: generalstaff status
+     Example: generalstaff status --json                 # machine-readable output
++    Example: generalstaff status --watch                # refresh every 5s until Ctrl-C
++    Example: generalstaff status --watch=10             # refresh every 10s
+ 
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+@@ -211,44 +214,59 @@ switch (command) {
+   }
+ 
+   case "status": {
++    const rawStatusArgs = args.slice(1);
++    const watch = parseWatchFlag(rawStatusArgs);
+     const { values: statusValues } = parseArgs({
+-      args: args.slice(1),
++      args: stripWatchArgs(rawStatusArgs),
+       options: {
+         json: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+-    const projects = await loadProjects();
+-    const fleet = await loadFleetState();
+-    const stopped = await isStopFilePresent();
+ 
+-    if (statusValues.json) {
+-      const summaries = await Promise.all(
+-        projects.map((p) => getProjectSummary(p, fleet)),
+-      );
+-      const output = { stopped, projects: summaries };
+-      console.log(JSON.stringify(output, null, 2));
+-    } else {
+-      console.log("=== GeneralStaff Fleet Status ===\n");
+-      console.log(`STOP file: ${stopped ? "PRESENT (halted)" : "absent (ready)"}`);
+-      console.log(`Registered projects: ${projects.length}\n`);
+-      for (const p of projects) {
+-        const state = fleet.projects[p.id];
+-        console.log(`  ${p.id} (priority ${p.priority})`);
+-        if (state) {
+-          if (state.last_cycle_at) {
++    const renderStatus = async () => {
++      const projects = await loadProjects();
++      const fleet = await loadFleetState();
++      const stopped = await isStopFilePresent();
++
++      if (statusValues.json) {
++        const summaries = await Promise.all(
++          projects.map((p) => getProjectSummary(p, fleet)),
++        );
++        const output = { stopped, projects: summaries };
++        console.log(JSON.stringify(output, null, 2));
++      } else {
++        console.log("=== GeneralStaff Fleet Status ===\n");
++        console.log(
++          `STOP file: ${stopped ? "PRESENT (halted)" : "absent (ready)"}`,
++        );
++        console.log(`Registered projects: ${projects.length}\n`);
++        for (const p of projects) {
++          const state = fleet.projects[p.id];
++          console.log(`  ${p.id} (priority ${p.priority})`);
++          if (state) {
++            if (state.last_cycle_at) {
++              console.log(
++                `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
++              );
++            } else {
++              console.log(`    Last cycle: never`);
++            }
+             console.log(
+-              `    Last cycle: ${formatRelativeTime(state.last_cycle_at)} (${state.last_cycle_at})`,
++              `    Last outcome: ${state.last_cycle_outcome ?? "none"}`,
+             );
++            console.log(`    Total cycles: ${state.total_cycles}`);
+           } else {
+-            console.log(`    Last cycle: never`);
++            console.log(`    No cycles yet`);
+           }
+-          console.log(`    Last outcome: ${state.last_cycle_outcome ?? "none"}`);
+-          console.log(`    Total cycles: ${state.total_cycles}`);
+-        } else {
+-          console.log(`    No cycles yet`);
+         }
+       }
++    };
++
++    if (watch.enabled) {
++      await runWatchLoop(renderStatus, watch.intervalSeconds);
++    } else {
++      await renderStatus();
+     }
+     break;
+   }
+diff --git a/src/watch.ts b/src/watch.ts
+new file mode 100644
+index 0000000..3d24e58
+--- /dev/null
++++ b/src/watch.ts
+@@ -0,0 +1,80 @@
++export interface ParsedWatch {
++  enabled: boolean;
++  intervalSeconds: number;
++}
++
++const DEFAULT_WATCH_SECONDS = 5;
++const MIN_WATCH_SECONDS = 1;
++
++export function parseWatchFlag(rawArgs: string[]): ParsedWatch {
++  let enabled = false;
++  let intervalSeconds = DEFAULT_WATCH_SECONDS;
++  for (const arg of rawArgs) {
++    if (arg === "--watch") {
++      enabled = true;
++    } else if (arg.startsWith("--watch=")) {
++      enabled = true;
++      const raw = arg.slice("--watch=".length);
++      const parsed = parseInt(raw, 10);
++      if (!isNaN(parsed)) {
++        intervalSeconds = Math.max(MIN_WATCH_SECONDS, parsed);
++      }
++    }
++  }
++  return { enabled, intervalSeconds };
++}
++
++export function stripWatchArgs(rawArgs: string[]): string[] {
++  return rawArgs.filter(
++    (a) => a !== "--watch" && !a.startsWith("--watch="),
++  );
++}
++
++export interface WatchTimer {
++  setInterval: (fn: () => void | Promise<void>, ms: number) => unknown;
++  clearInterval: (handle: unknown) => void;
++}
++
++export interface WatchOptions {
++  timer?: WatchTimer;
++  clearScreen?: () => void;
++  maxIterations?: number;
++}
++
++export function runWatchLoop(
++  renderFn: () => Promise<void> | void,
++  intervalSeconds: number,
++  opts: WatchOptions = {},
++): Promise<number> {
++  const timer: WatchTimer = opts.timer ?? {
++    setInterval: (fn, ms) => setInterval(fn, ms) as unknown,
++    clearInterval: (h) =>
++      clearInterval(h as ReturnType<typeof setInterval>),
++  };
++  const clearScreen =
++    opts.clearScreen ??
++    (() => {
++      if (process.stdout.isTTY) {
++        process.stdout.write("\x1b[2J\x1b[H");
++      }
++    });
++
++  let iterations = 0;
++
++  return new Promise<number>((resolve) => {
++    const tick = async () => {
++      clearScreen();
++      await renderFn();
++      iterations++;
++      if (
++        opts.maxIterations !== undefined &&
++        iterations >= opts.maxIterations
++      ) {
++        timer.clearInterval(handle);
++        resolve(iterations);
++      }
++    };
++    const handle = timer.setInterval(tick, intervalSeconds * 1000);
++    void tick();
++  });
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 4227329..98a8c77 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -446,7 +446,7 @@
+   {
+     "id": "gs-100",
+     "title": "Add a 'generalstaff status --watch[=N]' flag that refreshes the status output every N seconds until killed (Ctrl-C). Default N=5 when --watch is specified without a value. Minimum N=1. Use setInterval and clear the terminal between renders (ANSI clear-screen, suppressed when not a TTY — fall back to repeated output). Add tests with a mocked timer covering: default interval, custom interval, interval clamping at 1.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/watch.test.ts b/tests/watch.test.ts
+new file mode 100644
+index 0000000..ccc60f1
+--- /dev/null
++++ b/tests/watch.test.ts
+@@ -0,0 +1,178 @@
++import { describe, it, expect } from "bun:test";
++import {
++  parseWatchFlag,
++  stripWatchArgs,
++  runWatchLoop,
++  type WatchTimer,
++} from "../src/watch";
++
++describe("parseWatchFlag", () => {
++  it("returns disabled when --watch absent", () => {
++    expect(parseWatchFlag(["--json"])).toEqual({
++      enabled: false,
++      intervalSeconds: 5,
++    });
++  });
++
++  it("defaults to 5 seconds when --watch given without value", () => {
++    expect(parseWatchFlag(["--watch"])).toEqual({
++      enabled: true,
++      intervalSeconds: 5,
++    });
++  });
++
++  it("accepts a custom interval via --watch=N", () => {
++    expect(parseWatchFlag(["--watch=10"])).toEqual({
++      enabled: true,
++      intervalSeconds: 10,
++    });
++  });
++
++  it("clamps values below 1 to 1", () => {
++    expect(parseWatchFlag(["--watch=0"]).intervalSeconds).toBe(1);
++    expect(parseWatchFlag(["--watch=-5"]).intervalSeconds).toBe(1);
++  });
++
++  it("ignores non-numeric values (keeps default)", () => {
++    expect(parseWatchFlag(["--watch=foo"]).intervalSeconds).toBe(5);
++  });
++
++  it("works alongside other args in any order", () => {
++    expect(parseWatchFlag(["--json", "--watch=3"])).toEqual({
++      enabled: true,
++      intervalSeconds: 3,
++    });
++  });
++});
++
++describe("stripWatchArgs", () => {
++  it("removes --watch and --watch=N tokens", () => {
++    expect(stripWatchArgs(["--json", "--watch", "--other"])).toEqual([
++      "--json",
++      "--other",
++    ]);
++    expect(stripWatchArgs(["--watch=10", "--json"])).toEqual(["--json"]);
++  });
++
++  it("leaves untouched when no watch flag", () => {
++    expect(stripWatchArgs(["--json"])).toEqual(["--json"]);
++  });
++});
++
++function makeFakeTimer() {
++  let storedFn: (() => void | Promise<void>) | null = null;
++  let storedMs: number | null = null;
++  let cleared = false;
++  const timer: WatchTimer = {
++    setInterval: (fn, ms) => {
++      storedFn = fn;
++      storedMs = ms;
++      return Symbol("handle");
++    },
++    clearInterval: () => {
++      cleared = true;
++    },
++  };
++  return {
++    timer,
++    getMs: () => storedMs,
++    wasCleared: () => cleared,
++    tick: async () => {
++      if (storedFn) await storedFn();
++    },
++  };
++}
++
++describe("runWatchLoop", () => {
++  it("renders once with the default interval (5s -> 5000ms)", async () => {
++    const fake = makeFakeTimer();
++    let renders = 0;
++    const p = runWatchLoop(
++      () => {
++        renders++;
++      },
++      5,
++      {
++        timer: fake.timer,
++        clearScreen: () => {},
++        maxIterations: 1,
++      },
++    );
++    // With maxIterations=1, the initial render satisfies; but the loop
++    // awaits the interval tick before resolving. Tick once.
++    await fake.tick();
++    const count = await p;
++    expect(count).toBeGreaterThanOrEqual(1);
++    expect(renders).toBeGreaterThanOrEqual(1);
++    expect(fake.getMs()).toBe(5000);
++  });
++
++  it("respects a custom interval (10s -> 10000ms)", async () => {
++    const fake = makeFakeTimer();
++    const p = runWatchLoop(() => {}, 10, {
++      timer: fake.timer,
++      clearScreen: () => {},
++      maxIterations: 2,
++    });
++    await fake.tick();
++    await fake.tick();
++    await p;
++    expect(fake.getMs()).toBe(10000);
++  });
++
++  it("passes the clamped minimum interval (1s -> 1000ms)", async () => {
++    const fake = makeFakeTimer();
++    const p = runWatchLoop(() => {}, 1, {
++      timer: fake.timer,
++      clearScreen: () => {},
++      maxIterations: 2,
++    });
++    await fake.tick();
++    await fake.tick();
++    await p;
++    expect(fake.getMs()).toBe(1000);
++  });
++
++  it("calls renderFn on each tick and clears the handle when done", async () => {
++    const fake = makeFakeTimer();
++    let renders = 0;
++    const p = runWatchLoop(
++      () => {
++        renders++;
++      },
++      5,
++      {
++        timer: fake.timer,
++        clearScreen: () => {},
++        maxIterations: 3,
++      },
++    );
++    expect(renders).toBe(1); // initial render before interval
++    await fake.tick();
++    expect(renders).toBe(2);
++    await fake.tick();
++    expect(renders).toBe(3);
++    await p;
++    expect(fake.wasCleared()).toBe(true);
++  });
++
++  it("invokes clearScreen before each render", async () => {
++    const fake = makeFakeTimer();
++    let clears = 0;
++    const p = runWatchLoop(
++      () => {},
++      5,
++      {
++        timer: fake.timer,
++        clearScreen: () => {
++          clears++;
++        },
++        maxIterations: 2,
++      },
++    );
++    expect(clears).toBe(1);
++    await fake.tick();
++    await p;
++    expect(clears).toBe(2);
++  });
++});
