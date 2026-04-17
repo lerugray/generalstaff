@@ -5,6 +5,8 @@ import {
   warnProjectPaths,
   getProject,
   ProjectNotFoundError,
+  validateConfig,
+  assertValidConfig,
 } from "../src/projects";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -388,6 +390,206 @@ describe("validateHandsOff", () => {
     const patterns = warnings.map((w) => w.message);
     expect(patterns.some((m) => m.includes("bogus_one.xyz"))).toBe(true);
     expect(patterns.some((m) => m.includes("bogus_two.xyz"))).toBe(true);
+  });
+});
+
+describe("validateConfig", () => {
+  function validProjectRaw(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "ok",
+      path: "/tmp/ok",
+      priority: 1,
+      engineer_command: "echo",
+      verification_command: "echo",
+      cycle_budget_minutes: 30,
+      hands_off: ["secret/"],
+      ...overrides,
+    };
+  }
+
+  it("returns no errors for a valid single-project config", () => {
+    const { errors } = validateConfig({ projects: [validProjectRaw()] });
+    expect(errors).toEqual([]);
+  });
+
+  it("collects multiple errors in a single pass (doesn't fail-fast)", () => {
+    const { errors } = validateConfig({
+      projects: [
+        {
+          id: "bad",
+          // path missing
+          // engineer_command missing
+          verification_command: "",
+          cycle_budget_minutes: 0,
+          hands_off: [],
+        },
+      ],
+    });
+    // Expect errors for each of: path, engineer_command, verification_command,
+    // cycle_budget_minutes, hands_off (5 distinct issues).
+    expect(errors.length).toBeGreaterThanOrEqual(5);
+    expect(errors.some((e) => e.includes("path"))).toBe(true);
+    expect(errors.some((e) => e.includes("engineer_command"))).toBe(true);
+    expect(errors.some((e) => e.includes("verification_command"))).toBe(true);
+    expect(errors.some((e) => e.includes("cycle_budget_minutes"))).toBe(true);
+    expect(errors.some((e) => e.includes("hands_off"))).toBe(true);
+    // Every error should reference the project id.
+    for (const e of errors) {
+      expect(e).toContain('"bad"');
+    }
+  });
+
+  it("collects errors across multiple projects in one pass", () => {
+    const { errors } = validateConfig({
+      projects: [
+        { ...validProjectRaw({ id: "good" }) },
+        { ...validProjectRaw({ id: "bad1", hands_off: [] }) },
+        { ...validProjectRaw({ id: "bad2", cycle_budget_minutes: -5 }) },
+      ],
+    });
+    expect(errors.length).toBe(2);
+    expect(errors.some((e) => e.includes('"bad1"') && e.includes("hands_off"))).toBe(
+      true,
+    );
+    expect(
+      errors.some((e) => e.includes('"bad2"') && e.includes("cycle_budget_minutes")),
+    ).toBe(true);
+    expect(errors.some((e) => e.includes('"good"'))).toBe(false);
+  });
+
+  it("flags missing projects array", () => {
+    const { errors } = validateConfig({});
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("projects");
+  });
+
+  it("flags empty projects array", () => {
+    const { errors } = validateConfig({ projects: [] });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("at least one project");
+  });
+
+  it("flags non-object root", () => {
+    const { errors } = validateConfig("not an object");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("root must be an object");
+  });
+
+  it("flags duplicate project ids as a single error", () => {
+    const { errors } = validateConfig({
+      projects: [
+        validProjectRaw({ id: "same" }),
+        validProjectRaw({ id: "same" }),
+      ],
+    });
+    expect(errors.some((e) => e.includes("Duplicate") && e.includes("same"))).toBe(
+      true,
+    );
+  });
+
+  it("flags empty branch override as invalid", () => {
+    const { errors } = validateConfig({
+      projects: [validProjectRaw({ branch: "   " })],
+    });
+    expect(errors.some((e) => e.includes("branch"))).toBe(true);
+  });
+
+  it("accepts default branch (unset) without error", () => {
+    const raw = validProjectRaw();
+    delete (raw as Record<string, unknown>).branch;
+    const { errors } = validateConfig({ projects: [raw] });
+    expect(errors).toEqual([]);
+  });
+
+  it("flags cycle_budget_minutes = 0 as not > 0", () => {
+    const { errors } = validateConfig({
+      projects: [validProjectRaw({ cycle_budget_minutes: 0 })],
+    });
+    expect(errors.some((e) => e.includes("cycle_budget_minutes"))).toBe(true);
+  });
+
+  it("flags non-integer cycle_budget_minutes", () => {
+    const { errors } = validateConfig({
+      projects: [validProjectRaw({ cycle_budget_minutes: 2.5 })],
+    });
+    expect(errors.some((e) => e.includes("must be an integer"))).toBe(true);
+  });
+
+  it("flags wrong-type hands_off", () => {
+    const { errors } = validateConfig({
+      projects: [validProjectRaw({ hands_off: "secret/" })],
+    });
+    expect(errors.some((e) => e.includes("must be an array"))).toBe(true);
+  });
+});
+
+describe("assertValidConfig", () => {
+  it("does not throw on valid config", () => {
+    expect(() =>
+      assertValidConfig({
+        projects: [
+          {
+            id: "ok",
+            path: "/tmp/ok",
+            priority: 1,
+            engineer_command: "echo",
+            verification_command: "echo",
+            cycle_budget_minutes: 30,
+            hands_off: ["x"],
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("throws with aggregated multi-line message listing every problem", () => {
+    try {
+      assertValidConfig({
+        projects: [
+          {
+            id: "broken",
+            // no path, no engineer_command, hands_off empty
+            verification_command: "echo",
+            cycle_budget_minutes: 30,
+            hands_off: [],
+          },
+        ],
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain("Invalid projects.yaml");
+      expect(msg).toContain("3 errors"); // path, engineer_command, hands_off
+      expect(msg).toContain("path");
+      expect(msg).toContain("engineer_command");
+      expect(msg).toContain("hands_off");
+      expect(msg).toContain('"broken"');
+      // Multi-line format: one bullet per issue.
+      expect(msg.split("\n").length).toBeGreaterThanOrEqual(4);
+    }
+  });
+
+  it("uses singular header for a single error", () => {
+    try {
+      assertValidConfig({
+        projects: [
+          {
+            id: "one-bad",
+            path: "/tmp",
+            priority: 1,
+            engineer_command: "echo",
+            verification_command: "echo",
+            cycle_budget_minutes: 30,
+            hands_off: [],
+          },
+        ],
+      });
+      throw new Error("expected throw");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toContain("Invalid projects.yaml:");
+      expect(msg).not.toContain("errors)");
+    }
   });
 });
 
