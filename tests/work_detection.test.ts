@@ -5,6 +5,7 @@ import {
   catalogdnaCountRemaining,
   greenfieldCountRemaining,
   countRemainingWork,
+  hasMoreWork,
   gitIssuesCountRemaining,
   gitIssuesHasMoreWork,
   gitUnmergedCountRemaining,
@@ -455,5 +456,39 @@ describe("countRemainingWork", () => {
       branch: "bot/work",
     });
     expect(await countRemainingWork(project)).toBe(2);
+  });
+
+  it("returns 0 for an unknown work_detection mode (fail-safe)", async () => {
+    const project = makeProject({
+      work_detection: "bogus_mode" as unknown as ProjectConfig["work_detection"],
+    });
+    expect(await countRemainingWork(project)).toBe(0);
+  });
+});
+
+describe("hasMoreWork unknown-mode fallback", () => {
+  function makeProject(
+    overrides: Partial<ProjectConfig> & Pick<ProjectConfig, "work_detection">,
+  ): ProjectConfig {
+    return {
+      id: "proj",
+      path: FIXTURES,
+      priority: 1,
+      engineer_command: "",
+      verification_command: "",
+      cycle_budget_minutes: 10,
+      concurrency_detection: "none",
+      branch: "bot/work",
+      auto_merge: false,
+      hands_off: [],
+      ...overrides,
+    };
+  }
+
+  it("returns false for an unknown work_detection mode (fail-safe)", async () => {
+    const project = makeProject({
+      work_detection: "not_a_mode" as unknown as ProjectConfig["work_detection"],
+    });
+    expect(await hasMoreWork(project)).toBe(false);
   });
 });

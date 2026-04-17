@@ -704,7 +704,7 @@
   {
     "id": "gs-143",
     "title": "Add test coverage for countRemainingWork / hasMoreWork in src/work_detection.ts covering the 'unknown mode' fallback — pass a ProjectConfig with work_detection set to a value outside the VALID_WORK_DETECTION set (cast through unknown) and assert hasMoreWork returns false and countRemainingWork returns 0 (the fail-safe branches). Current tests exercise each valid mode but not the default-case safety net, so a regression there would silently enable chaining for misconfigured projects.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
