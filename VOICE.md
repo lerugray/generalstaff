@@ -155,6 +155,81 @@ Writing that loses this thesis loses the project.
   of Hammerstein is the whole interest
 - Screed energy that prioritizes satisfaction over persuasion
 
+## Mainstream-economics anchors for the same critique
+
+A README that wants to make the labor critique without
+flag-planting can anchor on peer-reviewable, policy-oriented
+work that argues the same substance in welfare-economics
+vocabulary. Two points to steal:
+
+**Falk & Tsoukalas, "The AI Layoff Trap"**
+(https://arxiv.org/abs/2603.20617, 2026).
+
+The paper's model: AI-driven worker replacement creates an
+**automation arms race** where firms face a prisoner's dilemma —
+each individually rational decision to automate creates
+**demand externalities** that collectively collapse the
+consumer base firms depend on. Their result: wage adjustments,
+UBI, upskilling, worker equity, and Coasian bargaining all
+*fail* to resolve the trap in their model. Only a
+**Pigouvian automation tax** on employers replacing humans
+with AI produces a collectively-rational outcome.
+
+Why this is useful for the GS voice:
+
+- **"Automation arms race" describes Polsia's market shape
+  exactly.** Every firm buying a Polsia-style tool because
+  competitors do, regardless of the slop it produces, is the
+  arms race playing out in miniature.
+- **The paper validates the critique without needing Marx.**
+  A README can cite Falk & Tsoukalas to say "extractive AI
+  deployment is a collectively-irrational outcome of
+  individually-rational firm behavior" and that statement is
+  now a mainstream-economics claim, not a political flag.
+- **GS is the architectural response, not the policy one.**
+  Falk & Tsoukalas argue for a corrective tax from above; GS
+  is the corrective architecture from below. You can't join an
+  automation arms race with a tool that is structurally
+  anti-extractive (local-first, BYOK, open audit log, user owns
+  the code, taste work stays with the user). The rules
+  preempt the race.
+- The term *"demand externalities"* is particularly usable.
+  Polsia extracts from creators AND from the creators' markets —
+  it hollows out the ecosystems it depends on. GS is the
+  inverse: it increases the creator's effective capacity
+  without reducing anyone else's, because the compute + keys +
+  judgment all stay local.
+
+**Usable phrasing the README can borrow directly:**
+
+- *"Polsia is the automation arms race; GeneralStaff is the
+  way out of it."*
+- *"Tools that extract value from creators while producing
+  confident slop are a collectively-irrational equilibrium
+  (cf. Falk & Tsoukalas, "The AI Layoff Trap," 2026).
+  GeneralStaff is architecturally designed to refuse
+  participation in that equilibrium."*
+- *"The right critique isn't 'AI bad' — it's that the current
+  deployment pattern concentrates AI's gains in the people who
+  were going to be fine anyway. Our response is a tool whose
+  benefits accrue to the person running it."*
+
+Each of those lands for a reader across the political
+spectrum. The Marxist reader catches the extraction-critique
+signals; the liberal-economics reader catches the
+demand-externalities argument; the libertarian catches the
+"tool is free, no middleman" argument; the worker catches the
+minimum-wage subtext. Same sentences, multiple readings,
+broad persuasive surface.
+
+The paper also usefully confirms the point VOICE.md was
+already making in §3: *human-livability is the universal.*
+Falk & Tsoukalas' whole argument presupposes that human
+employment has welfare value that the market doesn't fully
+price. That's the same thesis GeneralStaff writes out in code
+— Hard Rule 1's "user keeps taste work" is the architectural
+version of "humans stay economically valuable."
+
 ## Relationship to Hard Rule 1
 
 Voice is taste work, not correctness work. The bot can **outline**
