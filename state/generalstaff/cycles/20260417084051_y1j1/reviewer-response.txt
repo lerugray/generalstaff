@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changed files relate to the claimed task, no hands-off violations, and the diff provides strong evidence for the task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "In src/projects.ts, add a getProject(id) lookup helper with a typed 'not found' error that includes the list of available project ids. Refactor existing string-match fallbacks (like in cli.ts task list) to use it. Add tests.",
+      "evidence": "The diff adds getProject() function and ProjectNotFoundError class in src/projects.ts, refactors cli.ts to use getProject() instead of manual filtering, and adds corresponding tests in tests/projects.test.ts.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully with all tests green, confirming the implementation works as expected."
+}
