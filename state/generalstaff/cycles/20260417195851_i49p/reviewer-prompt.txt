@@ -1,0 +1,494 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+"priority": 1,
+"completed_at": "2026-04-17T20:02:48.718Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/provider_config.yaml.example b/provider_config.yaml.example
+new file mode 100644
+index 0000000..e339a67
+--- /dev/null
++++ b/provider_config.yaml.example
+@@ -0,0 +1,74 @@
++# GeneralStaff provider routing — example schema (Phase 2)
++#
++# This file is the schema reference for provider_config.yaml at the
++# repo root. Copy it to `provider_config.yaml` and edit to wire up
++# local LLM providers for non-reviewer roles (digest, cycle_summary,
++# classifier). The real file is NOT gitignored by default but is
++# user-managed — edits by bots are permitted (this file is NOT in
++# any project's hands_off list).
++#
++# ----------------------------------------------------------------------
++# Scope: what this file controls, and what it does NOT control
++# ----------------------------------------------------------------------
++#
++# This file controls routing for THREE roles:
++#   - digest          end-of-session narrative (see gs-154, gs-158)
++#   - cycle_summary   per-cycle plain-English summaries (Phase 2+)
++#   - classifier      work-item classification (Phase 2+)
++#
++# The REVIEWER role is NOT controlled here. Reviewer dispatch remains
++# inline in src/reviewer.ts and is selected at launch via the
++# GENERALSTAFF_REVIEWER_PROVIDER environment variable (see
++# CLAUDE.md §"Reviewer provider configuration"). This split is
++# intentional for Phase 2 — reviewer is load-bearing (Hard Rule 6)
++# and stays on its own dispatch path until the registry has matured.
++#
++# Consumers read this file via loadProviderRegistry() in
++# src/providers/registry.ts. When the file is absent every route
++# resolves to the sentinel string "noop" and callers must check
++# hasProviderForRole() before dispatching.
++#
++# ----------------------------------------------------------------------
++# Provider tier taxonomy
++# ----------------------------------------------------------------------
++#
++# Rationale for provider choice at each role lives in
++# FUTURE-DIRECTIONS-2026-04-15.md §2 ("Model Plurality / Provider
++# Routing"). Short version:
++#
++#   - ollama       local, free, offline. Best for unattended / cheap
++#                  work (digest narratives, cycle summaries).
++#   - openrouter   paid-per-token, many free models. Use for work
++#                  needing more quality than Ollama can give.
++#                  NOT IMPLEMENTED in Phase 2 registry — attempts to
++#                  route here will throw 'not implemented in Phase 2'.
++#   - claude       Anthropic API (BYOK). Use for judgment-heavy work.
++#                  NOT IMPLEMENTED in Phase 2 registry — attempts to
++#                  route here will throw 'not implemented in Phase 2'.
++#
++# The Phase 2 registry ships with ollama as the only fully-wired
++# provider. openrouter and claude descriptors parse successfully but
++# getProviderForRole() for them throws — the hooks are there for
++# later phases, not usable yet.
++
++# ----------------------------------------------------------------------
++# Provider catalogue — ids referenced by the routes: block below
++# ----------------------------------------------------------------------
++providers:
++  - id: ollama_llama3                       # stable id; routes: references it
++    kind: ollama                            # one of: ollama | openrouter | claude
++    model: llama3:8b                        # model name as Ollama sees it
++    host: http://localhost:11434            # optional; default is localhost:11434
++
++# ----------------------------------------------------------------------
++# Routes — which provider handles which role
++# ----------------------------------------------------------------------
++#
++# Any role omitted here defaults to "noop" and hasProviderForRole()
++# will return false for it — callers then fall back to their templated
++# non-LLM path. It is safe (and common) to wire up only the roles
++# you care about.
++routes:
++  digest: ollama_llama3
++  cycle_summary: ollama_llama3
++  classifier: ollama_llama3
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 18c0258..e91bacb 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -915,8 +915,9 @@
+   {
+     "id": "gs-153",
+     "title": "Create provider_config.yaml.example at repo root documenting the Phase 2 schema. Mirror projects.yaml.example style — heavy comments explaining each field, rationale for defaults, a warning that reviewer routing does NOT go here (it's controlled via GENERALSTAFF_REVIEWER_PROVIDER env var as of Phase 1). Structure: a top-level 'providers:' map with one ollama entry (id: ollama_llama3, kind: ollama, model: llama3:8b, host: http://localhost:11434) and a 'routes:' block mapping digest/cycle_summary/classifier to ollama_llama3. Include a comment block at top stating the file is NOT hands-off (bots can edit it) and pointing to FUTURE-DIRECTIONS §2 tier taxonomy for the rationale. Also create tests/providers.example.test.ts that loads this file via loadProviderRegistry from gs-152 and asserts the registry parses without error and routes resolve — keeps the example file from rotting away from the loader. Do NOT create provider_config.yaml (the real one) — that's user setup, not a task deliverable.",
+-    "status": "pending",
+-    "priority": 1
++    "status": "done",
++    "priority": 1,
++    "completed_at": "2026-04-17T20:02:48.718Z"
+   },
+   {
+     "id": "gs-154",
+diff --git a/tests/providers.example.test.ts b/tests/providers.example.test.ts
+new file mode 100644
+index 0000000..a96c81d
+--- /dev/null
++++ b/tests/providers.example.test.ts
+@@ -0,0 +1,55 @@
++import { describe, expect, it } from "bun:test";
++import { join } from "path";
++import {
++  getProviderForRole,
++  hasProviderForRole,
++  loadProviderRegistry,
++} from "../src/providers/registry";
++
++// gs-153: pin provider_config.yaml.example to the registry loader so
++// the example doesn't rot away from the code that actually reads it.
++
++const EXAMPLE_PATH = join(
++  import.meta.dir,
++  "..",
++  "provider_config.yaml.example",
++);
++
++describe("provider_config.yaml.example (gs-153)", () => {
++  it("parses without error via loadProviderRegistry", async () => {
++    const registry = await loadProviderRegistry(EXAMPLE_PATH);
++    expect(registry.providers.size).toBeGreaterThan(0);
++  });
++
++  it("declares the ollama_llama3 provider the task spec calls for", async () => {
++    const registry = await loadProviderRegistry(EXAMPLE_PATH);
++    const descriptor = registry.providers.get("ollama_llama3");
++    expect(descriptor).toBeDefined();
++    expect(descriptor?.kind).toBe("ollama");
++    expect(descriptor?.model).toBe("llama3:8b");
++    expect(descriptor?.host).toBe("http://localhost:11434");
++  });
++
++  it("routes digest / cycle_summary / classifier to ollama_llama3", async () => {
++    const registry = await loadProviderRegistry(EXAMPLE_PATH);
++    expect(registry.routes.digest).toBe("ollama_llama3");
++    expect(registry.routes.cycle_summary).toBe("ollama_llama3");
++    expect(registry.routes.classifier).toBe("ollama_llama3");
++  });
++
++  it("hasProviderForRole resolves true for every routed role", async () => {
++    const registry = await loadProviderRegistry(EXAMPLE_PATH);
++    expect(hasProviderForRole(registry, "digest")).toBe(true);
++    expect(hasProviderForRole(registry, "cycle_summary")).toBe(true);
++    expect(hasProviderForRole(registry, "classifier")).toBe(true);
++  });
++
++  it("getProviderForRole instantiates an ollama LLMProvider for each role", async () => {
++    const registry = await loadProviderRegistry(EXAMPLE_PATH);
++    for (const role of ["digest", "cycle_summary", "classifier"] as const) {
++      const provider = getProviderForRole(registry, role);
++      expect(provider.name).toBe("ollama_llama3");
++      expect(typeof provider.invoke).toBe("function");
++    }
++  });
++});
+
+
+Diff summary: provider_config.yaml.example    | 74 +++++++++++++++++++++++++++++++++++++++++
+ state/generalstaff/tasks.json   |  5 +--
+ tests/providers.example.test.ts | 55 ++++++++++++++++++++++++++++++
+ 3 files changed, 132 insertions(+), 2 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T20:03:03.849Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200335.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200335.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_200336.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_200336.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneD
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
