@@ -51,6 +51,11 @@ import {
   parseSessionsFlag,
   stripSessionsArgs,
 } from "./sessions";
+import {
+  loadProviderRegistry,
+  ProviderConfigError,
+} from "./providers/registry";
+import type { ProviderRole } from "./providers/types";
 
 const VERSION = "0.0.1";
 
@@ -163,6 +168,10 @@ Usage:
 
   generalstaff config                                     Pretty-print the parsed+validated projects.yaml (with resolved defaults)
     Example: generalstaff config                        # useful for debugging config issues
+
+  generalstaff providers list [--json]                    List configured LLM providers + role routes from provider_config.yaml
+    Example: generalstaff providers list
+    Example: generalstaff providers list --json         # machine-readable registry
 
   generalstaff bot-status [--project=<id>]                Show unmerged commits on each project's bot branch
     Example: generalstaff bot-status                    # all projects
@@ -1067,6 +1076,99 @@ switch (command) {
     console.log(`  max_cycles_per_project_per_session:${d.max_cycles_per_project_per_session}`);
     console.log(`  log_dir:                           ${d.log_dir}`);
     console.log(`  digest_dir:                        ${d.digest_dir}`);
+    break;
+  }
+
+  case "providers": {
+    const sub = args[1];
+    if (sub !== "list") {
+      console.error(
+        `Error: unknown providers subcommand '${sub ?? ""}'. Usage: generalstaff providers list [--json]`,
+      );
+      process.exit(2);
+    }
+    const { values: provValues } = parseArgs({
+      args: args.slice(2),
+      options: {
+        json: { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
+    const configPath = join(getRootDir(), "provider_config.yaml");
+    if (!existsSync(configPath)) {
+      if (provValues.json) {
+        console.log(
+          JSON.stringify(
+            {
+              providers: [],
+              routes: { digest: null, cycle_summary: null, classifier: null },
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(
+          "No provider_config.yaml found. See provider_config.yaml.example for format.",
+        );
+      }
+      break;
+    }
+    let registry;
+    try {
+      registry = await loadProviderRegistry(configPath);
+    } catch (err) {
+      if (err instanceof ProviderConfigError) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+      }
+      throw err;
+    }
+    const roleOrder: ProviderRole[] = ["digest", "cycle_summary", "classifier"];
+    if (provValues.json) {
+      const providersArr = Array.from(registry.providers.values());
+      const routesOut: Record<string, string | null> = {};
+      for (const role of roleOrder) {
+        const id = registry.routes[role];
+        routesOut[role] =
+          id === "noop" || !registry.providers.has(id) ? null : id;
+      }
+      console.log(
+        JSON.stringify({ providers: providersArr, routes: routesOut }, null, 2),
+      );
+      break;
+    }
+    console.log("=== GeneralStaff Providers ===\n");
+    if (registry.providers.size === 0) {
+      console.log("Providers: (none configured)");
+    } else {
+      console.log(`Providers: ${registry.providers.size}\n`);
+      for (const p of registry.providers.values()) {
+        console.log(`[${p.id}]`);
+        console.log(`  kind:        ${p.kind}`);
+        console.log(`  model:       ${p.model}`);
+        if (p.kind === "ollama") {
+          console.log(`  host:        ${p.host ?? "http://localhost:11434 (default)"}`);
+        }
+        if (p.api_key_env !== undefined) {
+          const present = process.env[p.api_key_env] ? "present" : "missing";
+          console.log(`  api_key_env: ${p.api_key_env} (${present})`);
+        }
+        if (p.kind === "openrouter" || p.kind === "claude") {
+          console.log(
+            `  status:      not implemented in Phase 2 — parsed but not usable`,
+          );
+        }
+        console.log();
+      }
+    }
+    console.log("[routes]");
+    for (const role of roleOrder) {
+      const id = registry.routes[role];
+      const label =
+        id === "noop" || !registry.providers.has(id) ? "(unrouted)" : id;
+      console.log(`  ${role.padEnd(14)} ${label}`);
+    }
     break;
   }
 
