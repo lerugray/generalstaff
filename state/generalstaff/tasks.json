@@ -518,7 +518,7 @@
   {
     "id": "gs-112",
     "title": "Add a session-level watchdog that logs a warning when a cycle takes >2x its cycle_budget_minutes. Purpose: give users a visible signal that an engineer or reviewer step is stuck before the engineer timeout fires. Implementation: in session.ts, after executeCycle returns, compute actual duration from result.started_at / result.ended_at and compare to project.cycle_budget_minutes * 2. Emit console.error('[WATCHDOG] cycle X took Nm, 2x the budget — consider investigating') when threshold exceeded. Non-fatal, purely observability. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
