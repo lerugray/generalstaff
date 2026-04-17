@@ -82,10 +82,12 @@ Usage:
     Example: generalstaff log --project=myapp --lines=50
     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
 
-  generalstaff summary [--no-tests] [--format=json]       Dashboard: cycles, outcomes, duration, tasks, tests
+  generalstaff summary [--no-tests] [--format=json] [--project=<id>]
+                                                          Dashboard: cycles, outcomes, duration, tasks, tests
     Example: generalstaff summary                       # one-screen fleet overview
     Example: generalstaff summary --no-tests            # skip scanning tests/ dir
     Example: generalstaff summary --format=json         # machine-readable output
+    Example: generalstaff summary --project=myapp       # filter to a single project
 
   generalstaff doctor                                     Check prerequisites (bun, git, claude)
     Example: generalstaff doctor
@@ -330,6 +332,7 @@ switch (command) {
       options: {
         "no-tests": { type: "boolean", default: false },
         "format": { type: "string" },
+        "project": { type: "string" },
       },
       allowPositionals: false,
     });
@@ -338,7 +341,22 @@ switch (command) {
       console.error(`Error: unknown --format value: ${format} (supported: json)`);
       process.exit(1);
     }
-    const summary = await buildFleetSummary();
+    if (summaryValues.project) {
+      try {
+        const all = await loadProjects();
+        getProject(all, summaryValues.project);
+      } catch (err) {
+        if (err instanceof ProjectNotFoundError) {
+          console.error(`Error: project '${err.projectId}' not found`);
+          if (err.availableIds.length > 0) {
+            console.error(`  Available: ${err.availableIds.join(", ")}`);
+          }
+          process.exit(1);
+        }
+        throw err;
+      }
+    }
+    const summary = await buildFleetSummary(summaryValues.project);
     const tests = summaryValues["no-tests"]
       ? null
       : countTests(resolve("tests"));

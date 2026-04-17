@@ -350,7 +350,7 @@
   {
     "id": "gs-084",
     "title": "Add a 'generalstaff summary --project=<id>' filter flag that restricts the fleet summary dashboard output to a single project. When unknown project id is passed, print a clear error listing valid ids (use getProject helper). Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

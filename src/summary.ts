@@ -94,7 +94,9 @@ function countPendingTasksSync(tasksPath: string): number {
   }
 }
 
-export async function buildFleetSummary(): Promise<FleetSummary> {
+export async function buildFleetSummary(
+  projectFilter?: string,
+): Promise<FleetSummary> {
   const stateDir = join(getRootDir(), "state");
   const empty: FleetSummary = {
     projects: 0,
@@ -114,7 +116,7 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
 
   if (!existsSync(stateDir)) return empty;
 
-  const projectDirs = readdirSync(stateDir).filter((name) => {
+  let projectDirs = readdirSync(stateDir).filter((name) => {
     const p = join(stateDir, name);
     try {
       return statSync(p).isDirectory();
@@ -122,6 +124,10 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
       return false;
     }
   });
+
+  if (projectFilter) {
+    projectDirs = projectDirs.filter((name) => name === projectFilter);
+  }
 
   const summary: FleetSummary = {
     ...empty,
