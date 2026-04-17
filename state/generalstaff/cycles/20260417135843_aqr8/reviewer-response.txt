@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff exclusively modifies files related to the claimed task (adding voice annotations to README-PROPOSAL.md and updating its task status) and does not violate any hands-off constraints.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Augment docs/README-PROPOSAL.md with voice-calibration annotations. Read VOICE.md in full (all sections including 'Mainstream-economics anchors' and 'Dogfooding as credibility'). For each proposed section in README-PROPOSAL.md, append a one-line `_Voice:_` annotation that flags where the editorial voice calibration applies — e.g., section §5 'The problem' → '_Voice: lean into anti-slop + anti-extraction framing from VOICE.md §1; optional Falk & Tsoukalas anchor._'; section §11 'Why this over the alternatives' → '_Voice: direct Polsia comparison allowed per VOICE.md §1; keep pointed not screed per §2; dogfooding contrast is structural not rhetorical per VOICE.md §Dogfooding._'; section §13 'Hammerstein framing' → '_Voice: the Marxist-compatible reading per VOICE.md §Intellectual framing is fair game._'; section §3 'Status / Maturity' → '_Voice: add dogfooding credibility line per VOICE.md §Dogfooding README placement._'; section §6 'The approach / How it works' → '_Voice: reference PROGRESS.jsonl as observable evidence per VOICE.md §Dogfooding README placement._'; neutral sections (badges, prerequisites, license) → '_Voice: neutral technical._'. Do NOT rewrite any section headers or bullets. Do NOT write the actual README prose. Only add the inline `_Voice:_` lines.",
+      "evidence": "The diff adds numerous '_Voice:' annotations to README-PROPOSAL.md, directly corresponding to the task's requirement to append voice-calibration notes for each section. The task status in tasks.json is also updated to 'done'.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming no functional regressions. The diff is consistent with the claimed task and does not touch any hands-off files."
+}
