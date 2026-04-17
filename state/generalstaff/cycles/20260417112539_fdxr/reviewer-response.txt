@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task of adding reviewer provider/model to digest headers, with tests and configuration updates",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "You must include the reviewer provider name in the digest header (e.g., 'Claude', 'GPT-4') and optionally the model version (e.g., 'Claude 2.1')",
+      "evidence": "src/session.ts now adds 'reviewer_provider' and 'reviewer_model' parameters to writeDigest(), and generates a 'Reviewer: {provider} ({model})' header line in the digest",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification output shows all tests passed, confirming the implementation meets the requirements"
+}
