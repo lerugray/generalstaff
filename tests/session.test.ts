@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { writeDigest, formatSessionPlanPreview, parseDigest } from "../src/session";
+import { writeDigest, formatSessionPlanPreview, parseDigest, checkCycleWatchdog } from "../src/session";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
@@ -712,4 +712,37 @@ describe("runSession --exclude-project", () => {
     // session still ran against real projects
     expect((result.picked_ids as string[]).length).toBeGreaterThan(0);
   }, 30_000);
+});
+
+describe("checkCycleWatchdog", () => {
+  it("returns null when duration is under the 2x threshold", () => {
+    // 5 min budget → 10 min threshold; 8 min actual is fine
+    expect(checkCycleWatchdog(8 * 60, 5)).toBe(null);
+  });
+
+  it("returns null when duration equals the threshold exactly", () => {
+    // Equality is not a warning — only strictly over counts
+    expect(checkCycleWatchdog(10 * 60, 5)).toBe(null);
+  });
+
+  it("returns a warning when duration exceeds the threshold", () => {
+    const warn = checkCycleWatchdog(11 * 60, 5);
+    expect(warn).not.toBe(null);
+    expect(warn).toContain("[WATCHDOG]");
+    expect(warn).toContain("5-min budget");
+    expect(warn).toContain("2x");
+  });
+
+  it("formats the actual duration using formatDuration", () => {
+    // 12m30s > 10m threshold for a 5-min budget
+    const warn = checkCycleWatchdog(12 * 60 + 30, 5);
+    expect(warn).toContain("12m30s");
+  });
+
+  it("returns null when cycle_budget_minutes is 0 or negative", () => {
+    // Guard against a misconfigured project with 0 budget — every cycle
+    // would otherwise trigger. We return null so the session stays readable.
+    expect(checkCycleWatchdog(100, 0)).toBe(null);
+    expect(checkCycleWatchdog(100, -5)).toBe(null);
+  });
 });

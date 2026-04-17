@@ -23,6 +23,27 @@ import { categorizeResults } from "./results";
 import { checkOllamaReachable } from "./ollama";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
+// Watchdog threshold multiplier. 2x the per-project cycle budget was picked as
+// a conservative "probably stuck, not just slow" signal — normal engineer
+// runs that brush against their budget still get through without alarm,
+// but a cycle that doubles its budget is almost always stalled on an
+// engineer or reviewer step that deserves human eyes.
+export const WATCHDOG_MULTIPLIER = 2;
+
+export function checkCycleWatchdog(
+  durationSeconds: number,
+  cycleBudgetMinutes: number,
+): string | null {
+  if (cycleBudgetMinutes <= 0) return null;
+  const thresholdSeconds = cycleBudgetMinutes * 60 * WATCHDOG_MULTIPLIER;
+  if (durationSeconds <= thresholdSeconds) return null;
+  return (
+    `[WATCHDOG] cycle took ${formatDuration(durationSeconds)}, ` +
+    `${WATCHDOG_MULTIPLIER}x the ${cycleBudgetMinutes}-min budget — ` +
+    `consider investigating`
+  );
+}
+
 export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
   const lines: string[] = [];
   lines.push("=== Session Plan Preview ===");
@@ -256,6 +277,14 @@ export async function runSession(options: SessionOptions) {
       `Cycle ${allResults.length} completed: ${currentProject.id} — ` +
         `${result.final_outcome} (took ${cycleDurationStr}, ${remainingStr} remaining${etaStr})`,
     );
+
+    const watchdogWarning = checkCycleWatchdog(
+      cycleDurationSec,
+      currentProject.cycle_budget_minutes,
+    );
+    if (watchdogWarning) {
+      console.error(watchdogWarning);
+    }
 
     // Guard against runaway empty cycles
     if (result.final_outcome === "verified_weak" &&
