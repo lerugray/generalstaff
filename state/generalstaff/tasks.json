@@ -885,7 +885,7 @@
   {
     "id": "gs-148",
     "title": "Add a 'generalstaff history --outcome=<verified|verified_weak|verification_failed|cycle_skipped>' filter in src/cli.ts history command (alongside existing --verified-only). Threads into loadCycleHistory / loadCycleHistoryJson as an extra option (src/audit.ts collectCycleEnds). Error 'Error: unknown --outcome value' with the valid list when passed a bad value. If both --verified-only and --outcome are set, error 'Error: --verified-only and --outcome are mutually exclusive'. Add tests covering each valid value, invalid value, and mutual exclusion.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

@@ -782,6 +782,47 @@ describe("loadCycleHistory --verified-only filter", () => {
   });
 });
 
+describe("loadCycleHistory --outcome filter", () => {
+  beforeEach(async () => {
+    await appendProgress("proj-oc", "cycle_end", {
+      outcome: "verified", start_sha: "a", end_sha: "b", duration_seconds: 10,
+    }, "c-ok");
+    await appendProgress("proj-oc", "cycle_end", {
+      outcome: "verified_weak", start_sha: "a", end_sha: "b", duration_seconds: 10,
+    }, "c-weak");
+    await appendProgress("proj-oc", "cycle_end", {
+      outcome: "cycle_skipped", start_sha: "a", end_sha: "a", duration_seconds: 1,
+    }, "c-skip");
+    await appendProgress("proj-oc", "cycle_end", {
+      outcome: "verification_failed", start_sha: "a", end_sha: "c", duration_seconds: 15,
+    }, "c-fail");
+  });
+
+  it("returns only verified rows when outcome='verified'", async () => {
+    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verified" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("verified");
+  });
+
+  it("returns only verified_weak rows when outcome='verified_weak'", async () => {
+    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verified_weak" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("verified_weak");
+  });
+
+  it("returns only verification_failed rows when outcome='verification_failed'", async () => {
+    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "verification_failed" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("verification_failed");
+  });
+
+  it("returns only cycle_skipped rows when outcome='cycle_skipped'", async () => {
+    const rows = await loadCycleHistory("proj-oc", 20, { outcome: "cycle_skipped" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe("cycle_skipped");
+  });
+});
+
 describe("loadCycleHistoryJson", () => {
   it("returns empty array when no state dir exists", async () => {
     rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });

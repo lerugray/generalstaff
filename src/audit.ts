@@ -302,10 +302,19 @@ function shaRange(startSha: unknown, endSha: unknown): string {
   return start === end ? start : `${start}..${end}`;
 }
 
+export const VALID_OUTCOME_FILTERS = [
+  "verified",
+  "verified_weak",
+  "verification_failed",
+  "cycle_skipped",
+] as const;
+export type OutcomeFilter = (typeof VALID_OUTCOME_FILTERS)[number];
+
 export interface LoadCycleHistoryOptions {
   since?: string;
   until?: string;
   verifiedOnly?: boolean;
+  outcome?: OutcomeFilter;
 }
 
 // Parse a YYYYMMDD string to an epoch-ms bound. endOfDay=true returns the
@@ -370,6 +379,10 @@ async function collectCycleEnds(
       if (options.verifiedOnly) {
         const outcome = String(value.data.outcome ?? "");
         if (outcome === "cycle_skipped" || outcome === "verification_failed") continue;
+      }
+      if (options.outcome !== undefined) {
+        const outcome = String(value.data.outcome ?? "");
+        if (outcome !== options.outcome) continue;
       }
       entries.push(value);
     }
