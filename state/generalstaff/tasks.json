@@ -374,7 +374,7 @@
   {
     "id": "gs-088",
     "title": "Extract a shared readJsonl(path: string): unknown[] helper in src/audit.ts that reads a newline-delimited JSON file, skips empty lines, and silently drops malformed lines (returning the valid ones). Refactor existing tail/filter utilities to use it. Add tests covering missing file, empty file, malformed lines mixed with valid, and trailing newline.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
