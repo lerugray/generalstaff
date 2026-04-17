@@ -114,9 +114,10 @@ Usage:
     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
     Example: generalstaff history --outcome=verification_failed  # show only failed cycles
 
-  generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>] [--since=<ts>]
+  generalstaff log [--project=<id>] [--lines=<n>|--tail] [--level=error] [--grep=<pattern>] [--since=<ts>]
                                                           Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
+    Example: generalstaff log --tail                     # equivalent to --lines=9999, show everything
     Example: generalstaff log --level=error              # only cycle_skipped / verification_failed / *_error
     Example: generalstaff log --grep='verified|weak'     # case-insensitive regex over event + data
     Example: generalstaff log --since=1h                 # last hour only (also: 30m, 2d, or ISO timestamp)
@@ -426,13 +427,19 @@ switch (command) {
       args: args.slice(1),
       options: {
         project: { type: "string" },
-        lines: { type: "string", default: "20" },
+        lines: { type: "string" },
+        tail: { type: "boolean", default: false },
         level: { type: "string" },
         grep: { type: "string" },
         since: { type: "string" },
       },
       allowPositionals: false,
     });
+    if (values.tail && values.lines !== undefined) {
+      console.error("Error: --tail and --lines are mutually exclusive");
+      process.exit(2);
+    }
+    const linesValue = values.tail ? 9999 : parseInt(values.lines ?? "20", 10);
     if (values.level !== undefined && values.level !== "error") {
       console.error(`Error: --level must be 'error' (got '${values.level}')`);
       process.exit(2);
@@ -455,7 +462,7 @@ switch (command) {
         process.exit(2);
       }
     }
-    await tailProgressLog(values.project, parseInt(values.lines!, 10), {
+    await tailProgressLog(values.project, linesValue, {
       level: values.level as "error" | undefined,
       grep: grepRegex,
       sinceMs,
