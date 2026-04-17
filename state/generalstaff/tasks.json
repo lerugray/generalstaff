@@ -422,7 +422,7 @@
   {
     "id": "gs-096",
     "title": "Add a 'generalstaff task count [--project=<id>]' subcommand that reports the number of pending vs done tasks per project (or for all projects when --project is omitted). Output format: 'myproj: 5 pending, 12 done (17 total)'. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

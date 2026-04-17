@@ -24,6 +24,7 @@ import {
   pendingTasks,
   addTask,
   markTaskDone,
+  countTasks,
   TasksLoadError,
   TaskValidationError,
 } from "./tasks";
@@ -106,6 +107,9 @@ Usage:
     Example: generalstaff task add --project=myapp "Fix login bug"
   generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
     Example: generalstaff task done --project=myapp --task=my-042
+  generalstaff task count [--project=<id>]                Report pending vs done counts
+    Example: generalstaff task count                     # all projects
+    Example: generalstaff task count --project=myapp     # single project
 
   generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json]
                                                           Print a session digest to stdout, or list all
@@ -553,12 +557,46 @@ switch (command) {
       } else {
         console.log(`Marked ${result.task.id} as done: ${result.task.title}`);
       }
+    } else if (sub === "count") {
+      const { values: countValues } = parseArgs({
+        args: args.slice(2),
+        options: { project: { type: "string" } },
+        allowPositionals: false,
+      });
+      let targets: string[];
+      if (countValues.project) {
+        targets = [countValues.project];
+      } else {
+        const all = await loadProjects();
+        if (all.length === 0) {
+          console.log("No projects registered.");
+          break;
+        }
+        targets = all.map((p) => p.id);
+      }
+      for (const id of targets) {
+        let tasks;
+        try {
+          tasks = await loadTasks(id);
+        } catch (err) {
+          if (err instanceof TasksLoadError) {
+            console.error(`Error: ${err.message}`);
+            process.exit(1);
+          }
+          throw err;
+        }
+        const c = countTasks(tasks);
+        console.log(
+          `${id}: ${c.pending} pending, ${c.done} done (${c.total} total)`,
+        );
+      }
     } else {
       console.error(
-        "Error: task subcommand required (list, add, or done)\n" +
+        "Error: task subcommand required (list, add, done, or count)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
-          "         generalstaff task done --project=<id> --task=<task-id>",
+          "         generalstaff task done --project=<id> --task=<task-id>\n" +
+          "         generalstaff task count [--project=<id>]",
       );
       process.exit(1);
     }
