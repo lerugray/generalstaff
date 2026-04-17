@@ -111,13 +111,14 @@ Usage:
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
 
-  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json]
+  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path]
                                                           Print a session digest to stdout, or list all
     Example: generalstaff digest --latest                # most recent digest
     Example: generalstaff digest --date=20260416         # first digest from that day
     Example: generalstaff digest --list                  # enumerate digests, newest first
     Example: generalstaff digest --latest --json         # structured JSON of the latest digest
     Example: generalstaff digest --list --json           # JSON array of digest summaries
+    Example: generalstaff digest --latest --path         # absolute path of the latest digest (for scripting)
 
   generalstaff version                                    Show version + environment info (for bug reports)
     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
@@ -611,6 +612,7 @@ switch (command) {
         date: { type: "string" },
         list: { type: "boolean", default: false },
         json: { type: "boolean", default: false },
+        path: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -636,6 +638,12 @@ switch (command) {
         break;
       }
       const sorted = [...files].sort().reverse();
+      if (digestValues.path) {
+        const paths = sorted.map((f) => join(digestDir, f));
+        if (digestValues.json) console.log(JSON.stringify(paths, null, 2));
+        else for (const p of paths) console.log(p);
+        break;
+      }
       const entries = sorted.map((f) => {
         const content = readFileSync(join(digestDir, f), "utf8");
         const m = f.match(/^digest_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.md$/);
@@ -684,7 +692,13 @@ switch (command) {
     } else {
       chosen = files[files.length - 1];
     }
-    const chosenContent = readFileSync(join(digestDir, chosen), "utf8");
+    const chosenPath = join(digestDir, chosen);
+    if (digestValues.path) {
+      if (digestValues.json) console.log(JSON.stringify(chosenPath));
+      else console.log(chosenPath);
+      break;
+    }
+    const chosenContent = readFileSync(chosenPath, "utf8");
     if (digestValues.json) {
       const { parseDigest } = await import("./session");
       console.log(JSON.stringify({ file: chosen, ...parseDigest(chosenContent) }, null, 2));
