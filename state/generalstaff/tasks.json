@@ -620,7 +620,7 @@
   {
     "id": "gs-129",
     "title": "Add test coverage for src/notify.ts truncateForTelegram: length always <= 3900, marker present, UTF-8 multi-byte chars at boundary don't produce invalid bytes (em-dashes/emoji edge cases).",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

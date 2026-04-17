@@ -6,6 +6,7 @@ import {
   loadTelegramCredentials,
   notifySessionEnd,
   sendTelegramMessage,
+  truncateForTelegram,
   type SessionNotificationParams,
 } from "../src/notify";
 
@@ -178,6 +179,86 @@ describe("formatSessionMessage", () => {
   it("omits the log path when undefined", () => {
     const msg = formatSessionMessage(makeParams({ logPath: undefined }));
     expect(msg).not.toContain("Log:");
+  });
+});
+
+describe("truncateForTelegram", () => {
+  it("returns short text unchanged", () => {
+    const text = "hello world";
+    expect(truncateForTelegram(text)).toBe(text);
+  });
+
+  it("returns text exactly at the limit unchanged", () => {
+    const text = "a".repeat(3900);
+    const result = truncateForTelegram(text);
+    expect(result).toBe(text);
+    expect(result.length).toBe(3900);
+  });
+
+  it("truncates text over the limit to no more than 3900 chars", () => {
+    const text = "a".repeat(10000);
+    const result = truncateForTelegram(text);
+    expect(result.length).toBeLessThanOrEqual(3900);
+  });
+
+  it("includes the truncation marker when the input is truncated", () => {
+    const text = "a".repeat(5000);
+    const result = truncateForTelegram(text);
+    expect(result).toContain("[...truncated]");
+  });
+
+  it("omits the truncation marker when the input is short enough", () => {
+    const result = truncateForTelegram("plenty of room");
+    expect(result).not.toContain("[...truncated]");
+  });
+
+  it("respects a custom limit", () => {
+    const result = truncateForTelegram("x".repeat(500), 100);
+    expect(result.length).toBeLessThanOrEqual(100);
+    expect(result).toContain("[...truncated]");
+  });
+
+  it("handles em-dashes at the truncation boundary without corruption", () => {
+    // Em-dash (U+2014) is a single UTF-16 code unit but 3 UTF-8 bytes.
+    // Truncation should still produce a round-trippable UTF-8 string.
+    const text = "—".repeat(5000);
+    const result = truncateForTelegram(text);
+    const roundTripped = Buffer.from(result, "utf8").toString("utf8");
+    expect(roundTripped).toBe(result);
+    expect(result).toContain("[...truncated]");
+  });
+
+  it("does not leave a lone surrogate when an emoji straddles the truncation boundary", () => {
+    // 🎉 (U+1F389) is a surrogate pair in UTF-16: [0xD83C, 0xDF89]. If
+    // truncation lands between the high and low surrogate, the result
+    // contains a lone surrogate that produces U+FFFD (replacement char)
+    // when round-tripped through UTF-8 bytes.
+    //
+    // Construct input so that the default slice position (limit - 20 =
+    // 3880) falls between the two code units of an emoji: pad so the
+    // high surrogate lands at index 3879 and the low at index 3880.
+    const pad = "a".repeat(3879);
+    const text = pad + "🎉".repeat(100);
+    const result = truncateForTelegram(text);
+
+    const roundTripped = Buffer.from(result, "utf8").toString("utf8");
+    expect(roundTripped).toBe(result);
+
+    // No lone surrogate should remain anywhere in the output.
+    for (let i = 0; i < result.length; i++) {
+      const code = result.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = result.charCodeAt(i + 1);
+        expect(next).toBeGreaterThanOrEqual(0xdc00);
+        expect(next).toBeLessThanOrEqual(0xdfff);
+        i++;
+      } else {
+        expect(code < 0xdc00 || code > 0xdfff).toBe(true);
+      }
+    }
+
+    expect(result.length).toBeLessThanOrEqual(3900);
+    expect(result).toContain("[...truncated]");
   });
 });
 
