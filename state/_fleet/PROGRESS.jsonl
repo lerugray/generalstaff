@@ -1,0 +1,1 @@
+{"timestamp":"2026-04-17T13:47:07.864Z","event":"session_complete","project_id":"_fleet","data":{"duration_minutes":95,"total_cycles":10,"total_verified":9,"total_failed":1,"stop_reason":"budget"}}
