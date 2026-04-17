@@ -170,4 +170,75 @@ digest" file per project is faster to triage.
 
 **no-as-a-service** (hotheadhacker/no-as-a-service, 7K stars) — Joke API proving "bring your own imagination" works. Simple idea + clean execution = community adoption. Good example of project-motivation neutrality.
 
+## 2026-04-17 — karpathy LLM-wiki gist (persistent-context pattern)
+
+**Source:** https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+
+Karpathy proposes an LLM-maintained persistent wiki as a
+compounding-knowledge alternative to disposable chat context and
+standard RAG. Three-layer architecture:
+
+1. **Immutable raw sources** — articles, papers, images, prior
+   conversations, commits. Never edited.
+2. **LLM-owned wiki of interconnected markdown files** — the
+   persistent knowledge artifact, edited continuously.
+3. **Schema document** (like our CLAUDE.md) — defines the wiki's
+   conventions, file roles, and workflows so the LLM knows how to
+   maintain the second layer.
+
+Three operations:
+- **Ingest:** given a new source (conversation, paper, commit),
+  update 10-15 related pages to incorporate what's new. Flag
+  contradictions with prior claims.
+- **Query:** search wiki pages at read time, synthesize answer
+  from the already-compiled knowledge (not from the raw sources).
+  Optionally file discoveries back into the wiki.
+- **Lint:** periodic health check — contradictions, orphaned
+  pages, stale claims, broken cross-references.
+
+**Why this maps onto what GeneralStaff already does informally:**
+CLAUDE.md is the schema document. research-notes.md, DESIGN.md,
+FUTURE-DIRECTIONS-*.md, PHASE-*.md are the interconnected wiki.
+Git commits + PROGRESS.jsonl + Telegram messages + external repos
+are the immutable raw sources. What we've been missing is the
+**explicit Ingest step at end-of-session** — currently the LLM
+(me) ingests sources incrementally during the session but doesn't
+consolidate into wiki updates before ending. That's the gap Ray
+flagged 2026-04-17 afternoon ("we failed to capture session notes
+last session"). The gist formalizes the obligation.
+
+**Novel vs generic RAG:** the LLM generates the knowledge base
+itself, not just retrieves from it. Synthesis happens continuously
+during ingestion, not at query time. Human curation drives source
+selection; the LLM does the bookkeeping. Referential integrity is
+maintained across pages via explicit cross-references, not by
+semantic similarity.
+
+**Conceptual lineage:** Vannevar Bush's Memex (1945). Explicitly
+rejects the disposable chat-history model that currently dominates
+LLM assistant UX.
+
+**Applicability to GeneralStaff specifically:**
+- The end-of-session **Ingest** step is a human-interactive-session
+  responsibility (not bot — docs/sessions/ is hands-off and it's
+  creative/taste work per Rule 1).
+- The **Lint** operation could plausibly be a low-stakes bot task
+  later (check cross-references, flag orphaned docs, find stale
+  date references — bounded correctness work). Not a Phase 2
+  deliverable; capture as a Phase 4+ candidate.
+- The **Query** operation is what a future user-facing GS
+  subcommand like `generalstaff ask "what's our stance on X?"`
+  could do against the vault — relates to the vault plugin in
+  FUTURE-DIRECTIONS §6 but as an internal tool first, corpus-of-
+  my-own-docs before corpus-of-my-whole-life.
+
+**Adjacent karpathy refs we've now captured:**
+- karpathy/autoresearch — optimization-loop pattern (informs gs-149
+  pi-autoresearch analogy)
+- This gist — LLM-wiki pattern (informs end-of-session tracking
+  obligation captured 2026-04-17)
+- The two are complementary: autoresearch = how the bot does its
+  work; LLM-wiki = how the human and assistant maintain shared
+  memory across sessions.
+
 **logo-creator MCP** — https://mcpmarket.com/tools/skills/logo-creator-1 — MCP tool for project logos, useful for Phase 7 branding with kriegspiel theme.

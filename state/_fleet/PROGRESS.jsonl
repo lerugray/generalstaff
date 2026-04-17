@@ -2,3 +2,4 @@
 {"timestamp":"2026-04-17T14:20:22.858Z","event":"session_complete","project_id":"_fleet","data":{"duration_minutes":27,"total_cycles":5,"total_verified":4,"total_failed":1,"stop_reason":"insufficient-budget"}}
 {"timestamp":"2026-04-17T15:25:21.191Z","event":"session_complete","project_id":"_fleet","data":{"duration_minutes":60,"total_cycles":9,"total_verified":6,"total_failed":3,"stop_reason":"insufficient-budget"}}
 {"timestamp":"2026-04-17T16:30:42.794Z","event":"session_complete","project_id":"_fleet","data":{"duration_minutes":65,"total_cycles":8,"total_verified":2,"total_failed":6,"stop_reason":"insufficient-budget","reviewer":"ollama"}}
+{"timestamp":"2026-04-17T19:19:49.558Z","event":"session_complete","project_id":"_fleet","data":{"duration_minutes":58,"total_cycles":10,"total_verified":8,"total_failed":2,"stop_reason":"no-project","reviewer":"openrouter"}}

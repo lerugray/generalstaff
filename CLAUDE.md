@@ -107,6 +107,54 @@ When you're about to save a memory, ask: "would the work-PC
 session need this?" If yes, save it here in CLAUDE.md (or a
 committed doc) instead.
 
+### End-of-session Ingest obligation (Ray, 2026-04-17)
+
+The project vault (this file + `research-notes.md` + `DESIGN.md`
++ `FUTURE-DIRECTIONS-*.md` + `PHASE-*.md`) is an **LLM-maintained
+wiki** in the pattern Karpathy formalized in
+https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+(captured in `research-notes.md` 2026-04-17). The interactive
+Claude session is the wiki's maintainer.
+
+Before ending any working session, perform an **Ingest pass**:
+
+1. **Review new sources** — external URLs/repos we discussed, new
+   external refs Ray shared, strategic decisions we made, blockers
+   we hit, architectural conclusions we reached. Anything a future
+   session couldn't reconstruct from `git log` + `PROGRESS.jsonl`
+   alone.
+2. **Update the relevant pages** — new external refs into
+   `research-notes.md`, new conventions into this file, new
+   design decisions into `DESIGN.md` (append-only), new
+   strategic direction into the relevant `PHASE-*.md` or
+   `FUTURE-DIRECTIONS-*.md`.
+3. **Cross-reference** — if a new note updates an old one,
+   link explicitly so a future session following the old note
+   sees the addendum.
+4. **Flag contradictions** — if new info contradicts an old
+   claim, say so plainly in the new entry; don't silently
+   overwrite the old.
+5. **Commit + push** — the vault only persists across machines
+   via git. Unpushed updates are effectively lost.
+
+The test is: *"would a work-PC session three weeks from now, or
+a fresh Claude session tomorrow, need this to avoid expensive
+reconstruction?"* If yes, commit it.
+
+**What NOT to ingest:**
+- Activity logs — `git log` already has what-when-who.
+- Transient task state — that belongs in tasks.json or PROGRESS.jsonl.
+- Session-specific debugging details that won't inform future work.
+- Creative/taste material the user produced — not mine to
+  archive without permission.
+
+**Hands-off surfaces the Ingest pass never touches:** the full
+hands-off list in `projects.yaml` applies to bot cycles but NOT
+to interactive-session doc updates; however, `docs/internal/` and
+`docs/sessions/` are hands-off by convention for both the bot and
+for Ingest — if session notes are ever wanted there, Ray asks
+explicitly, don't proactively write.
+
 ### Ray's workflow conventions
 
 - **Git, not OneDrive, for cross-machine sync.** The GeneralStaff

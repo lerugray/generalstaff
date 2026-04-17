@@ -742,5 +742,89 @@
     "title": "Fact-extraction research note. Append a dated section '## 2026-04-17 — pi-autoresearch + karpathy/autoresearch mechanisms' to research-notes.md documenting two mechanisms directly relevant to GeneralStaff Phase 2 design: (a) pi-autoresearch's CONFIDENCE SCORING (session noise floor, 2.0x threshold for 'real' improvement, green/yellow/red ranges) — extract the exact formula and how session noise is computed; (b) pi-autoresearch's AUTO-REVERT-ON-REGRESSION mechanism — extract what triggers a revert, what metric is measured, how state is restored. Also briefly summarize karpathy/autoresearch as the canonical inspiration and note what pi-autoresearch added on top. Use WebFetch on https://github.com/davebcn87/pi-autoresearch and https://github.com/karpathy/autoresearch. PURE FACT EXTRACTION — NO editorializing, NO recommendations, NO opinion, NO proposals for how to apply. Docs-only task: no code changes, no new tests. research-notes.md is NOT in the hands-off list, so this is safe. Verification will pass as a no-code diff.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-150",
+    "title": "Create src/providers/types.ts defining the provider abstraction interfaces: LLMProvider (name: string, invoke(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number; temperature?: number }): Promise<{ content: string; error?: string }>), ProviderRole ('digest' | 'cycle_summary' | 'classifier' — explicitly NOT including 'reviewer' since reviewer dispatch is handled inline in src/reviewer.ts per Phase 2 scoping), ProviderHealth ({ reachable: boolean; host?: string; error?: string; latencyMs?: number }), and ProviderDescriptor ({ id: string; kind: 'ollama' | 'openrouter' | 'claude'; model: string; host?: string; api_key_env?: string }). All pure type definitions with no runtime code. Add tests in tests/providers.types.test.ts exercising only the type shape (e.g. satisfies checks) — no runtime assertions needed beyond importing the module without errors. Do NOT import from src/reviewer.ts — the new abstraction lives alongside, not on top of, reviewer dispatch.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-151",
+    "title": "Create src/providers/ollama.ts exporting createOllamaProvider(descriptor: ProviderDescriptor): LLMProvider that returns an object conforming to the LLMProvider interface from gs-150. invoke() posts to <host>/api/chat (mirror the shape already used by invokeOllamaReviewer in src/reviewer.ts) — model from descriptor.model, host defaults to http://localhost:11434, options.temperature defaults to 0, options.maxTokens maps to num_predict (default 800 — much smaller than reviewer's 8000 since digest-tier tasks are one-shot summaries). On HTTP non-2xx or fetch error return { content: '', error: '<message>' } rather than the [REVIEWER ERROR] sentinel — this path is NOT reviewer-shaped. Include a health() method returning ProviderHealth via a GET <host>/api/tags probe (reuse logic equivalent to src/ollama.ts checkOllamaReachable). Add tests in tests/providers.ollama.test.ts mocking globalThis.fetch: (a) happy path returns content, (b) non-2xx returns error, (c) fetch throws returns error, (d) host with trailing slash is normalized, (e) health() reachable=true on 200 from /api/tags, (f) health() reachable=false on fetch failure. Do NOT modify src/reviewer.ts or src/ollama.ts.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-152",
+    "title": "Create src/providers/registry.ts with loadProviderRegistry(configPath?: string) that reads provider_config.yaml from the project root (default path getRootDir() + '/provider_config.yaml') and returns { providers: Map<string, ProviderDescriptor>, routes: Record<ProviderRole, string> }. Use the yaml package (already a dep per src/projects.ts). Validate: each provider entry has id, kind in {'ollama','openrouter','claude'}, model string, host optional. routes entry keys must be in {'digest','cycle_summary','classifier'}; values must reference a providers key. On malformed input throw a ProviderConfigError (new subclass of Error) naming the field and the offending value. getProviderForRole(registry, role): LLMProvider returns the instantiated provider for that role (dispatch on kind — only ollama implemented in Phase 2; openrouter/claude kinds throw 'not implemented in Phase 2 — see src/reviewer.ts for inline dispatch'). If provider_config.yaml is missing, return a registry with no providers and routes all pointing at 'noop' — callers should check with hasProviderForRole() before dispatching. Add tests in tests/providers.registry.test.ts covering valid config, missing file (returns empty registry), malformed (each required-field case throws ProviderConfigError), unknown kind rejected, unreferenced route rejected. Do NOT modify src/reviewer.ts or projects.yaml.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-153",
+    "title": "Create provider_config.yaml.example at repo root documenting the Phase 2 schema. Mirror projects.yaml.example style — heavy comments explaining each field, rationale for defaults, a warning that reviewer routing does NOT go here (it's controlled via GENERALSTAFF_REVIEWER_PROVIDER env var as of Phase 1). Structure: a top-level 'providers:' map with one ollama entry (id: ollama_llama3, kind: ollama, model: llama3:8b, host: http://localhost:11434) and a 'routes:' block mapping digest/cycle_summary/classifier to ollama_llama3. Include a comment block at top stating the file is NOT hands-off (bots can edit it) and pointing to FUTURE-DIRECTIONS §2 tier taxonomy for the rationale. Also create tests/providers.example.test.ts that loads this file via loadProviderRegistry from gs-152 and asserts the registry parses without error and routes resolve — keeps the example file from rotting away from the loader. Do NOT create provider_config.yaml (the real one) — that's user setup, not a task deliverable.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-154",
+    "title": "Create src/digest_llm.ts with generateDigestNarrative(results: CycleResult[], durationMinutes: number, provider: LLMProvider): Promise<{ narrative: string; fellBack: boolean; error?: string }>. Build a compact prompt (~300 tokens) summarizing cycles: verified count, failed count, one-line-per-verified-cycle with the commit subject (use fetchCommitSubject from src/git.ts — already imported in session.ts), one-line-per-failed-cycle with the reason. Prompt asks for a 2-4 sentence plain-English narrative of what happened this session — no bullets, no headings, just prose. Invoke the provider with maxTokens=200, temperature=0. On provider error or empty content, return { narrative: '', fellBack: true, error } so callers can fall back to the existing templated line. On success return { narrative: content.trim(), fellBack: false }. Add tests in tests/digest_llm.test.ts using a stub LLMProvider: (a) happy path returns narrative, (b) provider returns empty content triggers fellBack, (c) provider returns error triggers fellBack, (d) narrative is trimmed. Do NOT modify src/session.ts in this task — wiring happens in gs-158.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-155",
+    "title": "Create src/cycle_summary_llm.ts with generateCycleDescription(result: CycleResult, diffStat: string, provider: LLMProvider): Promise<{ description: string; fellBack: boolean; error?: string }>. Build a tiny prompt (~150 tokens) from cycle_id, project_id, final_outcome, diff_stats, and diff_stat summary; ask for a single-line (max ~80 char) human-readable description of what the cycle did. Currently the digest's 'What got done' section uses fetchCommitSubject in writeDigest; this new function produces a richer one-liner that can optionally replace it. Provider invoked with maxTokens=80, temperature=0. Strip newlines from output so it stays single-line; truncate at 120 chars with ellipsis. On error return fellBack=true. Add tests in tests/cycle_summary_llm.test.ts with a stub provider: (a) happy path returns description, (b) provider strips internal newlines, (c) truncates oversize output, (d) error path fellBack=true. Do NOT wire into writeDigest in this task — that's gs-158's job behind a feature flag.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-156",
+    "title": "Create tests/providers.calibration.test.ts — a dual-run reviewer-calibration harness that takes an array of fixture diffs (create 3 minimal fixtures under tests/fixtures/reviewer_calibration/: verified_simple (small tests-added diff), hands_off_violation (touches src/safety.ts), verification_failed_scope_drift (diff unrelated to any stated task)). For each fixture, invoke invokeReviewerProvider from src/reviewer.ts TWICE: once with provider='claude' (skipped when CLAUDE_BINARY env not present — the test prints 'skip: no claude binary' and passes), once with provider='ollama' (skipped when Ollama is unreachable via checkOllamaReachable — also prints skip and passes). Parse both responses via parseReviewerResponse and assert the verdicts AGREE on each fixture (verified/verified, verification_failed/verification_failed). On disagreement, fail with a diff of the two responses. This is a GATE test for Phase 2 tier taxonomy — catches Ollama drifting from Claude on straightforward cases. Marked skip-when-unavailable so CI without local Ollama/claude still passes. Fixtures live under tests/fixtures/reviewer_calibration/ (new subdir). Do NOT modify src/reviewer.ts.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-157",
+    "title": "Add 'generalstaff providers list' subcommand in src/cli.ts. When invoked, load provider_config.yaml via loadProviderRegistry from gs-152. For each configured provider, print: id, kind, model, host (if ollama), api_key_env presence (openrouter, but noted as unimplemented in Phase 2). Support --json flag emitting the full registry as JSON. If provider_config.yaml is missing, print 'No provider_config.yaml found. See provider_config.yaml.example for format.' and exit 0 (not an error — the file is optional). Also list each route (digest/cycle_summary/classifier) with its resolved provider id, or '(unrouted)' if route not configured. Add tests in tests/cli.test.ts (or extend) covering: (a) missing file message, (b) valid file table output, (c) --json output shape. Wire into the switch(command) block and into printUsage()'s help text. Do NOT touch reviewer routing output — that's controlled by GENERALSTAFF_REVIEWER_PROVIDER env var and already shown via 'generalstaff config'.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-158",
+    "title": "Wire generateDigestNarrative (gs-154) into writeDigest in src/session.ts behind a feature flag. When env var GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is set to a non-empty provider id AND provider_config.yaml exists AND the registry resolves that id, instantiate the provider via getProviderForRole, call generateDigestNarrative, and if it returns fellBack=false inject the narrative as a new '**Narrative:**' line in the digest front-matter (right after '**Summary:**'). If fellBack=true OR the env var is unset, writeDigest produces exactly the current output (templated only). The feature must default OFF — no behavior change for existing users until they opt in. Log a digest_narrative_generated PROGRESS event to the _fleet log (follow-up: actually ADDING this event type to ProgressEventType is gs-161; until then just console.log the fallback status, no PROGRESS event). Add tests in tests/session.test.ts: (a) no env var → identical to baseline writeDigest output, (b) env var set + provider returns narrative → digest contains '**Narrative:**' line, (c) env var set + provider errors → narrative line absent, digest otherwise complete. Do NOT modify projects.yaml or the reviewer dispatch.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-159",
+    "title": "Add 'generalstaff providers ping <provider-id>' subcommand in src/cli.ts. Loads the registry via loadProviderRegistry, instantiates the named provider, calls its health() method (gs-151 defines this on the ollama provider; other kinds throw 'not implemented in Phase 2'). Prints: 'Provider <id>: reachable (<latencyMs>ms)' on success, 'Provider <id>: unreachable — <error>' on failure (exit code 1 on failure for scripting). --json flag dumps the ProviderHealth object. Also support 'generalstaff providers ping --all' which pings every configured provider in parallel and prints a summary table. Add tests in tests/cli.test.ts covering: unknown provider id errors, ping single provider success, ping single provider failure (exit 1), --all table. Wire into the switch(command) block and printUsage() help text. Do NOT touch src/reviewer.ts; the existing 'generalstaff doctor' command has Ollama-specific probes — leave those as-is.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-160",
+    "title": "Add test coverage in tests/session.test.ts for graceful degradation when GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is set but the underlying provider is unreachable. Scenario: set env var to 'ollama_llama3', provide a test provider_config.yaml fixture, stub the ollama provider's invoke() to return an error, run writeDigest — assert: (a) the session completes without throwing, (b) the digest file is written, (c) the digest contains the standard '**Summary:**' line and does NOT contain '**Narrative:**', (d) an appropriate console.log warning is emitted. Also add an integration-style test that the existing pre-flight Ollama reachability warning in runSession still prints when GENERALSTAFF_REVIEWER_PROVIDER=ollama and the server is down — regression guard since gs-158 wiring touches the same code area. Do NOT modify src/reviewer.ts or projects.yaml. No changes to src/ollama.ts needed — existing checkOllamaReachable is sufficient.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-161",
+    "title": "Add 'provider_invoked' and 'provider_fallback' entries to ProgressEventType union AND VALID_EVENTS runtime list in src/types.ts (mirror the pattern gs-134 fixed for worktree_preflight — both lists must match or isProgressEntry silently rejects). provider_invoked fires when any non-reviewer provider is invoked (initially only from src/digest_llm.ts and src/cycle_summary_llm.ts); data shape { provider_id: string, role: 'digest'|'cycle_summary'|'classifier', prompt_length: number, duration_ms: number, success: boolean }. provider_fallback fires when a provider fails and the caller falls back to the templated path; data shape { provider_id: string, role: string, error: string }. Add a test in tests/types.test.ts extending the 'accepts all valid event types' list so omission can't silently recur. Do NOT emit these events from src/reviewer.ts — the reviewer already has its own reviewer_invoked / reviewer_fallback events; those stay as-is per Phase 2 scoping. Actually emitting the new events from digest_llm.ts / cycle_summary_llm.ts is a follow-up (can land in the same task or as a trivial follow-on — draft handles this as a one-line appendProgress call site if time permits).",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-162",
+    "title": "Add test coverage in tests/providers.registry.test.ts for every malformed-input branch of loadProviderRegistry (gs-152). Cases: (a) yaml parse failure (raw '{[ bad'), (b) top-level providers not a map, (c) provider entry missing id, (d) provider entry missing kind, (e) provider entry with unknown kind ('gemini' — not in Phase 2), (f) provider entry missing model, (g) routes referencing a provider id that is not declared, (h) routes with unknown role key, (i) empty file (returns empty registry, not an error — this is the 'no provider_config.yaml' equivalent for an existing-but-blank file). Each case asserts either a ProviderConfigError with the expected field name OR the documented lenient fallback. Also add a fixture at tests/fixtures/provider_config_malformed/ with one bad example per case. Do NOT touch provider_config.yaml.example — that stays as the golden-path reference.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-163",
+    "title": "Add docs/provider-config-format.md documenting the provider_config.yaml schema (separate from the example file so long-form explanation doesn't clutter the inline comments). Sections: (1) Purpose — why provider_config.yaml exists alongside the reviewer's env-var-based dispatch, citing FUTURE-DIRECTIONS §2 tier taxonomy. (2) Schema reference — each top-level block (providers, routes) with required/optional fields and types. (3) Supported provider kinds — ollama (fully implemented), openrouter/claude (listed but Phase 2 defers implementation to reviewer's inline path). (4) Role definitions — digest, cycle_summary, classifier; what each one controls. (5) A complete worked example copied from provider_config.yaml.example. (6) FAQ: 'Why isn't reviewer routing here?' (because reviewer dispatch stays in src/reviewer.ts this phase). Target length ~200 lines. Do NOT place under docs/internal/ (hands-off) or docs/sessions/ (hands-off) — lands in docs/ root which is NOT hands-off. Add a link to this doc from docs/ index if one exists (check first; create if not). No tests needed for prose-only docs.",
+    "status": "pending",
+    "priority": 3
   }
 ]
