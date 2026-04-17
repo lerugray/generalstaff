@@ -84,8 +84,16 @@ export async function runReviewer(
     return { verdict: "verified", response: dryResponse, rawResponse: raw, parseError: null };
   }
 
-  // Spawn claude -p
-  const rawResponse = await spawnClaude(prompt, cwdOverride ?? project.path);
+  // Provider routing. Default: claude -p (behavior since Phase 1). Opt-in:
+  // GENERALSTAFF_REVIEWER_PROVIDER=openrouter uses the OpenRouter Chat
+  // Completions API with Qwen3 Coder (see FUTURE-DIRECTIONS-2026-04-15.md
+  // §2 tier taxonomy). The reviewer is structured JSON-in/JSON-out so a
+  // tools-capable agent is not required on this path.
+  const provider = (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "claude").toLowerCase();
+  const rawResponse =
+    provider === "openrouter"
+      ? await invokeOpenRouterReviewer(prompt)
+      : await spawnClaude(prompt, cwdOverride ?? project.path);
 
   await writeCycleFile(
     project.id,
@@ -162,6 +170,57 @@ async function spawnClaude(prompt: string, cwd: string): Promise<string> {
       resolve(`[REVIEWER ERROR] Failed to spawn claude: ${err.message}`);
     });
   });
+}
+
+// OpenRouter-backed reviewer invocation. Uses the OpenAI-compatible
+// Chat Completions API. Defaults to qwen/qwen3-coder-30b-a3b-instruct
+// ($0.07/$0.27 per M — very cheap); overridable via
+// GENERALSTAFF_REVIEWER_MODEL. Returns the raw text content of the
+// first choice's message, or a `[REVIEWER ERROR] ...` string that
+// parseReviewerResponse will fail-safe to verification_failed on.
+export async function invokeOpenRouterReviewer(prompt: string): Promise<string> {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    return (
+      "[REVIEWER ERROR] OPENROUTER_API_KEY not set in environment. " +
+      "Set it via `export OPENROUTER_API_KEY=...` or source it from " +
+      "your provider .env file before running with " +
+      "GENERALSTAFF_REVIEWER_PROVIDER=openrouter."
+    );
+  }
+  const model =
+    process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: 4000,
+      }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      return `[REVIEWER ERROR] OpenRouter ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`;
+    }
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const content = data?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") {
+      return `[REVIEWER ERROR] OpenRouter response missing content: ${JSON.stringify(data).slice(0, 1500)}`;
+    }
+    return content;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `[REVIEWER ERROR] OpenRouter fetch failed: ${msg}`;
+  }
 }
 
 export function parseReviewerResponse(raw: string): {
