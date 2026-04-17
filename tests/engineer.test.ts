@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { runEngineer, killChildTree } from "../src/engineer";
+import {
+  runEngineer,
+  killChildTree,
+  killActiveEngineer,
+  getActiveEngineerChild,
+} from "../src/engineer";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
@@ -204,6 +209,35 @@ describe("engineer module", () => {
 
       expect(spawnCalls.length).toBe(0);
       expect(killCalls).toEqual(["SIGTERM"]);
+    });
+  });
+
+  describe("active-engineer registry (gs-131)", () => {
+    it("returns false from killActiveEngineer when no engineer is running", () => {
+      expect(killActiveEngineer()).toBe(false);
+      expect(getActiveEngineerChild()).toBeNull();
+    });
+
+    it("kills the live child and clears the registry when STOP triggers mid-run", async () => {
+      // A long-running sleep stands in for a real claude invocation — the
+      // session watcher fires killActiveEngineer once STOP is observed.
+      const project = makeProject({ engineer_command: "sleep 30" });
+      const runPromise = runEngineer(project, "cycle-kill-1");
+
+      // Wait for the child to be registered (spawn is async).
+      for (let i = 0; i < 20 && !getActiveEngineerChild(); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(getActiveEngineerChild()).not.toBeNull();
+
+      const killed = killActiveEngineer();
+      expect(killed).toBe(true);
+
+      const result = await runPromise;
+      // Killed subprocesses report exitCode=null (signal) or non-zero on
+      // win32 taskkill. Either way, it's not a clean 0.
+      expect(result.exitCode).not.toBe(0);
+      expect(getActiveEngineerChild()).toBeNull();
     });
   });
 

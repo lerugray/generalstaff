@@ -632,7 +632,7 @@
   {
     "id": "gs-131",
     "title": "Add mid-cycle STOP file detection. Currently isStopFilePresent() is only checked at cycle boundaries. Use fs.watch on the STOP path in session.ts to SIGTERM the active engineer + mark cycle_skipped when triggered. Test with a test-mode synchronous watcher.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]

@@ -472,6 +472,31 @@ describe("executeCycle", () => {
     expect(result.reason).toContain("empty diff");
   }, 30_000);
 
+  it("routes to cycle_skipped when STOP file appears mid-engineer (gs-131)", async () => {
+    const helperPath = join(import.meta.dir, "helpers", "verify_stop_mid_cycle.ts");
+    const proc = Bun.spawn(["bun", "run", helperPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
+      );
+    }
+
+    const lastLine = stdout.trim().split("\n").pop()!;
+    const result = JSON.parse(lastLine);
+    expect(result.engineer_exit_code).toBeNull();
+    expect(result.verification_called).toBe(false);
+    expect(result.reviewer_called).toBe(false);
+    expect(result.final_outcome).toBe("cycle_skipped");
+    expect(result.reason).toContain("STOP file triggered during engineer");
+  }, 30_000);
+
   it("skips verification and reviewer on hands-off violation", async () => {
     const helperPath = join(import.meta.dir, "helpers", "verify_handsoff_violation_skips.ts");
     const proc = Bun.spawn(["bun", "run", helperPath], {
