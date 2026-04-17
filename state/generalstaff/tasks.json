@@ -538,5 +538,53 @@
     "title": "Add end-to-end test coverage for notifySessionEnd's real homedir loader path (currently only the dependency-injection path is tested in tests/notify.test.ts). Use a fixture ~/.claude layout inside a tmpdir, point HOME / USERPROFILE env at it, verify loadTelegramCredentials reads the correct files. Restore env after. Add a cross-platform skip marker if HOME env manipulation is too brittle on Windows CI.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-116",
+    "title": "Investigate and fix `.bot-worktree` cleanup after abnormal cycle termination. When a cycle is killed (engineer timeout, manual taskkill, STOP file), does cleanupWorktree() still fire? If not, stale worktrees accumulate and the next cycle's `git worktree add` fails. Add a pre-cycle cleanup pass that removes any existing `.bot-worktree` before `git worktree add`. Add tests covering: clean run (no stale worktree), stale worktree present (removed + replaced), worktree locked by another process (warn but don't crash).",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-117",
+    "title": "Add a `generalstaff doctor --fix` mode. Currently `doctor` only diagnoses; the `--fix` mode prompts (y/N) before each auto-resolvable issue: missing state directories → create, stale `.bot-worktree` → remove, orphaned STOP file from crashed session → remove (with confirmation). Never touches user code or git refs. Add tests for each fix path using fixture project roots.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-118",
+    "title": "Add validateConfig(yaml) pre-flight in src/projects.ts that runs BEFORE a session starts and rejects invalid configs with a clear error listing every problem at once (don't fail on first). Checks: project paths exist, hands_off non-empty (Hard Rule 5), engineer_command set, verification_command set, cycle_budget_minutes > 0, branch name valid. Emit errors to stderr with the project id prefix. Add tests for each failure mode.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-119",
+    "title": "Add a `generalstaff stop --force` subcommand that writes the STOP file AND attempts to kill any running bun/claude processes associated with the current session. On Windows, use `taskkill /pid X /f /t` matching PIDs from running sessions (read from state if tracked). Current `stop` just writes the file, which doesn't interrupt a hung cycle. Add tests using mocked process table.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-120",
+    "title": "Add test coverage for parseReviewerResponse when the response contains `<think>...</think>` tags before the JSON (Qwen3 reasoning mode can emit these in Ollama responses). Expected behavior: strip the think-tags or scan past them, then parse the trailing JSON. Add fixtures covering: think-tags wrapping reasoning with JSON after, nested think-tags, think-tags that contain JSON-looking text that should NOT be parsed.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-121",
+    "title": "Refactor executeCycle in src/cycle.ts to consolidate its multiple early-return paths into a single assembly point. Currently there are 6+ places that construct a CycleResult with different fields set, which makes adding new fields (like the gs-111 abnormal-exit block) error-prone. Approach: use a mutable builder object throughout the function, single return at the end. Don't change behavior — just structure. Safety: the 600+ tests are the regression guard. Add no new tests; this is a pure refactor.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-122",
+    "title": "Improve the 'bot/work branch has unmerged commits' error message in src/cycle.ts to interpolate the resolved project path in the suggested git command — e.g., `git -C /full/path/to/project merge --no-ff bot/work` rather than the current placeholder. Also suggest the alternative `auto_merge: true` config change with the exact project id. Add a test.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-123",
+    "title": "Add a `generalstaff session --verbose` flag that streams PROGRESS.jsonl events to stdout as they fire (not just the cycle-completion summaries). Useful for debugging stuck cycles in real time and for demo screencasts. Format each event as one line with timestamp + event name + short data summary. Default off. Add test.",
+    "status": "pending",
+    "priority": 2
   }
 ]
