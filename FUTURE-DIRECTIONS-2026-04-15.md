@@ -400,6 +400,133 @@ catalogdna only."
 
 ---
 
+## 6. Creative Mode / Second-Brain Retrieval Plugin (Phase 4+)
+
+**Captured:** 2026-04-17 early morning, during the Ollama
+reviewer practice run. Ray raised this as an expansion of the
+"creative agents are opt-in plugins" clause of Hard Rule 1.
+
+**Problem.** Rule 1 says *"no creative work delegation by
+default. Bots get correctness work; users keep taste work.
+Creative agents are opt-in plugins with explicit warnings."*
+That's a defensible default, but the "explicit warnings" clause
+is doing a lot of work. What would a principled creative-mode
+plugin actually look like — one that doesn't collapse into
+confident slop the moment it gets turned on?
+
+The naive path is to turn the bot loose on generation tasks
+("draft a song", "write a game manual") with a disclaimer. That
+inverts the industriousness/judgment relationship in exactly
+the wrong way — the bot is most industrious and least judged
+when doing creative work, which is where slop is worst.
+
+**The key reframing.** A creative-mode plugin should be
+**retrieval, not generation**. The bot indexes the user's own
+corpus and answers queries that *cite prior-user thoughts*.
+Taste decisions still belong to the user; the bot just makes
+the user's own prior output faster to access than manual search.
+
+Concrete distinction:
+
+- *"Find every time I've talked about asymmetric objectives
+  in the wargame manuals"* — retrieval, correctness work. Did
+  the search return the right passages? Measurable, bounded,
+  safe to delegate.
+- *"Suggest a new asymmetric-objective mechanic given my prior
+  designs"* — generation, taste work. Out of scope. The user
+  reads the retrieved passages and decides what's next.
+
+The retrieval/generation line is the same one Rule 1 already
+draws between correctness and taste; it just extends into a
+new domain (the user's own creative archive).
+
+**Shape.** `generalstaff vault` subcommand as an opt-in
+plugin (per Rule 1's "creative agents are opt-in plugins" clause).
+Three phases of implementation:
+
+1. **Ingest.** Heterogeneous corpus support: Ray's 400+ song
+   catalog (audio metadata, lyrics, self-authored influence
+   notes), pre-AI-era wargame manuals (Markdown conversions of
+   paper documents), Facebook status exports, email archives,
+   maybe future photo metadata / voice memo transcripts. Each
+   source type needs a tailored parser + chunker.
+2. **Index.** Embeddings + metadata (date, source, tags).
+   Citation-first retrieval — every returned passage comes with
+   provenance. No "the model learned it" — only "here's where
+   you wrote it."
+3. **Query.** Natural-language questions answered with cited
+   excerpts. Explicit refusal to generate *new* creative content
+   in the same call — a hard architectural boundary, not a soft
+   prompt instruction. The vault plugin never writes; it only
+   retrieves.
+
+**Why this fits Rule 1.** The retrieval-only invariant is
+*already how Rule 1 thinks about creative work*. "Creative
+agents are opt-in plugins with explicit warnings" — the vault
+plugin is explicitly opt-in, explicitly advisory, explicitly
+retrieval-only. The warning is literally the retrieval/generation
+line: *"this plugin shows you what you've thought before; you
+still decide what to do next."* That's a warning a user can
+actually internalize, unlike the vague "AI might hallucinate"
+warning most creative tools ship with.
+
+**Research pointers for a future design session.** Karpathy has
+been doing recent work in the second-brain / personal-archive
+retrieval space, and a cluster of open-source repos has emerged
+around this problem shape. Before designing the vault plugin, a
+survey pass should answer: which existing tools handle
+heterogeneous corpora (audio metadata + PDFs + social exports
++ emails) in one index? Which handle citation-first retrieval
+vs. the more common "answer + footnote" pattern? What eval
+harnesses exist for measuring "did retrieval return the right
+sources" as a correctness metric? The right default may be to
+wrap an existing tool rather than build from scratch —
+consistent with the "prefer libraries" pattern in §1.
+
+**Near-term dogfooding experiment: README drafting.** A smaller,
+tractable version of the same idea is on the table right now:
+have the bot read the `matiassingers/awesome-readme` reference
++ GeneralStaff's existing docs and produce a *structural
+proposal* for the README (which sections to include, in what
+order, with what anchors) — NOT the final prose. User picks
+voice, positioning, and tone. This is a retrieval/structuring
+task dressed up as a creative one; the bot does the enumeration
+and surveying (correctness), the user does the voice (taste).
+
+Running this dogfood experiment would also generate a useful
+data point for the larger vault plugin design: how much value
+does "structural proposal from a checklist source" actually add
+for a user who could also just read the checklist themselves?
+If the answer is "not much," that's evidence that retrieval
+alone isn't enough — we also need good *synthesis* of retrieved
+material, which is a harder design problem.
+
+**Phase.** Full vault plugin is Phase 4+ (after Phase 1 MVP
+ships, after second-project validation in Phase 3, after
+provider routing stabilizes in Phase 2). README dogfooding
+could happen any time — it's a single bot task with a bounded
+output.
+
+**Open questions.**
+
+- Does "retrieval only" survive contact with real usage? Users
+  will ask for synthesis ("summarize the three times I wrote
+  about X"). Summarization is closer to retrieval than
+  generation, but the line gets fuzzy fast. The plugin needs a
+  principled stance on what counts as the retrieval side.
+- Privacy model? A user's full email archive and FB history is
+  extraordinarily sensitive. The vault must be local-first
+  (Hard Rule 10) with no cloud egress, and the opt-in flow
+  needs to make this absolutely clear.
+- How does the vault interact with the reviewer? Presumably
+  the vault plugin is its own runtime concern, not a reviewer
+  step. But if a future creative-mode bot ever did generate,
+  a vault-aware reviewer that checks "was the output grounded
+  in the user's own corpus?" becomes a plausible verification
+  layer.
+
+---
+
 ## Market observation: why no one else has built this
 
 Captured for reference, not as a design decision. Reasons it's
