@@ -250,6 +250,45 @@ dispatcher:
       // Ensure it's NOT JSON
       expect(() => JSON.parse(result.stdout)).toThrow();
     });
+
+    it("Last cycle line shows relative time and preserves ISO timestamp", async () => {
+      const isoTimestamp = "2026-04-15T12:00:00.000Z";
+      const fleetState = {
+        version: 1,
+        updated_at: "2026-04-16T00:00:00.000Z",
+        projects: {
+          alpha: {
+            last_cycle_at: isoTimestamp,
+            last_cycle_outcome: "verified",
+            total_cycles: 5,
+            total_verified: 4,
+            total_failed: 1,
+            accumulated_minutes: 120,
+          },
+        },
+      };
+      writeFileSync(
+        join(STATUS_TEST_DIR, "fleet_state.json"),
+        JSON.stringify(fleetState),
+      );
+
+      const result = await runCli(["status"], STATUS_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      // ISO timestamp kept in parentheses for precision
+      expect(result.stdout).toContain(`(${isoTimestamp})`);
+      // A relative fragment (days/hours/ago/yesterday/just now) should precede it
+      const lastCycleMatch = result.stdout.match(/Last cycle: (.+) \(2026-04-15T12:00:00\.000Z\)/);
+      expect(lastCycleMatch).not.toBeNull();
+      expect(lastCycleMatch![1]).not.toBe(isoTimestamp);
+      // beta has no state — still shows "never"
+      expect(result.stdout).toContain("No cycles yet");
+    });
+
+    it("Last cycle line shows 'never' when there is no state", async () => {
+      const result = await runCli(["status"], STATUS_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No cycles yet");
+    });
   });
 
   describe("history", () => {
