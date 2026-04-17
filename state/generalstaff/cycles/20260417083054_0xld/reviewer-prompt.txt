@@ -1,0 +1,352 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/summary.ts b/src/summary.ts
+index 80b09f5..3fb32f4 100644
+--- a/src/summary.ts
++++ b/src/summary.ts
+@@ -4,7 +4,7 @@ import { existsSync, readdirSync, statSync } from "fs";
+ import { join } from "path";
+ import { getRootDir } from "./state";
+ import { loadProgressEvents } from "./audit";
+-import { formatBytes, formatDuration } from "./format";
++import { formatBytes, formatDuration, formatPercent } from "./format";
+ 
+ export interface OutcomeCounts {
+   verified: number;
+@@ -14,6 +14,11 @@ export interface OutcomeCounts {
+   other: number;
+ }
+ 
++export interface ProjectCycleStats {
++  verified: number;
++  total: number;
++}
++
+ export interface FleetSummary {
+   projects: number;
+   cycles_total: number;
+@@ -21,6 +26,7 @@ export interface FleetSummary {
+   duration_seconds: number;
+   tasks_pending: number;
+   tasks_by_project: Record<string, number>;
++  cycles_by_project: Record<string, ProjectCycleStats>;
+ }
+ 
+ export interface TestCounts {
+@@ -103,6 +109,7 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
+     duration_seconds: 0,
+     tasks_pending: 0,
+     tasks_by_project: {},
++    cycles_by_project: {},
+   };
+ 
+   if (!existsSync(stateDir)) return empty;
+@@ -120,6 +127,7 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
+     ...empty,
+     outcomes: { ...empty.outcomes },
+     tasks_by_project: {},
++    cycles_by_project: {},
+   };
+ 
+   summary.projects = projectDirs.length;
+@@ -133,10 +141,15 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
+     );
+     for (const e of ends) {
+       summary.cycles_total += 1;
++      if (!summary.cycles_by_project[projectId]) {
++        summary.cycles_by_project[projectId] = { verified: 0, total: 0 };
++      }
++      summary.cycles_by_project[projectId].total += 1;
+       const outcome = String(e.data.outcome ?? "");
+       switch (outcome) {
+         case "verified":
+           summary.outcomes.verified += 1;
++          summary.cycles_by_project[projectId].verified += 1;
+           break;
+         case "verified_weak":
+           summary.outcomes.verified_weak += 1;
+@@ -233,6 +246,17 @@ export function formatSummary(
+     if (summary.outcomes.other > 0) {
+       lines.push(`  Other:         ${summary.outcomes.other}`);
+     }
++    const projectsWithCycles = Object.keys(summary.cycles_by_project).sort();
++    if (projectsWithCycles.length > 0) {
++      lines.push("  By project:");
++      for (const p of projectsWithCycles) {
++        const stats = summary.cycles_by_project[p];
++        const rate = formatPercent(stats.verified / stats.total);
++        lines.push(
++          `    ${p}: Success rate: ${rate} (${stats.verified}/${stats.total} verified)`,
++        );
++      }
++    }
+   }
+   lines.push("");
+   lines.push("Duration:");
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 07c4491..360e573 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -284,7 +284,7 @@
+   {
+     "id": "gs-073",
+     "title": "In src/summary.ts, add a per-project success-rate line to the Cycles section of the fleet summary: 'Success rate: NN% (X/Y verified)' using formatPercent. Only shown when a project has at least one cycle. Add test.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/summary.test.ts b/tests/summary.test.ts
+index d8e6bd9..4d7fd61 100644
+--- a/tests/summary.test.ts
++++ b/tests/summary.test.ts
+@@ -218,6 +218,10 @@ describe("formatSummary", () => {
+     duration_seconds: 600,
+     tasks_pending: 5,
+     tasks_by_project: { alpha: 3, beta: 2 },
++    cycles_by_project: {
++      alpha: { verified: 4, total: 5 },
++      beta: { verified: 3, total: 5 },
++    },
+   };
+ 
+   it("renders header, cycles, durations, tasks, tests", () => {
+@@ -253,6 +257,7 @@ describe("formatSummary", () => {
+         duration_seconds: 0,
+         tasks_pending: 0,
+         tasks_by_project: {},
++        cycles_by_project: {},
+       },
+       null,
+     );
+@@ -284,6 +289,43 @@ describe("formatSummary", () => {
+     expect(out).toContain("Total:         3.5 KB");
+   });
+ 
++  it("renders a per-project success rate line for each project with cycles", () => {
++    const out = formatSummary(baseSummary, null);
++    expect(out).toContain("By project:");
++    expect(out).toContain("alpha: Success rate: 80% (4/5 verified)");
++    expect(out).toContain("beta: Success rate: 60% (3/5 verified)");
++  });
++
++  it("omits the By project section when no project has cycles", () => {
++    const out = formatSummary(
++      { ...baseSummary, cycles_by_project: {} },
++      null,
++    );
++    expect(out).not.toContain("By project:");
++    expect(out).not.toContain("Success rate:");
++  });
++
++  it("buildFleetSummary populates cycles_by_project with verified counts", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "alpha"), { recursive: true });
++    mkdirSync(join(stateDir, "beta"), { recursive: true });
++
++    const alphaLog = [
++      cycleEnd({ project: "alpha", cycleId: "c-a1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified" }),
++      cycleEnd({ project: "alpha", cycleId: "c-a2", ts: "2026-04-16T10:05:00.000Z", outcome: "verified" }),
++      cycleEnd({ project: "alpha", cycleId: "c-a3", ts: "2026-04-16T10:10:00.000Z", outcome: "verification_failed" }),
++    ].join("\n") + "\n";
++    const betaLog = [
++      cycleEnd({ project: "beta", cycleId: "c-b1", ts: "2026-04-16T11:00:00.000Z", outcome: "cycle_skipped" }),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), alphaLog);
++    writeFileSync(join(stateDir, "beta", "PROGRESS.jsonl"), betaLog);
++
++    const s = await buildFleetSummary();
++    expect(s.cycles_by_project.alpha).toEqual({ verified: 2, total: 3 });
++    expect(s.cycles_by_project.beta).toEqual({ verified: 0, total: 1 });
++  });
++
+   it("omits Disk Usage section when disk is null or undefined", () => {
+     expect(formatSummary(baseSummary, null)).not.toContain("Disk Usage");
+     expect(formatSummary(baseSummary, null, null)).not.toContain("Disk Usage");
+
+
+Diff summary: src/summary.ts                | 26 +++++++++++++++++++++++++-
+ state/generalstaff/tasks.json |  2 +-
+ tests/summary.test.ts         | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 68 insertions(+), 2 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T08:33:57.004Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_083414.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_083414.md
+
+ 441 pass
+ 0 fail
+ 1319 expect() calls
+Ran 441 tests across 20 files. [26.62s]
+
+========================================
+Exit code: 0
+Duration: 28.4s
+Ended: 2026-04-17T08:34:25.373Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
