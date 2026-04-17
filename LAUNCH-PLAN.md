@@ -24,26 +24,40 @@ README.)
 
 ### Pre-launch gates (don't ship before these)
 
-1. **Phase 1 threshold hit:** 5 clean supervised cycles per Hard
-   Rule 4. As of 2026-04-17 afternoon we're ~30 cycles in with
-   the auto_merge-verification bug (gs-132) fixed, so the next
-   5 clean cycles after that fix lands is the real Phase 1 close.
-2. **Phase 4 Tauri UI at least preview-able.** A launch without
+1. **Phase 1 + Phase 2 shipped.** Phase 1 DoD (verification gate
+   catches scope drift + hands-off violations, PROGRESS.jsonl
+   full audit, digest files, cycle chaining, ≥5 supervised clean
+   cycles) substantively met by 2026-04-17 with 30+ dogfood
+   cycles — effectively closed (formal PHASE-1-COMPLETE marker
+   TBD; see "Open question" below). Phase 2 per PIVOT §"Phased
+   build plan" = Reviewer + verification gate (already shipped)
+   + multi-provider routing (in-flight on the 2026-04-17 chain
+   session, gs-150..gs-163).
+2. **Phase 3 second-project validation.** At least one non-
+   GeneralStaff project running cycles (gamr per §5 of
+   FUTURE-DIRECTIONS). Proves generality; without it the
+   generalizability claim is unprovable and the README is
+   weaker.
+3. **Phase 4 Tauri UI at least preview-able.** A launch without
    a clickable install path for non-CLI users is wasted ammo.
    Per FUTURE-DIRECTIONS §10, the Tauri installer is the
    non-programmer distribution vehicle — launching without it
    caps the reachable audience at developers who can run
    `bun src/cli.ts`.
-3. **Phase 3 second-project validation.** At least one non-
-   GeneralStaff project running cycles (gamr per §5 of
-   FUTURE-DIRECTIONS). Proves generality, otherwise the
-   generalizability claim is unprovable.
 4. **README polished.** Voice-calibrated pass after gs-109 +
    gs-110's structural + voice work. Must pass the "a skeptical
    Hacker News reader can see the point in 30 seconds" test.
 5. **SUPPORTERS.md + GitHub Sponsors link live.** Rule 10
    alignment: Ray-personally or foundation, never
    "GeneralStaff LLC."
+
+**Open question:** do we want a formal `PHASE-1-COMPLETE-2026-
+04-17.md` marker file documenting the close (cycle count, DoD
+check, any deviations), or do we roll Phase 1's closure into
+the launch writeup itself? The marker is nice for launch-story
+credibility ("Phase 1 closed on 2026-04-17 with N clean cycles,
+here's the PROGRESS.jsonl range") but a bit ceremonial for a
+dogfood project. Either is fine; Ray picks.
 
 ### Pre-launch artifact checklist
 
