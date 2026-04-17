@@ -103,3 +103,32 @@ export async function addTask(
   await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
   return task;
 }
+
+export type MarkTaskDoneResult =
+  | { kind: "done"; task: GreenfieldTask }
+  | { kind: "already_done"; task: GreenfieldTask }
+  | { kind: "task_not_found"; availableIds: string[] }
+  | { kind: "project_not_found"; path: string };
+
+export async function markTaskDone(
+  projectId: string,
+  taskId: string,
+): Promise<MarkTaskDoneResult> {
+  const path = tasksPath(projectId);
+  if (!existsSync(path)) {
+    return { kind: "project_not_found", path };
+  }
+  const tasks = await loadTasks(projectId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx === -1) {
+    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
+  }
+  const task = tasks[idx]!;
+  if (task.status === "done") {
+    return { kind: "already_done", task };
+  }
+  const updated = [...tasks];
+  updated[idx] = { ...task, status: "done" };
+  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  return { kind: "done", task: updated[idx]! };
+}

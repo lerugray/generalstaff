@@ -14,6 +14,7 @@ import {
   deriveTaskIdPrefix,
   nextTaskId,
   addTask,
+  markTaskDone,
   TasksLoadError,
 } from "../src/tasks";
 import type { GreenfieldTask } from "../src/types";
@@ -211,6 +212,59 @@ describe("tasks module", () => {
       expect(existsSync(path)).toBe(true);
     });
   });
+
+  describe("markTaskDone", () => {
+    it("returns project_not_found when tasks.json is missing", async () => {
+      const result = await markTaskDone("nope", "x-1");
+      expect(result.kind).toBe("project_not_found");
+    });
+
+    it("returns task_not_found when id isn't present", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await markTaskDone("myproj", "gs-999");
+      expect(result.kind).toBe("task_not_found");
+      if (result.kind === "task_not_found") {
+        expect(result.availableIds).toEqual(["gs-001"]);
+      }
+    });
+
+    it("returns already_done when task is already done", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "done", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await markTaskDone("myproj", "gs-001");
+      expect(result.kind).toBe("already_done");
+    });
+
+    it("marks a pending task as done and persists", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+        { id: "gs-002", title: "b", status: "pending", priority: 2 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(seed, null, 2),
+      );
+      const result = await markTaskDone("myproj", "gs-002");
+      expect(result.kind).toBe("done");
+
+      const stored = JSON.parse(
+        readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
+      );
+      expect(stored[1].status).toBe("done");
+      expect(stored[0].status).toBe("pending");
+    });
+  });
 });
 
 describe("CLI task command", () => {
@@ -335,6 +389,89 @@ describe("CLI task command", () => {
     });
   });
 
+  describe("task done", () => {
+    it("errors when --project is missing", async () => {
+      const result = await runCli(["task", "done", "--task=gs-001"], TEST_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--project=<id> is required");
+    });
+
+    it("errors when --task is missing", async () => {
+      const result = await runCli(
+        ["task", "done", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--task=<task-id> is required");
+    });
+
+    it("errors when the project has no tasks.json", async () => {
+      const result = await runCli(
+        ["task", "done", "--project=ghost", "--task=gs-001"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("no tasks file for project");
+    });
+
+    it("errors when the task id is not found", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "pending", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await runCli(
+        ["task", "done", "--project=proj", "--task=gs-999"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("gs-999");
+      expect(result.stderr).toContain("not found");
+      expect(result.stderr).toContain("gs-001");
+    });
+
+    it("prints a notice (exit 0) when task is already done", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "a", status: "done", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed),
+      );
+      const result = await runCli(
+        ["task", "done", "--project=proj", "--task=gs-001"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("already done");
+    });
+
+    it("marks a task as done and persists the change", async () => {
+      const seed: GreenfieldTask[] = [
+        { id: "gs-001", title: "open", status: "pending", priority: 1 },
+        { id: "gs-002", title: "other", status: "pending", priority: 1 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        JSON.stringify(seed, null, 2),
+      );
+      const result = await runCli(
+        ["task", "done", "--project=proj", "--task=gs-001"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Marked gs-001");
+
+      const stored = JSON.parse(
+        readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
+      );
+      expect(stored[0].status).toBe("done");
+      expect(stored[1].status).toBe("pending");
+    });
+  });
+
   describe("unknown subcommand", () => {
     it("errors when no subcommand is given", async () => {
       const result = await runCli(["task"], TEST_DIR);
@@ -354,5 +491,6 @@ describe("CLI task command", () => {
     expect(result.stdout).toContain("generalstaff task");
     expect(result.stdout).toContain("task list");
     expect(result.stdout).toContain("task add");
+    expect(result.stdout).toContain("task done");
   });
 });
