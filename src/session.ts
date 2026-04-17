@@ -19,6 +19,7 @@ import { formatDuration } from "./format";
 import { fetchCommitSubject } from "./git";
 import { notifySessionEnd } from "./notify";
 import { countRemainingWork } from "./work_detection";
+import { categorizeResults } from "./results";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
 export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
@@ -277,22 +278,12 @@ export async function runSession(options: SessionOptions) {
     const projectResults = allResults.filter(
       (r) => r.project_id === projectId,
     );
-    const verified = projectResults.filter(
-      (r) =>
-        r.final_outcome === "verified" ||
-        r.final_outcome === "verified_weak",
-    ).length;
-    const failed = projectResults.filter(
-      (r) => r.final_outcome === "verification_failed",
-    ).length;
-    const skipped = projectResults.filter(
-      (r) => r.final_outcome === "cycle_skipped",
-    ).length;
+    const buckets = categorizeResults(projectResults);
     const project = projects.find((p) => p.id === projectId);
     const remaining = project ? await countRemainingWork(project) : 0;
     console.log(
       `  ${projectId}: ${count} cycle(s) — ` +
-        `${verified} verified, ${failed} failed, ${skipped} skipped ` +
+        `${buckets.verified.length} verified, ${buckets.failed.length} failed, ${buckets.skipped.length} skipped ` +
         `(${remaining} task(s) remaining)`,
     );
   }
@@ -303,30 +294,24 @@ export async function runSession(options: SessionOptions) {
   // Log session end for each project
   for (const p of projects) {
     const projectResults = allResults.filter((r) => r.project_id === p.id);
+    const buckets = categorizeResults(projectResults);
     await appendProgress(p.id, "session_end", {
       duration_minutes: Math.round(elapsed),
       total_cycles: projectResults.length,
-      total_verified: projectResults.filter(
-        (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
-      ).length,
-      total_failed: projectResults.filter(
-        (r) => r.final_outcome === "verification_failed",
-      ).length,
+      total_verified: buckets.verified.length,
+      total_failed: buckets.failed.length,
     });
   }
 
   // Fleet-level session_complete event. Fires exactly once per session
   // with aggregated stats; written to the "_fleet" pseudo-project log so
   // it isn't tied to any individual project's PROGRESS.jsonl.
+  const fleetBuckets = categorizeResults(allResults);
   await appendProgress("_fleet", "session_complete", {
     duration_minutes: Math.round(elapsed),
     total_cycles: allResults.length,
-    total_verified: allResults.filter(
-      (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
-    ).length,
-    total_failed: allResults.filter(
-      (r) => r.final_outcome === "verification_failed",
-    ).length,
+    total_verified: fleetBuckets.verified.length,
+    total_failed: fleetBuckets.failed.length,
     stop_reason: stopReason,
   });
 
@@ -339,25 +324,16 @@ export async function runSession(options: SessionOptions) {
   // and all internal failures are swallowed so this can never crash
   // the session.
   if (!dryRun) {
-    const verifiedResults = allResults.filter(
-      (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
-    );
-    const failedResults = allResults.filter(
-      (r) => r.final_outcome === "verification_failed",
-    );
-    const skippedResults = allResults.filter(
-      (r) => r.final_outcome === "cycle_skipped",
-    );
-    const tasksDone = verifiedResults.map(
+    const tasksDone = fleetBuckets.verified.map(
       (r) => fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id,
     );
     await notifySessionEnd({
-      success: failedResults.length === 0,
+      success: fleetBuckets.failed.length === 0,
       budgetMinutes,
       durationMinutes: elapsed,
-      verified: verifiedResults.length,
-      failed: failedResults.length,
-      skipped: skippedResults.length,
+      verified: fleetBuckets.verified.length,
+      failed: fleetBuckets.failed.length,
+      skipped: fleetBuckets.skipped.length,
       tasksDone,
       logPath: process.env.GENERALSTAFF_SESSION_LOG,
     });
@@ -383,9 +359,10 @@ export async function writeDigest(
   const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/T/, "_").replace(/\.\d+Z$/, "");
   const digestPath = join(digestDir, `digest_${ts}.md`);
 
-  const verified = results.filter(
-    (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
-  );
+  const buckets = categorizeResults(results);
+  const verified = buckets.verified;
+  // Digest "Issues" lumps skipped and failed together as anything-not-verified.
+  // Filter on the original results to preserve cycle order.
   const failed = results.filter(
     (r) => r.final_outcome !== "verified" && r.final_outcome !== "verified_weak",
   );

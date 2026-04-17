@@ -452,7 +452,7 @@
   {
     "id": "gs-101",
     "title": "Extract the result-categorization logic from src/session.ts (the verified/failed/skipped filtering used in the notification block and session-end logging) into a helper `categorizeResults(results: CycleResult[]): { verified: CycleResult[]; failed: CycleResult[]; skipped: CycleResult[] }` in a new src/results.ts module. verified_weak counts as verified (per existing convention). Refactor session.ts and src/summary.ts to use it. Add tests covering each bucket plus edge cases (empty array, all one type).",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
