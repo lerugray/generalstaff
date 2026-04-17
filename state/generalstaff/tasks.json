@@ -586,5 +586,53 @@
     "title": "Add a `generalstaff session --verbose` flag that streams PROGRESS.jsonl events to stdout as they fire (not just the cycle-completion summaries). Useful for debugging stuck cycles in real time and for demo screencasts. Format each event as one line with timestamp + event name + short data summary. Default off. Add test.",
     "status": "pending",
     "priority": 2
+  },
+  {
+    "id": "gs-124",
+    "title": "Investigate and fix scripts/wait_then_launch_ollama.ps1. Used on 2026-04-17 for the first dentist-run chain attempt — it polled correctly but never fired the child Start-Process when the idle threshold was met. Reproduce with a fixture log directory + short threshold, determine root cause, fix, add smoke test.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-125",
+    "title": "Design doc: the session-budget vs cycle-budget reservation math. A 60-min session only allows 25 usable min of cycles (60 - 35-min reservation). Document in DESIGN.md. Propose one of: (a) lower cycle_budget_minutes since real cycles are 4-8 min, (b) adapt based on moving-average cycle duration, (c) document as-is. No code.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-126",
+    "title": "Add `generalstaff session --chain=<N>` flag that queues N back-to-back sessions, each starting after the previous finishes. Same budget/reviewer across children. Enables unattended multi-hour runs past the 10-cycle-per-session cap. Add tests for --chain=0 (error), --chain=1 (equivalent to no flag), --chain=3.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-127",
+    "title": "Add `generalstaff status --sessions` flag: table of last N sessions (start time, duration, cycle count, pass/fail, reviewer, stop reason). Reads session_complete PROGRESS events. Default N=10. Tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-128",
+    "title": "Add `generalstaff log --since=<ts>` filter (alongside --lines/--level/--grep). Accepts absolute ISO or relative forms like '1h'/'30m'/'2d'. Tests covering each form plus malformed and future timestamps.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-129",
+    "title": "Add test coverage for src/notify.ts truncateForTelegram: length always <= 3900, marker present, UTF-8 multi-byte chars at boundary don't produce invalid bytes (em-dashes/emoji edge cases).",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-130",
+    "title": "Add `generalstaff cycle-redo --project=<id> --task=<id>` to reopen a done task as pending. Tests: reopen-done, reopen-pending (noop), reopen-not-found.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-131",
+    "title": "Add mid-cycle STOP file detection. Currently isStopFilePresent() is only checked at cycle boundaries. Use fs.watch on the STOP path in session.ts to SIGTERM the active engineer + mark cycle_skipped when triggered. Test with a test-mode synchronous watcher.",
+    "status": "pending",
+    "priority": 2
   }
 ]
