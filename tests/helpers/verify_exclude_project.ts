@@ -142,6 +142,7 @@ mock.module("../../src/state", () => ({
 mock.module("../../src/audit", () => ({
   appendProgress: async () => {},
   loadProgressEvents: async () => [],
+  setVerboseMode: () => {},
 }));
 
 mock.module("../../src/work_detection", () => ({

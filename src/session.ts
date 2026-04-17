@@ -10,7 +10,7 @@ import {
   saveProjectState,
   getRootDir,
 } from "./state";
-import { appendProgress, loadProgressEvents } from "./audit";
+import { appendProgress, loadProgressEvents, setVerboseMode } from "./audit";
 import { isStopFilePresent } from "./safety";
 import { executeCycle, countCommitsAhead } from "./cycle";
 import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
@@ -71,8 +71,13 @@ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
 }
 
 export async function runSession(options: SessionOptions) {
-  const { budgetMinutes, dryRun, maxCycles, excludeProjects } = options;
+  const { budgetMinutes, dryRun, maxCycles, excludeProjects, verbose } = options;
   const sessionStart = Date.now();
+
+  // Streams every appendProgress() call to stdout for the duration of this
+  // session. Reset on exit so subsequent non-verbose sessions in the same
+  // process (tests, repls) don't inherit the flag.
+  setVerboseMode(Boolean(verbose));
 
   console.log(`\n=== GeneralStaff Session ===`);
   console.log(`Budget: ${budgetMinutes} min`);
@@ -446,6 +451,7 @@ export async function runSession(options: SessionOptions) {
     });
   }
 
+  setVerboseMode(false);
   return allResults;
 }
 

@@ -124,6 +124,7 @@ mock.module("../../src/audit", () => ({
     capturedEvents.push({ projectId, event, data });
   },
   loadProgressEvents: async () => [],
+  setVerboseMode: () => {},
 }));
 
 mock.module("../../src/work_detection", () => ({

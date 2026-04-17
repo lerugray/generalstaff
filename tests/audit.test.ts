@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag, setVerboseMode, isVerboseMode } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -1309,5 +1309,66 @@ describe("readJsonl", () => {
     writeFileSync(file, '42\n"hello"\n[1,2,3]\nnull\n', "utf8");
     const result = await readJsonl(file);
     expect(result).toEqual([42, "hello", [1, 2, 3], null]);
+  });
+});
+
+describe("setVerboseMode (gs-123)", () => {
+  afterEach(() => {
+    setVerboseMode(false);
+  });
+
+  it("is off by default", () => {
+    expect(isVerboseMode()).toBe(false);
+  });
+
+  it("toggles on and off", () => {
+    setVerboseMode(true);
+    expect(isVerboseMode()).toBe(true);
+    setVerboseMode(false);
+    expect(isVerboseMode()).toBe(false);
+  });
+
+  it("emits no stdout when verbose is off", async () => {
+    const lines = await captureLog(async () => {
+      await appendProgress("vp", "cycle_start", { start_sha: "deadbeef" }, "c1");
+    });
+    expect(lines).toHaveLength(0);
+    // File still written
+    const filePath = join(TEST_DIR, "state", "vp", "PROGRESS.jsonl");
+    expect(existsSync(filePath)).toBe(true);
+  });
+
+  it("streams one line per appendProgress when verbose is on", async () => {
+    setVerboseMode(true);
+    const lines = await captureLog(async () => {
+      await appendProgress("vp", "cycle_start", { start_sha: "feedface" }, "cyc-1");
+      await appendProgress("vp", "engineer_completed", {
+        exit_code: 0,
+        duration_seconds: 12,
+      }, "cyc-1");
+      await appendProgress("vp", "cycle_end", {
+        outcome: "verified",
+        reason: "ok",
+      }, "cyc-1");
+    });
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("cycle_start");
+    expect(lines[0]).toContain("sha=feedface");
+    expect(lines[0]).toContain("vp");
+    expect(lines[1]).toContain("engineer_completed");
+    expect(lines[1]).toContain("exit=0");
+    expect(lines[2]).toContain("cycle_end");
+    expect(lines[2]).toContain("outcome=verified");
+  });
+
+  it("stops streaming when toggled off mid-run", async () => {
+    setVerboseMode(true);
+    const lines = await captureLog(async () => {
+      await appendProgress("vp", "cycle_start", { start_sha: "a" }, "c1");
+      setVerboseMode(false);
+      await appendProgress("vp", "cycle_end", { outcome: "verified" }, "c1");
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("cycle_start");
   });
 });

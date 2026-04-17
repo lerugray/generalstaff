@@ -56,6 +56,13 @@ describe("CLI", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Usage:");
     });
+
+    it("advertises --verbose on session", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("--verbose");
+      expect(result.stdout).toContain("stream PROGRESS.jsonl events");
+    });
   });
 
   describe("no arguments", () => {

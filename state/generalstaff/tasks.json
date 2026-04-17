@@ -584,7 +584,7 @@
   {
     "id": "gs-123",
     "title": "Add a `generalstaff session --verbose` flag that streams PROGRESS.jsonl events to stdout as they fire (not just the cycle-completion summaries). Useful for debugging stuck cycles in real time and for demo screencasts. Format each event as one line with timestamp + event name + short data summary. Default off. Add test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
