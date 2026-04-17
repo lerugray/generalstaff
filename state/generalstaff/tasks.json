@@ -308,7 +308,7 @@
   {
     "id": "gs-077",
     "title": "Add a 'generalstaff history --verified-only' flag that filters out cycle_skipped and verification_failed rows from the history output. Works in both default and --format=compact modes. Add tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
