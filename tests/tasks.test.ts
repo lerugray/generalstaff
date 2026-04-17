@@ -14,6 +14,7 @@ import {
   deriveTaskIdPrefix,
   nextTaskId,
   addTask,
+  TasksLoadError,
 } from "../src/tasks";
 import type { GreenfieldTask } from "../src/types";
 
@@ -61,6 +62,37 @@ describe("tasks module", () => {
       writeFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "");
       const tasks = await loadTasks("myproj");
       expect(tasks).toEqual([]);
+    });
+
+    it("throws TasksLoadError with file path on malformed JSON", async () => {
+      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
+      writeFileSync(path, "{not valid json");
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TasksLoadError);
+      const err = caught as TasksLoadError;
+      expect(err.filePath).toBe(path);
+      expect(err.message).toContain("invalid JSON");
+      expect(err.message).toContain("tasks.json");
+    });
+
+    it("throws TasksLoadError when JSON is valid but not an array", async () => {
+      const path = join(TEST_DIR, "state", "myproj", "tasks.json");
+      writeFileSync(path, JSON.stringify({ id: "x", title: "y" }));
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TasksLoadError);
+      const err = caught as TasksLoadError;
+      expect(err.filePath).toBe(path);
+      expect(err.message).toContain("expected a JSON array");
     });
 
     it("parses a non-empty tasks.json", async () => {
@@ -211,6 +243,20 @@ describe("CLI task command", () => {
       );
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("No pending tasks.");
+    });
+
+    it("surfaces a clear error when tasks.json is malformed", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "proj", "tasks.json"),
+        "{not valid json",
+      );
+      const result = await runCli(
+        ["task", "list", "--project=proj"],
+        TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Failed to load tasks");
+      expect(result.stderr).toContain("invalid JSON");
     });
 
     it("prints only pending/in_progress tasks", async () => {

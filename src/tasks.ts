@@ -10,12 +10,36 @@ function tasksPath(projectId: string): string {
   return join(getRootDir(), "state", projectId, "tasks.json");
 }
 
+export class TasksLoadError extends Error {
+  constructor(
+    public readonly filePath: string,
+    public readonly reason: string,
+    public readonly cause?: unknown,
+  ) {
+    super(`Failed to load tasks from ${filePath}: ${reason}`);
+    this.name = "TasksLoadError";
+  }
+}
+
 export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
   const path = tasksPath(projectId);
   if (!existsSync(path)) return [];
   const raw = await readFile(path, "utf8");
   if (!raw.trim()) return [];
-  return JSON.parse(raw) as GreenfieldTask[];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new TasksLoadError(path, `invalid JSON (${detail})`, err);
+  }
+  if (!Array.isArray(parsed)) {
+    throw new TasksLoadError(
+      path,
+      `expected a JSON array, got ${parsed === null ? "null" : typeof parsed}`,
+    );
+  }
+  return parsed as GreenfieldTask[];
 }
 
 export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {

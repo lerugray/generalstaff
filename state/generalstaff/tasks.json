@@ -236,7 +236,7 @@
   {
     "id": "gs-065",
     "title": "In tasks.ts loadTasks, surface JSON parse errors instead of silently returning an empty list (current behavior misleads users into thinking there's 'no work' when really their tasks.json is malformed). On parse failure, log a clear error with the file path and rethrow or return a typed failure. Update callers to handle the new failure mode gracefully. Add tests covering malformed JSON, empty file, and valid-but-not-array structure.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
