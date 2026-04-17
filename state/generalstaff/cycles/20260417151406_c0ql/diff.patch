@@ -1,0 +1,301 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 957f150..5a10bb6 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -24,6 +24,7 @@ import {
+   pendingTasks,
+   addTask,
+   markTaskDone,
++  markTaskPending,
+   countTasks,
+   TasksLoadError,
+   TaskValidationError,
+@@ -125,6 +126,9 @@ Usage:
+     Example: generalstaff task count                     # all projects
+     Example: generalstaff task count --project=myapp     # single project
+ 
++  generalstaff cycle-redo --project=<id> --task=<task-id>  Reopen a done task as pending
++    Example: generalstaff cycle-redo --project=myapp --task=my-042
++
+   generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path] [--regen=<file>]
+                                                           Print a session digest to stdout, or list all
+     Example: generalstaff digest --latest                # most recent digest
+@@ -661,6 +665,56 @@ switch (command) {
+     break;
+   }
+ 
++  case "cycle-redo": {
++    const { values: redoValues } = parseArgs({
++      args: args.slice(1),
++      options: {
++        project: { type: "string" },
++        task: { type: "string" },
++      },
++      allowPositionals: false,
++    });
++    if (!redoValues.project) {
++      console.error("Error: --project=<id> is required");
++      process.exit(1);
++    }
++    if (!redoValues.task) {
++      console.error("Error: --task=<task-id> is required");
++      process.exit(1);
++    }
++    let result;
++    try {
++      result = await markTaskPending(redoValues.project, redoValues.task);
++    } catch (err) {
++      if (err instanceof TasksLoadError) {
++        console.error(`Error: ${err.message}`);
++        process.exit(1);
++      }
++      throw err;
++    }
++    if (result.kind === "project_not_found") {
++      console.error(
++        `Error: no tasks file for project '${redoValues.project}' (${result.path})`,
++      );
++      process.exit(1);
++    } else if (result.kind === "task_not_found") {
++      console.error(
++        `Error: task '${redoValues.task}' not found in project '${redoValues.project}'`,
++      );
++      if (result.availableIds.length > 0) {
++        console.error(`  Available: ${result.availableIds.join(", ")}`);
++      }
++      process.exit(1);
++    } else if (result.kind === "already_pending") {
++      console.log(`${result.task.id} is already pending.`);
++    } else {
++      console.log(
++        `Reopened ${result.task.id} as pending: ${result.task.title}`,
++      );
++    }
++    break;
++  }
++
+   case "digest": {
+     const { values: digestValues } = parseArgs({
+       args: args.slice(1),
+diff --git a/src/tasks.ts b/src/tasks.ts
+index a96be4f..1e63ad3 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -157,3 +157,32 @@ export async function markTaskDone(
+   await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+   return { kind: "done", task: updated[idx]! };
+ }
++
++export type MarkTaskPendingResult =
++  | { kind: "reopened"; task: GreenfieldTask }
++  | { kind: "already_pending"; task: GreenfieldTask }
++  | { kind: "task_not_found"; availableIds: string[] }
++  | { kind: "project_not_found"; path: string };
++
++export async function markTaskPending(
++  projectId: string,
++  taskId: string,
++): Promise<MarkTaskPendingResult> {
++  const path = tasksPath(projectId);
++  if (!existsSync(path)) {
++    return { kind: "project_not_found", path };
++  }
++  const tasks = await loadTasks(projectId);
++  const idx = tasks.findIndex((t) => t.id === taskId);
++  if (idx === -1) {
++    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
++  }
++  const task = tasks[idx]!;
++  if (task.status === "pending") {
++    return { kind: "already_pending", task };
++  }
++  const updated = [...tasks];
++  updated[idx] = { ...task, status: "pending" };
++  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
++  return { kind: "reopened", task: updated[idx]! };
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index d5d8edf..b0d2fd6 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -626,7 +626,7 @@
+   {
+     "id": "gs-130",
+     "title": "Add `generalstaff cycle-redo --project=<id> --task=<id>` to reopen a done task as pending. Tests: reopen-done, reopen-pending (noop), reopen-not-found.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index 6eb4531..512d685 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -15,6 +15,7 @@ import {
+   nextTaskId,
+   addTask,
+   markTaskDone,
++  markTaskPending,
+   countTasks,
+   TasksLoadError,
+   TaskValidationError,
+@@ -312,6 +313,59 @@ describe("tasks module", () => {
+       expect(stored[0].status).toBe("pending");
+     });
+   });
++
++  describe("markTaskPending", () => {
++    it("returns project_not_found when tasks.json is missing", async () => {
++      const result = await markTaskPending("nope", "x-1");
++      expect(result.kind).toBe("project_not_found");
++    });
++
++    it("returns task_not_found when id isn't present", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "done", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await markTaskPending("myproj", "gs-999");
++      expect(result.kind).toBe("task_not_found");
++      if (result.kind === "task_not_found") {
++        expect(result.availableIds).toEqual(["gs-001"]);
++      }
++    });
++
++    it("returns already_pending when task is already pending", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "pending", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed),
++      );
++      const result = await markTaskPending("myproj", "gs-001");
++      expect(result.kind).toBe("already_pending");
++    });
++
++    it("reopens a done task as pending and persists", async () => {
++      const seed: GreenfieldTask[] = [
++        { id: "gs-001", title: "a", status: "done", priority: 1 },
++        { id: "gs-002", title: "b", status: "done", priority: 2 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(seed, null, 2),
++      );
++      const result = await markTaskPending("myproj", "gs-002");
++      expect(result.kind).toBe("reopened");
++
++      const stored = JSON.parse(
++        readFileSync(join(TEST_DIR, "state", "myproj", "tasks.json"), "utf8"),
++      );
++      expect(stored[1].status).toBe("pending");
++      expect(stored[0].status).toBe("done");
++    });
++  });
+ });
+ 
+ describe("CLI task command", () => {
+@@ -672,3 +726,99 @@ dispatcher:
+     expect(result.stdout).toContain("task count");
+   });
+ });
++
++describe("CLI cycle-redo command", () => {
++  const TEST_DIR = join(import.meta.dir, "fixtures", "cycle_redo_test");
++
++  beforeEach(() => {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++    mkdirSync(join(TEST_DIR, "state", "proj"), { recursive: true });
++  });
++
++  afterEach(() => {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  });
++
++  it("errors when --project is missing", async () => {
++    const result = await runCli(["cycle-redo", "--task=gs-001"], TEST_DIR);
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("--project=<id> is required");
++  });
++
++  it("errors when --task is missing", async () => {
++    const result = await runCli(["cycle-redo", "--project=proj"], TEST_DIR);
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("--task=<task-id> is required");
++  });
++
++  it("errors when the project has no tasks.json", async () => {
++    const result = await runCli(
++      ["cycle-redo", "--project=ghost", "--task=gs-001"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("no tasks file for project");
++  });
++
++  it("errors when the task id is not found", async () => {
++    const seed: GreenfieldTask[] = [
++      { id: "gs-001", title: "a", status: "done", priority: 1 },
++    ];
++    writeFileSync(
++      join(TEST_DIR, "state", "proj", "tasks.json"),
++      JSON.stringify(seed),
++    );
++    const result = await runCli(
++      ["cycle-redo", "--project=proj", "--task=gs-999"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("gs-999");
++    expect(result.stderr).toContain("not found");
++    expect(result.stderr).toContain("gs-001");
++  });
++
++  it("prints a notice (exit 0) when task is already pending", async () => {
++    const seed: GreenfieldTask[] = [
++      { id: "gs-001", title: "a", status: "pending", priority: 1 },
++    ];
++    writeFileSync(
++      join(TEST_DIR, "state", "proj", "tasks.json"),
++      JSON.stringify(seed),
++    );
++    const result = await runCli(
++      ["cycle-redo", "--project=proj", "--task=gs-001"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(0);
++    expect(result.stdout).toContain("already pending");
++  });
++
++  it("reopens a done task as pending and persists the change", async () => {
++    const seed: GreenfieldTask[] = [
++      { id: "gs-001", title: "reopen me", status: "done", priority: 1 },
++      { id: "gs-002", title: "other", status: "done", priority: 1 },
++    ];
++    writeFileSync(
++      join(TEST_DIR, "state", "proj", "tasks.json"),
++      JSON.stringify(seed, null, 2),
++    );
++    const result = await runCli(
++      ["cycle-redo", "--project=proj", "--task=gs-001"],
++      TEST_DIR,
++    );
++    expect(result.exitCode).toBe(0);
++    expect(result.stdout).toContain("Reopened gs-001");
++
++    const stored = JSON.parse(
++      readFileSync(join(TEST_DIR, "state", "proj", "tasks.json"), "utf8"),
++    );
++    expect(stored[0].status).toBe("pending");
++    expect(stored[1].status).toBe("done");
++  });
++
++  it("is listed in --help output", async () => {
++    const result = await runCli(["--help"]);
++    expect(result.stdout).toContain("generalstaff cycle-redo");
++  });
++});
