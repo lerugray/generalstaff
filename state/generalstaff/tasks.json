@@ -590,7 +590,7 @@
   {
     "id": "gs-124",
     "title": "Investigate and fix scripts/wait_then_launch_ollama.ps1. Used on 2026-04-17 for the first dentist-run chain attempt — it polled correctly but never fired the child Start-Process when the idle threshold was met. Reproduce with a fixture log directory + short threshold, determine root cause, fix, add smoke test.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
