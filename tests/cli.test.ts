@@ -683,6 +683,107 @@ projects:
     });
   });
 
+  describe("summary --format=json", () => {
+    const SUMMARY_TEST_DIR = join(import.meta.dir, "fixtures", "summary_json_test");
+
+    function cycleEnd(opts: {
+      project: string;
+      cycleId: string;
+      ts: string;
+      outcome: string;
+      durationSeconds?: number;
+    }): string {
+      return JSON.stringify({
+        timestamp: opts.ts,
+        event: "cycle_end",
+        cycle_id: opts.cycleId,
+        project_id: opts.project,
+        data: {
+          outcome: opts.outcome,
+          duration_seconds: opts.durationSeconds ?? 60,
+          start_sha: "aaa1111",
+          end_sha: "bbb2222",
+        },
+      });
+    }
+
+    beforeEach(() => {
+      const stateDir = join(SUMMARY_TEST_DIR, "state");
+      mkdirSync(join(stateDir, "alpha"), { recursive: true });
+      mkdirSync(join(stateDir, "beta"), { recursive: true });
+
+      const alphaLog = [
+        cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified", durationSeconds: 120 }),
+        cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-16T10:05:00.000Z", outcome: "verification_failed", durationSeconds: 30 }),
+        cycleEnd({ project: "alpha", cycleId: "c3", ts: "2026-04-16T10:10:00.000Z", outcome: "cycle_skipped", durationSeconds: 5 }),
+      ].join("\n") + "\n";
+      const betaLog = [
+        cycleEnd({ project: "beta", cycleId: "c4", ts: "2026-04-16T11:00:00.000Z", outcome: "verified", durationSeconds: 90 }),
+      ].join("\n") + "\n";
+      writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), alphaLog);
+      writeFileSync(join(stateDir, "beta", "PROGRESS.jsonl"), betaLog);
+    });
+
+    afterEach(() => {
+      rmSync(SUMMARY_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("outputs valid parseable JSON with summary/tests/disk keys", async () => {
+      const result = await runCli(["summary", "--no-tests", "--format=json"], SUMMARY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("summary");
+      expect(parsed).toHaveProperty("tests");
+      expect(parsed).toHaveProperty("disk");
+      expect(parsed.tests).toBeNull();
+      expect(parsed.summary.projects).toBe(2);
+      expect(parsed.summary.cycles_total).toBe(4);
+    });
+
+    it("JSON counts match the text output's counts", async () => {
+      const jsonResult = await runCli(
+        ["summary", "--no-tests", "--format=json"],
+        SUMMARY_TEST_DIR,
+      );
+      const textResult = await runCli(["summary", "--no-tests"], SUMMARY_TEST_DIR);
+      expect(jsonResult.exitCode).toBe(0);
+      expect(textResult.exitCode).toBe(0);
+
+      const parsed = JSON.parse(jsonResult.stdout);
+      const text = textResult.stdout;
+
+      // Text contains e.g. "Total:         4"
+      expect(text).toContain(`Total:         ${parsed.summary.cycles_total}`);
+      expect(text).toContain(`Projects:        ${parsed.summary.projects}`);
+      expect(text).toContain(
+        `Verified:      ${parsed.summary.outcomes.verified}`,
+      );
+      expect(text).toContain(
+        `Failed:        ${parsed.summary.outcomes.verification_failed}`,
+      );
+      expect(text).toContain(
+        `Skipped:       ${parsed.summary.outcomes.cycle_skipped}`,
+      );
+    });
+
+    it("rejects unknown --format value", async () => {
+      const result = await runCli(
+        ["summary", "--no-tests", "--format=yaml"],
+        SUMMARY_TEST_DIR,
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("unknown --format");
+    });
+
+    it("without --format outputs formatted text (not JSON)", async () => {
+      const result = await runCli(["summary", "--no-tests"], SUMMARY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("=== GeneralStaff Fleet Summary ===");
+      expect(() => JSON.parse(result.stdout)).toThrow();
+    });
+  });
+
   describe("help completeness", () => {
     it("lists all registered commands in help output", async () => {
       const result = await runCli(["--help"]);

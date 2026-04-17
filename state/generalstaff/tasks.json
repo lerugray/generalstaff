@@ -224,7 +224,7 @@
   {
     "id": "gs-063",
     "title": "Add --format=json to 'generalstaff summary' that emits the FleetSummary object as JSON (same data as the text dashboard, machine-readable). Include tests verifying JSON parses and matches the text output's counts.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

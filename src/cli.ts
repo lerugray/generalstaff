@@ -62,9 +62,10 @@ Usage:
   generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
 
-  generalstaff summary [--no-tests]                       Dashboard: cycles, outcomes, duration, tasks, tests
+  generalstaff summary [--no-tests] [--format=json]       Dashboard: cycles, outcomes, duration, tasks, tests
     Example: generalstaff summary                       # one-screen fleet overview
     Example: generalstaff summary --no-tests            # skip scanning tests/ dir
+    Example: generalstaff summary --format=json         # machine-readable output
 
   generalstaff doctor                                     Check prerequisites (bun, git, claude)
     Example: generalstaff doctor
@@ -267,15 +268,25 @@ switch (command) {
       args: args.slice(1),
       options: {
         "no-tests": { type: "boolean", default: false },
+        "format": { type: "string" },
       },
       allowPositionals: false,
     });
+    const format = summaryValues.format;
+    if (format !== undefined && format !== "json") {
+      console.error(`Error: unknown --format value: ${format} (supported: json)`);
+      process.exit(1);
+    }
     const summary = await buildFleetSummary();
     const tests = summaryValues["no-tests"]
       ? null
       : countTests(resolve("tests"));
     const disk = computeDiskUsage();
-    console.log(formatSummary(summary, tests, disk));
+    if (format === "json") {
+      console.log(JSON.stringify({ summary, tests, disk }, null, 2));
+    } else {
+      console.log(formatSummary(summary, tests, disk));
+    }
     break;
   }
 
