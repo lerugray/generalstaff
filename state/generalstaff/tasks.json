@@ -548,7 +548,7 @@
   {
     "id": "gs-117",
     "title": "Add a `generalstaff doctor --fix` mode. Currently `doctor` only diagnoses; the `--fix` mode prompts (y/N) before each auto-resolvable issue: missing state directories → create, stale `.bot-worktree` → remove, orphaned STOP file from crashed session → remove (with confirmation). Never touches user code or git refs. Add tests for each fix path using fixture project roots.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

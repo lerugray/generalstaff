@@ -110,8 +110,10 @@ Usage:
     Example: generalstaff summary --format=json         # machine-readable output
     Example: generalstaff summary --project=myapp       # filter to a single project
 
-  generalstaff doctor                                     Check prerequisites (bun, git, claude)
-    Example: generalstaff doctor
+  generalstaff doctor [--fix] [--yes]                     Check prerequisites + diagnose resolvable issues
+    Example: generalstaff doctor                        # diagnose only
+    Example: generalstaff doctor --fix                  # prompt y/N for each fix
+    Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
   generalstaff clean [--keep=N] [--log-days=N]            Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
@@ -490,7 +492,18 @@ switch (command) {
   }
 
   case "doctor": {
-    await runDoctor();
+    const { values: doctorValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        fix: { type: "boolean", default: false },
+        yes: { type: "boolean", short: "y", default: false },
+      },
+      allowPositionals: false,
+    });
+    await runDoctor({
+      fix: Boolean(doctorValues.fix),
+      assumeYes: Boolean(doctorValues.yes),
+    });
     break;
   }
 
