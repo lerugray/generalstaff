@@ -522,6 +522,61 @@ describe("executeCycle", () => {
   }, 30_000);
 });
 
+describe("cycle rollback on verification_failed (gs-132)", () => {
+  async function runRollbackHelper(scenarioArg: string) {
+    const helperPath = join(import.meta.dir, "helpers", "verify_rollback_behavior.ts");
+    const proc = Bun.spawn(["bun", "run", helperPath, scenarioArg], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    const lastLine = stdout.trim().split("\n").pop()!;
+    return JSON.parse(lastLine);
+  }
+
+  it("rolls back bot/work to start_sha when verification_failed with non-empty diff", async () => {
+    const result = await runRollbackHelper("verification_failed");
+    expect(result.final_outcome).toBe("verification_failed");
+    expect(result.reviewer_called).toBe(true);
+    expect(result.cycle_end_sha).toBe(result.cycle_start_sha);
+    expect(result.branch_sha_after).toBe(result.cycle_start_sha);
+    expect(result.rollback_event_count).toBe(1);
+    expect(result.rollback_after_sha).toBe(result.cycle_start_sha);
+    expect(result.rollback_before_sha).not.toBe(result.cycle_start_sha);
+  }, 30_000);
+
+  it("does not roll back on verified cycle", async () => {
+    const result = await runRollbackHelper("verified");
+    expect(result.final_outcome).toBe("verified");
+    expect(result.reviewer_called).toBe(true);
+    expect(result.cycle_end_sha).not.toBe(result.cycle_start_sha);
+    expect(result.branch_sha_after).toBe(result.cycle_end_sha);
+    expect(result.rollback_event_count).toBe(0);
+  }, 30_000);
+
+  it("does not roll back on verified_weak cycle", async () => {
+    const result = await runRollbackHelper("verified_weak");
+    expect(result.final_outcome).toBe("verified_weak");
+    expect(result.reviewer_called).toBe(true);
+    expect(result.cycle_end_sha).not.toBe(result.cycle_start_sha);
+    expect(result.branch_sha_after).toBe(result.cycle_end_sha);
+    expect(result.rollback_event_count).toBe(0);
+  }, 30_000);
+
+  it("does not roll back when diff is empty (start_sha === end_sha)", async () => {
+    const result = await runRollbackHelper("empty_diff");
+    expect(result.final_outcome).toBe("verified_weak");
+    expect(result.reviewer_called).toBe(false);
+    expect(result.cycle_end_sha).toBe(result.cycle_start_sha);
+    expect(result.rollback_event_count).toBe(0);
+  }, 30_000);
+});
+
 describe("formatUnmergedBranchError", () => {
   it("interpolates a resolved absolute path into the git command", () => {
     // Relative path input — the message must resolve it to absolute.
