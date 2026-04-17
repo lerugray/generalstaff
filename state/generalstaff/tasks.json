@@ -650,7 +650,7 @@
   {
     "id": "gs-134",
     "title": "(BUG) In src/types.ts VALID_EVENTS is missing 'worktree_preflight' even though the ProgressEventType union includes it and src/cycle.ts:394,399 actively emits that event. isProgressEntry() therefore rejects every worktree_preflight entry as malformed, and those entries silently disappear from loadProgressEvents/tailProgressLog/getRecentCycles/loadRecentSessions. Add 'worktree_preflight' to VALID_EVENTS and extend tests/types.test.ts's 'accepts all valid event types' list so the omission can't silently recur. Also add a regression test that feeds an object with event='worktree_preflight' to isProgressEntry and asserts true.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
