@@ -1,5 +1,16 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { matchesHandsOff, isBotRunning } from "../src/safety";
+import {
+  matchesHandsOff,
+  isBotRunning,
+  writeSessionPid,
+  readSessionPid,
+  removeSessionPid,
+  sessionPidFilePath,
+  killProcessTree,
+  stopForce,
+} from "../src/safety";
+import { setRootDir } from "../src/state";
+import { existsSync } from "fs";
 import type { ProjectConfig } from "../src/types";
 import { join } from "path";
 import {
@@ -222,5 +233,161 @@ describe("isBotRunning", () => {
     expect(
       isBotRunning(makeProject({ concurrency_detection: "worktree" })),
     ).toEqual({ running: false });
+  });
+});
+
+// gs-119: session pid tracking + stop --force
+
+const STOP_FORCE_ROOT = join(import.meta.dir, "fixtures", "stop_force");
+
+describe("session pid tracking (gs-119)", () => {
+  beforeEach(() => {
+    mkdirSync(STOP_FORCE_ROOT, { recursive: true });
+    setRootDir(STOP_FORCE_ROOT);
+  });
+  afterEach(() => {
+    rmSync(STOP_FORCE_ROOT, { recursive: true, force: true });
+  });
+
+  it("writes and reads back the session pid", async () => {
+    await writeSessionPid(12345);
+    expect(readSessionPid()).toBe(12345);
+    expect(existsSync(sessionPidFilePath())).toBe(true);
+  });
+
+  it("readSessionPid returns null when no pid file exists", () => {
+    expect(readSessionPid()).toBeNull();
+  });
+
+  it("readSessionPid returns null for malformed pid file", async () => {
+    await writeSessionPid(0);
+    // Overwrite with garbage
+    writeFileSync(sessionPidFilePath(), "not-a-number\n", "utf8");
+    expect(readSessionPid()).toBeNull();
+  });
+
+  it("removeSessionPid clears the file", async () => {
+    await writeSessionPid(9999);
+    await removeSessionPid();
+    expect(existsSync(sessionPidFilePath())).toBe(false);
+  });
+
+  it("removeSessionPid is a no-op when file is missing", async () => {
+    await removeSessionPid();
+    expect(existsSync(sessionPidFilePath())).toBe(false);
+  });
+});
+
+describe("killProcessTree (gs-119)", () => {
+  it("uses taskkill on win32", () => {
+    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: [...args] });
+      return { status: 0, error: undefined };
+    }) as any;
+    const result = killProcessTree(4242, {
+      platform: "win32",
+      spawnSyncFn: fakeSpawn,
+    });
+    expect(result.killed).toBe(true);
+    expect(result.method).toBe("taskkill");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.cmd).toBe("taskkill");
+    expect(calls[0]!.args).toEqual(["/pid", "4242", "/f", "/t"]);
+  });
+
+  it("reports error when taskkill spawn fails", () => {
+    const fakeSpawn = (() => ({
+      status: null,
+      error: new Error("ENOENT"),
+    })) as any;
+    const result = killProcessTree(1, {
+      platform: "win32",
+      spawnSyncFn: fakeSpawn,
+    });
+    expect(result.killed).toBe(false);
+    expect(result.error).toContain("ENOENT");
+  });
+
+  it("uses SIGTERM on non-windows platforms", () => {
+    const killed: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    const result = killProcessTree(321, {
+      platform: "linux",
+      killFn: (pid, signal) => {
+        killed.push({ pid, signal });
+      },
+    });
+    expect(result.killed).toBe(true);
+    expect(result.method).toBe("signal");
+    expect(killed).toEqual([{ pid: 321, signal: "SIGTERM" }]);
+  });
+
+  it("catches thrown errors from kill", () => {
+    const result = killProcessTree(999, {
+      platform: "linux",
+      killFn: () => {
+        throw new Error("ESRCH");
+      },
+    });
+    expect(result.killed).toBe(false);
+    expect(result.error).toContain("ESRCH");
+  });
+});
+
+describe("stopForce (gs-119)", () => {
+  beforeEach(() => {
+    mkdirSync(STOP_FORCE_ROOT, { recursive: true });
+    setRootDir(STOP_FORCE_ROOT);
+  });
+  afterEach(() => {
+    rmSync(STOP_FORCE_ROOT, { recursive: true, force: true });
+  });
+
+  it("creates STOP file and returns pid=null when no session is tracked", async () => {
+    const result = await stopForce({
+      platform: "linux",
+      killFn: () => {
+        throw new Error("should not be called");
+      },
+    });
+    expect(result.stopFileCreated).toBe(true);
+    expect(result.pid).toBeNull();
+    expect(result.killed).toBe(false);
+    expect(existsSync(join(STOP_FORCE_ROOT, "STOP"))).toBe(true);
+  });
+
+  it("kills the tracked pid and clears the pid file", async () => {
+    await writeSessionPid(77777);
+    const killCalls: number[] = [];
+    const result = await stopForce({
+      platform: "linux",
+      killFn: (pid) => {
+        killCalls.push(pid);
+      },
+    });
+    expect(result.stopFileCreated).toBe(true);
+    expect(result.pid).toBe(77777);
+    expect(result.killed).toBe(true);
+    expect(result.method).toBe("signal");
+    expect(killCalls).toEqual([77777]);
+    expect(existsSync(sessionPidFilePath())).toBe(false);
+    expect(existsSync(join(STOP_FORCE_ROOT, "STOP"))).toBe(true);
+  });
+
+  it("uses taskkill on win32 and clears pid file even on failure", async () => {
+    await writeSessionPid(88888);
+    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: [...args] });
+      return { status: 0, error: undefined };
+    }) as any;
+    const result = await stopForce({
+      platform: "win32",
+      spawnSyncFn: fakeSpawn,
+    });
+    expect(result.pid).toBe(88888);
+    expect(result.killed).toBe(true);
+    expect(calls[0]!.args).toEqual(["/pid", "88888", "/f", "/t"]);
+    expect(existsSync(sessionPidFilePath())).toBe(false);
   });
 });
