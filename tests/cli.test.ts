@@ -398,6 +398,69 @@ dispatcher:
       const result = await runCli(["--help"]);
       expect(result.stdout).toContain("history");
     });
+
+    it("filters by --outcome=verified", async () => {
+      const result = await runCli(["history", "--outcome=verified"], HISTORY_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const lines = result.stdout.trim().split("\n");
+      // 5 verified rows (3 alpha at i=0,2,4 + 2 beta at i=10,12) + header + separator = 7
+      expect(lines).toHaveLength(7);
+      expect(result.stdout).not.toContain("verification_failed");
+    });
+
+    it("filters by --outcome=verification_failed", async () => {
+      const result = await runCli(
+        ["history", "--outcome=verification_failed"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const lines = result.stdout.trim().split("\n");
+      // 3 failed rows (2 alpha at i=1,3 + 1 beta at i=11) + header + separator = 5
+      expect(lines).toHaveLength(5);
+      expect(result.stdout).toContain("verification_failed");
+    });
+
+    it("returns no data rows for --outcome=verified_weak when none exist", async () => {
+      const result = await runCli(
+        ["history", "--outcome=verified_weak"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No cycle history found.");
+    });
+
+    it("returns no data rows for --outcome=cycle_skipped when none exist", async () => {
+      const result = await runCli(
+        ["history", "--outcome=cycle_skipped"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No cycle history found.");
+    });
+
+    it("errors on invalid --outcome value", async () => {
+      const result = await runCli(
+        ["history", "--outcome=bogus"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("unknown --outcome value");
+      expect(result.stderr).toContain("verified");
+      expect(result.stderr).toContain("verified_weak");
+      expect(result.stderr).toContain("verification_failed");
+      expect(result.stderr).toContain("cycle_skipped");
+    });
+
+    it("errors when --verified-only and --outcome are both set", async () => {
+      const result = await runCli(
+        ["history", "--verified-only", "--outcome=verified"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--verified-only and --outcome are mutually exclusive",
+      );
+    });
   });
 
   describe("log --lines", () => {

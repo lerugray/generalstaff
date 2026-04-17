@@ -22,7 +22,7 @@ import {
   writeSessionPid,
   removeSessionPid,
 } from "./safety";
-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -98,6 +98,7 @@ Usage:
 
   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact|json] [--costs]
                        [--since=YYYYMMDD] [--until=YYYYMMDD] [--verified-only]
+                       [--outcome=verified|verified_weak|verification_failed|cycle_skipped]
                                                           Cycle history (compact: tab-delimited, no headers)
     Example: generalstaff history --lines=50
     Example: generalstaff history --project=myapp --format=compact
@@ -105,6 +106,7 @@ Usage:
     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
     Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
     Example: generalstaff history --verified-only         # hide cycle_skipped and verification_failed rows
+    Example: generalstaff history --outcome=verification_failed  # show only failed cycles
 
   generalstaff log [--project=<id>] [--lines=<n>] [--level=error] [--grep=<pattern>] [--since=<ts>]
                                                           Tail PROGRESS.jsonl
@@ -457,6 +459,7 @@ switch (command) {
         since: { type: "string" },
         until: { type: "string" },
         "verified-only": { type: "boolean", default: false },
+        outcome: { type: "string" },
       },
       allowPositionals: false,
     });
@@ -465,10 +468,24 @@ switch (command) {
       console.error(`Error: unknown --format value: ${fmt} (supported: table, compact, json)`);
       process.exit(1);
     }
+    if (historyValues["verified-only"] && historyValues.outcome !== undefined) {
+      console.error("Error: --verified-only and --outcome are mutually exclusive");
+      process.exit(1);
+    }
+    if (
+      historyValues.outcome !== undefined &&
+      !(VALID_OUTCOME_FILTERS as readonly string[]).includes(historyValues.outcome)
+    ) {
+      console.error(
+        `Error: unknown --outcome value: ${historyValues.outcome} (supported: ${VALID_OUTCOME_FILTERS.join(", ")})`,
+      );
+      process.exit(1);
+    }
     const loadOpts = {
       since: historyValues.since,
       until: historyValues.until,
       verifiedOnly: historyValues["verified-only"],
+      outcome: historyValues.outcome as OutcomeFilter | undefined,
     };
     const limit = parseInt(historyValues.lines!, 10);
     if (fmt === "json") {
