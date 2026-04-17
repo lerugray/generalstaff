@@ -1,0 +1,168 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 7f437a1..c04ee7c 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -128,8 +128,9 @@ Usage:
+     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
+     Example: generalstaff clean --dry-run                # preview without deleting
+ 
+-  generalstaff task list --project=<id>                   Show pending tasks for a project
++  generalstaff task list --project=<id> [--priority=N]    Show pending tasks for a project
+     Example: generalstaff task list --project=myapp
++    Example: generalstaff task list --project=myapp --priority=1  # only P1 tasks
+   generalstaff task add --project=<id> [--priority=N] <title>
+                                                           Append a new task to tasks.json
+     Example: generalstaff task add --project=myapp "Fix login bug"
+@@ -584,13 +585,25 @@ switch (command) {
+     if (sub === "list") {
+       const { values } = parseArgs({
+         args: args.slice(2),
+-        options: { project: { type: "string" } },
++        options: {
++          project: { type: "string" },
++          priority: { type: "string" },
++        },
+         allowPositionals: false,
+       });
+       if (!values.project) {
+         console.error("Error: --project=<id> is required");
+         process.exit(1);
+       }
++      let priorityFilter: number | undefined;
++      if (values.priority !== undefined) {
++        const parsed = parseInt(values.priority, 10);
++        if (isNaN(parsed) || parsed < 1 || String(parsed) !== values.priority.trim()) {
++          console.error("Error: --priority must be a positive integer");
++          process.exit(1);
++        }
++        priorityFilter = parsed;
++      }
+       let tasks;
+       try {
+         tasks = await loadTasks(values.project);
+@@ -601,9 +614,16 @@ switch (command) {
+         }
+         throw err;
+       }
+-      const pending = pendingTasks(tasks);
++      let pending = pendingTasks(tasks);
++      if (priorityFilter !== undefined) {
++        pending = pending.filter((t) => t.priority === priorityFilter);
++      }
+       if (pending.length === 0) {
+-        console.log("No pending tasks.");
++        if (priorityFilter !== undefined) {
++          console.log(`No pending tasks at priority ${priorityFilter}.`);
++        } else {
++          console.log("No pending tasks.");
++        }
+       } else {
+         for (const t of pending) {
+           console.log(`${t.id}  p${t.priority}  ${t.status.padEnd(11)}  ${t.title}`);
+@@ -782,7 +802,7 @@ switch (command) {
+     } else {
+       console.error(
+         "Error: task subcommand required (list, add, done, rm, or count)\n" +
+-          "  Usage: generalstaff task list --project=<id>\n" +
++          "  Usage: generalstaff task list --project=<id> [--priority=N]\n" +
+           "         generalstaff task add --project=<id> <title>\n" +
+           "         generalstaff task done --project=<id> --task=<task-id>\n" +
+           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9094de8..0d9ba30 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -848,7 +848,7 @@
+   {
+     "id": "gs-142",
+     "title": "Add --priority=N filter to 'generalstaff task list' (cli.ts) so operators can say 'task list --project=myapp --priority=1' to see only P1 tasks. Parse N as integer, error with 'Error: --priority must be a positive integer' on bad input. Add tests for filter match, empty filter result (prints 'No pending tasks at priority N.'), and mixing with no filter (existing behavior preserved).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index 7c30cef..32c4c4a 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -484,6 +484,80 @@ describe("CLI task command", () => {
+       expect(result.stdout).not.toContain("gs-002");
+       expect(result.stdout).not.toContain("gs-003");
+     });
++
++    it("filters by --priority=N when provided", async () => {
++      const tasks: GreenfieldTask[] = [
++        { id: "gs-001", title: "p1 item", status: "pending", priority: 1 },
++        { id: "gs-002", title: "p2 item", status: "pending", priority: 2 },
++        { id: "gs-003", title: "p1 done", status: "done", priority: 1 },
++        { id: "gs-004", title: "p1 other", status: "pending", priority: 1 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(tasks),
++      );
++      const result = await runCli(
++        ["task", "list", "--project=proj", "--priority=1"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("gs-001");
++      expect(result.stdout).toContain("gs-004");
++      expect(result.stdout).not.toContain("gs-002");
++      expect(result.stdout).not.toContain("gs-003");
++    });
++
++    it("prints a priority-specific message when no tasks match the filter", async () => {
++      const tasks: GreenfieldTask[] = [
++        { id: "gs-001", title: "p1 item", status: "pending", priority: 1 },
++        { id: "gs-002", title: "p2 item", status: "pending", priority: 2 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(tasks),
++      );
++      const result = await runCli(
++        ["task", "list", "--project=proj", "--priority=3"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("No pending tasks at priority 3.");
++    });
++
++    it("preserves unfiltered behavior when --priority is not given", async () => {
++      const tasks: GreenfieldTask[] = [
++        { id: "gs-001", title: "p1 item", status: "pending", priority: 1 },
++        { id: "gs-002", title: "p2 item", status: "pending", priority: 2 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        JSON.stringify(tasks),
++      );
++      const result = await runCli(
++        ["task", "list", "--project=proj"],
++        TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("gs-001");
++      expect(result.stdout).toContain("gs-002");
++    });
++
++    it("errors when --priority is not a positive integer", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "proj", "tasks.json"),
++        "[]\n",
++      );
++      for (const bad of ["0", "-1", "abc", "1.5"]) {
++        const result = await runCli(
++          ["task", "list", "--project=proj", `--priority=${bad}`],
++          TEST_DIR,
++        );
++        expect(result.exitCode).toBe(1);
++        expect(result.stderr).toContain(
++          "--priority must be a positive integer",
++        );
++      }
++    });
+   });
+ 
+   describe("task add", () => {
