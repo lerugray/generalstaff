@@ -1,0 +1,436 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 1262a84..3d9947f 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -14,7 +14,14 @@ import {
+   getProject,
+   ProjectNotFoundError,
+ } from "./projects";
+-import { isStopFilePresent, createStopFile, removeStopFile } from "./safety";
++import {
++  isStopFilePresent,
++  createStopFile,
++  removeStopFile,
++  stopForce,
++  writeSessionPid,
++  removeSessionPid,
++} from "./safety";
+ import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag } from "./audit";
+ import { initProject } from "./init";
+ import { runDoctor } from "./doctor";
+@@ -80,8 +87,9 @@ Usage:
+     Example: generalstaff init ./myapp
+     Example: generalstaff init ../other-repo --id=other
+ 
+-  generalstaff stop                                       Create STOP file (halt dispatcher)
++  generalstaff stop [--force]                             Create STOP file (halt dispatcher)
+     Example: generalstaff stop                          # halt before next cycle
++    Example: generalstaff stop --force                  # also kill the running session process
+ 
+   generalstaff start                                      Remove STOP file (allow dispatch)
+     Example: generalstaff start                         # resume after a stop
+@@ -221,10 +229,27 @@ switch (command) {
+       excludeProjects,
+       verbose: values.verbose!,
+     };
+-    if (chain === 1) {
+-      await runSession(sessionOpts);
+-    } else {
+-      await runSessionChain(sessionOpts, chain);
++    // gs-119: record this process's PID so `stop --force` can locate
++    // and kill it. Best-effort — failure must not prevent the session
++    // from running. Cleared in a finally block on normal exit; abnormal
++    // exits leave the file stale, which stop --force tolerates.
++    try {
++      await writeSessionPid(process.pid);
++    } catch {
++      // Writable state/ is nice-to-have, not load-bearing.
++    }
++    try {
++      if (chain === 1) {
++        await runSession(sessionOpts);
++      } else {
++        await runSessionChain(sessionOpts, chain);
++      }
++    } finally {
++      try {
++        await removeSessionPid();
++      } catch {
++        // May already be gone if stop --force ran concurrently.
++      }
+     }
+     break;
+   }
+@@ -338,8 +363,32 @@ switch (command) {
+   }
+ 
+   case "stop": {
+-    await createStopFile();
+-    console.log("STOP file created. Dispatcher will halt before next cycle.");
++    const { values } = parseArgs({
++      args: args.slice(1),
++      options: { force: { type: "boolean", default: false } },
++      allowPositionals: true,
++    });
++    if (values.force) {
++      const result = await stopForce();
++      if (result.pid === null) {
++        console.log(
++          "STOP file created. No running session pid on record — nothing to kill.",
++        );
++      } else if (result.killed) {
++        console.log(
++          `STOP file created. Killed session pid ${result.pid} via ${result.method}.`,
++        );
++      } else {
++        console.error(
++          `STOP file created, but failed to kill pid ${result.pid}` +
++            (result.error ? `: ${result.error}` : "") +
++            ". The process may already be gone.",
++        );
++      }
++    } else {
++      await createStopFile();
++      console.log("STOP file created. Dispatcher will halt before next cycle.");
++    }
+     break;
+   }
+ 
+diff --git a/src/safety.ts b/src/safety.ts
+index 7b65408..579ba74 100644
+--- a/src/safety.ts
++++ b/src/safety.ts
+@@ -1,10 +1,11 @@
+ // GeneralStaff — safety module (build step 5)
+ // STOP file, working-tree-clean check, hands_off glob, isBotRunning (Q3)
+ 
+-import { existsSync, statSync, readdirSync } from "fs";
++import { existsSync, statSync, readdirSync, mkdirSync, readFileSync } from "fs";
+ import { readFile, writeFile, unlink } from "fs/promises";
+-import { join } from "path";
++import { dirname, join } from "path";
+ import { $ } from "bun";
++import { spawnSync as realSpawnSync } from "child_process";
+ import type { ProjectConfig, BotRunningResult } from "./types";
+ import { getRootDir } from "./state";
+ 
+@@ -33,6 +34,124 @@ export async function removeStopFile(): Promise<void> {
+   }
+ }
+ 
++// --- Session PID tracking ---
++// gs-119: record the running session's PID so `stop --force` can locate
++// and terminate it. Written at session start, removed on clean exit.
++// Best-effort — if the process is killed mid-cycle the file is left
++// stale, which is why stop --force ignores failures and why the file
++// is overwritten, not appended to, on each session start.
++
++export function sessionPidFilePath(): string {
++  return join(getRootDir(), "state", "session.pid");
++}
++
++export async function writeSessionPid(pid: number): Promise<void> {
++  const path = sessionPidFilePath();
++  const dir = dirname(path);
++  if (!existsSync(dir)) {
++    mkdirSync(dir, { recursive: true });
++  }
++  await writeFile(path, String(pid), "utf8");
++}
++
++export function readSessionPid(): number | null {
++  const path = sessionPidFilePath();
++  if (!existsSync(path)) return null;
++  try {
++    const raw = readFileSync(path, "utf8").trim();
++    const pid = parseInt(raw, 10);
++    return Number.isFinite(pid) && pid > 0 ? pid : null;
++  } catch {
++    return null;
++  }
++}
++
++export async function removeSessionPid(): Promise<void> {
++  const path = sessionPidFilePath();
++  if (existsSync(path)) {
++    await unlink(path);
++  }
++}
++
++// --- Force-stop (gs-119) ---
++
++export interface KillProcessTreeOptions {
++  spawnSyncFn?: typeof realSpawnSync;
++  killFn?: (pid: number, signal?: NodeJS.Signals | number) => void;
++  platform?: NodeJS.Platform;
++}
++
++export interface KillProcessTreeResult {
++  killed: boolean;
++  method: "taskkill" | "signal";
++  error?: string;
++}
++
++export function killProcessTree(
++  pid: number,
++  opts: KillProcessTreeOptions = {},
++): KillProcessTreeResult {
++  const platform = opts.platform ?? process.platform;
++  try {
++    if (platform === "win32") {
++      const spawnSyncFn = opts.spawnSyncFn ?? realSpawnSync;
++      const result = spawnSyncFn(
++        "taskkill",
++        ["/pid", String(pid), "/f", "/t"],
++        { stdio: "ignore" },
++      );
++      if (result.error) {
++        return {
++          killed: false,
++          method: "taskkill",
++          error: String(result.error),
++        };
++      }
++      // taskkill exits non-zero when the pid no longer exists. Treat
++      // "already gone" as success — stop --force is idempotent.
++      return { killed: true, method: "taskkill" };
++    }
++    const killFn =
++      opts.killFn ?? ((p: number, s?: NodeJS.Signals | number) => process.kill(p, s));
++    killFn(pid, "SIGTERM");
++    return { killed: true, method: "signal" };
++  } catch (e) {
++    return {
++      killed: false,
++      method: platform === "win32" ? "taskkill" : "signal",
++      error: String(e),
++    };
++  }
++}
++
++export interface StopForceResult {
++  stopFileCreated: boolean;
++  pid: number | null;
++  killed: boolean;
++  method?: "taskkill" | "signal";
++  error?: string;
++}
++
++export async function stopForce(
++  opts: KillProcessTreeOptions = {},
++): Promise<StopForceResult> {
++  await createStopFile();
++  const pid = readSessionPid();
++  if (pid === null) {
++    return { stopFileCreated: true, pid: null, killed: false };
++  }
++  const result = killProcessTree(pid, opts);
++  // Clear the pid file regardless — the process is either dead or gone.
++  await removeSessionPid();
++  return {
++    stopFileCreated: true,
++    pid,
++    killed: result.killed,
++    method: result.method,
++    error: result.error,
++  };
++}
++
+ // --- Working tree clean check ---
+ 
+ export async function isWorkingTreeClean(projectPath: string): Promise<{
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 09832a4..8d357ff 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -560,7 +560,7 @@
+   {
+     "id": "gs-119",
+     "title": "Add a `generalstaff stop --force` subcommand that writes the STOP file AND attempts to kill any running bun/claude processes associated with the current session. On Windows, use `taskkill /pid X /f /t` matching PIDs from running sessions (read from state if tracked). Current `stop` just writes the file, which doesn't interrupt a hung cycle. Add tests using mocked process table.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/safety.test.ts b/tests/safety.test.ts
+index 285b0cb..2151f04 100644
+--- a/tests/safety.test.ts
++++ b/tests/safety.test.ts
+@@ -1,5 +1,16 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { matchesHandsOff, isBotRunning } from "../src/safety";
++import {
++  matchesHandsOff,
++  isBotRunning,
++  writeSessionPid,
++  readSessionPid,
++  removeSessionPid,
++  sessionPidFilePath,
++  killProcessTree,
++  stopForce,
++} from "../src/safety";
++import { setRootDir } from "../src/state";
++import { existsSync } from "fs";
+ import type { ProjectConfig } from "../src/types";
+ import { join } from "path";
+ import {
+@@ -224,3 +235,159 @@ describe("isBotRunning", () => {
+     ).toEqual({ running: false });
+   });
+ });
++
++// gs-119: session pid tracking + stop --force
++
++const STOP_FORCE_ROOT = join(import.meta.dir, "fixtures", "stop_force");
++
++describe("session pid tracking (gs-119)", () => {
++  beforeEach(() => {
++    mkdirSync(STOP_FORCE_ROOT, { recursive: true });
++    setRootDir(STOP_FORCE_ROOT);
++  });
++  afterEach(() => {
++    rmSync(STOP_FORCE_ROOT, { recursive: true, force: true });
++  });
++
++  it("writes and reads back the session pid", async () => {
++    await writeSessionPid(12345);
++    expect(readSessionPid()).toBe(12345);
++    expect(existsSync(sessionPidFilePath())).toBe(true);
++  });
++
++  it("readSessionPid returns null when no pid file exists", () => {
++    expect(readSessionPid()).toBeNull();
++  });
++
++  it("readSessionPid returns null for malformed pid file", async () => {
++    await writeSessionPid(0);
++    // Overwrite with garbage
++    writeFileSync(sessionPidFilePath(), "not-a-number\n", "utf8");
++    expect(readSessionPid()).toBeNull();
++  });
++
++  it("removeSessionPid clears the file", async () => {
++    await writeSessionPid(9999);
++    await removeSessionPid();
++    expect(existsSync(sessionPidFilePath())).toBe(false);
++  });
++
++  it("removeSessionPid is a no-op when file is missing", async () => {
++    await removeSessionPid();
++    expect(existsSync(sessionPidFilePath())).toBe(false);
++  });
++});
++
++describe("killProcessTree (gs-119)", () => {
++  it("uses taskkill on win32", () => {
++    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
++    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
++      calls.push({ cmd, args: [...args] });
++      return { status: 0, error: undefined };
++    }) as any;
++    const result = killProcessTree(4242, {
++      platform: "win32",
++      spawnSyncFn: fakeSpawn,
++    });
++    expect(result.killed).toBe(true);
++    expect(result.method).toBe("taskkill");
++    expect(calls).toHaveLength(1);
++    expect(calls[0]!.cmd).toBe("taskkill");
++    expect(calls[0]!.args).toEqual(["/pid", "4242", "/f", "/t"]);
++  });
++
++  it("reports error when taskkill spawn fails", () => {
++    const fakeSpawn = (() => ({
++      status: null,
++      error: new Error("ENOENT"),
++    })) as any;
++    const result = killProcessTree(1, {
++      platform: "win32",
++      spawnSyncFn: fakeSpawn,
++    });
++    expect(result.killed).toBe(false);
++    expect(result.error).toContain("ENOENT");
++  });
++
++  it("uses SIGTERM on non-windows platforms", () => {
++    const killed: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
++    const result = killProcessTree(321, {
++      platform: "linux",
++      killFn: (pid, signal) => {
++        killed.push({ pid, signal });
++      },
++    });
++    expect(result.killed).toBe(true);
++    expect(result.method).toBe("signal");
++    expect(killed).toEqual([{ pid: 321, signal: "SIGTERM" }]);
++  });
++
++  it("catches thrown errors from kill", () => {
++    const result = killProcessTree(999, {
++      platform: "linux",
++      killFn: () => {
++        throw new Error("ESRCH");
++      },
++    });
++    expect(result.killed).toBe(false);
++    expect(result.error).toContain("ESRCH");
++  });
++});
++
++describe("stopForce (gs-119)", () => {
++  beforeEach(() => {
++    mkdirSync(STOP_FORCE_ROOT, { recursive: true });
++    setRootDir(STOP_FORCE_ROOT);
++  });
++  afterEach(() => {
++    rmSync(STOP_FORCE_ROOT, { recursive: true, force: true });
++  });
++
++  it("creates STOP file and returns pid=null when no session is tracked", async () => {
++    const result = await stopForce({
++      platform: "linux",
++      killFn: () => {
++        throw new Error("should not be called");
++      },
++    });
++    expect(result.stopFileCreated).toBe(true);
++    expect(result.pid).toBeNull();
++    expect(result.killed).toBe(false);
++    expect(existsSync(join(STOP_FORCE_ROOT, "STOP"))).toBe(true);
++  });
++
++  it("kills the tracked pid and clears the pid file", async () => {
++    await writeSessionPid(77777);
++    const killCalls: number[] = [];
++    const result = await stopForce({
++      platform: "linux",
++      killFn: (pid) => {
++        killCalls.push(pid);
++      },
++    });
++    expect(result.stopFileCreated).toBe(true);
++    expect(result.pid).toBe(77777);
++    expect(result.killed).toBe(true);
++    expect(result.method).toBe("signal");
++    expect(killCalls).toEqual([77777]);
++    expect(existsSync(sessionPidFilePath())).toBe(false);
++    expect(existsSync(join(STOP_FORCE_ROOT, "STOP"))).toBe(true);
++  });
++
++  it("uses taskkill on win32 and clears pid file even on failure", async () => {
++    await writeSessionPid(88888);
++    const calls: Array<{ cmd: string; args: readonly string[] }> = [];
++    const fakeSpawn = ((cmd: string, args: readonly string[]) => {
++      calls.push({ cmd, args: [...args] });
++      return { status: 0, error: undefined };
++    }) as any;
++    const result = await stopForce({
++      platform: "win32",
++      spawnSyncFn: fakeSpawn,
++    });
++    expect(result.pid).toBe(88888);
++    expect(result.killed).toBe(true);
++    expect(calls[0]!.args).toEqual(["/pid", "88888", "/f", "/t"]);
++    expect(existsSync(sessionPidFilePath())).toBe(false);
++  });
++});
