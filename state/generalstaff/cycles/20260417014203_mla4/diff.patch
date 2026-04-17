@@ -1,0 +1,290 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index d89c891..fcd589f 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -85,11 +85,13 @@ Usage:
+   generalstaff task done --project=<id> --task=<task-id>  Mark a task as done
+     Example: generalstaff task done --project=myapp --task=my-042
+ 
+-  generalstaff digest [--latest] [--date=YYYYMMDD] [--list]
++  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json]
+                                                           Print a session digest to stdout, or list all
+     Example: generalstaff digest --latest                # most recent digest
+     Example: generalstaff digest --date=20260416         # first digest from that day
+     Example: generalstaff digest --list                  # enumerate digests, newest first
++    Example: generalstaff digest --latest --json         # structured JSON of the latest digest
++    Example: generalstaff digest --list --json           # JSON array of digest summaries
+ 
+   generalstaff version                                    Show version + environment info (for bug reports)
+     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
+@@ -471,6 +473,7 @@ switch (command) {
+         latest: { type: "boolean", default: false },
+         date: { type: "string" },
+         list: { type: "boolean", default: false },
++        json: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -491,16 +494,17 @@ switch (command) {
+       : [];
+     if (digestValues.list) {
+       if (files.length === 0) {
+-        console.log("No digests found.");
++        if (digestValues.json) console.log("[]");
++        else console.log("No digests found.");
+         break;
+       }
+       const sorted = [...files].sort().reverse();
+-      for (const f of sorted) {
++      const entries = sorted.map((f) => {
+         const content = readFileSync(join(digestDir, f), "utf8");
+         const m = f.match(/^digest_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.md$/);
+         const date = m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : f;
+         const cyclesMatch = content.match(/\*\*Cycles:\*\*\s*(\d+)/);
+-        const cycles = cyclesMatch ? cyclesMatch[1] : "?";
++        const cycles = cyclesMatch ? Number(cyclesMatch[1]) : null;
+         let verified = 0;
+         let failed = 0;
+         let skipped = 0;
+@@ -510,14 +514,22 @@ switch (command) {
+           else if (o === "verification_failed") failed++;
+           else if (o === "cycle_skipped") skipped++;
+         }
+-        console.log(
+-          `${f}  ${date}  cycles=${cycles}  verified=${verified} failed=${failed} skipped=${skipped}`,
+-        );
++        return { file: f, date, cycles, verified, failed, skipped };
++      });
++      if (digestValues.json) {
++        console.log(JSON.stringify(entries, null, 2));
++      } else {
++        for (const e of entries) {
++          console.log(
++            `${e.file}  ${e.date}  cycles=${e.cycles ?? "?"}  verified=${e.verified} failed=${e.failed} skipped=${e.skipped}`,
++          );
++        }
+       }
+       break;
+     }
+     if (files.length === 0) {
+-      console.log("No digests found.");
++      if (digestValues.json) console.log("null");
++      else console.log("No digests found.");
+       break;
+     }
+     let chosen: string | undefined;
+@@ -528,13 +540,20 @@ switch (command) {
+       }
+       chosen = files.find((f) => f.startsWith(`digest_${digestValues.date}_`));
+       if (!chosen) {
+-        console.log(`No digests found for date ${digestValues.date}.`);
++        if (digestValues.json) console.log("null");
++        else console.log(`No digests found for date ${digestValues.date}.`);
+         break;
+       }
+     } else {
+       chosen = files[files.length - 1];
+     }
+-    process.stdout.write(readFileSync(join(digestDir, chosen), "utf8"));
++    const chosenContent = readFileSync(join(digestDir, chosen), "utf8");
++    if (digestValues.json) {
++      const { parseDigest } = await import("./session");
++      console.log(JSON.stringify({ file: chosen, ...parseDigest(chosenContent) }, null, 2));
++    } else {
++      process.stdout.write(chosenContent);
++    }
+     break;
+   }
+ 
+diff --git a/src/session.ts b/src/session.ts
+index f966db9..0d063be 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -355,3 +355,78 @@ export async function writeDigest(
+   await writeFile(digestPath, content, "utf8");
+   console.log(`\nDigest written to: ${digestPath}`);
+ }
++
++export interface ParsedDigestCycle {
++  project_id: string;
++  cycle_id: string;
++  outcome: string | null;
++  reason: string | null;
++  sha_start: string | null;
++  sha_end: string | null;
++  diff_stats: { files_changed: number; insertions: number; deletions: number } | null;
++  engineer_exit: number | null;
++  verification: string | null;
++  reviewer: string | null;
++}
++
++export interface ParsedDigest {
++  date: string | null;
++  duration: string | null;
++  cycle_count: number | null;
++  cycles: ParsedDigestCycle[];
++}
++
++export function parseDigest(markdown: string): ParsedDigest {
++  const dateMatch = markdown.match(/\*\*Date:\*\*\s*(.+)/);
++  const durationMatch = markdown.match(/\*\*Duration:\*\*\s*(.+)/);
++  const cyclesMatch = markdown.match(/\*\*Cycles:\*\*\s*(\d+)/);
++
++  const cycles: ParsedDigestCycle[] = [];
++  const sectionRe = /^## (.+?) — (.+?)$/gm;
++  const sections: { project_id: string; cycle_id: string; start: number }[] = [];
++  let m: RegExpExecArray | null;
++  while ((m = sectionRe.exec(markdown)) !== null) {
++    sections.push({
++      project_id: m[1].trim(),
++      cycle_id: m[2].trim(),
++      start: m.index + m[0].length,
++    });
++  }
++  for (let i = 0; i < sections.length; i++) {
++    const s = sections[i];
++    const end = i + 1 < sections.length ? sections[i + 1].start : markdown.length;
++    const body = markdown.slice(s.start, end);
++    const outcome = body.match(/\*\*Outcome:\*\*\s*(.+)/);
++    const reason = body.match(/\*\*Reason:\*\*\s*(.+)/);
++    const sha = body.match(/\*\*SHA:\*\*\s*(\S+)\s*(?:→|->)\s*(\S+)/);
++    const diff = body.match(/\*\*Diff:\*\*\s*(\d+)\s*file.*?,\s*\+(\d+)\/-(\d+)/);
++    const engineer = body.match(/\*\*Engineer exit:\*\*\s*(-?\d+)/);
++    const verification = body.match(/\*\*Verification:\*\*\s*(.+)/);
++    const reviewer = body.match(/\*\*Reviewer:\*\*\s*(.+)/);
++    cycles.push({
++      project_id: s.project_id,
++      cycle_id: s.cycle_id,
++      outcome: outcome ? outcome[1].trim() : null,
++      reason: reason ? reason[1].trim() : null,
++      sha_start: sha ? sha[1] : null,
++      sha_end: sha ? sha[2] : null,
++      diff_stats: diff
++        ? {
++            files_changed: Number(diff[1]),
++            insertions: Number(diff[2]),
++            deletions: Number(diff[3]),
++          }
++        : null,
++      engineer_exit: engineer ? Number(engineer[1]) : null,
++      verification: verification ? verification[1].trim() : null,
++      reviewer: reviewer ? reviewer[1].trim() : null,
++    });
++  }
++
++  return {
++    date: dateMatch ? dateMatch[1].trim() : null,
++    duration: durationMatch ? durationMatch[1].trim() : null,
++    cycle_count: cyclesMatch ? Number(cyclesMatch[1]) : null,
++    cycles,
++  };
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 2b6aa2d..bd98b09 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -254,7 +254,7 @@
+   {
+     "id": "gs-068",
+     "title": "Add --json flag to 'generalstaff digest' (pair with --list/--latest/--date from gs-057). Emits the same data as the markdown digest but as a structured JSON object (duration, cycle count, per-cycle results array with outcome/sha/diff_stats). Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index fce95a9..683815b 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -681,6 +681,91 @@ projects:
+         expect(result.stderr).toContain("--list cannot be combined");
+       });
+     });
++
++    describe("--json", () => {
++      const FULL_DIGEST = `# GeneralStaff Session Digest
++
++**Date:** 2026-04-16T10:00:00.000Z
++**Duration:** 5m
++**Cycles:** 2
++
++## alpha — c1
++
++- **Outcome:** verified
++- **Reason:** tests pass
++- **SHA:** aaaaaaaa → bbbbbbbb
++- **Diff:** 3 file(s), +12/-4
++- **Engineer exit:** 0
++- **Verification:** pass
++- **Reviewer:** scope_ok
++
++## alpha — c2
++
++- **Outcome:** verification_failed
++- **Reason:** test failed
++- **SHA:** bbbbbbbb → cccccccc
++- **Engineer exit:** 1
++- **Verification:** fail
++- **Reviewer:** skipped
++`;
++
++      it("emits null for --latest when no digests exist", async () => {
++        const result = await runCli(["digest", "--latest", "--json"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout.trim()).toBe("null");
++      });
++
++      it("emits [] for --list when no digests exist", async () => {
++        const result = await runCli(["digest", "--list", "--json"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        expect(JSON.parse(result.stdout)).toEqual([]);
++      });
++
++      it("emits structured JSON for --latest", async () => {
++        writeFileSync(join(DIGEST_DIR, "digest_20260416_100000.md"), FULL_DIGEST);
++        const result = await runCli(["digest", "--latest", "--json"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        const parsed = JSON.parse(result.stdout);
++        expect(parsed.file).toBe("digest_20260416_100000.md");
++        expect(parsed.duration).toBe("5m");
++        expect(parsed.cycle_count).toBe(2);
++        expect(parsed.cycles).toHaveLength(2);
++        expect(parsed.cycles[0]).toMatchObject({
++          project_id: "alpha",
++          cycle_id: "c1",
++          outcome: "verified",
++          sha_start: "aaaaaaaa",
++          sha_end: "bbbbbbbb",
++          diff_stats: { files_changed: 3, insertions: 12, deletions: 4 },
++          engineer_exit: 0,
++        });
++        expect(parsed.cycles[1].outcome).toBe("verification_failed");
++        expect(parsed.cycles[1].diff_stats).toBeNull();
++      });
++
++      it("emits JSON array for --list", async () => {
++        writeFileSync(join(DIGEST_DIR, "digest_20260415_120000.md"), FULL_DIGEST);
++        writeFileSync(join(DIGEST_DIR, "digest_20260416_090000.md"), FULL_DIGEST);
++        const result = await runCli(["digest", "--list", "--json"], DIGEST_TEST_DIR);
++        expect(result.exitCode).toBe(0);
++        const parsed = JSON.parse(result.stdout);
++        expect(parsed).toHaveLength(2);
++        expect(parsed[0].file).toBe("digest_20260416_090000.md");
++        expect(parsed[0].cycles).toBe(2);
++        expect(parsed[0].verified).toBe(1);
++        expect(parsed[0].failed).toBe(1);
++      });
++
++      it("emits null for --date with no match", async () => {
++        writeFileSync(join(DIGEST_DIR, "digest_20260416_100000.md"), FULL_DIGEST);
++        const result = await runCli(
++          ["digest", "--date=20260101", "--json"],
++          DIGEST_TEST_DIR,
++        );
++        expect(result.exitCode).toBe(0);
++        expect(result.stdout.trim()).toBe("null");
++      });
++    });
+   });
+ 
+   describe("summary --format=json", () => {
