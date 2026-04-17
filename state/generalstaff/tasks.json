@@ -634,5 +634,107 @@
     "title": "Add mid-cycle STOP file detection. Currently isStopFilePresent() is only checked at cycle boundaries. Use fs.watch on the STOP path in session.ts to SIGTERM the active engineer + mark cycle_skipped when triggered. Test with a test-mode synchronous watcher.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-132",
+    "title": "(BUG) When a cycle's reviewer_verdict is verification_failed, the commit the engineer made on bot/work is NOT rolled back, and the next cycle's auto_merge path (cycle.ts:417) or session-end auto_merge (session.ts:370-376, whose comment falsely asserts 'anything on bot/work here has already passed the per-cycle verification gate') merges it into HEAD anyway. On 2026-04-17 afternoon this path landed 6 hands-off-violating and scope-creeping commits on master after they had been reported verification_failed. Fix: in src/cycle.ts executeCycle, after the reviewer returns a non-verified outcome WITH a non-empty diff, reset bot/work back to the cycle's start_sha so the bad commit is discarded and not later auto-merged. Log a cycle_rollback PROGRESS event (add to ProgressEventType union + VALID_EVENTS in src/types.ts) naming before_sha and after_sha. Update the optimistic comment in session.ts:370-376 to reflect the new guarantee. Add tests in tests/cycle.test.ts covering: (a) verified cycle — no rollback, (b) verification_failed with diff — rollback fires, cycle_end's end_sha equals start_sha, (c) verification_failed with empty diff — no rollback (noop), (d) verified_weak — no rollback (still considered acceptable work). Do NOT modify src/safety.ts or src/reviewer.ts; the fix lives entirely in src/cycle.ts, src/session.ts, src/types.ts.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-133",
+    "title": "(BUG) Reviewer producing false-positive hands_off_violations. On 2026-04-17's second session (Ollama qwen3:8b), 3 of 6 failed cycles had reviewer-reported hands_off_violations naming files that were NOT in the diff — e.g., gs-131 (cycle juzs) reported ['src/safety.ts','src/reviewer.ts','src/prompts/'] as violations but the diff_summary shows the bot only touched active_engineer.ts/cycle.ts/engineer.ts/session.ts/stop_watcher.ts and their tests. Cycles eosu (gs-115) and ek00 (gs-121) had the same pattern. These false positives wasted ~25 minutes of session budget. Fix: in src/cycle.ts after the reviewer verdict returns, cross-reference reviewer-reported hands_off_violations against the actual changed-files list (already computed upstream via extractChangedFiles). Drop any violation whose named file/pattern does not match any file in the diff (reuse matchesHandsOff's pattern-matching semantics for parity). If dropping violations leaves no real violations AND no other failure signals (scope_drift_files, silent_failures), flip the verdict from verification_failed to verified. Emit a 'reviewer_hallucination' PROGRESS event (add to ProgressEventType + VALID_EVENTS in src/types.ts) naming the dropped file list for observability, regardless of whether the verdict flipped. Add tests in tests/cycle.test.ts covering: (a) reviewer reports a file IS in the diff — violation stands, (b) reviewer reports a file NOT in the diff — violation dropped, hallucination event emitted, (c) all violations hallucinated AND no other failures — verdict flips to verified, (d) mixed real + hallucinated — real stands, hallucinated dropped. Do NOT modify src/reviewer.ts — the sanity-check layer lives in cycle.ts.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-134",
+    "title": "(BUG) In src/types.ts VALID_EVENTS is missing 'worktree_preflight' even though the ProgressEventType union includes it and src/cycle.ts:394,399 actively emits that event. isProgressEntry() therefore rejects every worktree_preflight entry as malformed, and those entries silently disappear from loadProgressEvents/tailProgressLog/getRecentCycles/loadRecentSessions. Add 'worktree_preflight' to VALID_EVENTS and extend tests/types.test.ts's 'accepts all valid event types' list so the omission can't silently recur. Also add a regression test that feeds an object with event='worktree_preflight' to isProgressEntry and asserts true.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-135",
+    "title": "Refactor src/cycle.ts runSingleCycle to use getProject + ProjectNotFoundError instead of the legacy findProject lookup (which returns undefined and prints a bare 'Project X not found' line). Mirror the pattern the summary/bot-status commands in src/cli.ts adopted in gs-082: print 'Error: project <id> not found' then 'Available: <ids>' when known ids exist, then process.exit(1). Add a test in tests/cycle.test.ts using a fake yaml that has no matching project and verify the error + exit code.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-136",
+    "title": "Add a test in tests/session.test.ts covering formatSessionPlanPreview from src/session.ts. Exercise: (a) empty plan (total_cycles=0) returns the 'No cycles fit in the budget.' line; (b) single-project plan formats the Project/Cycles header with correct padding; (c) multiple projects with differing id widths (short 'x' alongside 'generalstaff') align under a width-matched header. Asserts the literal line structure so future column-layout regressions are caught.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-137",
+    "title": "Add test coverage for preflightCleanupWorktree in src/cycle.ts. Build a tmp project dir fixture with a fake .bot-worktree folder and exercise the three branches: (a) no stale worktree returns {wasStale:false,removed:false}, (b) stale worktree that is removable returns {wasStale:true,removed:true}, (c) stale worktree where the injected rmFn throws returns {wasStale:true,removed:false,warning:<message includes 'locked by another process'>}. Use the rmFn param so the test is deterministic on Windows and Unix.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-138",
+    "title": "Add test coverage for checkCycleWatchdog in src/session.ts. Cases: (a) cycleBudgetMinutes <= 0 returns null even for large durations, (b) duration exactly at threshold (2 * budget * 60) returns null (boundary — equal is NOT a warning), (c) duration one second over the threshold returns a warning string containing the formatted duration and budget number, (d) very large duration (e.g. 3x budget) still returns a single-line string. Prevents silent drift if someone changes WATCHDOG_MULTIPLIER without updating tests.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-139",
+    "title": "Add --dry-run to src/clean.ts runClean so operators can preview exactly what would be deleted before committing. Flag threads through from cli.ts clean command (existing --keep/--log-days are parsed there). In dry-run mode: enumerate each worktree/log/cycle that would be removed with a '[DRY RUN] Would remove: <path>' line, do not invoke rmSync or git worktree remove, and report the same 'Cleaned N item(s)' footer prefixed with '[DRY RUN] '. Add tests in tests/clean.test.ts covering each of the three cleanup phases.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-140",
+    "title": "Extract a shared botWorktreePath(project) helper into src/state.ts (or a new lightweight src/paths.ts — your call) and refactor the three current inline uses: src/cycle.ts worktreePath (currently a private function), src/clean.ts join(p.path, '.bot-worktree'), and src/doctor.ts join(p.path, '.bot-worktree'). Keep the same returned string so no behavior changes. Add a trivial test pinning the shape ('<path>/.bot-worktree'). Do NOT touch src/safety.ts (hands-off) — its inline join stays.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-141",
+    "title": "Add a 'generalstaff task rm --project=<id> --task=<task-id>' subcommand in src/cli.ts that deletes a task from tasks.json. Mirrors task done/cycle-redo error handling: print 'Error: task X not found' with Available: list, 'Error: no tasks file for project Y' when the project state dir is missing. Implement removeTask in src/tasks.ts returning the same discriminated-union kind as markTaskDone. Include tests for success, task-not-found, project-not-found, and verify the file is rewritten without the removed entry (other tasks preserved).",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-142",
+    "title": "Add --priority=N filter to 'generalstaff task list' (cli.ts) so operators can say 'task list --project=myapp --priority=1' to see only P1 tasks. Parse N as integer, error with 'Error: --priority must be a positive integer' on bad input. Add tests for filter match, empty filter result (prints 'No pending tasks at priority N.'), and mixing with no filter (existing behavior preserved).",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-143",
+    "title": "Add test coverage for countRemainingWork / hasMoreWork in src/work_detection.ts covering the 'unknown mode' fallback — pass a ProjectConfig with work_detection set to a value outside the VALID_WORK_DETECTION set (cast through unknown) and assert hasMoreWork returns false and countRemainingWork returns 0 (the fail-safe branches). Current tests exercise each valid mode but not the default-case safety net, so a regression there would silently enable chaining for misconfigured projects.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-144",
+    "title": "Add test coverage for isNoopCommand in src/verification.ts (currently only reached indirectly via runVerification). Cover: 'true', ':', 'echo', 'exit 0' all return true; 'true && npm test' returns true (startsWith-match per current implementation, document whether that's intentional); 'tree', 'truecheck' (begins with 'true' but not a word boundary) — current code treats 'truecheck' as noop because startsWith(noop + ' ') requires space, so 'truecheck' is NOT a noop — add the test pinning that behavior; whitespace-only returns false. Because isNoopCommand is module-private, either export it for tests or exercise it through runVerification with dryRun=true (which calls it explicitly). Prefer exporting.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-145",
+    "title": "Improve src/init.ts scaffolding: accept a --priority=N flag (default 2) and emit it into the YAML snippet and into a first 'pending' template task written to tasks.json (instead of the current empty-array content). The template task title should read 'Describe first task for <project_id> (edit me or run generalstaff task rm)' with status pending and the given priority. Rationale: a fresh project with zero tasks produces 'no more work' on the first hasMoreWork check, so the bot never runs until the user hand-edits tasks.json. Wire through from cli.ts init. Add tests covering default priority, explicit priority, and the seeded task's shape.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-146",
+    "title": "Add a 'generalstaff stop --status' subcommand (or --check flag) in src/cli.ts that prints whether the STOP file is present and the session pid it would target, without creating or removing anything. Output: 'STOP file: present at <path>' or 'STOP file: absent' and 'Session pid: <pid>' or 'Session pid: none recorded'. Useful for scripts that want to sanity-check before running 'stop --force'. Add tests covering stop-present+pid, stop-absent+nopid, and combinations.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-147",
+    "title": "Add a 'generalstaff log --tail' alias flag that is equivalent to --lines=9999 — convenience for 'show me everything' without counting. Parse flag in cli.ts log command, when set override the parsed --lines value. If both --tail and --lines=N are passed, error 'Error: --tail and --lines are mutually exclusive'. Add tests covering each combination and verify filter flags (--level, --grep, --since) still compose with --tail.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-148",
+    "title": "Add a 'generalstaff history --outcome=<verified|verified_weak|verification_failed|cycle_skipped>' filter in src/cli.ts history command (alongside existing --verified-only). Threads into loadCycleHistory / loadCycleHistoryJson as an extra option (src/audit.ts collectCycleEnds). Error 'Error: unknown --outcome value' with the valid list when passed a bad value. If both --verified-only and --outcome are set, error 'Error: --verified-only and --outcome are mutually exclusive'. Add tests covering each valid value, invalid value, and mutual exclusion.",
+    "status": "pending",
+    "priority": 2
   }
 ]
