@@ -458,7 +458,7 @@
   {
     "id": "gs-102",
     "title": "Include the reviewer provider name in the digest header so multi-provider runs are traceable from the digest alone. Read from GENERALSTAFF_REVIEWER_PROVIDER (default 'claude') at session start, thread it through writeDigest's config param, and emit a '**Reviewer:** <provider>' line in the digest header (e.g., '**Reviewer:** ollama (qwen3:8b)'). When GENERALSTAFF_REVIEWER_MODEL is set, include the model in parentheses. Add tests covering default, openrouter, ollama, and unknown-provider cases.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]

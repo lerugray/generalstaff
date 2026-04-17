@@ -256,6 +256,55 @@ describe("writeDigest", () => {
     expect(detailsIdx).toBeGreaterThan(-1);
     expect(cycleIdx).toBeGreaterThan(detailsIdx);
   });
+
+  it("defaults reviewer header to 'claude' when provider is unset", async () => {
+    await writeDigest([makeCycleResult()], 1, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("**Reviewer:** claude\n");
+  });
+
+  it("renders reviewer header for openrouter with model", async () => {
+    await writeDigest([makeCycleResult()], 1, {
+      digest_dir: "digests",
+      reviewer_provider: "openrouter",
+      reviewer_model: "qwen/qwen3-coder-30b-a3b-instruct",
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain(
+      "**Reviewer:** openrouter (qwen/qwen3-coder-30b-a3b-instruct)\n",
+    );
+  });
+
+  it("renders reviewer header for ollama with model", async () => {
+    await writeDigest([makeCycleResult()], 1, {
+      digest_dir: "digests",
+      reviewer_provider: "ollama",
+      reviewer_model: "qwen3:8b",
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("**Reviewer:** ollama (qwen3:8b)\n");
+  });
+
+  it("passes through an unknown provider name (lowercased, no model)", async () => {
+    await writeDigest([makeCycleResult()], 1, {
+      digest_dir: "digests",
+      reviewer_provider: "MyCustomProvider",
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("**Reviewer:** mycustomprovider\n");
+  });
 });
 
 function makePlan(overrides: Partial<SessionPlanEstimate> = {}): SessionPlanEstimate {
