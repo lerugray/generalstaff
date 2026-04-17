@@ -10,8 +10,11 @@ import {
   countCommitsAhead,
   preflightCleanupWorktree,
   formatUnmergedBranchError,
+  crossCheckReviewerHandsOff,
+  applyReviewerSanityCheck,
 } from "../src/cycle";
-import type { ProjectConfig } from "../src/types";
+import type { ProjectConfig, ReviewerResponse } from "../src/types";
+import type { ReviewerResult } from "../src/reviewer";
 
 function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
@@ -575,6 +578,178 @@ describe("cycle rollback on verification_failed (gs-132)", () => {
     expect(result.cycle_end_sha).toBe(result.cycle_start_sha);
     expect(result.rollback_event_count).toBe(0);
   }, 30_000);
+});
+
+describe("reviewer hands_off_violations sanity check (gs-133)", () => {
+  function makeReviewerResult(overrides: Partial<ReviewerResponse> = {}): ReviewerResult {
+    const response: ReviewerResponse = {
+      verdict: "verification_failed",
+      reason: "hands-off violation",
+      scope_drift_files: [],
+      hands_off_violations: [],
+      task_evidence: [],
+      silent_failures: [],
+      notes: "",
+      ...overrides,
+    };
+    return {
+      verdict: response.verdict,
+      response,
+      rawResponse: "{}",
+      parseError: null,
+    };
+  }
+
+  describe("crossCheckReviewerHandsOff", () => {
+    it("keeps a violation that names a file actually in the diff", () => {
+      const result = crossCheckReviewerHandsOff(
+        ["src/safety.ts"],
+        ["src/safety.ts", "src/cycle.ts"],
+      );
+      expect(result.real).toEqual(["src/safety.ts"]);
+      expect(result.dropped).toEqual([]);
+    });
+
+    it("drops a violation that names a file NOT in the diff", () => {
+      const result = crossCheckReviewerHandsOff(
+        ["src/safety.ts"],
+        ["src/engineer.ts", "src/cycle.ts"],
+      );
+      expect(result.real).toEqual([]);
+      expect(result.dropped).toEqual(["src/safety.ts"]);
+    });
+
+    it("keeps a glob-style violation that matches a changed file", () => {
+      // The reviewer frequently emits a prefix like src/prompts/; this
+      // must still match src/prompts/reviewer.ts for parity with the
+      // cycle's hands-off gate.
+      const result = crossCheckReviewerHandsOff(
+        ["src/prompts/"],
+        ["src/prompts/reviewer.ts"],
+      );
+      expect(result.real).toEqual(["src/prompts/"]);
+      expect(result.dropped).toEqual([]);
+    });
+
+    it("splits mixed real + hallucinated violations", () => {
+      const result = crossCheckReviewerHandsOff(
+        ["src/safety.ts", "src/cycle.ts", "src/prompts/"],
+        ["src/cycle.ts", "src/engineer.ts"],
+      );
+      expect(result.real).toEqual(["src/cycle.ts"]);
+      expect(result.dropped).toEqual(["src/safety.ts", "src/prompts/"]);
+    });
+
+    it("returns empty lists when reviewer reported nothing", () => {
+      const result = crossCheckReviewerHandsOff([], ["src/cycle.ts"]);
+      expect(result.real).toEqual([]);
+      expect(result.dropped).toEqual([]);
+    });
+  });
+
+  describe("applyReviewerSanityCheck", () => {
+    it("(a) reviewer reports a file IS in the diff — violation stands, verdict unchanged", () => {
+      const rr = makeReviewerResult({
+        verdict: "verification_failed",
+        hands_off_violations: ["src/safety.ts"],
+      });
+      const outcome = applyReviewerSanityCheck(rr, ["src/safety.ts", "src/cycle.ts"]);
+      expect(outcome.dropped).toEqual([]);
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verification_failed");
+      expect(rr.response!.hands_off_violations).toEqual(["src/safety.ts"]);
+    });
+
+    it("(b) reviewer reports a file NOT in the diff — violation dropped, hallucination flagged", () => {
+      const rr = makeReviewerResult({
+        verdict: "verification_failed",
+        hands_off_violations: ["src/safety.ts"],
+        scope_drift_files: ["something.ts"], // prevents the flip
+      });
+      const outcome = applyReviewerSanityCheck(rr, ["src/engineer.ts"]);
+      expect(outcome.dropped).toEqual(["src/safety.ts"]);
+      // flip blocked by scope_drift_files
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verification_failed");
+      expect(rr.response!.hands_off_violations).toEqual([]);
+    });
+
+    it("(c) all violations hallucinated AND no other failures — verdict flips to verified", () => {
+      const rr = makeReviewerResult({
+        verdict: "verification_failed",
+        hands_off_violations: ["src/safety.ts", "src/reviewer.ts", "src/prompts/"],
+      });
+      const outcome = applyReviewerSanityCheck(rr, [
+        "src/engineer.ts",
+        "src/cycle.ts",
+      ]);
+      expect(outcome.dropped).toEqual([
+        "src/safety.ts",
+        "src/reviewer.ts",
+        "src/prompts/",
+      ]);
+      expect(outcome.flipped).toBe(true);
+      expect(rr.verdict).toBe("verified");
+      expect(rr.response!.verdict).toBe("verified");
+      expect(rr.response!.hands_off_violations).toEqual([]);
+      expect(rr.response!.reason).toContain("hallucinated");
+    });
+
+    it("(d) mixed real + hallucinated — real stands, hallucinated dropped, no flip", () => {
+      const rr = makeReviewerResult({
+        verdict: "verification_failed",
+        hands_off_violations: ["src/cycle.ts", "src/safety.ts"],
+      });
+      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
+      expect(outcome.dropped).toEqual(["src/safety.ts"]);
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verification_failed");
+      expect(rr.response!.hands_off_violations).toEqual(["src/cycle.ts"]);
+    });
+
+    it("does not flip when silent_failures is non-empty", () => {
+      const rr = makeReviewerResult({
+        verdict: "verification_failed",
+        hands_off_violations: ["src/safety.ts"],
+        silent_failures: ["tests skipped"],
+      });
+      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
+      expect(outcome.dropped).toEqual(["src/safety.ts"]);
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verification_failed");
+    });
+
+    it("does not flip when primary verdict was already verified_weak", () => {
+      const rr = makeReviewerResult({
+        verdict: "verified_weak",
+        hands_off_violations: ["src/safety.ts"],
+      });
+      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
+      expect(outcome.dropped).toEqual(["src/safety.ts"]);
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verified_weak");
+    });
+
+    it("is a no-op when response is null", () => {
+      const rr: ReviewerResult = {
+        verdict: "verification_failed",
+        response: null,
+        rawResponse: "",
+        parseError: "bad json",
+      };
+      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
+      expect(outcome.dropped).toEqual([]);
+      expect(outcome.flipped).toBe(false);
+      expect(rr.verdict).toBe("verification_failed");
+    });
+
+    it("is a no-op when reviewer reported no hands_off_violations", () => {
+      const rr = makeReviewerResult({ hands_off_violations: [] });
+      const outcome = applyReviewerSanityCheck(rr, ["src/cycle.ts"]);
+      expect(outcome.dropped).toEqual([]);
+      expect(outcome.flipped).toBe(false);
+    });
+  });
 });
 
 describe("formatUnmergedBranchError", () => {

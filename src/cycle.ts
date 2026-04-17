@@ -18,7 +18,7 @@ import {
 import { appendProgress } from "./audit";
 import { runEngineer } from "./engineer";
 import { runVerification } from "./verification";
-import { runReviewer } from "./reviewer";
+import { runReviewer, type ReviewerResult } from "./reviewer";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import type {
@@ -210,6 +210,64 @@ export function extractChangedFiles(diff: string): string[] {
     }
   }
   return files;
+}
+
+// gs-133: cross-reference reviewer-reported hands_off_violations against
+// the actual diff. Returns which violations are real (a file in the diff
+// matches the violation string as a glob, using matchesHandsOff for
+// parity with the cycle's own hands-off gate) and which are hallucinated.
+export function crossCheckReviewerHandsOff(
+  reviewerViolations: string[],
+  changedFiles: string[],
+): { real: string[]; dropped: string[] } {
+  const real: string[] = [];
+  const dropped: string[] = [];
+  for (const v of reviewerViolations) {
+    const hasMatch = changedFiles.some(
+      (f) => matchesHandsOff(f, [v]) !== null,
+    );
+    if (hasMatch) real.push(v);
+    else dropped.push(v);
+  }
+  return { real, dropped };
+}
+
+// gs-133: mutates the reviewer result in place — drops hallucinated
+// hands_off_violations and, when the reviewer's only failure reason was
+// those hallucinations, flips the verdict from verification_failed to
+// verified. Returns the dropped list + whether the verdict was flipped so
+// the caller can emit a reviewer_hallucination progress event.
+export function applyReviewerSanityCheck(
+  reviewerResult: ReviewerResult,
+  changedFiles: string[],
+): { dropped: string[]; flipped: boolean } {
+  const resp = reviewerResult.response;
+  if (!resp || resp.hands_off_violations.length === 0) {
+    return { dropped: [], flipped: false };
+  }
+  const { real, dropped } = crossCheckReviewerHandsOff(
+    resp.hands_off_violations,
+    changedFiles,
+  );
+  if (dropped.length === 0) {
+    return { dropped: [], flipped: false };
+  }
+  resp.hands_off_violations = real;
+  let flipped = false;
+  if (
+    reviewerResult.verdict === "verification_failed" &&
+    real.length === 0 &&
+    resp.scope_drift_files.length === 0 &&
+    resp.silent_failures.length === 0
+  ) {
+    reviewerResult.verdict = "verified";
+    resp.verdict = "verified";
+    resp.reason =
+      `verdict flipped: all reported hands_off_violations were hallucinated ` +
+      `(${dropped.join(", ")})`;
+    flipped = true;
+  }
+  return { dropped, flipped };
 }
 
 export function diffSummaryStats(diff: string): DiffStats {
@@ -623,6 +681,31 @@ export async function executeCycle(
     console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
     if (reviewerResult.parseError) {
       console.log(`Reviewer parse error: ${reviewerResult.parseError}`);
+    }
+
+    // 8a. Sanity-check reviewer hands_off_violations against actual
+    //     changed files. Some reviewer models (observed on Ollama
+    //     qwen3:8b, 2026-04-17) hallucinate violations naming files
+    //     not present in the diff, which then fails cycles that should
+    //     pass. See gs-133.
+    const sanity = applyReviewerSanityCheck(reviewerResult, changedFiles);
+    if (sanity.dropped.length > 0) {
+      await appendProgress(project.id, "reviewer_hallucination", {
+        dropped_violations: sanity.dropped,
+        changed_files: changedFiles,
+        verdict_flipped: sanity.flipped,
+      }, cycleId);
+      if (sanity.flipped) {
+        console.log(
+          `Reviewer verdict flipped verification_failed → verified ` +
+          `(all hands_off_violations hallucinated: ${sanity.dropped.join(", ")})`,
+        );
+      } else {
+        console.log(
+          `Dropped ${sanity.dropped.length} hallucinated hands_off_violation(s): ` +
+          `${sanity.dropped.join(", ")}`,
+        );
+      }
     }
 
     // 9. Determine final outcome
