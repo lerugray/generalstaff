@@ -1,0 +1,362 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 935e560..dd0f281 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -296,7 +296,7 @@
+   {
+     "id": "gs-075",
+     "title": "Add test coverage for the OpenRouter reviewer code path in reviewer.ts. Mock the global fetch to return a well-formed chat-completion response; verify invokeOpenRouterReviewer builds the correct request body (model, messages, temperature), parses the response, and fail-safes correctly on HTTP errors and malformed JSON.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/reviewer.test.ts b/tests/reviewer.test.ts
+index 868b083..369df62 100644
+--- a/tests/reviewer.test.ts
++++ b/tests/reviewer.test.ts
+@@ -1,5 +1,5 @@
+-import { describe, expect, it } from "bun:test";
+-import { parseReviewerResponse } from "../src/reviewer";
++import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { invokeOpenRouterReviewer, parseReviewerResponse } from "../src/reviewer";
+ 
+ const VALID_RESPONSE = {
+   verdict: "verified" as const,
+@@ -90,3 +90,148 @@ describe("parseReviewerResponse", () => {
+     expect(result.parseError).not.toBeNull();
+   });
+ });
++
++describe("invokeOpenRouterReviewer", () => {
++  const originalFetch = globalThis.fetch;
++  const originalApiKey = process.env.OPENROUTER_API_KEY;
++  const originalModel = process.env.GENERALSTAFF_REVIEWER_MODEL;
++
++  beforeEach(() => {
++    delete process.env.GENERALSTAFF_REVIEWER_MODEL;
++  });
++
++  afterEach(() => {
++    globalThis.fetch = originalFetch;
++    if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
++    else process.env.OPENROUTER_API_KEY = originalApiKey;
++    if (originalModel === undefined) delete process.env.GENERALSTAFF_REVIEWER_MODEL;
++    else process.env.GENERALSTAFF_REVIEWER_MODEL = originalModel;
++  });
++
++  it("returns error string when OPENROUTER_API_KEY is not set", async () => {
++    delete process.env.OPENROUTER_API_KEY;
++    let fetchCalled = false;
++    globalThis.fetch = (async () => {
++      fetchCalled = true;
++      return new Response("{}");
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("test prompt");
++
++    expect(result).toContain("[REVIEWER ERROR]");
++    expect(result).toContain("OPENROUTER_API_KEY");
++    expect(fetchCalled).toBe(false);
++  });
++
++  it("builds correct request body and parses content from well-formed response", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test-key-123";
++    let capturedUrl: string = "";
++    let capturedInit: RequestInit | undefined;
++
++    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
++      capturedUrl = String(url);
++      capturedInit = init;
++      return new Response(
++        JSON.stringify({
++          choices: [{ message: { content: "the reviewer verdict text" } }],
++        }),
++        { status: 200, headers: { "Content-Type": "application/json" } },
++      );
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("review this diff");
++
++    expect(result).toBe("the reviewer verdict text");
++    expect(capturedUrl).toBe("https://openrouter.ai/api/v1/chat/completions");
++    expect(capturedInit?.method).toBe("POST");
++    const headers = capturedInit?.headers as Record<string, string>;
++    expect(headers["Authorization"]).toBe("Bearer sk-test-key-123");
++    expect(headers["Content-Type"]).toBe("application/json");
++
++    const body = JSON.parse(capturedInit?.body as string) as {
++      model: string;
++      messages: Array<{ role: string; content: string }>;
++      temperature: number;
++      max_tokens: number;
++    };
++    expect(body.model).toBe("qwen/qwen3-coder-30b-a3b-instruct");
++    expect(body.messages).toEqual([{ role: "user", content: "review this diff" }]);
++    expect(body.temperature).toBe(0);
++    expect(body.max_tokens).toBe(4000);
++  });
++
++  it("honors GENERALSTAFF_REVIEWER_MODEL override", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test";
++    process.env.GENERALSTAFF_REVIEWER_MODEL = "anthropic/claude-sonnet-4.6";
++    let capturedBody: string | null = null;
++
++    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
++      capturedBody = init?.body as string;
++      return new Response(
++        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
++        { status: 200 },
++      );
++    }) as unknown as typeof fetch;
++
++    await invokeOpenRouterReviewer("prompt");
++
++    expect(capturedBody).not.toBeNull();
++    const body = JSON.parse(capturedBody as unknown as string);
++    expect(body.model).toBe("anthropic/claude-sonnet-4.6");
++  });
++
++  it("returns error string on non-2xx HTTP response", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test";
++    globalThis.fetch = (async () => {
++      return new Response("upstream rate limited", {
++        status: 429,
++        statusText: "Too Many Requests",
++      });
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("prompt");
++
++    expect(result).toContain("[REVIEWER ERROR]");
++    expect(result).toContain("429");
++    expect(result).toContain("Too Many Requests");
++    expect(result).toContain("upstream rate limited");
++  });
++
++  it("returns error string when response JSON is missing content", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test";
++    globalThis.fetch = (async () => {
++      return new Response(JSON.stringify({ choices: [] }), { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("prompt");
++
++    expect(result).toContain("[REVIEWER ERROR]");
++    expect(result).toContain("missing content");
++  });
++
++  it("returns error string when fetch throws", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test";
++    globalThis.fetch = (async () => {
++      throw new Error("ENETUNREACH: network is down");
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("prompt");
++
++    expect(result).toContain("[REVIEWER ERROR]");
++    expect(result).toContain("fetch failed");
++    expect(result).toContain("ENETUNREACH");
++  });
++
++  it("returns error string when response body is not valid JSON", async () => {
++    process.env.OPENROUTER_API_KEY = "sk-test";
++    globalThis.fetch = (async () => {
++      return new Response("not-json-at-all", { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOpenRouterReviewer("prompt");
++
++    // The fetch try/catch will catch the JSON parse error
++    expect(result).toContain("[REVIEWER ERROR]");
++    expect(result).toContain("fetch failed");
++  });
++});
+
+
+Diff summary: state/generalstaff/tasks.json |   2 +-
+ tests/reviewer.test.ts        | 149 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 148 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T08:19:38.799Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_081956.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_081956.md
+
+ 424 pass
+ 0 fail
+ 1269 expect() calls
+Ran 424 tests across 20 files. [27.05s]
+
+========================================
+Exit code: 0
+Duration: 28.9s
+Ended: 2026-04-17T08:20:07.650Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
