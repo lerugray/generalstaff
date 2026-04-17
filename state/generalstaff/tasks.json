@@ -746,7 +746,7 @@
   {
     "id": "gs-150",
     "title": "Create src/providers/types.ts defining the provider abstraction interfaces: LLMProvider (name: string, invoke(prompt: string, opts?: { timeoutMs?: number; maxTokens?: number; temperature?: number }): Promise<{ content: string; error?: string }>), ProviderRole ('digest' | 'cycle_summary' | 'classifier' — explicitly NOT including 'reviewer' since reviewer dispatch is handled inline in src/reviewer.ts per Phase 2 scoping), ProviderHealth ({ reachable: boolean; host?: string; error?: string; latencyMs?: number }), and ProviderDescriptor ({ id: string; kind: 'ollama' | 'openrouter' | 'claude'; model: string; host?: string; api_key_env?: string }). All pure type definitions with no runtime code. Add tests in tests/providers.types.test.ts exercising only the type shape (e.g. satisfies checks) — no runtime assertions needed beyond importing the module without errors. Do NOT import from src/reviewer.ts — the new abstraction lives alongside, not on top of, reviewer dispatch.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
