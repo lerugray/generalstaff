@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff are directly related to the claimed task, no hands-off violations, and the diff provides strong evidence for the task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "In work_detection.ts, add a 'git_unmerged' mode that counts commits on bot/work ahead of master as a proxy for pending work (alternative to tasks_json for projects without an explicit task file). Add VALID_WORK_DETECTION entry, cycle.ts dispatch, and tests.",
+      "evidence": "The diff adds 'git_unmerged' to VALID_WORK_DETECTION in projects.ts, adds dispatch logic in cycle.ts, implements gitUnmergedCountRemaining and gitUnmergedHasMoreWork functions in work_detection.ts, and includes comprehensive tests in work_detection.test.ts.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully with all 417 tests passing, confirming the implementation is working as expected."
+}
