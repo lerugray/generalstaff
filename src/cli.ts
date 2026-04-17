@@ -12,7 +12,7 @@ import { tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompa
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
-import { loadTasks, pendingTasks, addTask } from "./tasks";
+import { loadTasks, pendingTasks, addTask, TasksLoadError } from "./tasks";
 import {
   buildFleetSummary,
   computeDiskUsage,
@@ -300,7 +300,16 @@ switch (command) {
         console.error("Error: --project=<id> is required");
         process.exit(1);
       }
-      const tasks = await loadTasks(values.project);
+      let tasks;
+      try {
+        tasks = await loadTasks(values.project);
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
       const pending = pendingTasks(tasks);
       if (pending.length === 0) {
         console.log("No pending tasks.");
@@ -336,7 +345,16 @@ switch (command) {
         }
         priority = parsed;
       }
-      const task = await addTask(taskValues.project, title, priority);
+      let task;
+      try {
+        task = await addTask(taskValues.project, title, priority);
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
       console.log(`Added ${task.id}: ${task.title}`);
     } else {
       console.error(
