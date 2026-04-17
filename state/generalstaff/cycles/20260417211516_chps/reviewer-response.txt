@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changed files correspond to the claimed task gs-158, no hands-off violations, and the diff provides strong evidence for completing the task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Wire generateDigestNarrative (gs-154) into writeDigest in src/session.ts behind a feature flag. When env var GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is set to a non-empty provider id AND provider_config.yaml exists AND the registry resolves that id, instantiate the provider via getProviderForRole, call generateDigestNarrative, and if it returns fellBack=false inject the narrative as a new '**Narrative:**' line in the digest front-matter (right after '**Summary:**'). If fellBack=true OR the env var is unset, writeDigest produces exactly the current output (templated only). The feature must default OFF — no behavior change for existing users until they opt in. Log a digest_narrative_generated PROGRESS event to the _fleet log (follow-up: actually ADDING this event type to ProgressEventType is gs-161; until then just console.log the fallback status, no PROGRESS event). Add tests in tests/session.test.ts: (a) no env var → identical to baseline writeDigest output, (b) env var set + provider returns narrative → digest contains '**Narrative:**' line, (c) env var set + provider errors → narrative line absent, digest otherwise complete. Do NOT modify projects.yaml or the reviewer dispatch.",
+      "evidence": "The diff shows the implementation of `resolveDigestNarrative` function in src/session.ts, integration of narrative generation into `writeDigest`, addition of `WriteDigestDeps` interface, and corresponding test cases in tests/session.test.ts that verify all three scenarios described in the task.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, and the changes are fully aligned with the task requirements. The tests added cover all specified behaviors for the new feature."
+}
