@@ -1,0 +1,760 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 8fad0b4..c23c19f 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -114,7 +114,7 @@ Usage:
+     Example: generalstaff task count                     # all projects
+     Example: generalstaff task count --project=myapp     # single project
+ 
+-  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path]
++  generalstaff digest [--latest] [--date=YYYYMMDD] [--list] [--json] [--path] [--regen=<file>]
+                                                           Print a session digest to stdout, or list all
+     Example: generalstaff digest --latest                # most recent digest
+     Example: generalstaff digest --date=20260416         # first digest from that day
+@@ -122,6 +122,7 @@ Usage:
+     Example: generalstaff digest --latest --json         # structured JSON of the latest digest
+     Example: generalstaff digest --list --json           # JSON array of digest summaries
+     Example: generalstaff digest --latest --path         # absolute path of the latest digest (for scripting)
++    Example: generalstaff digest --regen=digests/digest_20260417_100000.md  # re-render from PROGRESS.jsonl
+ 
+   generalstaff version                                    Show version + environment info (for bug reports)
+     Example: generalstaff version                       # includes bun version, platform, projects.yaml path
+@@ -631,6 +632,7 @@ switch (command) {
+         list: { type: "boolean", default: false },
+         json: { type: "boolean", default: false },
+         path: { type: "boolean", default: false },
++        regen: { type: "string" },
+       },
+       allowPositionals: false,
+     });
+@@ -642,7 +644,34 @@ switch (command) {
+       console.error("Error: --list cannot be combined with --latest or --date");
+       process.exit(1);
+     }
++    if (
++      digestValues.regen &&
++      (digestValues.latest || digestValues.date || digestValues.list || digestValues.path)
++    ) {
++      console.error(
++        "Error: --regen cannot be combined with --latest, --date, --list, or --path",
++      );
++      process.exit(1);
++    }
+     const dispatcher = await loadDispatcherConfig();
++    if (digestValues.regen) {
++      const sourcePath = resolve(getRootDir(), digestValues.regen);
++      if (!existsSync(sourcePath)) {
++        console.error(`Error: digest file not found: ${sourcePath}`);
++        process.exit(1);
++      }
++      const { regenerateDigest } = await import("./session");
++      const { missing } = await regenerateDigest(sourcePath, {
++        digest_dir: dispatcher.digest_dir,
++      });
++      if (missing.length > 0) {
++        console.error(
++          `Warning: ${missing.length} cycle(s) had no matching cycle_end event in PROGRESS.jsonl ` +
++            `(used digest-only fallback): ${missing.map((m) => `${m.project_id}/${m.cycle_id}`).join(", ")}`,
++        );
++      }
++      break;
++    }
+     const digestDir = resolve(getRootDir(), dispatcher.digest_dir);
+     const files = existsSync(digestDir)
+       ? readdirSync(digestDir)
+diff --git a/src/session.ts b/src/session.ts
+index b2b4afa..30a585c 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -10,7 +10,7 @@ import {
+   saveProjectState,
+   getRootDir,
+ } from "./state";
+-import { appendProgress } from "./audit";
++import { appendProgress, loadProgressEvents } from "./audit";
+ import { isStopFilePresent } from "./safety";
+ import { executeCycle, countCommitsAhead } from "./cycle";
+ import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
+@@ -612,3 +612,113 @@ export function parseDigest(markdown: string): ParsedDigest {
+     cycles,
+   };
+ }
++
++// Reverse formatDuration: "1h15m" / "2m30s" / "45s" → fractional minutes.
++// Returns 0 for unparseable input (regen still produces output, just with
++// an unknown duration line).
++export function parseFormattedDuration(s: string): number {
++  const m = s.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/);
++  if (!m || (!m[1] && !m[2] && !m[3])) return 0;
++  const h = m[1] ? Number(m[1]) : 0;
++  const min = m[2] ? Number(m[2]) : 0;
++  const sec = m[3] ? Number(m[3]) : 0;
++  return h * 60 + min + sec / 60;
++}
++
++// gs-113: rebuild a digest from PROGRESS.jsonl cycle_end events. Reads the
++// source digest to learn the cycle list (project_id + cycle_id pairs) and
++// reviewer/duration metadata, then loads the matching cycle_end entries and
++// hands them to writeDigest. writeDigest uses a fresh timestamp so the new
++// file never overwrites the source.
++export async function regenerateDigest(
++  sourceDigestPath: string,
++  config: { digest_dir: string },
++): Promise<{ results: CycleResult[]; missing: Array<{ project_id: string; cycle_id: string }> }> {
++  const { readFileSync } = require("fs");
++  const markdown = readFileSync(sourceDigestPath, "utf8");
++  const parsed = parseDigest(markdown);
++
++  // Reviewer line: "**Reviewer:** provider" or "**Reviewer:** provider (model)".
++  // Keeping the model optional matches writeDigest's own conditional.
++  const reviewerMatch = markdown.match(/\*\*Reviewer:\*\*\s*(\S+)(?:\s*\(([^)]+)\))?/);
++  const reviewerProvider = reviewerMatch ? reviewerMatch[1] : undefined;
++  const reviewerModel = reviewerMatch && reviewerMatch[2] ? reviewerMatch[2] : undefined;
++
++  const results: CycleResult[] = [];
++  const missing: Array<{ project_id: string; cycle_id: string }> = [];
++
++  for (const c of parsed.cycles) {
++    const events = await loadProgressEvents(
++      c.project_id,
++      (e) => e.event === "cycle_end" && e.cycle_id === c.cycle_id,
++    );
++    if (events.length === 0) {
++      missing.push({ project_id: c.project_id, cycle_id: c.cycle_id });
++      const fallback = resultFromDigestCycle(c);
++      if (fallback) results.push(fallback);
++      continue;
++    }
++    results.push(resultFromProgressEntry(events[0], c));
++  }
++
++  const durationMinutes = parsed.duration ? parseFormattedDuration(parsed.duration) : 0;
++
++  await writeDigest(results, durationMinutes, {
++    digest_dir: config.digest_dir,
++    reviewer_provider: reviewerProvider,
++    reviewer_model: reviewerModel,
++  });
++
++  return { results, missing };
++}
++
++function resultFromProgressEntry(
++  entry: { timestamp: string; data: Record<string, unknown> },
++  c: ParsedDigestCycle,
++): CycleResult {
++  const d = entry.data;
++  const endedAt = entry.timestamp;
++  const durSec = typeof d.duration_seconds === "number" ? d.duration_seconds : 0;
++  const startedAt = new Date(new Date(endedAt).getTime() - durSec * 1000).toISOString();
++  const diff = d.diff_stats as { files_changed: number; insertions: number; deletions: number } | undefined;
++  return {
++    cycle_id: c.cycle_id,
++    project_id: c.project_id,
++    started_at: startedAt,
++    ended_at: endedAt,
++    cycle_start_sha: typeof d.start_sha === "string" ? d.start_sha : "",
++    cycle_end_sha: typeof d.end_sha === "string" ? d.end_sha : "",
++    engineer_exit_code:
++      typeof d.engineer_exit_code === "number" ? d.engineer_exit_code : null,
++    verification_outcome: (d.verification_outcome ?? "failed") as CycleResult["verification_outcome"],
++    reviewer_verdict: (d.reviewer_verdict ?? "verification_failed") as CycleResult["reviewer_verdict"],
++    final_outcome: (d.outcome ?? "verification_failed") as CycleResult["final_outcome"],
++    reason: typeof d.reason === "string" ? d.reason : "",
++    diff_stats: diff && typeof diff === "object"
++      ? {
++          files_changed: Number(diff.files_changed) || 0,
++          insertions: Number(diff.insertions) || 0,
++          deletions: Number(diff.deletions) || 0,
++        }
++      : undefined,
++  };
++}
++
++function resultFromDigestCycle(c: ParsedDigestCycle): CycleResult | null {
++  if (!c.outcome) return null;
++  const now = new Date().toISOString();
++  return {
++    cycle_id: c.cycle_id,
++    project_id: c.project_id,
++    started_at: now,
++    ended_at: now,
++    cycle_start_sha: c.sha_start ?? "",
++    cycle_end_sha: c.sha_end ?? "",
++    engineer_exit_code: c.engineer_exit,
++    verification_outcome: (c.verification ?? "failed") as CycleResult["verification_outcome"],
++    reviewer_verdict: (c.reviewer ?? "verification_failed") as CycleResult["reviewer_verdict"],
++    final_outcome: c.outcome as CycleResult["final_outcome"],
++    reason: c.reason ?? "",
++    diff_stats: c.diff_stats ?? undefined,
++  };
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 6b5e7ce..ea64cc3 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -524,7 +524,7 @@
+   {
+     "id": "gs-113",
+     "title": "Add `generalstaff digest --regen=<digest-file-path>` that re-renders an existing digest markdown from the underlying PROGRESS.jsonl cycle_end events. Useful for recovering when a digest rendered with a bug (like the 2026-04-17 cycle-1 subject fallback) needs a fresh pass with the corrected code. Reads the digest file's date range, finds matching cycle_end entries, rebuilds CycleResult objects, calls writeDigest. Writes to a new timestamped file rather than overwriting. Add tests.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/helpers/verify_capped_projects_skipped.ts b/tests/helpers/verify_capped_projects_skipped.ts
+index b268a22..aed8059 100644
+--- a/tests/helpers/verify_capped_projects_skipped.ts
++++ b/tests/helpers/verify_capped_projects_skipped.ts
+@@ -133,6 +133,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_cycle_completion_log.ts b/tests/helpers/verify_cycle_completion_log.ts
+index 9be4d67..95f4946 100644
+--- a/tests/helpers/verify_cycle_completion_log.ts
++++ b/tests/helpers/verify_cycle_completion_log.ts
+@@ -110,6 +110,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_cycle_eta_log.ts b/tests/helpers/verify_cycle_eta_log.ts
+index 9ab0cb2..b8d0940 100644
+--- a/tests/helpers/verify_cycle_eta_log.ts
++++ b/tests/helpers/verify_cycle_eta_log.ts
+@@ -101,6 +101,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_empty_cycle_guard.ts b/tests/helpers/verify_empty_cycle_guard.ts
+index 9d9141c..7765f16 100644
+--- a/tests/helpers/verify_empty_cycle_guard.ts
++++ b/tests/helpers/verify_empty_cycle_guard.ts
+@@ -103,6 +103,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_empty_diff_skips.ts b/tests/helpers/verify_empty_diff_skips.ts
+index aa72aaa..ac16631 100644
+--- a/tests/helpers/verify_empty_diff_skips.ts
++++ b/tests/helpers/verify_empty_diff_skips.ts
+@@ -96,6 +96,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ const { executeCycle } = await import("../../src/cycle");
+diff --git a/tests/helpers/verify_engineer_exit_handling.ts b/tests/helpers/verify_engineer_exit_handling.ts
+index 9c7efd9..7922be4 100644
+--- a/tests/helpers/verify_engineer_exit_handling.ts
++++ b/tests/helpers/verify_engineer_exit_handling.ts
+@@ -107,6 +107,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ const { executeCycle } = await import("../../src/cycle");
+diff --git a/tests/helpers/verify_exclude_project.ts b/tests/helpers/verify_exclude_project.ts
+index fc42e21..7c94356 100644
+--- a/tests/helpers/verify_exclude_project.ts
++++ b/tests/helpers/verify_exclude_project.ts
+@@ -141,6 +141,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_handsoff_violation_skips.ts b/tests/helpers/verify_handsoff_violation_skips.ts
+index 474760e..941d3eb 100644
+--- a/tests/helpers/verify_handsoff_violation_skips.ts
++++ b/tests/helpers/verify_handsoff_violation_skips.ts
+@@ -103,6 +103,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ const { executeCycle } = await import("../../src/cycle");
+diff --git a/tests/helpers/verify_max_cycles.ts b/tests/helpers/verify_max_cycles.ts
+index fda3038..db116cc 100644
+--- a/tests/helpers/verify_max_cycles.ts
++++ b/tests/helpers/verify_max_cycles.ts
+@@ -99,6 +99,7 @@ mock.module("../../src/state", () => ({
+ 
+ mock.module("../../src/audit", () => ({
+   appendProgress: async () => {},
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/helpers/verify_session_complete_event.ts b/tests/helpers/verify_session_complete_event.ts
+index b6d783f..cc18cd8 100644
+--- a/tests/helpers/verify_session_complete_event.ts
++++ b/tests/helpers/verify_session_complete_event.ts
+@@ -123,6 +123,7 @@ mock.module("../../src/audit", () => ({
+   ) => {
+     capturedEvents.push({ projectId, event, data });
+   },
++  loadProgressEvents: async () => [],
+ }));
+ 
+ mock.module("../../src/work_detection", () => ({
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 1701f35..5ed5a06 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -1,8 +1,15 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+-import { writeDigest, formatSessionPlanPreview, parseDigest, checkCycleWatchdog } from "../src/session";
++import {
++  writeDigest,
++  formatSessionPlanPreview,
++  parseDigest,
++  checkCycleWatchdog,
++  regenerateDigest,
++  parseFormattedDuration,
++} from "../src/session";
+ import { setRootDir } from "../src/state";
+ import { join } from "path";
+-import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
++import { mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
+ import type { CycleResult } from "../src/types";
+ import type { SessionPlanEstimate } from "../src/dispatcher";
+ 
+@@ -521,6 +528,135 @@ describe("parseDigest", () => {
+   });
+ });
+ 
++describe("parseFormattedDuration", () => {
++  it("parses hours+minutes", () => {
++    expect(parseFormattedDuration("1h15m")).toBeCloseTo(75);
++  });
++  it("parses minutes+seconds", () => {
++    expect(parseFormattedDuration("2m30s")).toBeCloseTo(2.5);
++  });
++  it("parses seconds-only", () => {
++    expect(parseFormattedDuration("45s")).toBeCloseTo(0.75);
++  });
++  it("parses hours-only", () => {
++    expect(parseFormattedDuration("3h")).toBe(180);
++  });
++  it("returns 0 for unparseable input", () => {
++    expect(parseFormattedDuration("not a duration")).toBe(0);
++    expect(parseFormattedDuration("")).toBe(0);
++  });
++});
++
++describe("regenerateDigest", () => {
++  function seedCycleEnd(projectId: string, cycleId: string, data: Record<string, unknown>, timestamp: string) {
++    const dir = join(TEST_DIR, "state", projectId);
++    mkdirSync(dir, { recursive: true });
++    const entry = {
++      timestamp,
++      event: "cycle_end",
++      cycle_id: cycleId,
++      project_id: projectId,
++      data,
++    };
++    const line = JSON.stringify(entry) + "\n";
++    const path = join(dir, "PROGRESS.jsonl");
++    // Append rather than overwrite so seeding multiple cycles works
++    const existing = (() => {
++      try {
++        return readFileSync(path, "utf8");
++      } catch {
++        return "";
++      }
++    })();
++    writeFileSync(path, existing + line, "utf8");
++  }
++
++  it("re-renders a digest from PROGRESS.jsonl and writes to a new file", async () => {
++    seedCycleEnd(
++      "proj-a",
++      "c-1",
++      {
++        outcome: "verified",
++        reason: "tests pass, scope matches",
++        start_sha: "aaaaaaaa11111111",
++        end_sha: "bbbbbbbb22222222",
++        engineer_exit_code: 0,
++        verification_outcome: "passed",
++        reviewer_verdict: "verified",
++        diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
++        duration_seconds: 300,
++      },
++      "2026-04-17T10:05:00.000Z",
++    );
++
++    const originalResults = [
++      makeCycleResult({
++        project_id: "proj-a",
++        cycle_id: "c-1",
++        cycle_start_sha: "aaaaaaaa11111111",
++        cycle_end_sha: "bbbbbbbb22222222",
++        diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
++      }),
++    ];
++    await writeDigest(originalResults, 5, {
++      digest_dir: "digests",
++      reviewer_provider: "openrouter",
++      reviewer_model: "qwen/qwen3-coder-plus",
++    });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const before = readdirSync(digestDir).sort();
++    expect(before).toHaveLength(1);
++    const sourcePath = join(digestDir, before[0]);
++
++    // Wait a moment so the regenerated file gets a distinct timestamp
++    await new Promise((r) => setTimeout(r, 1100));
++
++    const { results, missing } = await regenerateDigest(sourcePath, { digest_dir: "digests" });
++    expect(missing).toHaveLength(0);
++    expect(results).toHaveLength(1);
++    expect(results[0].project_id).toBe("proj-a");
++    expect(results[0].cycle_id).toBe("c-1");
++    expect(results[0].final_outcome).toBe("verified");
++    expect(results[0].diff_stats).toEqual({ files_changed: 2, insertions: 10, deletions: 3 });
++
++    const after = readdirSync(digestDir).sort();
++    expect(after.length).toBe(2);
++    // Source file must still exist
++    expect(after).toContain(before[0]);
++    // Regenerated content preserves reviewer and cycle
++    const regen = after.find((f) => f !== before[0])!;
++    const content = readFileSync(join(digestDir, regen), "utf8");
++    expect(content).toContain("**Reviewer:** openrouter (qwen/qwen3-coder-plus)");
++    expect(content).toContain("proj-a — c-1");
++    expect(content).toContain("**Outcome:** verified");
++  });
++
++  it("reports missing cycles when cycle_end events are not in PROGRESS.jsonl", async () => {
++    const results = [
++      makeCycleResult({
++        project_id: "ghost-proj",
++        cycle_id: "ghost-cycle",
++        final_outcome: "verified",
++        cycle_start_sha: "cccccccc33333333",
++        cycle_end_sha: "dddddddd44444444",
++      }),
++    ];
++    await writeDigest(results, 2, { digest_dir: "digests" });
++    const digestDir = join(TEST_DIR, "digests");
++    const sourcePath = join(digestDir, readdirSync(digestDir)[0]);
++
++    await new Promise((r) => setTimeout(r, 1100));
++
++    const out = await regenerateDigest(sourcePath, { digest_dir: "digests" });
++    expect(out.missing).toHaveLength(1);
++    expect(out.missing[0]).toEqual({ project_id: "ghost-proj", cycle_id: "ghost-cycle" });
++    // Still rebuilt via digest-only fallback
++    expect(out.results).toHaveLength(1);
++    expect(out.results[0].final_outcome).toBe("verified");
++  });
++});
++
+ describe("runSession safeguards", () => {
+   it("exits after 3 consecutive empty-diff cycles", async () => {
+     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+
+
+Diff summary: src/cli.ts                                       |  31 ++++-
+ src/session.ts                                   | 112 +++++++++++++++++-
+ state/generalstaff/tasks.json                    |   2 +-
+ tests/helpers/verify_capped_projects_skipped.ts  |   1 +
+ tests/helpers/verify_cycle_completion_log.ts     |   1 +
+ tests/helpers/verify_cycle_eta_log.ts            |   1 +
+ tests/helpers/verify_empty_cycle_guard.ts        |   1 +
+ tests/helpers/verify_empty_diff_skips.ts         |   1 +
+ tests/helpers/verify_engineer_exit_handling.ts   |   1 +
+ tests/helpers/verify_exclude_project.ts          |   1 +
+ tests/helpers/verify_handsoff_violation_skips.ts |   1 +
+ tests/helpers/verify_max_cycles.ts               |   1 +
+ tests/helpers/verify_session_complete_event.ts   |   1 +
+ tests/session.test.ts                            | 140 ++++++++++++++++++++++-
+ 14 files changed, 290 insertions(+), 5 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T14:42:42.194Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_144309.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144309.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_144310.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\On
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
