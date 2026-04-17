@@ -1,0 +1,168 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 8deee9f..51ccc19 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -62,9 +62,10 @@ Usage:
+   generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
+     Example: generalstaff log --project=myapp --lines=50
+ 
+-  generalstaff summary [--no-tests]                       Dashboard: cycles, outcomes, duration, tasks, tests
++  generalstaff summary [--no-tests] [--format=json]       Dashboard: cycles, outcomes, duration, tasks, tests
+     Example: generalstaff summary                       # one-screen fleet overview
+     Example: generalstaff summary --no-tests            # skip scanning tests/ dir
++    Example: generalstaff summary --format=json         # machine-readable output
+ 
+   generalstaff doctor                                     Check prerequisites (bun, git, claude)
+     Example: generalstaff doctor
+@@ -267,15 +268,25 @@ switch (command) {
+       args: args.slice(1),
+       options: {
+         "no-tests": { type: "boolean", default: false },
++        "format": { type: "string" },
+       },
+       allowPositionals: false,
+     });
++    const format = summaryValues.format;
++    if (format !== undefined && format !== "json") {
++      console.error(`Error: unknown --format value: ${format} (supported: json)`);
++      process.exit(1);
++    }
+     const summary = await buildFleetSummary();
+     const tests = summaryValues["no-tests"]
+       ? null
+       : countTests(resolve("tests"));
+     const disk = computeDiskUsage();
+-    console.log(formatSummary(summary, tests, disk));
++    if (format === "json") {
++      console.log(JSON.stringify({ summary, tests, disk }, null, 2));
++    } else {
++      console.log(formatSummary(summary, tests, disk));
++    }
+     break;
+   }
+ 
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 70b9b55..62139c6 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -224,7 +224,7 @@
+   {
+     "id": "gs-063",
+     "title": "Add --format=json to 'generalstaff summary' that emits the FleetSummary object as JSON (same data as the text dashboard, machine-readable). Include tests verifying JSON parses and matches the text output's counts.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 747a09b..fce95a9 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -683,6 +683,107 @@ projects:
+     });
+   });
+ 
++  describe("summary --format=json", () => {
++    const SUMMARY_TEST_DIR = join(import.meta.dir, "fixtures", "summary_json_test");
++
++    function cycleEnd(opts: {
++      project: string;
++      cycleId: string;
++      ts: string;
++      outcome: string;
++      durationSeconds?: number;
++    }): string {
++      return JSON.stringify({
++        timestamp: opts.ts,
++        event: "cycle_end",
++        cycle_id: opts.cycleId,
++        project_id: opts.project,
++        data: {
++          outcome: opts.outcome,
++          duration_seconds: opts.durationSeconds ?? 60,
++          start_sha: "aaa1111",
++          end_sha: "bbb2222",
++        },
++      });
++    }
++
++    beforeEach(() => {
++      const stateDir = join(SUMMARY_TEST_DIR, "state");
++      mkdirSync(join(stateDir, "alpha"), { recursive: true });
++      mkdirSync(join(stateDir, "beta"), { recursive: true });
++
++      const alphaLog = [
++        cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-16T10:00:00.000Z", outcome: "verified", durationSeconds: 120 }),
++        cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-16T10:05:00.000Z", outcome: "verification_failed", durationSeconds: 30 }),
++        cycleEnd({ project: "alpha", cycleId: "c3", ts: "2026-04-16T10:10:00.000Z", outcome: "cycle_skipped", durationSeconds: 5 }),
++      ].join("\n") + "\n";
++      const betaLog = [
++        cycleEnd({ project: "beta", cycleId: "c4", ts: "2026-04-16T11:00:00.000Z", outcome: "verified", durationSeconds: 90 }),
++      ].join("\n") + "\n";
++      writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), alphaLog);
++      writeFileSync(join(stateDir, "beta", "PROGRESS.jsonl"), betaLog);
++    });
++
++    afterEach(() => {
++      rmSync(SUMMARY_TEST_DIR, { recursive: true, force: true });
++    });
++
++    it("outputs valid parseable JSON with summary/tests/disk keys", async () => {
++      const result = await runCli(["summary", "--no-tests", "--format=json"], SUMMARY_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed).toHaveProperty("summary");
++      expect(parsed).toHaveProperty("tests");
++      expect(parsed).toHaveProperty("disk");
++      expect(parsed.tests).toBeNull();
++      expect(parsed.summary.projects).toBe(2);
++      expect(parsed.summary.cycles_total).toBe(4);
++    });
++
++    it("JSON counts match the text output's counts", async () => {
++      const jsonResult = await runCli(
++        ["summary", "--no-tests", "--format=json"],
++        SUMMARY_TEST_DIR,
++      );
++      const textResult = await runCli(["summary", "--no-tests"], SUMMARY_TEST_DIR);
++      expect(jsonResult.exitCode).toBe(0);
++      expect(textResult.exitCode).toBe(0);
++
++      const parsed = JSON.parse(jsonResult.stdout);
++      const text = textResult.stdout;
++
++      // Text contains e.g. "Total:         4"
++      expect(text).toContain(`Total:         ${parsed.summary.cycles_total}`);
++      expect(text).toContain(`Projects:        ${parsed.summary.projects}`);
++      expect(text).toContain(
++        `Verified:      ${parsed.summary.outcomes.verified}`,
++      );
++      expect(text).toContain(
++        `Failed:        ${parsed.summary.outcomes.verification_failed}`,
++      );
++      expect(text).toContain(
++        `Skipped:       ${parsed.summary.outcomes.cycle_skipped}`,
++      );
++    });
++
++    it("rejects unknown --format value", async () => {
++      const result = await runCli(
++        ["summary", "--no-tests", "--format=yaml"],
++        SUMMARY_TEST_DIR,
++      );
++      expect(result.exitCode).not.toBe(0);
++      expect(result.stderr).toContain("unknown --format");
++    });
++
++    it("without --format outputs formatted text (not JSON)", async () => {
++      const result = await runCli(["summary", "--no-tests"], SUMMARY_TEST_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("=== GeneralStaff Fleet Summary ===");
++      expect(() => JSON.parse(result.stdout)).toThrow();
++    });
++  });
++
+   describe("help completeness", () => {
+     it("lists all registered commands in help output", async () => {
+       const result = await runCli(["--help"]);
