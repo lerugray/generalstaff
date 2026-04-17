@@ -320,7 +320,7 @@
   {
     "id": "gs-079",
     "title": "Add a test for extractChangedFiles in cycle.ts that covers the --diff-filter=A added-only case: given a diff with only new files and no modifications, verify the function returns the added file paths correctly.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
