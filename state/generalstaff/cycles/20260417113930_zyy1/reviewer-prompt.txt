@@ -1,0 +1,329 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/format.ts b/src/format.ts
+index fb33744..3eb5b3c 100644
+--- a/src/format.ts
++++ b/src/format.ts
+@@ -29,6 +29,15 @@ export function formatBytes(bytes: number): string {
+   return `${(bytes / GB).toFixed(1)} GB`;
+ }
+ 
++// gs-093: pluralize a file count for digest output. Negatives and invalid
++// inputs collapse to "0 files" rather than propagating nonsense into the
++// digest markdown.
++export function formatFileCount(n: number): string {
++  if (!Number.isFinite(n) || n < 1) return "0 files";
++  const count = Math.floor(n);
++  return count === 1 ? "1 file" : `${count} files`;
++}
++
+ export function formatPercent(ratio: number): string {
+   if (!Number.isFinite(ratio) || ratio < 0) return "?";
+   return `${Math.round(ratio * 100)}%`;
+diff --git a/src/session.ts b/src/session.ts
+index 21b50d4..a5be114 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -15,7 +15,7 @@ import { isStopFilePresent } from "./safety";
+ import { executeCycle, countCommitsAhead } from "./cycle";
+ import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
+ import type { SessionPlanEstimate } from "./dispatcher";
+-import { formatDuration } from "./format";
++import { formatDuration, formatFileCount } from "./format";
+ import { fetchCommitSubject } from "./git";
+ import { notifySessionEnd } from "./notify";
+ import { countRemainingWork } from "./work_detection";
+@@ -422,7 +422,7 @@ export async function writeDigest(
+       verified.forEach((r, i) => {
+         const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
+         const diff = r.diff_stats
+-          ? `  _(${r.diff_stats.files_changed} file(s), +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
++          ? `  _(${formatFileCount(r.diff_stats.files_changed)}, +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
+           : "";
+         content += `${i + 1}. ${subject}${diff}\n`;
+       });
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 4a78d80..0310bfb 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -404,7 +404,7 @@
+   {
+     "id": "gs-093",
+     "title": "Add a formatFileCount(n: number) helper to src/format.ts that pluralizes: 0 -> '0 files', 1 -> '1 file', 2 -> '2 files'. Use it in writeDigest's 'What got done' list (replacing the current '${n} file(s)' template). Add tests covering 0, 1, 2, large numbers, and negative (should return '0 files').",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3
+   },
+   {
+diff --git a/tests/format.test.ts b/tests/format.test.ts
+index 92ac6e1..826bb3a 100644
+--- a/tests/format.test.ts
++++ b/tests/format.test.ts
+@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
+ import {
+   formatDuration,
+   formatBytes,
++  formatFileCount,
+   formatPercent,
+   formatRelativeTime,
+ } from "../src/format";
+@@ -98,6 +99,35 @@ describe("formatBytes", () => {
+   });
+ });
+ 
++describe("formatFileCount", () => {
++  it("pluralizes basic cases", () => {
++    expect(formatFileCount(0)).toBe("0 files");
++    expect(formatFileCount(1)).toBe("1 file");
++    expect(formatFileCount(2)).toBe("2 files");
++  });
++
++  it("handles large numbers", () => {
++    expect(formatFileCount(42)).toBe("42 files");
++    expect(formatFileCount(1000)).toBe("1000 files");
++  });
++
++  it("floors fractional counts", () => {
++    expect(formatFileCount(1.9)).toBe("1 file");
++    expect(formatFileCount(2.5)).toBe("2 files");
++  });
++
++  it("returns '0 files' for negative inputs", () => {
++    expect(formatFileCount(-1)).toBe("0 files");
++    expect(formatFileCount(-100)).toBe("0 files");
++  });
++
++  it("returns '0 files' for invalid inputs", () => {
++    expect(formatFileCount(NaN)).toBe("0 files");
++    expect(formatFileCount(Infinity)).toBe("0 files");
++    expect(formatFileCount(-Infinity)).toBe("0 files");
++  });
++});
++
+ describe("formatPercent", () => {
+   it("renders representative ratios", () => {
+     expect(formatPercent(0)).toBe("0%");
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 1029121..9f21bbe 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -205,8 +205,8 @@ describe("writeDigest", () => {
+ 
+     expect(content).toContain("## What got done");
+     // Fake SHAs won't resolve to a commit subject, so label falls back to cycle_id
+-    expect(content).toMatch(/1\. cycle-aaa\s+_\(3 file\(s\), \+42\/-5\)_/);
+-    expect(content).toMatch(/2\. cycle-bbb\s+_\(1 file\(s\), \+8\/-0\)_/);
++    expect(content).toMatch(/1\. cycle-aaa\s+_\(3 files, \+42\/-5\)_/);
++    expect(content).toMatch(/2\. cycle-bbb\s+_\(1 file, \+8\/-0\)_/);
+   });
+ 
+   it("renders an 'Issues' section with 'None' when all cycles verified", async () => {
+
+
+Diff summary: src/format.ts                 |  9 +++++++++
+ src/session.ts                |  4 ++--
+ state/generalstaff/tasks.json |  2 +-
+ tests/format.test.ts          | 30 ++++++++++++++++++++++++++++++
+ tests/session.test.ts         |  4 ++--
+ 5 files changed, 44 insertions(+), 5 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T11:48:22.907Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114856.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114857.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114857.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114857.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114857.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_114858.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114858.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114858.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114859.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114901.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114901.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114901.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114901.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114901.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114902.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114902.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_114902.md
+
+ 565 pass
+ 0 fail
+ 1643 expect() calls
+Ran 565 tests across 23 files. [59.38s]
+
+========================================
+Exit code: 0
+Duration: 62.9s
+Ended: 2026-04-17T11:49:25.780Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
