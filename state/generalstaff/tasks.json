@@ -950,7 +950,7 @@
   {
     "id": "gs-158",
     "title": "Wire generateDigestNarrative (gs-154) into writeDigest in src/session.ts behind a feature flag. When env var GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is set to a non-empty provider id AND provider_config.yaml exists AND the registry resolves that id, instantiate the provider via getProviderForRole, call generateDigestNarrative, and if it returns fellBack=false inject the narrative as a new '**Narrative:**' line in the digest front-matter (right after '**Summary:**'). If fellBack=true OR the env var is unset, writeDigest produces exactly the current output (templated only). The feature must default OFF — no behavior change for existing users until they opt in. Log a digest_narrative_generated PROGRESS event to the _fleet log (follow-up: actually ADDING this event type to ProgressEventType is gs-161; until then just console.log the fallback status, no PROGRESS event). Add tests in tests/session.test.ts: (a) no env var → identical to baseline writeDigest output, (b) env var set + provider returns narrative → digest contains '**Narrative:**' line, (c) env var set + provider errors → narrative line absent, digest otherwise complete. Do NOT modify projects.yaml or the reviewer dispatch.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

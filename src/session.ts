@@ -24,6 +24,9 @@ import { notifySessionEnd } from "./notify";
 import { countRemainingWork } from "./work_detection";
 import { categorizeResults } from "./results";
 import { checkOllamaReachable } from "./ollama";
+import { generateDigestNarrative } from "./digest_llm";
+import { loadProviderRegistry, getProviderForRole } from "./providers/registry";
+import type { LLMProvider } from "./providers/types";
 import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 
 // Watchdog threshold multiplier. 2x the per-project cycle budget was picked as
@@ -506,6 +509,67 @@ export async function runSessionChain(
   return runs;
 }
 
+async function resolveDigestNarrative(
+  results: CycleResult[],
+  durationMinutes: number,
+  override: LLMProvider | undefined,
+): Promise<string | null> {
+  if (results.length === 0) return null;
+  const providerId = process.env.GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER;
+  if (!providerId || providerId.length === 0) return null;
+
+  let provider: LLMProvider | null = override ?? null;
+  if (!provider) {
+    const { existsSync } = require("fs");
+    const { join } = require("path");
+    const configPath = join(getRootDir(), "provider_config.yaml");
+    if (!existsSync(configPath)) return null;
+    try {
+      const registry = await loadProviderRegistry(configPath);
+      if (
+        registry.providers.has(providerId) &&
+        registry.routes.digest === providerId
+      ) {
+        provider = getProviderForRole(registry, "digest");
+      }
+    } catch (err) {
+      console.log(
+        `digest narrative: registry load failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+    if (!provider) return null;
+  }
+
+  try {
+    const result = await generateDigestNarrative(
+      results,
+      durationMinutes,
+      provider,
+    );
+    if (result.fellBack) {
+      console.log(
+        `digest narrative: fell back — ${result.error ?? "unknown"}`,
+      );
+      return null;
+    }
+    return result.narrative;
+  } catch (err) {
+    console.log(
+      `digest narrative: provider error — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+export interface WriteDigestDeps {
+  // gs-158 test seam. When set AND env var
+  // GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER is non-empty, this overrides
+  // the registry-based resolution so tests can inject a stub without
+  // standing up a real provider_config.yaml + live ollama.
+  narrativeProvider?: LLMProvider;
+}
+
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
@@ -514,6 +578,7 @@ export async function writeDigest(
     reviewer_provider?: string;
     reviewer_model?: string;
   },
+  deps?: WriteDigestDeps,
 ) {
   const { mkdirSync, existsSync } = require("fs");
   const { writeFile } = require("fs/promises");
@@ -542,6 +607,17 @@ export async function writeDigest(
     ? `${reviewerProvider} (${config.reviewer_model})`
     : reviewerProvider;
 
+  // gs-158: optional LLM-backed narrative. Default OFF — only runs when the
+  // operator opts in via GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER AND the
+  // registry routes the digest role at that same id (safety: a typo'd env
+  // var shouldn't silently pick the wrong provider). Any failure falls back
+  // to a narrative-less digest so this path can never block the session end.
+  const narrative = await resolveDigestNarrative(
+    results,
+    durationMinutes,
+    deps?.narrativeProvider,
+  );
+
   let content = `# GeneralStaff Session Digest\n\n`;
   content += `**Date:** ${new Date().toISOString()}\n`;
   content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
@@ -549,6 +625,9 @@ export async function writeDigest(
   content += `**Reviewer:** ${reviewerLabel}\n`;
   if (results.length > 0) {
     content += `**Summary:** ${verified.length} verified, ${failed.length} failed\n`;
+    if (narrative) {
+      content += `**Narrative:** ${narrative}\n`;
+    }
   }
   content += `\n`;
 
