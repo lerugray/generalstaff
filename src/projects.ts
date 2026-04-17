@@ -139,6 +139,13 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
   }
 
   const branch = (raw.branch ?? "bot/work") as string;
+  if (typeof branch !== "string" || branch.trim() === "") {
+    throw new ProjectValidationError(
+      id,
+      "branch",
+      "must be a non-empty string if specified",
+    );
+  }
   const autoMerge = (raw.auto_merge ?? false) as boolean;
 
   const handsOff = raw.hands_off;
@@ -178,6 +185,148 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     hands_off: handsOff,
     notes: raw.notes as string | undefined,
   };
+}
+
+export interface ConfigValidationResult {
+  errors: string[];
+}
+
+// validateConfig collects ALL configuration errors rather than failing on the
+// first one. Errors are formatted with a project-id prefix so the user can
+// fix every issue in one pass rather than running the loader repeatedly.
+// Path-existence is NOT checked here (machine-specific; use warnProjectPaths).
+export function validateConfig(raw: unknown): ConfigValidationResult {
+  const errors: string[] = [];
+
+  if (!raw || typeof raw !== "object") {
+    errors.push("projects.yaml: root must be an object");
+    return { errors };
+  }
+  const obj = raw as Record<string, unknown>;
+  const rawProjects = obj.projects;
+  if (!Array.isArray(rawProjects)) {
+    errors.push("projects.yaml: must contain a 'projects' array");
+    return { errors };
+  }
+  if (rawProjects.length === 0) {
+    errors.push("projects.yaml: must contain at least one project");
+    return { errors };
+  }
+
+  const seenIds = new Set<string>();
+  for (let i = 0; i < rawProjects.length; i++) {
+    const p = rawProjects[i];
+    if (!p || typeof p !== "object") {
+      errors.push(`project[${i}]: must be an object`);
+      continue;
+    }
+    const pr = p as Record<string, unknown>;
+    const id =
+      typeof pr.id === "string" && pr.id !== ""
+        ? pr.id
+        : `(unknown-index-${i})`;
+    const prefix = `project "${id}"`;
+
+    if (pr.id === undefined || pr.id === null) {
+      errors.push(`project[${i}]: id — is required but missing`);
+    } else if (typeof pr.id !== "string") {
+      errors.push(`project[${i}]: id — must be a string, got ${typeof pr.id}`);
+    } else if (pr.id === "") {
+      errors.push(`project[${i}]: id — must not be empty`);
+    } else if (seenIds.has(pr.id)) {
+      errors.push(`Duplicate project id: "${pr.id}"`);
+    } else {
+      seenIds.add(pr.id);
+    }
+
+    if (pr.path === undefined || pr.path === null) {
+      errors.push(`${prefix}: path — is required but missing`);
+    } else if (typeof pr.path !== "string") {
+      errors.push(`${prefix}: path — must be a string, got ${typeof pr.path}`);
+    } else if (pr.path === "") {
+      errors.push(`${prefix}: path — must not be empty`);
+    }
+
+    if (pr.engineer_command === undefined || pr.engineer_command === null) {
+      errors.push(`${prefix}: engineer_command — is required but missing`);
+    } else if (typeof pr.engineer_command !== "string") {
+      errors.push(
+        `${prefix}: engineer_command — must be a string, got ${typeof pr.engineer_command}`,
+      );
+    } else if (pr.engineer_command === "") {
+      errors.push(`${prefix}: engineer_command — must not be empty`);
+    }
+
+    if (
+      pr.verification_command === undefined ||
+      pr.verification_command === null
+    ) {
+      errors.push(`${prefix}: verification_command — is required but missing`);
+    } else if (typeof pr.verification_command !== "string") {
+      errors.push(
+        `${prefix}: verification_command — must be a string, got ${typeof pr.verification_command}`,
+      );
+    } else if (pr.verification_command === "") {
+      errors.push(`${prefix}: verification_command — must not be empty`);
+    }
+
+    if (pr.cycle_budget_minutes === undefined || pr.cycle_budget_minutes === null) {
+      errors.push(`${prefix}: cycle_budget_minutes — is required but missing`);
+    } else if (typeof pr.cycle_budget_minutes !== "number") {
+      errors.push(
+        `${prefix}: cycle_budget_minutes — must be a number, got ${typeof pr.cycle_budget_minutes}`,
+      );
+    } else if (!Number.isInteger(pr.cycle_budget_minutes)) {
+      errors.push(
+        `${prefix}: cycle_budget_minutes — must be an integer, got ${pr.cycle_budget_minutes}`,
+      );
+    } else if (pr.cycle_budget_minutes <= 0) {
+      errors.push(
+        `${prefix}: cycle_budget_minutes — must be > 0, got ${pr.cycle_budget_minutes}`,
+      );
+    }
+
+    if (pr.hands_off === undefined || pr.hands_off === null) {
+      errors.push(
+        `${prefix}: hands_off — is required but missing — Hard Rule #5 requires a non-empty hands-off list`,
+      );
+    } else if (!Array.isArray(pr.hands_off)) {
+      errors.push(
+        `${prefix}: hands_off — must be an array, got ${typeof pr.hands_off}`,
+      );
+    } else if (pr.hands_off.length === 0) {
+      errors.push(
+        `${prefix}: hands_off — must not be empty — Hard Rule #5 requires at least one entry`,
+      );
+    }
+
+    if (pr.branch !== undefined && pr.branch !== null) {
+      if (typeof pr.branch !== "string") {
+        errors.push(
+          `${prefix}: branch — must be a string, got ${typeof pr.branch}`,
+        );
+      } else if (pr.branch.trim() === "") {
+        errors.push(`${prefix}: branch — must be a non-empty string if specified`);
+      }
+    }
+  }
+
+  return { errors };
+}
+
+// Throws a single Error whose message lists every issue in the config,
+// one per line, with a project-id prefix. Intended for pre-flight
+// validation before a session starts so the operator sees every problem
+// at once rather than iterating on a fail-first loader.
+export function assertValidConfig(raw: unknown): void {
+  const { errors } = validateConfig(raw);
+  if (errors.length === 0) return;
+  const header =
+    errors.length === 1
+      ? "Invalid projects.yaml:"
+      : `Invalid projects.yaml (${errors.length} errors):`;
+  const lines = errors.map((e) => `  - ${e}`);
+  throw new Error([header, ...lines].join("\n"));
 }
 
 function validateDispatcher(
@@ -284,11 +433,11 @@ export async function loadProjectsYaml(
   const raw = await readFile(filePath, "utf8");
   const parsed = parseYaml(raw) as Record<string, unknown>;
 
-  const rawProjects = parsed.projects as Record<string, unknown>[];
-  if (!Array.isArray(rawProjects) || rawProjects.length === 0) {
-    throw new Error("projects.yaml must contain at least one project");
-  }
+  // Collect ALL config errors first so the operator sees every issue at
+  // once rather than iterating on a fail-first loader.
+  assertValidConfig(parsed);
 
+  const rawProjects = parsed.projects as Record<string, unknown>[];
   const projects = rawProjects.map(validateProject);
   const dispatcher = validateDispatcher(
     parsed.dispatcher as Record<string, unknown> | undefined,

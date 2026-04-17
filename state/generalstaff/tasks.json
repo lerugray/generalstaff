@@ -554,7 +554,7 @@
   {
     "id": "gs-118",
     "title": "Add validateConfig(yaml) pre-flight in src/projects.ts that runs BEFORE a session starts and rejects invalid configs with a clear error listing every problem at once (don't fail on first). Checks: project paths exist, hands_off non-empty (Hard Rule 5), engineer_command set, verification_command set, cycle_budget_minutes > 0, branch name valid. Emit errors to stderr with the project id prefix. Add tests for each failure mode.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
