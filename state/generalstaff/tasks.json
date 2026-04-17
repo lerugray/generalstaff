@@ -542,7 +542,7 @@
   {
     "id": "gs-116",
     "title": "Investigate and fix `.bot-worktree` cleanup after abnormal cycle termination. When a cycle is killed (engineer timeout, manual taskkill, STOP file), does cleanupWorktree() still fire? If not, stale worktrees accumulate and the next cycle's `git worktree add` fails. Add a pre-cycle cleanup pass that removes any existing `.bot-worktree` before `git worktree add`. Add tests covering: clean run (no stale worktree), stale worktree present (removed + replaced), worktree locked by another process (warn but don't crash).",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

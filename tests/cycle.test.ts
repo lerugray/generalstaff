@@ -3,11 +3,31 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
+import { existsSync } from "fs";
 import {
   extractChangedFiles,
   diffSummaryStats,
   countCommitsAhead,
+  preflightCleanupWorktree,
 } from "../src/cycle";
+import type { ProjectConfig } from "../src/types";
+
+function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
+  return {
+    id: "test",
+    path: "/tmp/test",
+    priority: 1,
+    engineer_command: "echo",
+    verification_command: "echo",
+    cycle_budget_minutes: 60,
+    work_detection: "tasks_json",
+    concurrency_detection: "none",
+    branch: "bot/work",
+    auto_merge: false,
+    hands_off: ["x"],
+    ...overrides,
+  };
+}
 
 describe("extractChangedFiles", () => {
   it("extracts file paths from a unified diff", () => {
@@ -314,6 +334,65 @@ describe("countCommitsAhead", () => {
       await initRepo(repo);
       await commitFile(repo, "a.txt", "one", "initial");
       expect(await countCommitsAhead(repo, "nonexistent-branch", "master")).toBe(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("preflightCleanupWorktree", () => {
+  async function initRepo(path: string): Promise<void> {
+    mkdirSync(path, { recursive: true });
+    await $`git -C ${path} init -b master`.quiet();
+    await $`git -C ${path} config user.email test@example.com`.quiet();
+    await $`git -C ${path} config user.name test`.quiet();
+    await $`git -C ${path} config commit.gpgsign false`.quiet();
+  }
+
+  it("no-ops on a clean run (no stale worktree)", async () => {
+    const repo = join(tmpdir(), "gs-pf-clean-" + Date.now());
+    try {
+      await initRepo(repo);
+      const project = makeProject({ path: repo });
+      const result = await preflightCleanupWorktree(project);
+      expect(result).toEqual({ wasStale: false, removed: false });
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a stale .bot-worktree directory left behind by a killed cycle", async () => {
+    const repo = join(tmpdir(), "gs-pf-stale-" + Date.now());
+    try {
+      await initRepo(repo);
+      const wt = join(repo, ".bot-worktree");
+      mkdirSync(wt, { recursive: true });
+      writeFileSync(join(wt, "leftover.txt"), "partial work", "utf8");
+      const project = makeProject({ path: repo });
+      const result = await preflightCleanupWorktree(project);
+      expect(result.wasStale).toBe(true);
+      expect(result.removed).toBe(true);
+      expect(existsSync(wt)).toBe(false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("warns but does not crash when the stale worktree is locked", async () => {
+    const repo = join(tmpdir(), "gs-pf-locked-" + Date.now());
+    try {
+      await initRepo(repo);
+      const wt = join(repo, ".bot-worktree");
+      mkdirSync(wt, { recursive: true });
+      const project = makeProject({ path: repo });
+      const rmFn = () => {
+        throw new Error("EBUSY: resource busy or locked");
+      };
+      const result = await preflightCleanupWorktree(project, rmFn);
+      expect(result.wasStale).toBe(true);
+      expect(result.removed).toBe(false);
+      expect(result.warning).toContain("locked");
+      expect(result.warning).toContain("EBUSY");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }

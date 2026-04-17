@@ -114,6 +114,45 @@ async function cleanupWorktree(project: ProjectConfig): Promise<void> {
   }
 }
 
+// Pre-cycle cleanup. If the prior cycle was killed (engineer timeout,
+// STOP file mid-run, manual taskkill, host crash), cleanupWorktree may
+// not have fired — leaving .bot-worktree behind. The next `git worktree
+// add` then fails. This runs defensively before engineer spawn, removes
+// any stale worktree, and surfaces a warning (but does not crash) when
+// removal fails — e.g. another process holds an open handle on Windows.
+export async function preflightCleanupWorktree(
+  project: ProjectConfig,
+  rmFn?: (path: string) => void,
+): Promise<{ wasStale: boolean; removed: boolean; warning?: string }> {
+  const wt = worktreePath(project);
+  if (!existsSync(wt)) {
+    return { wasStale: false, removed: false };
+  }
+  try {
+    await $`git -C ${project.path} worktree remove ${wt} --force`.quiet();
+  } catch {
+    // not tracked or already pruned — fall through to fs rm
+  }
+  if (!existsSync(wt)) {
+    return { wasStale: true, removed: true };
+  }
+  const rm = rmFn ?? ((p: string) => {
+    const { rmSync } = require("fs");
+    rmSync(p, { recursive: true, force: true });
+  });
+  try {
+    rm(wt);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      wasStale: true,
+      removed: false,
+      warning: `stale ${wt} could not be removed (likely locked by another process): ${msg}`,
+    };
+  }
+  return { wasStale: true, removed: !existsSync(wt) };
+}
+
 async function getGitDiff(
   projectPath: string,
   startSha: string,
@@ -312,6 +351,22 @@ export async function executeCycle(
       reason: treeCheck.reason,
     }, cycleId);
     return skipResult(cycleId, project.id, startedAt, treeCheck.reason!);
+  }
+
+  const preflight = await preflightCleanupWorktree(project);
+  if (preflight.wasStale) {
+    if (preflight.removed) {
+      console.log("Removed stale .bot-worktree from a prior cycle.");
+      await appendProgress(project.id, "worktree_preflight", {
+        status: "removed",
+      }, cycleId);
+    } else {
+      console.error(`Warning: ${preflight.warning}`);
+      await appendProgress(project.id, "worktree_preflight", {
+        status: "warning",
+        warning: preflight.warning,
+      }, cycleId);
+    }
   }
 
   // 2. Before resetting bot branch to HEAD, check whether it has unmerged
