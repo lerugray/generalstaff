@@ -1,8 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { writeDigest, formatSessionPlanPreview, parseDigest, checkCycleWatchdog } from "../src/session";
+import {
+  writeDigest,
+  formatSessionPlanPreview,
+  parseDigest,
+  checkCycleWatchdog,
+  regenerateDigest,
+  parseFormattedDuration,
+} from "../src/session";
 import { setRootDir } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, readFileSync, readdirSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import type { CycleResult } from "../src/types";
 import type { SessionPlanEstimate } from "../src/dispatcher";
 
@@ -518,6 +525,135 @@ describe("parseDigest", () => {
     expect(parsed.cycle_count).toBe(0);
     expect(parsed.cycles).toHaveLength(0);
     expect(parsed.duration).toBe("0m30s");
+  });
+});
+
+describe("parseFormattedDuration", () => {
+  it("parses hours+minutes", () => {
+    expect(parseFormattedDuration("1h15m")).toBeCloseTo(75);
+  });
+  it("parses minutes+seconds", () => {
+    expect(parseFormattedDuration("2m30s")).toBeCloseTo(2.5);
+  });
+  it("parses seconds-only", () => {
+    expect(parseFormattedDuration("45s")).toBeCloseTo(0.75);
+  });
+  it("parses hours-only", () => {
+    expect(parseFormattedDuration("3h")).toBe(180);
+  });
+  it("returns 0 for unparseable input", () => {
+    expect(parseFormattedDuration("not a duration")).toBe(0);
+    expect(parseFormattedDuration("")).toBe(0);
+  });
+});
+
+describe("regenerateDigest", () => {
+  function seedCycleEnd(projectId: string, cycleId: string, data: Record<string, unknown>, timestamp: string) {
+    const dir = join(TEST_DIR, "state", projectId);
+    mkdirSync(dir, { recursive: true });
+    const entry = {
+      timestamp,
+      event: "cycle_end",
+      cycle_id: cycleId,
+      project_id: projectId,
+      data,
+    };
+    const line = JSON.stringify(entry) + "\n";
+    const path = join(dir, "PROGRESS.jsonl");
+    // Append rather than overwrite so seeding multiple cycles works
+    const existing = (() => {
+      try {
+        return readFileSync(path, "utf8");
+      } catch {
+        return "";
+      }
+    })();
+    writeFileSync(path, existing + line, "utf8");
+  }
+
+  it("re-renders a digest from PROGRESS.jsonl and writes to a new file", async () => {
+    seedCycleEnd(
+      "proj-a",
+      "c-1",
+      {
+        outcome: "verified",
+        reason: "tests pass, scope matches",
+        start_sha: "aaaaaaaa11111111",
+        end_sha: "bbbbbbbb22222222",
+        engineer_exit_code: 0,
+        verification_outcome: "passed",
+        reviewer_verdict: "verified",
+        diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
+        duration_seconds: 300,
+      },
+      "2026-04-17T10:05:00.000Z",
+    );
+
+    const originalResults = [
+      makeCycleResult({
+        project_id: "proj-a",
+        cycle_id: "c-1",
+        cycle_start_sha: "aaaaaaaa11111111",
+        cycle_end_sha: "bbbbbbbb22222222",
+        diff_stats: { files_changed: 2, insertions: 10, deletions: 3 },
+      }),
+    ];
+    await writeDigest(originalResults, 5, {
+      digest_dir: "digests",
+      reviewer_provider: "openrouter",
+      reviewer_model: "qwen/qwen3-coder-plus",
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const before = readdirSync(digestDir).sort();
+    expect(before).toHaveLength(1);
+    const sourcePath = join(digestDir, before[0]);
+
+    // Wait a moment so the regenerated file gets a distinct timestamp
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const { results, missing } = await regenerateDigest(sourcePath, { digest_dir: "digests" });
+    expect(missing).toHaveLength(0);
+    expect(results).toHaveLength(1);
+    expect(results[0].project_id).toBe("proj-a");
+    expect(results[0].cycle_id).toBe("c-1");
+    expect(results[0].final_outcome).toBe("verified");
+    expect(results[0].diff_stats).toEqual({ files_changed: 2, insertions: 10, deletions: 3 });
+
+    const after = readdirSync(digestDir).sort();
+    expect(after.length).toBe(2);
+    // Source file must still exist
+    expect(after).toContain(before[0]);
+    // Regenerated content preserves reviewer and cycle
+    const regen = after.find((f) => f !== before[0])!;
+    const content = readFileSync(join(digestDir, regen), "utf8");
+    expect(content).toContain("**Reviewer:** openrouter (qwen/qwen3-coder-plus)");
+    expect(content).toContain("proj-a — c-1");
+    expect(content).toContain("**Outcome:** verified");
+  });
+
+  it("reports missing cycles when cycle_end events are not in PROGRESS.jsonl", async () => {
+    const results = [
+      makeCycleResult({
+        project_id: "ghost-proj",
+        cycle_id: "ghost-cycle",
+        final_outcome: "verified",
+        cycle_start_sha: "cccccccc33333333",
+        cycle_end_sha: "dddddddd44444444",
+      }),
+    ];
+    await writeDigest(results, 2, { digest_dir: "digests" });
+    const digestDir = join(TEST_DIR, "digests");
+    const sourcePath = join(digestDir, readdirSync(digestDir)[0]);
+
+    await new Promise((r) => setTimeout(r, 1100));
+
+    const out = await regenerateDigest(sourcePath, { digest_dir: "digests" });
+    expect(out.missing).toHaveLength(1);
+    expect(out.missing[0]).toEqual({ project_id: "ghost-proj", cycle_id: "ghost-cycle" });
+    // Still rebuilt via digest-only fallback
+    expect(out.results).toHaveLength(1);
+    expect(out.results[0].final_outcome).toBe("verified");
   });
 });
 
