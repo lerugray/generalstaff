@@ -506,6 +506,64 @@ dispatcher:
       expect(outputLines[0]).toContain("c-005");
       expect(outputLines[19]).toContain("c-024");
     });
+
+    it("--tail shows everything (equivalent to --lines=9999)", async () => {
+      const result = await runCli(["log", "--project=proj-log", "--tail"], LOG_TEST_DIR);
+      expect(result.exitCode).toBe(0);
+      const outputLines = result.stdout.trim().split("\n");
+      expect(outputLines).toHaveLength(25);
+      expect(outputLines[0]).toContain("c-000");
+      expect(outputLines[24]).toContain("c-024");
+    });
+
+    it("--tail and --lines=N together is rejected as mutually exclusive", async () => {
+      const result = await runCli(
+        ["log", "--project=proj-log", "--tail", "--lines=5"],
+        LOG_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(2);
+      expect(result.stderr).toContain("--tail and --lines are mutually exclusive");
+    });
+
+    it("--tail composes with --grep filter", async () => {
+      // grep is case-insensitive over event + data JSON. Match against start_sha
+      // values 'sha2', 'sha20'..'sha24' → 6 entries (indices 2, 20..24).
+      const result = await runCli(
+        ["log", "--project=proj-log", "--tail", "--grep=sha2"],
+        LOG_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const outputLines = result.stdout.trim().split("\n").filter((l) => l.length > 0);
+      expect(outputLines).toHaveLength(6);
+      expect(outputLines[0]).toContain("c-002");
+      expect(outputLines[5]).toContain("c-024");
+    });
+
+    it("--tail composes with --since filter", async () => {
+      // Entries have timestamps 2026-04-16T12:00..12:24 UTC.
+      // Filter to entries at/after 12:20 → indices 20..24 (5 entries).
+      const result = await runCli(
+        ["log", "--project=proj-log", "--tail", "--since=2026-04-16T12:20:00.000Z"],
+        LOG_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const outputLines = result.stdout.trim().split("\n").filter((l) => l.length > 0);
+      expect(outputLines).toHaveLength(5);
+      expect(outputLines[0]).toContain("c-020");
+      expect(outputLines[4]).toContain("c-024");
+    });
+
+    it("--tail composes with --level=error filter", async () => {
+      const result = await runCli(
+        ["log", "--project=proj-log", "--tail", "--level=error"],
+        LOG_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      // All fixture entries are cycle_start (not error events); expect the
+      // single-project empty-matches message, and no cycle_start lines.
+      expect(result.stdout).toContain("No error-level entries for project");
+      expect(result.stdout).not.toContain("cycle_start");
+    });
   });
 
   describe("version command", () => {

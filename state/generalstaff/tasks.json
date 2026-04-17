@@ -880,7 +880,7 @@
   {
     "id": "gs-147",
     "title": "Add a 'generalstaff log --tail' alias flag that is equivalent to --lines=9999 — convenience for 'show me everything' without counting. Parse flag in cli.ts log command, when set override the parsed --lines value. If both --tail and --lines=N are passed, error 'Error: --tail and --lines are mutually exclusive'. Add tests covering each combination and verify filter flags (--level, --grep, --since) still compose with --tail.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
