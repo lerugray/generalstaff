@@ -502,5 +502,11 @@
     "title": "Produce a README outline proposal at `docs/README-PROPOSAL.md` following the matiassingers/awesome-readme checklist structure. Read README.md (existing), CLAUDE.md, DESIGN.md, PIVOT-2026-04-15.md, FUTURE-DIRECTIONS-2026-04-15.md, RULE-RELAXATION-2026-04-15.md, UI-VISION-2026-04-15.md, and the PHASE-1-*-2026-04-15 docs. Output section headers + one-bullet-per-section summary + cite which source doc each bullet draws from. Do NOT modify README.md itself. Do NOT write any narrative prose in the sections. Only propose structure and what-belongs-where. This is pure retrieval/outlining on behalf of the README dogfooding experiment proposed in FUTURE-DIRECTIONS §6 — the user will handle voice, positioning, and final prose in a later interactive session. Create the docs/ directory if it doesn't exist.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-110",
+    "title": "Augment docs/README-PROPOSAL.md with voice-calibration annotations. Read VOICE.md in full. For each proposed section in README-PROPOSAL.md, append a one-line `_Voice:_` annotation that flags where the editorial voice calibration applies — e.g., section §5 'The problem' → '_Voice: lean into anti-slop + anti-extraction framing from VOICE.md §1._'; section §11 'Why this over the alternatives' → '_Voice: direct Polsia comparison allowed per VOICE.md §1; keep pointed not screed per §2._'; section §13 'Hammerstein framing' → '_Voice: the Marxist-compatible reading per VOICE.md §\"Intellectual framing\" is fair game._'; neutral sections (badges, prerequisites, license) → '_Voice: neutral technical._'. Do NOT rewrite any section headers or bullets. Do NOT write the actual README prose. Only add the inline `_Voice:_` lines. Keeps the outline useful as a compass for the future interactive README-writing session.",
+    "status": "pending",
+    "priority": 2
   }
 ]

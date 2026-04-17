@@ -19,6 +19,10 @@ workflow applies.)
   personal infra to open-source product
 - [[RULE-RELAXATION-2026-04-15]] — current 10 Hard Rules with
   rationale for each change
+- [[VOICE]] — editorial voice calibration for public writing
+  (README, landing copy, release notes). Captures the anti-Polsia
+  positioning, the Prussian/Marxist intellectual juxtaposition,
+  and the human-livability thesis that connects them
 
 ## Architecture
 
