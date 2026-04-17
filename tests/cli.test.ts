@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { $ } from "bun";
 
 const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
 
@@ -869,6 +871,128 @@ projects:
     });
   });
 
+  describe("bot-status command", () => {
+    const BS_TEST_DIR = join(import.meta.dir, "fixtures", "bot_status_test");
+
+    async function initRepo(path: string) {
+      mkdirSync(path, { recursive: true });
+      await $`git -C ${path} init -b master`.quiet();
+      await $`git -C ${path} config user.email test@example.com`.quiet();
+      await $`git -C ${path} config user.name test`.quiet();
+      await $`git -C ${path} config commit.gpgsign false`.quiet();
+    }
+
+    async function commitFile(path: string, file: string, content: string, msg: string) {
+      writeFileSync(join(path, file), content, "utf8");
+      await $`git -C ${path} add ${file}`.quiet();
+      await $`git -C ${path} commit -m ${msg}`.quiet();
+    }
+
+    function writeProjectsYaml(dir: string, projects: { id: string; path: string }[]) {
+      const body = projects
+        .map(
+          (p) => `  - id: ${p.id}
+    path: ${p.path.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md`,
+        )
+        .join("\n");
+      writeFileSync(
+        join(dir, "projects.yaml"),
+        `projects:\n${body}\ndispatcher:\n  state_dir: ./state\n  fleet_state_file: ./fleet_state.json\n  stop_file: ./STOP\n  override_file: ./next_project.txt\n  picker: priority_x_staleness\n  max_cycles_per_project_per_session: 3\n  log_dir: ./logs\n  digest_dir: ./digests\n`,
+      );
+    }
+
+    beforeEach(() => {
+      mkdirSync(BS_TEST_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(BS_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("prints 0 commits when bot/work has no ahead-commits", async () => {
+      const repo = join(tmpdir(), "gs-bs-zero-" + Date.now());
+      try {
+        await initRepo(repo);
+        await commitFile(repo, "a.txt", "one", "initial");
+        await $`git -C ${repo} branch bot/work`.quiet();
+        writeProjectsYaml(BS_TEST_DIR, [{ id: "alpha", path: repo }]);
+        const result = await runCli(["bot-status"], BS_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("alpha: 0 commit(s) on bot/work not yet on master");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it("counts commits on bot/work that are not yet on HEAD", async () => {
+      const repo = join(tmpdir(), "gs-bs-ahead-" + Date.now());
+      try {
+        await initRepo(repo);
+        await commitFile(repo, "a.txt", "one", "initial");
+        await $`git -C ${repo} checkout -b bot/work`.quiet();
+        await commitFile(repo, "b.txt", "two", "bot work 1");
+        await commitFile(repo, "c.txt", "three", "bot work 2");
+        await $`git -C ${repo} checkout master`.quiet();
+        writeProjectsYaml(BS_TEST_DIR, [{ id: "alpha", path: repo }]);
+        const result = await runCli(["bot-status"], BS_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("alpha: 2 commit(s) on bot/work not yet on master");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it("filters by --project", async () => {
+      const repoA = join(tmpdir(), "gs-bs-a-" + Date.now());
+      const repoB = join(tmpdir(), "gs-bs-b-" + Date.now());
+      try {
+        await initRepo(repoA);
+        await commitFile(repoA, "a.txt", "one", "initial");
+        await $`git -C ${repoA} branch bot/work`.quiet();
+        await initRepo(repoB);
+        await commitFile(repoB, "a.txt", "one", "initial");
+        await $`git -C ${repoB} branch bot/work`.quiet();
+        writeProjectsYaml(BS_TEST_DIR, [
+          { id: "alpha", path: repoA },
+          { id: "beta", path: repoB },
+        ]);
+        const result = await runCli(["bot-status", "--project=beta"], BS_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("beta:");
+        expect(result.stdout).not.toContain("alpha:");
+      } finally {
+        rmSync(repoA, { recursive: true, force: true });
+        rmSync(repoB, { recursive: true, force: true });
+      }
+    });
+
+    it("errors when --project doesn't match a registered id", async () => {
+      const repo = join(tmpdir(), "gs-bs-nf-" + Date.now());
+      try {
+        await initRepo(repo);
+        await commitFile(repo, "a.txt", "one", "initial");
+        writeProjectsYaml(BS_TEST_DIR, [{ id: "alpha", path: repo }]);
+        const result = await runCli(["bot-status", "--project=nonesuch"], BS_TEST_DIR);
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain("not found");
+        expect(result.stderr).toContain("alpha");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.stdout).toContain("generalstaff bot-status");
+    });
+  });
+
   describe("help completeness", () => {
     it("lists all registered commands in help output", async () => {
       const result = await runCli(["--help"]);
@@ -876,6 +1000,7 @@ projects:
       const expectedCommands = [
         "session", "cycle", "status", "stop", "start",
         "log", "projects", "init", "history", "doctor", "clean",
+        "bot-status",
       ];
       for (const cmd of expectedCommands) {
         expect(help).toContain(`generalstaff ${cmd}`);
