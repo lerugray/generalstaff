@@ -1,0 +1,482 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/ollama.ts b/src/ollama.ts
+new file mode 100644
+index 0000000..e34dba7
+--- /dev/null
++++ b/src/ollama.ts
+@@ -0,0 +1,45 @@
++// Ollama helpers shared across the reviewer path and session pre-flight
++// checks. Kept separate from reviewer.ts so session.ts can depend on the
++// reachability check without also pulling in reviewer.ts's state/audit
++// dependencies (which test helpers mock narrowly).
++
++export interface OllamaReachabilityResult {
++  reachable: boolean;
++  host: string;
++  error?: string;
++}
++
++export async function checkOllamaReachable(
++  timeoutMs: number = 2000,
++): Promise<OllamaReachabilityResult> {
++  const host = (process.env.OLLAMA_HOST ?? "http://localhost:11434").replace(
++    /\/$/,
++    "",
++  );
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetch(`${host}/api/tags`, {
++      method: "GET",
++      signal: controller.signal,
++    });
++    if (!response.ok) {
++      return {
++        reachable: false,
++        host,
++        error: `HTTP ${response.status} ${response.statusText}`,
++      };
++    }
++    return { reachable: true, host };
++  } catch (err) {
++    const name = err instanceof Error ? err.name : "";
++    const msg = err instanceof Error ? err.message : String(err);
++    return {
++      reachable: false,
++      host,
++      error: name === "AbortError" ? `timeout after ${timeoutMs}ms` : msg,
++    };
++  } finally {
++    clearTimeout(timer);
++  }
++}
+diff --git a/src/session.ts b/src/session.ts
+index 2bbd26b..e4fa1da 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -20,6 +20,7 @@ import { fetchCommitSubject } from "./git";
+ import { notifySessionEnd } from "./notify";
+ import { countRemainingWork } from "./work_detection";
+ import { categorizeResults } from "./results";
++import { checkOllamaReachable } from "./ollama";
+ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+ 
+ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
+@@ -97,6 +98,27 @@ export async function runSession(options: SessionOptions) {
+     console.log(formatSessionPlanPreview(plan));
+   }
+ 
++  // Pre-flight Ollama reachability check. When the reviewer provider is
++  // Ollama, a down server causes every cycle to fail-safe to
++  // verification_failed — the warning here gives clearer error attribution
++  // than discovering it cycle-by-cycle. Non-fatal: the session proceeds,
++  // and the per-cycle fallback chain (GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER)
++  // is the real safety net.
++  if (
++    !dryRun &&
++    (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "").toLowerCase() ===
++      "ollama"
++  ) {
++    const check = await checkOllamaReachable();
++    if (!check.reachable) {
++      console.warn(
++        `Warning: Ollama unreachable at ${check.host} (${check.error ?? "unknown"}).\n` +
++          `  Start the server with 'ollama serve', or set\n` +
++          `  GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter to auto-fall-back.`,
++      );
++    }
++  }
++
+   // Reset per-session cycle counts
+   for (const p of projects) {
+     const state = await loadProjectState(p.id, config);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 3785ee6..d57d136 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -464,7 +464,7 @@
+   {
+     "id": "gs-103",
+     "title": "Add a pre-flight Ollama reachability check in session.ts when GENERALSTAFF_REVIEWER_PROVIDER=ollama. Before the first cycle runs, fire a GET to `${OLLAMA_HOST}/api/tags` (default http://localhost:11434). If unreachable, emit a warning to stderr suggesting the user either start the Ollama server (`ollama serve`) or set GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter. Non-fatal — the session proceeds; bad-call fallback will catch it at cycle time anyway, but the pre-flight warning gives clearer error attribution. Add tests mocking fetch for reachable/unreachable/timeout cases.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/ollama.test.ts b/tests/ollama.test.ts
+new file mode 100644
+index 0000000..8f0fa3e
+--- /dev/null
++++ b/tests/ollama.test.ts
+@@ -0,0 +1,94 @@
++import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { checkOllamaReachable } from "../src/ollama";
++
++describe("checkOllamaReachable", () => {
++  const originalFetch = globalThis.fetch;
++  const originalHost = process.env.OLLAMA_HOST;
++
++  beforeEach(() => {
++    delete process.env.OLLAMA_HOST;
++  });
++
++  afterEach(() => {
++    globalThis.fetch = originalFetch;
++    if (originalHost === undefined) delete process.env.OLLAMA_HOST;
++    else process.env.OLLAMA_HOST = originalHost;
++  });
++
++  it("reports reachable when /api/tags returns 200", async () => {
++    let capturedUrl = "";
++    globalThis.fetch = (async (url: string | URL | Request) => {
++      capturedUrl = String(url);
++      return new Response(JSON.stringify({ models: [] }), { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(true);
++    expect(result.host).toBe("http://localhost:11434");
++    expect(capturedUrl).toBe("http://localhost:11434/api/tags");
++    expect(result.error).toBeUndefined();
++  });
++
++  it("honors OLLAMA_HOST override and strips trailing slash", async () => {
++    process.env.OLLAMA_HOST = "http://192.168.1.50:11434/";
++    let capturedUrl = "";
++    globalThis.fetch = (async (url: string | URL | Request) => {
++      capturedUrl = String(url);
++      return new Response("{}", { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(true);
++    expect(result.host).toBe("http://192.168.1.50:11434");
++    expect(capturedUrl).toBe("http://192.168.1.50:11434/api/tags");
++  });
++
++  it("reports unreachable when fetch throws (server down)", async () => {
++    globalThis.fetch = (async () => {
++      throw new TypeError("fetch failed");
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("fetch failed");
++  });
++
++  it("reports unreachable with HTTP status when server returns non-2xx", async () => {
++    globalThis.fetch = (async () => {
++      return new Response("nope", {
++        status: 503,
++        statusText: "Service Unavailable",
++      });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("503");
++    expect(result.error).toContain("Service Unavailable");
++  });
++
++  it("reports timeout when fetch exceeds the timeout budget", async () => {
++    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
++      return await new Promise<Response>((_resolve, reject) => {
++        const signal = init?.signal;
++        if (signal) {
++          signal.addEventListener("abort", () => {
++            const err = new Error("aborted");
++            err.name = "AbortError";
++            reject(err);
++          });
++        }
++      });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable(50);
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("timeout");
++    expect(result.error).toContain("50ms");
++  });
++});
+diff --git a/tests/reviewer.test.ts b/tests/reviewer.test.ts
+index 5ea5ee2..5ec8028 100644
+--- a/tests/reviewer.test.ts
++++ b/tests/reviewer.test.ts
+@@ -575,3 +575,4 @@ describe("invokeReviewerWithFallback", () => {
+     ]);
+   });
+ });
++
+
+
+Diff summary: src/ollama.ts                 | 45 +++++++++++++++++++++
+ src/session.ts                | 22 ++++++++++
+ state/generalstaff/tasks.json |  2 +-
+ tests/ollama.test.ts          | 94 +++++++++++++++++++++++++++++++++++++++++++
+ tests/reviewer.test.ts        |  1 +
+ 5 files changed, 163 insertions(+), 1 deletion(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T12:34:08.440Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_123429.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123429.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_123430.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\On
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

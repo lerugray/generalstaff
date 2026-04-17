@@ -1,0 +1,213 @@
+diff --git a/src/ollama.ts b/src/ollama.ts
+new file mode 100644
+index 0000000..e34dba7
+--- /dev/null
++++ b/src/ollama.ts
+@@ -0,0 +1,45 @@
++// Ollama helpers shared across the reviewer path and session pre-flight
++// checks. Kept separate from reviewer.ts so session.ts can depend on the
++// reachability check without also pulling in reviewer.ts's state/audit
++// dependencies (which test helpers mock narrowly).
++
++export interface OllamaReachabilityResult {
++  reachable: boolean;
++  host: string;
++  error?: string;
++}
++
++export async function checkOllamaReachable(
++  timeoutMs: number = 2000,
++): Promise<OllamaReachabilityResult> {
++  const host = (process.env.OLLAMA_HOST ?? "http://localhost:11434").replace(
++    /\/$/,
++    "",
++  );
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const response = await fetch(`${host}/api/tags`, {
++      method: "GET",
++      signal: controller.signal,
++    });
++    if (!response.ok) {
++      return {
++        reachable: false,
++        host,
++        error: `HTTP ${response.status} ${response.statusText}`,
++      };
++    }
++    return { reachable: true, host };
++  } catch (err) {
++    const name = err instanceof Error ? err.name : "";
++    const msg = err instanceof Error ? err.message : String(err);
++    return {
++      reachable: false,
++      host,
++      error: name === "AbortError" ? `timeout after ${timeoutMs}ms` : msg,
++    };
++  } finally {
++    clearTimeout(timer);
++  }
++}
+diff --git a/src/session.ts b/src/session.ts
+index 2bbd26b..e4fa1da 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -20,6 +20,7 @@ import { fetchCommitSubject } from "./git";
+ import { notifySessionEnd } from "./notify";
+ import { countRemainingWork } from "./work_detection";
+ import { categorizeResults } from "./results";
++import { checkOllamaReachable } from "./ollama";
+ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+ 
+ export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
+@@ -97,6 +98,27 @@ export async function runSession(options: SessionOptions) {
+     console.log(formatSessionPlanPreview(plan));
+   }
+ 
++  // Pre-flight Ollama reachability check. When the reviewer provider is
++  // Ollama, a down server causes every cycle to fail-safe to
++  // verification_failed — the warning here gives clearer error attribution
++  // than discovering it cycle-by-cycle. Non-fatal: the session proceeds,
++  // and the per-cycle fallback chain (GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER)
++  // is the real safety net.
++  if (
++    !dryRun &&
++    (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "").toLowerCase() ===
++      "ollama"
++  ) {
++    const check = await checkOllamaReachable();
++    if (!check.reachable) {
++      console.warn(
++        `Warning: Ollama unreachable at ${check.host} (${check.error ?? "unknown"}).\n` +
++          `  Start the server with 'ollama serve', or set\n` +
++          `  GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter to auto-fall-back.`,
++      );
++    }
++  }
++
+   // Reset per-session cycle counts
+   for (const p of projects) {
+     const state = await loadProjectState(p.id, config);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 3785ee6..d57d136 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -464,7 +464,7 @@
+   {
+     "id": "gs-103",
+     "title": "Add a pre-flight Ollama reachability check in session.ts when GENERALSTAFF_REVIEWER_PROVIDER=ollama. Before the first cycle runs, fire a GET to `${OLLAMA_HOST}/api/tags` (default http://localhost:11434). If unreachable, emit a warning to stderr suggesting the user either start the Ollama server (`ollama serve`) or set GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter. Non-fatal — the session proceeds; bad-call fallback will catch it at cycle time anyway, but the pre-flight warning gives clearer error attribution. Add tests mocking fetch for reachable/unreachable/timeout cases.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/ollama.test.ts b/tests/ollama.test.ts
+new file mode 100644
+index 0000000..8f0fa3e
+--- /dev/null
++++ b/tests/ollama.test.ts
+@@ -0,0 +1,94 @@
++import { afterEach, beforeEach, describe, expect, it } from "bun:test";
++import { checkOllamaReachable } from "../src/ollama";
++
++describe("checkOllamaReachable", () => {
++  const originalFetch = globalThis.fetch;
++  const originalHost = process.env.OLLAMA_HOST;
++
++  beforeEach(() => {
++    delete process.env.OLLAMA_HOST;
++  });
++
++  afterEach(() => {
++    globalThis.fetch = originalFetch;
++    if (originalHost === undefined) delete process.env.OLLAMA_HOST;
++    else process.env.OLLAMA_HOST = originalHost;
++  });
++
++  it("reports reachable when /api/tags returns 200", async () => {
++    let capturedUrl = "";
++    globalThis.fetch = (async (url: string | URL | Request) => {
++      capturedUrl = String(url);
++      return new Response(JSON.stringify({ models: [] }), { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(true);
++    expect(result.host).toBe("http://localhost:11434");
++    expect(capturedUrl).toBe("http://localhost:11434/api/tags");
++    expect(result.error).toBeUndefined();
++  });
++
++  it("honors OLLAMA_HOST override and strips trailing slash", async () => {
++    process.env.OLLAMA_HOST = "http://192.168.1.50:11434/";
++    let capturedUrl = "";
++    globalThis.fetch = (async (url: string | URL | Request) => {
++      capturedUrl = String(url);
++      return new Response("{}", { status: 200 });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(true);
++    expect(result.host).toBe("http://192.168.1.50:11434");
++    expect(capturedUrl).toBe("http://192.168.1.50:11434/api/tags");
++  });
++
++  it("reports unreachable when fetch throws (server down)", async () => {
++    globalThis.fetch = (async () => {
++      throw new TypeError("fetch failed");
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("fetch failed");
++  });
++
++  it("reports unreachable with HTTP status when server returns non-2xx", async () => {
++    globalThis.fetch = (async () => {
++      return new Response("nope", {
++        status: 503,
++        statusText: "Service Unavailable",
++      });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable();
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("503");
++    expect(result.error).toContain("Service Unavailable");
++  });
++
++  it("reports timeout when fetch exceeds the timeout budget", async () => {
++    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
++      return await new Promise<Response>((_resolve, reject) => {
++        const signal = init?.signal;
++        if (signal) {
++          signal.addEventListener("abort", () => {
++            const err = new Error("aborted");
++            err.name = "AbortError";
++            reject(err);
++          });
++        }
++      });
++    }) as unknown as typeof fetch;
++
++    const result = await checkOllamaReachable(50);
++
++    expect(result.reachable).toBe(false);
++    expect(result.error).toContain("timeout");
++    expect(result.error).toContain("50ms");
++  });
++});
+diff --git a/tests/reviewer.test.ts b/tests/reviewer.test.ts
+index 5ea5ee2..5ec8028 100644
+--- a/tests/reviewer.test.ts
++++ b/tests/reviewer.test.ts
+@@ -575,3 +575,4 @@ describe("invokeReviewerWithFallback", () => {
+     ]);
+   });
+ });
++

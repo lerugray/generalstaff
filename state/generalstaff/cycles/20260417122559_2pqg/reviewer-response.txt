@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changed files correspond to the claimed task, no hands-off violations, and the diff provides strong evidence for the task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Add a pre-flight Ollama reachability check in session.ts when GENERALSTAFF_REVIEWER_PROVIDER=ollama. Before the first cycle runs, fire a GET to `${OLLAMA_HOST}/api/tags` (default http://localhost:11434). If unreachable, emit a warning to stderr suggesting the user either start the Ollama server (`ollama serve`) or set GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER=openrouter. Non-fatal — the session proceeds; bad-call fallback will catch it at cycle time anyway, but the pre-flight warning gives clearer error attribution. Add tests mocking fetch for reachable/unreachable/timeout cases.",
+      "evidence": "The diff adds a new function `checkOllamaReachable` in `src/ollama.ts`, imports and uses it in `src/session.ts` to perform the pre-flight check, and includes comprehensive tests in `tests/ollama.test.ts` covering all specified scenarios.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, and the test suite includes new tests for the implemented functionality."
+}
