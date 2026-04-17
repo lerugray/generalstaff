@@ -155,43 +155,89 @@ function shaRange(startSha: unknown, endSha: unknown): string {
   return start === end ? start : `${start}..${end}`;
 }
 
+export interface LoadCycleHistoryOptions {
+  since?: string;
+  until?: string;
+}
+
+// Parse a YYYYMMDD string to an epoch-ms bound. endOfDay=true returns the
+// inclusive end of that UTC day (last ms). Throws on malformed input.
+export function parseDateFlag(input: string, endOfDay: boolean): number {
+  if (!/^\d{8}$/.test(input)) {
+    throw new Error(
+      `Invalid date '${input}': expected YYYYMMDD (e.g. 20260415)`,
+    );
+  }
+  const year = parseInt(input.slice(0, 4), 10);
+  const month = parseInt(input.slice(4, 6), 10);
+  const day = parseInt(input.slice(6, 8), 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    throw new Error(
+      `Invalid date '${input}': month and day must be in range`,
+    );
+  }
+  const ms = endOfDay
+    ? Date.UTC(year, month - 1, day, 23, 59, 59, 999)
+    : Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+  const d = new Date(ms);
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    throw new Error(`Invalid date '${input}': not a real calendar date`);
+  }
+  return ms;
+}
+
+function startedAtMs(entry: ProgressEntry): number {
+  const endMs = new Date(entry.timestamp).getTime();
+  const dur = entry.data.duration_seconds;
+  return typeof dur === "number" ? endMs - dur * 1000 : endMs;
+}
+
 export async function loadCycleHistory(
   projectId: string | undefined,
   limit: number = 20,
+  options: LoadCycleHistoryOptions = {},
 ): Promise<CycleHistoryRow[]> {
+  const sinceMs = options.since !== undefined
+    ? parseDateFlag(options.since, false)
+    : undefined;
+  const untilMs = options.until !== undefined
+    ? parseDateFlag(options.until, true)
+    : undefined;
+
   const stateDir = join(getRootDir(), "state");
   if (!existsSync(stateDir)) return [];
 
   const entries: ProgressEntry[] = [];
   const { readdirSync } = require("fs");
 
-  if (projectId) {
-    const filePath = join(stateDir, projectId, "PROGRESS.jsonl");
-    if (!existsSync(filePath)) return [];
-    const content = await readFile(filePath, "utf8");
+  const collect = (content: string) => {
     for (const line of content.trim().split("\n")) {
       if (!line.trim()) continue;
       try {
         const parsed = JSON.parse(line);
         if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
+          const started = startedAtMs(parsed);
+          if (sinceMs !== undefined && started < sinceMs) continue;
+          if (untilMs !== undefined && started > untilMs) continue;
           entries.push(parsed);
         }
       } catch { /* skip malformed */ }
     }
+  };
+
+  if (projectId) {
+    const filePath = join(stateDir, projectId, "PROGRESS.jsonl");
+    if (!existsSync(filePath)) return [];
+    collect(await readFile(filePath, "utf8"));
   } else {
     for (const dir of readdirSync(stateDir)) {
       const filePath = join(stateDir, dir, "PROGRESS.jsonl");
       if (!existsSync(filePath)) continue;
-      const content = await readFile(filePath, "utf8");
-      for (const line of content.trim().split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const parsed = JSON.parse(line);
-          if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
-            entries.push(parsed);
-          }
-        } catch { /* skip malformed */ }
-      }
+      collect(await readFile(filePath, "utf8"));
     }
   }
 

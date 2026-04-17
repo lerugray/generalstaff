@@ -218,7 +218,7 @@
   {
     "id": "gs-062",
     "title": "In the 'history' command, add --since=YYYYMMDD and --until=YYYYMMDD filter flags that filter cycles by started_at. Reject malformed date input with a clear error (not a silent empty result). Add tests covering valid ranges, out-of-range filters, and malformed input.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

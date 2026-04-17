@@ -52,10 +52,12 @@ Usage:
     Example: generalstaff start                         # resume after a stop
 
   generalstaff history [--project=<id>] [--lines=<n>] [--format=compact] [--costs]
+                       [--since=YYYYMMDD] [--until=YYYYMMDD]
                                                           Cycle history (compact: tab-delimited, no headers)
     Example: generalstaff history --lines=50
     Example: generalstaff history --project=myapp --format=compact
     Example: generalstaff history --format=compact --costs  # add reviewer-invocation + est-token columns
+    Example: generalstaff history --since=20260401 --until=20260430  # April 2026 cycles only
 
   generalstaff log [--project=<id>] [--lines=<n>]         Tail PROGRESS.jsonl
     Example: generalstaff log --project=myapp --lines=50
@@ -231,13 +233,22 @@ switch (command) {
         lines: { type: "string", default: "20" },
         format: { type: "string", default: "table" },
         costs: { type: "boolean", default: false },
+        since: { type: "string" },
+        until: { type: "string" },
       },
       allowPositionals: false,
     });
-    const rows = await loadCycleHistory(
-      historyValues.project,
-      parseInt(historyValues.lines!, 10),
-    );
+    let rows;
+    try {
+      rows = await loadCycleHistory(
+        historyValues.project,
+        parseInt(historyValues.lines!, 10),
+        { since: historyValues.since, until: historyValues.until },
+      );
+    } catch (err) {
+      console.error(`Error: ${(err as Error).message}`);
+      process.exit(2);
+    }
     if (historyValues.format === "compact") {
       if (historyValues.costs) {
         const summary = await summarizeCosts(historyValues.project);

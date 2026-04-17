@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag } from "../src/audit";
 import { setRootDir } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "fs";
+import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "fs";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "audit_test");
 
@@ -300,6 +300,126 @@ describe("loadCycleHistory", () => {
 
     const rows = await loadCycleHistory("proj-same");
     expect(rows[0].sha_range).toBe("abc1234");
+  });
+});
+
+// Helper: write a cycle_end entry with a fixed end-time + duration
+function writeCycleEnd(
+  projectId: string,
+  cycleId: string,
+  endedAtIso: string,
+  durationSeconds: number,
+  outcome = "verified",
+) {
+  const dir = join(TEST_DIR, "state", projectId);
+  mkdirSync(dir, { recursive: true });
+  const entry = {
+    timestamp: endedAtIso,
+    event: "cycle_end",
+    cycle_id: cycleId,
+    project_id: projectId,
+    data: {
+      outcome,
+      start_sha: "aaa",
+      end_sha: "bbb",
+      duration_seconds: durationSeconds,
+    },
+  };
+  writeFileSync(
+    join(dir, "PROGRESS.jsonl"),
+    JSON.stringify(entry) + "\n",
+    { flag: "a" },
+  );
+}
+
+describe("loadCycleHistory date filters", () => {
+  it("filters by --since (inclusive from start of UTC day)", async () => {
+    writeCycleEnd("proj-range", "c-old", "2026-04-10T12:00:00Z", 60);
+    writeCycleEnd("proj-range", "c-new", "2026-04-20T12:00:00Z", 60);
+    const rows = await loadCycleHistory("proj-range", 20, { since: "20260415" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("c-new");
+  });
+
+  it("filters by --until (inclusive through end of UTC day)", async () => {
+    writeCycleEnd("proj-range", "c-old", "2026-04-10T12:00:00Z", 60);
+    writeCycleEnd("proj-range", "c-new", "2026-04-20T12:00:00Z", 60);
+    const rows = await loadCycleHistory("proj-range", 20, { until: "20260415" });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("c-old");
+  });
+
+  it("filters by combined --since and --until range", async () => {
+    writeCycleEnd("proj-range", "c-before", "2026-04-01T12:00:00Z", 60);
+    writeCycleEnd("proj-range", "c-middle", "2026-04-15T12:00:00Z", 60);
+    writeCycleEnd("proj-range", "c-after", "2026-04-30T12:00:00Z", 60);
+    const rows = await loadCycleHistory("proj-range", 20, {
+      since: "20260410",
+      until: "20260420",
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("c-middle");
+  });
+
+  it("filters by started_at (not end timestamp) so a long cycle spanning the boundary is included", async () => {
+    // Cycle ends on Apr 16 but started on Apr 15 (14-hour cycle).
+    // Range includes Apr 15 so the cycle should be included.
+    writeCycleEnd(
+      "proj-range",
+      "c-long",
+      "2026-04-16T04:00:00Z",
+      14 * 3600,
+    );
+    const rows = await loadCycleHistory("proj-range", 20, {
+      since: "20260415",
+      until: "20260415",
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cycle_id).toBe("c-long");
+  });
+
+  it("returns empty array when range contains no cycles", async () => {
+    writeCycleEnd("proj-range", "c-only", "2026-04-10T12:00:00Z", 60);
+    const rows = await loadCycleHistory("proj-range", 20, {
+      since: "20260501",
+      until: "20260531",
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it("rejects malformed date strings", async () => {
+    writeCycleEnd("proj-range", "c-only", "2026-04-10T12:00:00Z", 60);
+    await expect(
+      loadCycleHistory("proj-range", 20, { since: "2026-04-15" }),
+    ).rejects.toThrow(/YYYYMMDD/);
+    await expect(
+      loadCycleHistory("proj-range", 20, { until: "20261301" }),
+    ).rejects.toThrow(/Invalid date/);
+    await expect(
+      loadCycleHistory("proj-range", 20, { since: "20260230" }),
+    ).rejects.toThrow(/Invalid date/);
+    await expect(
+      loadCycleHistory("proj-range", 20, { since: "" }),
+    ).rejects.toThrow(/YYYYMMDD/);
+  });
+});
+
+describe("parseDateFlag", () => {
+  it("parses YYYYMMDD at start of UTC day", () => {
+    const ms = parseDateFlag("20260415", false);
+    expect(new Date(ms).toISOString()).toBe("2026-04-15T00:00:00.000Z");
+  });
+
+  it("parses YYYYMMDD at end of UTC day when endOfDay=true", () => {
+    const ms = parseDateFlag("20260415", true);
+    expect(new Date(ms).toISOString()).toBe("2026-04-15T23:59:59.999Z");
+  });
+
+  it("throws on malformed input", () => {
+    expect(() => parseDateFlag("abc", false)).toThrow();
+    expect(() => parseDateFlag("2026-04-15", false)).toThrow();
+    expect(() => parseDateFlag("20260000", false)).toThrow();
+    expect(() => parseDateFlag("20260231", false)).toThrow();
   });
 });
 
