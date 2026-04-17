@@ -4,6 +4,7 @@ import {
   formatSessionPlanPreview,
   parseDigest,
   checkCycleWatchdog,
+  WATCHDOG_MULTIPLIER,
   regenerateDigest,
   parseFormattedDuration,
   runSessionChain,
@@ -941,6 +942,30 @@ describe("checkCycleWatchdog", () => {
     // would otherwise trigger. We return null so the session stays readable.
     expect(checkCycleWatchdog(100, 0)).toBe(null);
     expect(checkCycleWatchdog(100, -5)).toBe(null);
+  });
+
+  it("returns null for 0/negative budget even at very large durations", () => {
+    expect(checkCycleWatchdog(10_000, 0)).toBe(null);
+    expect(checkCycleWatchdog(10_000, -1)).toBe(null);
+  });
+
+  it("returns a warning when duration is one second over the threshold", () => {
+    // 5-min budget → 10-min threshold (600s); 601s must trip
+    const budgetMin = 5;
+    const thresholdSec = budgetMin * 60 * WATCHDOG_MULTIPLIER;
+    const warn = checkCycleWatchdog(thresholdSec + 1, budgetMin);
+    expect(warn).not.toBe(null);
+    expect(warn).toContain("[WATCHDOG]");
+    expect(warn).toContain(`${budgetMin}-min budget`);
+  });
+
+  it("returns a single-line warning even for 3x the budget", () => {
+    // 3x a 5-min budget = 15 min runtime; still one line, no embedded \n
+    const warn = checkCycleWatchdog(15 * 60, 5);
+    expect(warn).not.toBe(null);
+    expect(warn).not.toContain("\n");
+    expect(warn).toContain("15m");
+    expect(warn).toContain("5-min budget");
   });
 });
 
