@@ -929,8 +929,9 @@
   {
     "id": "gs-155",
     "title": "Create src/cycle_summary_llm.ts with generateCycleDescription(result: CycleResult, diffStat: string, provider: LLMProvider): Promise<{ description: string; fellBack: boolean; error?: string }>. Build a tiny prompt (~150 tokens) from cycle_id, project_id, final_outcome, diff_stats, and diff_stat summary; ask for a single-line (max ~80 char) human-readable description of what the cycle did. Currently the digest's 'What got done' section uses fetchCommitSubject in writeDigest; this new function produces a richer one-liner that can optionally replace it. Provider invoked with maxTokens=80, temperature=0. Strip newlines from output so it stays single-line; truncate at 120 chars with ellipsis. On error return fellBack=true. Add tests in tests/cycle_summary_llm.test.ts with a stub provider: (a) happy path returns description, (b) provider strips internal newlines, (c) truncates oversize output, (d) error path fellBack=true. Do NOT wire into writeDigest in this task — that's gs-158's job behind a feature flag.",
-    "status": "pending",
-    "priority": 1
+    "status": "done",
+    "priority": 1,
+    "completed_at": "2026-04-17T20:20:00.000Z"
   },
   {
     "id": "gs-156",
