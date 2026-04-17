@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff contains the creation of the README-PROPOSAL.md file as claimed, and the task status in tasks.json is updated to 'done', with no scope drift or hands-off violations.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "Produce a README outline proposal at `docs/README-PROPOSAL.md` following the matiassingers/awesome-readme checklist structure. Read README.md (existing), CLAUDE.md, DESIGN.md, PIVOT-2026-04-15.md, FUTURE-DIRECTIONS-2026-04-15.md, RULE-RELAXATION-2026-04-15.md, UI-VISION-2026-04-15.md, and the PHASE-1-*-2026-04-15 docs. Output section headers + one-bullet-per-section summary + cite which source doc each bullet draws from. Do NOT modify README.md itself. Do NOT write any narrative prose in the sections. Only propose structure and what-belongs-where. This is pure retrieval/outlining on behalf of the README dogfooding experiment proposed in FUTURE-DIRECTIONS §6 — the user will handle voice, positioning, and final prose in a later interactive session. Create the docs/ directory if it doesn't exist.",
+      "evidence": "The diff shows the creation of docs/README-PROPOSAL.md which contains a structured outline proposal based on the specified source documents, matching the task description exactly.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) passed with exit code 0, indicating successful execution of tests and type checking. The diff is clean and only includes the expected file creation and task status update."
+}

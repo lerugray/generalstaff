@@ -1,0 +1,544 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/docs/README-PROPOSAL.md b/docs/README-PROPOSAL.md
+new file mode 100644
+index 0000000..d2c8ac2
+--- /dev/null
++++ b/docs/README-PROPOSAL.md
+@@ -0,0 +1,259 @@
++# README Outline Proposal
++
++**Purpose:** Structural proposal for a revised `README.md` following the
++[matiassingers/awesome-readme](https://github.com/matiassingers/awesome-readme)
++checklist. Retrieval and outlining only — no narrative prose. Voice,
++positioning, and final wording to be composed in a later interactive
++session (per `FUTURE-DIRECTIONS-2026-04-15.md` §6 README dogfooding
++proposal).
++
++**How to read this file:** each section heading is the proposed
++section. Bullets describe *what belongs there*. Each bullet cites
++the source doc whose existing content should seed that bullet.
++
++---
++
++## 1. Title + Tagline
++
++- Project name "GeneralStaff" (source: `README.md` line 1).
++- Two-line tagline pair: "Open-source autonomous engineering for solo
++  founders." + "Your code. Your keys. Your control." (source:
++  `README.md` lines 3–4).
++- One-sentence elevator describing the meta-dispatcher + verification
++  gate + audit log (source: `README.md` lines 6–9).
++
++## 2. Badges
++
++- Placeholder row — none ship yet in the current README. Candidates
++  once repo is public: build status, test count, license (MIT per
++  `README.md` line 209), phase/status.
++- Static status line is already in `README.md` lines 11–15 and could
++  collapse into badges + one sentence.
++
++## 3. Status / Maturity callout
++
++- Current "Status (2026-04-16)" blockquote (source: `README.md` lines
++  11–15) — phase-1 shipped numbers, zero false positives, private
++  repo, cross-platform.
++- Roadmap pointer ("you are here") mirrors the Phase 7 line (source:
++  `README.md` line 185).
++
++## 4. Visuals / Demo
++
++- Not in current README. Candidates when available:
++  - `generalstaff status` screenshot (CLI surface defined in
++    `PHASE-1-SKETCH-2026-04-15.md` §"CLI surface").
++  - Sample `digest_*.md` excerpt (schema in `DESIGN.md` §"Open audit
++    log entry format").
++  - UI preview deferred to Phase 4/5.5 (source:
++    `UI-VISION-2026-04-15.md` §"When this happens";
++    `README.md` lines 182–184).
++
++## 5. The problem
++
++- Failure mode framing: "industrious without judgment" + Polsia
++  Trustpilot signal about false completions (source: `README.md`
++  lines 17–25).
++- Optional: the same framing in Hammerstein-quadrant terms (source:
++  `README.md` §"The Hammerstein framing" lines 125–143; deeper
++  grounding in `PIVOT-2026-04-15.md` §"Why pivot").
++
++## 6. The approach / How it works
++
++- ASCII pipeline diagram (source: `README.md` lines 29–32).
++- Verification gate bullet (source: `README.md` lines 34–37;
++  full spec in `DESIGN.md` §"Verification gate spec").
++- Hands-off lists bullet (source: `README.md` lines 38–40).
++- Worktree isolation bullet (source: `README.md` lines 41–44).
++- BYOK bullet (source: `README.md` lines 45–47;
++  `RULE-RELAXATION-2026-04-15.md` §"Hard Rule #8").
++- Open audit log bullet (source: `README.md` lines 48–50;
++  format in `DESIGN.md` §"Open audit log entry format").
++
++## 7. Prerequisites / Installation
++
++- Toolchain list: git, bash, bun 1.2+, claude CLI (source: `README.md`
++  lines 54–55).
++- `git clone` + `bun install` + `bun link` + `generalstaff doctor`
++  block (source: `README.md` lines 57–63).
++
++## 8. Quickstart / Usage
++
++- `generalstaff init` + edit `projects.yaml` + `config` + `cycle
++  --dry-run` flow (source: `README.md` lines 65–73).
++- Real session: `generalstaff session --budget=90` + `history
++  --lines=20` (source: `README.md` lines 75–80).
++- Reassurance line: bot only pushes to `bot/work`, export = git clone
++  (source: `README.md` lines 82–83; `RULE-RELAXATION-2026-04-15.md`
++  §"Hard Rule #7").
++
++## 9. Configuration
++
++- Point at `projects.yaml.example` as schema reference (source:
++  `README.md` line 195).
++- Per-project fields summary: `engineer_command`,
++  `verification_command`, `cycle_budget_minutes`, `hands_off` patterns
++  (source: `README.md` lines 68–70; schema in `DESIGN.md` §"Project
++  registry schema").
++- Reviewer provider env vars: `GENERALSTAFF_REVIEWER_PROVIDER`,
++  `GENERALSTAFF_REVIEWER_MODEL`,
++  `GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER`, `OPENROUTER_API_KEY`,
++  `OLLAMA_HOST` (source: `CLAUDE.md` §"Reviewer provider
++  configuration").
++
++## 10. Features
++
++- Bulleted feature list, drawn from the 15 CLI commands in
++  `src/cli.ts` usage (source: `PHASE-1-SKETCH-2026-04-15.md` §"CLI
++  surface"; can be cross-checked against `README.md` line 11–15
++  "15 CLI commands" claim).
++- Phase 1 "Definition of done" bullets as features list (source:
++  `PHASE-1-PLAN-2026-04-15.md` §"Definition of done for Phase 1";
++  `PHASE-1-SKETCH-2026-04-15.md` §"Definition of done for Phase 1").
++
++## 11. Why this over the alternatives
++
++- Polsia / Devin / closed SaaS contrast (source: `README.md` lines
++  87–91; deeper analysis in `PIVOT-2026-04-15.md` §"Polsia research
++  summary" and §"Strategic positioning").
++- Naive `claude -p` loops contrast (source: `README.md` lines 92–96).
++- Hand-rolled nightly scripts contrast (source: `README.md` lines
++  97–99; historical context in `research-notes.md`, per `CLAUDE.md`
++  §"Read first" order).
++
++## 12. Who this is for
++
++- "Bring your own imagination" neutral-on-motivation framing (source:
++  `README.md` lines 101–123; full argument in
++  `FUTURE-DIRECTIONS-2026-04-15.md` §4 "Bring Your Own Imagination
++  Framing").
++- Hard Rule #1 still holds — correctness work, not creative work
++  (source: `README.md` lines 119–123;
++  `RULE-RELAXATION-2026-04-15.md` §"Hard Rule #1").
++
++## 13. The Hammerstein framing (philosophy)
++
++- Origin of the name + clever-industrious vs stupid-industrious
++  (source: `README.md` lines 125–143).
++- Forward reference to `docs/internal/` once public (source:
++  `README.md` lines 140–143).
++
++## 14. Hard rules
++
++- All 10 rules, one line each (source: `README.md` lines 145–169;
++  canonical list in `RULE-RELAXATION-2026-04-15.md` §2 + §3).
++- Pointer to `RULE-RELAXATION-2026-04-15.md` for rationale (source:
++  `README.md` line 171).
++
++## 15. Roadmap
++
++- Phase 2 (multi-provider routing) (source: `README.md` lines
++  175–179; full plan in `FUTURE-DIRECTIONS-2026-04-15.md` §2 and the
++  2026-04-16 tier taxonomy update).
++- Phase 3 (second managed project) (source: `README.md` lines
++  180–181; candidate discussion in
++  `FUTURE-DIRECTIONS-2026-04-15.md` §5 on Retrogaze).
++- Phase 4 (Tauri UI) (source: `README.md` line 182;
++  `RULE-RELAXATION-2026-04-15.md` §5.1 UI framework resolution).
++- Phase 5.5+ (Kriegspiel theme) (source: `README.md` lines 183–184;
++  `UI-VISION-2026-04-15.md` in full).
++- Phase 7 (public launch) (source: `README.md` line 185).
++- Later phases (simulation mode, budget guards, fleet viewer,
++  multi-bot) available for a "Long-term ideas" expandable section
++  (source: `FUTURE-DIRECTIONS-2026-04-15.md` §1, §3, §7, §8).
++- Revised 12-phase plan reference (source: `PIVOT-2026-04-15.md`
++  §"Phased build plan (revised)").
++
++## 16. Documentation
++
++- Pointer list already in current `README.md` lines 187–200.
++  Confirm/expand with newer docs when ready:
++  - `DESIGN.md` (v1 + v2 append-only).
++  - `PIVOT-2026-04-15.md`.
++  - `PHASE-1-PLAN-2026-04-15.md`.
++  - `PHASE-1-RESOLUTIONS-2026-04-15.md` (could be added — currently
++    missing from the README list).
++  - `PHASE-1-SKETCH-2026-04-15.md` (could be added).
++  - `FUTURE-DIRECTIONS-2026-04-15.md` (could be added).
++  - `RULE-RELAXATION-2026-04-15.md` (already linked inline at line
++    171; consider duplicating here for discoverability).
++  - `UI-VISION-2026-04-15.md` (already linked at line 184).
++  - `projects.yaml.example`.
++  - `CLAUDE.md`.
++  - `research-notes.md`.
++
++## 17. Tests
++
++- Not in current README. Candidate one-liner: "bun test" runs the
++  suite; coverage numbers cited in the Status block (source:
++  `README.md` line 12; structure in
++  `PHASE-1-SKETCH-2026-04-15.md` §"Test strategy").
++
++## 18. Contributing
++
++- Current stub about pre-public + PROGRESS.jsonl feedback loop
++  (source: `README.md` lines 202–207).
++- Expand once public: CONTRIBUTING.md link, code of conduct, issue
++  template guidance (no current source — TBD at public launch).
++
++## 19. License
++
++- MIT (source: `README.md` line 209).
++
++## 20. Acknowledgements / Prior art
++
++- Not in current README. Candidates:
++  - Prior-art survey: nightcrawler, parallel-cc, Polsia,
++    Continuous-Claude-v3 (source: `research-notes.md` per
++    `CLAUDE.md` §"Read first" item 5).
++  - Hammerstein framing lineage from catalogdna's "AI Collaboration
++    Principles" (source: `CLAUDE.md` §"Hammerstein context";
++    external path noted there).
++
++## 21. FAQ (optional)
++
++- Candidate seed questions from existing content:
++  - "Will it touch my main branch?" → `README.md` lines 82–83 +
++    Hard Rule #7.
++  - "What if the bot hallucinates a task is done?" → `README.md`
++    §"The approach" + Hard Rule #6.
++  - "Do I have to pay for a platform?" → Hard Rule #8 (BYOK).
++  - "Can I use it with non-Claude models?" → reviewer provider
++    section (`CLAUDE.md` §"Reviewer provider configuration"); full
++    roadmap in `FUTURE-DIRECTIONS-2026-04-15.md` §2.
++  - "How do I stop the bot from touching file X?" → Hard Rule #5,
++    `projects.yaml.example`.
++
++---
++
++## Source docs consulted
++
++- `README.md` (current, 209 lines) — primary seed.
++- `CLAUDE.md` — reviewer config, session context, Hammerstein pointer.
++- `DESIGN.md` — architecture (v1 + v2), verification gate spec,
++  audit-log format.
++- `PIVOT-2026-04-15.md` — mission change, Polsia research,
++  positioning, phased plan.
++- `FUTURE-DIRECTIONS-2026-04-15.md` — model plurality, BYOI framing,
++  roadmap items beyond Phase 4.
++- `RULE-RELAXATION-2026-04-15.md` — canonical Hard Rules list and
++  rationale; Phase 1 resolved decisions.
++- `UI-VISION-2026-04-15.md` — Kriegspiel theme, UI timing.
++- `PHASE-1-PLAN-2026-04-15.md` — shipped Phase 1 workflow and DoD.
++- `PHASE-1-RESOLUTIONS-2026-04-15.md` — resolved Phase 1 open
++  questions (work detection, reviewer prompt, concurrent-run
++  detection, state-dir location).
++- `PHASE-1-SKETCH-2026-04-15.md` — CLI surface, file structure, test
++  strategy.
++
++## Gaps flagged
++
++- No current sources for Tests, Acknowledgements, or FAQ sections —
++  those entries above are TBD-at-public-launch placeholders.
++- "15 CLI commands" count in the Status block is currently
++  README-only; the authoritative source is `src/cli.ts`. A check
++  against `src/cli.ts` is recommended before publishing.
++- Badges row has no source — needs a separate decision about which
++  CI provider to surface, per `RULE-RELAXATION-2026-04-15.md` §5.5
++  (distribution channel resolved; CI choice is adjacent but
++  distinct).
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index a0943ee..48328be 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -500,7 +500,7 @@
+   {
+     "id": "gs-109",
+     "title": "Produce a README outline proposal at `docs/README-PROPOSAL.md` following the matiassingers/awesome-readme checklist structure. Read README.md (existing), CLAUDE.md, DESIGN.md, PIVOT-2026-04-15.md, FUTURE-DIRECTIONS-2026-04-15.md, RULE-RELAXATION-2026-04-15.md, UI-VISION-2026-04-15.md, and the PHASE-1-*-2026-04-15 docs. Output section headers + one-bullet-per-section summary + cite which source doc each bullet draws from. Do NOT modify README.md itself. Do NOT write any narrative prose in the sections. Only propose structure and what-belongs-where. This is pure retrieval/outlining on behalf of the README dogfooding experiment proposed in FUTURE-DIRECTIONS §6 — the user will handle voice, positioning, and final prose in a later interactive session. Create the docs/ directory if it doesn't exist.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+
+
+Diff summary: docs/README-PROPOSAL.md       | 259 ++++++++++++++++++++++++++++++++++++++++++
+ state/generalstaff/tasks.json |   2 +-
+ 2 files changed, 260 insertions(+), 1 deletion(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-17T12:49:39.440Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260417_124958.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124958.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124959.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124959.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260417_124959.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\On
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-1-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "exact marked-done task line",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
