@@ -1,0 +1,47 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index d6794f2..b2ab6c7 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -416,7 +416,7 @@
+   {
+     "id": "gs-095",
+     "title": "Add a test for invokeOllamaReviewer verifying it correctly returns the message.content when the response also contains a 'thinking' field (some reasoning models like qwen3 populate both). Mock fetch to return { message: { content: 'real answer', thinking: 'internal reasoning' } } and verify the result is 'real answer' (thinking field ignored).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/reviewer.test.ts b/tests/reviewer.test.ts
+index 404b767..aebe5e1 100644
+--- a/tests/reviewer.test.ts
++++ b/tests/reviewer.test.ts
+@@ -381,6 +381,29 @@ describe("invokeOllamaReviewer", () => {
+     expect(result).toContain("ECONNREFUSED");
+     expect(result).toContain("Ollama server running");
+   });
++
++  it("returns message.content and ignores 'thinking' field when both present", async () => {
++    // Reasoning models like qwen3 populate a separate `thinking` field
++    // alongside `content`. The reviewer must return only `content` so
++    // parseReviewerResponse sees the JSON verdict, not the chain of thought.
++    globalThis.fetch = (async () => {
++      return new Response(
++        JSON.stringify({
++          message: {
++            content: "real answer",
++            thinking: "internal reasoning that should be ignored",
++          },
++          done: true,
++        }),
++        { status: 200 },
++      );
++    }) as unknown as typeof fetch;
++
++    const result = await invokeOllamaReviewer("prompt");
++
++    expect(result).toBe("real answer");
++    expect(result).not.toContain("internal reasoning");
++  });
+ });
+ 
+ describe("invokeReviewerWithFallback", () => {
