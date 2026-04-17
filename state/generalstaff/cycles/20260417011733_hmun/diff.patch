@@ -1,0 +1,113 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index fff9aa9..bcdb548 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -260,7 +260,7 @@
+   {
+     "id": "gs-069",
+     "title": "Add test coverage for countCommitsAhead in cycle.ts. Use a tmp git repo fixture: init repo, make a commit on master, create a branch, verify count=0. Add a commit on the branch, verify count=1. Merge branch into master, verify count=0. Also verify returns 0 when branch doesn't exist.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/cycle.test.ts b/tests/cycle.test.ts
+index 8a33d9a..a6f70ab 100644
+--- a/tests/cycle.test.ts
++++ b/tests/cycle.test.ts
+@@ -1,7 +1,13 @@
+ import { describe, expect, it } from "bun:test";
+ import { join } from "path";
++import { tmpdir } from "os";
++import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { $ } from "bun";
+-import { extractChangedFiles, diffSummaryStats } from "../src/cycle";
++import {
++  extractChangedFiles,
++  diffSummaryStats,
++  countCommitsAhead,
++} from "../src/cycle";
+ 
+ describe("extractChangedFiles", () => {
+   it("extracts file paths from a unified diff", () => {
+@@ -205,6 +211,80 @@ describe("diffSummaryStats", () => {
+   });
+ });
+ 
++describe("countCommitsAhead", () => {
++  async function initRepo(path: string): Promise<void> {
++    mkdirSync(path, { recursive: true });
++    await $`git -C ${path} init -b master`.quiet();
++    // Isolate from global git identity / signing config so commits work in CI
++    // and on machines with commit.gpgsign=true.
++    await $`git -C ${path} config user.email test@example.com`.quiet();
++    await $`git -C ${path} config user.name test`.quiet();
++    await $`git -C ${path} config commit.gpgsign false`.quiet();
++  }
++
++  async function commitFile(
++    path: string,
++    file: string,
++    content: string,
++    message: string,
++  ): Promise<void> {
++    writeFileSync(join(path, file), content, "utf8");
++    await $`git -C ${path} add ${file}`.quiet();
++    await $`git -C ${path} commit -m ${message}`.quiet();
++  }
++
++  it("returns 0 for a branch even with master unless that branch has its own commits", async () => {
++    const repo = join(tmpdir(), "gs-cca-even-" + Date.now());
++    try {
++      await initRepo(repo);
++      await commitFile(repo, "a.txt", "one", "initial");
++      await $`git -C ${repo} branch feature`.quiet();
++      expect(await countCommitsAhead(repo, "feature", "master")).toBe(0);
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("returns 1 when the branch has one commit not on master", async () => {
++    const repo = join(tmpdir(), "gs-cca-ahead-" + Date.now());
++    try {
++      await initRepo(repo);
++      await commitFile(repo, "a.txt", "one", "initial");
++      await $`git -C ${repo} checkout -b feature`.quiet();
++      await commitFile(repo, "b.txt", "two", "branch work");
++      expect(await countCommitsAhead(repo, "feature", "master")).toBe(1);
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("returns 0 after the branch is merged into master", async () => {
++    const repo = join(tmpdir(), "gs-cca-merged-" + Date.now());
++    try {
++      await initRepo(repo);
++      await commitFile(repo, "a.txt", "one", "initial");
++      await $`git -C ${repo} checkout -b feature`.quiet();
++      await commitFile(repo, "b.txt", "two", "branch work");
++      await $`git -C ${repo} checkout master`.quiet();
++      await $`git -C ${repo} merge --no-ff --no-edit feature`.quiet();
++      expect(await countCommitsAhead(repo, "feature", "master")).toBe(0);
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("returns 0 when the branch does not exist", async () => {
++    const repo = join(tmpdir(), "gs-cca-missing-" + Date.now());
++    try {
++      await initRepo(repo);
++      await commitFile(repo, "a.txt", "one", "initial");
++      expect(await countCommitsAhead(repo, "nonexistent-branch", "master")).toBe(0);
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++});
++
+ describe("executeCycle", () => {
+   it("runs verification and reviewer even when engineer exits non-zero", async () => {
+     // Run in a subprocess so mock.module calls don't leak into other test files
