@@ -38,6 +38,20 @@ export async function readJsonl(path: string): Promise<unknown[]> {
   return out;
 }
 
+// Module-level verbose toggle. Enabled by `generalstaff session --verbose`
+// (via setVerboseMode). When on, every appended PROGRESS.jsonl entry also
+// prints a one-line summary to stdout so long-running sessions are
+// observable in real time.
+let verboseMode = false;
+
+export function setVerboseMode(on: boolean): void {
+  verboseMode = on;
+}
+
+export function isVerboseMode(): boolean {
+  return verboseMode;
+}
+
 export async function appendProgress(
   projectId: string,
   event: ProgressEventType,
@@ -59,6 +73,10 @@ export async function appendProgress(
   }
 
   await appendFile(filePath, JSON.stringify(entry) + "\n", "utf8");
+
+  if (verboseMode) {
+    printEntry(entry);
+  }
 }
 
 export type LogLevel = "error";

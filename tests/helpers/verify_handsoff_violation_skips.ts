@@ -104,6 +104,7 @@ mock.module("../../src/state", () => ({
 mock.module("../../src/audit", () => ({
   appendProgress: async () => {},
   loadProgressEvents: async () => [],
+  setVerboseMode: () => {},
 }));
 
 const { executeCycle } = await import("../../src/cycle");

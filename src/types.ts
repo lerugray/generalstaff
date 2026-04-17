@@ -153,6 +153,7 @@ export interface SessionOptions {
   dryRun: boolean;
   maxCycles?: number;
   excludeProjects?: string[];
+  verbose?: boolean;
 }
 
 export interface SingleCycleOptions {
