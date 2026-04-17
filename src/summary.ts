@@ -1,10 +1,9 @@
 // GeneralStaff — fleet summary: dashboard snapshot across all projects
 
 import { existsSync, readdirSync, statSync } from "fs";
-import { readFile } from "fs/promises";
 import { join } from "path";
 import { getRootDir } from "./state";
-import { isProgressEntry, type ProgressEntry } from "./types";
+import { loadProgressEvents } from "./audit";
 import { formatBytes, formatDuration } from "./format";
 
 export interface OutcomeCounts {
@@ -74,22 +73,6 @@ export function computeDiskUsage(rootDir?: string): DiskUsage {
   return { logs, digests, state, total: logs + digests + state };
 }
 
-async function readCycleEnds(filePath: string): Promise<ProgressEntry[]> {
-  if (!existsSync(filePath)) return [];
-  const content = await readFile(filePath, "utf8");
-  const out: ProgressEntry[] = [];
-  for (const line of content.trim().split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line);
-      if (isProgressEntry(parsed) && parsed.event === "cycle_end") {
-        out.push(parsed);
-      }
-    } catch { /* skip malformed */ }
-  }
-  return out;
-}
-
 function countPendingTasksSync(tasksPath: string): number {
   if (!existsSync(tasksPath)) return 0;
   try {
@@ -144,7 +127,10 @@ export async function buildFleetSummary(): Promise<FleetSummary> {
   for (const projectId of projectDirs) {
     const projectDir = join(stateDir, projectId);
 
-    const ends = await readCycleEnds(join(projectDir, "PROGRESS.jsonl"));
+    const ends = await loadProgressEvents(
+      projectId,
+      (e) => e.event === "cycle_end",
+    );
     for (const e of ends) {
       summary.cycles_total += 1;
       const outcome = String(e.data.outcome ?? "");

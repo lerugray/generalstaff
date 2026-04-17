@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -762,5 +762,59 @@ describe("printHistoryCompact colorization", () => {
     const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows, true)));
     expect(lines[0].split("\t")[3]).toBe("\x1b[32mverified\x1b[0m");
     expect(lines[1].split("\t")[3]).toBe("\x1b[31mverification_failed\x1b[0m");
+  });
+});
+
+describe("loadProgressEvents", () => {
+  it("returns [] when PROGRESS.jsonl does not exist", async () => {
+    const result = await loadProgressEvents("missing-proj", () => true);
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] when PROGRESS.jsonl is empty", async () => {
+    const filePath = join(TEST_DIR, "state", "empty-proj", "PROGRESS.jsonl");
+    mkdirSync(join(TEST_DIR, "state", "empty-proj"), { recursive: true });
+    writeFileSync(filePath, "", "utf8");
+    const result = await loadProgressEvents("empty-proj", () => true);
+    expect(result).toEqual([]);
+  });
+
+  it("returns only entries that pass filterFn", async () => {
+    await appendProgress("proj-f", "cycle_start", { start_sha: "a" }, "c1");
+    await appendProgress("proj-f", "cycle_end", { outcome: "verified" }, "c1");
+    await appendProgress("proj-f", "reviewer_invoked", { prompt_length: 100 }, "c1");
+    await appendProgress("proj-f", "cycle_end", { outcome: "verification_failed" }, "c2");
+
+    const ends = await loadProgressEvents("proj-f", (e) => e.event === "cycle_end");
+    expect(ends).toHaveLength(2);
+    expect(ends[0].data.outcome).toBe("verified");
+    expect(ends[1].data.outcome).toBe("verification_failed");
+
+    const reviewers = await loadProgressEvents("proj-f", (e) => e.event === "reviewer_invoked");
+    expect(reviewers).toHaveLength(1);
+    expect(reviewers[0].data.prompt_length).toBe(100);
+
+    const none = await loadProgressEvents("proj-f", () => false);
+    expect(none).toEqual([]);
+  });
+
+  it("skips malformed JSON lines and non-ProgressEntry objects", async () => {
+    await appendProgress("proj-m", "cycle_end", { outcome: "verified" }, "c1");
+
+    // Append garbage and a non-ProgressEntry JSON object
+    const filePath = join(TEST_DIR, "state", "proj-m", "PROGRESS.jsonl");
+    const existing = readFileSync(filePath, "utf8");
+    writeFileSync(
+      filePath,
+      existing + "not valid json\n" + '{"foo":"bar"}\n' + "\n",
+      "utf8",
+    );
+
+    await appendProgress("proj-m", "cycle_end", { outcome: "verified_weak" }, "c2");
+
+    const result = await loadProgressEvents("proj-m", () => true);
+    expect(result).toHaveLength(2);
+    expect(result[0].data.outcome).toBe("verified");
+    expect(result[1].data.outcome).toBe("verified_weak");
   });
 });
