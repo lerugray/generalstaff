@@ -1,0 +1,311 @@
+diff --git a/src/session.ts b/src/session.ts
+index 304032c..cf550d8 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -315,6 +315,21 @@ export async function runSession(options: SessionOptions) {
+     });
+   }
+ 
++  // Fleet-level session_complete event. Fires exactly once per session
++  // with aggregated stats; written to the "_fleet" pseudo-project log so
++  // it isn't tied to any individual project's PROGRESS.jsonl.
++  await appendProgress("_fleet", "session_complete", {
++    duration_minutes: Math.round(elapsed),
++    total_cycles: allResults.length,
++    total_verified: allResults.filter(
++      (r) => r.final_outcome === "verified" || r.final_outcome === "verified_weak",
++    ).length,
++    total_failed: allResults.filter(
++      (r) => r.final_outcome === "verification_failed",
++    ).length,
++    stop_reason: stopReason,
++  });
++
+   // End-of-session Telegram notification. Moved here from the .bat
+   // wrapper because post-bun steps in run_session.bat weren't reliably
+   // reached when the .bat was spawned from a detached context. Running
+diff --git a/src/types.ts b/src/types.ts
+index 547c125..3ecd342 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -134,7 +134,8 @@ export type ProgressEventType =
+   | "reviewer_fallback"
+   | "cycle_end"
+   | "session_start"
+-  | "session_end";
++  | "session_end"
++  | "session_complete";
+ 
+ export interface ProgressEntry {
+   timestamp: string;
+@@ -181,7 +182,7 @@ const VALID_EVENTS: readonly string[] = [
+   "verification_run", "verification_outcome", "diff_summary",
+   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
+   "reviewer_fallback",
+-  "cycle_end", "session_start", "session_end",
++  "cycle_end", "session_start", "session_end", "session_complete",
+ ];
+ 
+ export function isReviewerResponse(v: unknown): v is ReviewerResponse {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9bde127..11f7be1 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -440,7 +440,7 @@
+   {
+     "id": "gs-099",
+     "title": "Add a 'session_complete' ProgressEntry event type (fleet-level, not per-project) that emits once at session end with aggregated stats: total_cycles, total_verified, total_failed, duration_minutes, stop_reason. Complements the existing per-project session_end entries. Add to ProgressEventType union in types.ts, emit from session.ts after the per-project session_end loop, and add tests verifying the event fires exactly once per session.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/helpers/verify_session_complete_event.ts b/tests/helpers/verify_session_complete_event.ts
+new file mode 100644
+index 0000000..b6d783f
+--- /dev/null
++++ b/tests/helpers/verify_session_complete_event.ts
+@@ -0,0 +1,214 @@
++// Isolated test helper: proves runSession emits exactly one
++// "session_complete" fleet-level ProgressEntry at session end, and that
++// the entry carries the aggregated stats (duration, totals, stop_reason).
++
++import { mock } from "bun:test";
++import { join } from "path";
++import { mkdirSync, rmSync } from "fs";
++import type { ProjectConfig, CycleResult } from "../../src/types";
++
++const TEST_DIR = join(
++  import.meta.dir,
++  "..",
++  "fixtures",
++  "session_complete_event_test",
++);
++
++let pickCalls = 0;
++let executeCycleCalls = 0;
++
++const project: ProjectConfig = {
++  id: "test-proj",
++  path: TEST_DIR,
++  priority: 1,
++  engineer_command: "echo ok",
++  verification_command: "bun test",
++  cycle_budget_minutes: 1,
++  work_detection: "tasks_json",
++  concurrency_detection: "none",
++  branch: "bot/work",
++  auto_merge: false,
++  hands_off: [],
++};
++
++mock.module("../../src/projects", () => ({
++  loadProjectsYaml: async () => ({
++    projects: [project],
++    dispatcher: {
++      state_dir: join(TEST_DIR, "state"),
++      fleet_state_file: "fleet_state.json",
++      stop_file: "STOP",
++      override_file: "OVERRIDE",
++      picker: "priority_staleness",
++      max_cycles_per_project_per_session: 100,
++      log_dir: "logs",
++      digest_dir: "digests",
++    },
++  }),
++}));
++
++mock.module("../../src/cycle", () => ({
++  countCommitsAhead: async () => 0,
++  executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
++    executeCycleCalls++;
++    const now = new Date().toISOString();
++    return {
++      cycle_id: `cycle-${executeCycleCalls}`,
++      project_id: p.id,
++      started_at: now,
++      ended_at: now,
++      cycle_start_sha: "abc",
++      cycle_end_sha: "def",
++      engineer_exit_code: 0,
++      verification_outcome: "passed",
++      reviewer_verdict: "verified",
++      final_outcome: "verified",
++      reason: "ok",
++    };
++  },
++}));
++
++mock.module("../../src/dispatcher", () => ({
++  pickNextProject: async () => {
++    pickCalls++;
++    if (pickCalls <= 2) return { project, reason: "test pick" };
++    return null;
++  },
++  shouldChain: async () => ({ chain: false, reason: "stop after one" }),
++  estimateSessionPlan: () => ({
++    picks: [],
++    per_project: [],
++    total_cycles: 0,
++    budget_used_minutes: 0,
++    budget_remaining_minutes: 0,
++  }),
++}));
++
++mock.module("../../src/safety", () => ({
++  isStopFilePresent: async () => false,
++}));
++
++mock.module("../../src/state", () => ({
++  loadFleetState: async () => ({
++    version: 1,
++    updated_at: new Date().toISOString(),
++    projects: {},
++  }),
++  saveFleetState: async () => {},
++  loadProjectState: async (id: string) => ({
++    project_id: id,
++    current_cycle_id: null,
++    last_cycle_id: null,
++    last_cycle_outcome: null,
++    last_cycle_at: null,
++    cycles_this_session: 0,
++  }),
++  saveProjectState: async () => {},
++  getRootDir: () => TEST_DIR,
++}));
++
++interface CapturedEvent {
++  projectId: string;
++  event: string;
++  data: Record<string, unknown>;
++}
++
++const capturedEvents: CapturedEvent[] = [];
++
++mock.module("../../src/audit", () => ({
++  appendProgress: async (
++    projectId: string,
++    event: string,
++    data: Record<string, unknown>,
++  ) => {
++    capturedEvents.push({ projectId, event, data });
++  },
++}));
++
++mock.module("../../src/work_detection", () => ({
++  countRemainingWork: async () => 0,
++}));
++
++mock.module("../../src/notify", () => ({
++  notifySessionEnd: async () => {},
++}));
++
++const { runSession } = await import("../../src/session");
++
++async function run() {
++  const origLog = console.log;
++  console.log = () => {};
++
++  try {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++    mkdirSync(join(TEST_DIR, "digests"), { recursive: true });
++
++    await runSession({ budgetMinutes: 60, dryRun: true });
++
++    console.log = origLog;
++
++    const completeEvents = capturedEvents.filter(
++      (e) => e.event === "session_complete",
++    );
++
++    const errors: string[] = [];
++    if (completeEvents.length !== 1) {
++      errors.push(
++        `expected exactly 1 session_complete event, got ${completeEvents.length}`,
++      );
++    }
++
++    const ev = completeEvents[0];
++    if (ev) {
++      if (ev.projectId !== "_fleet") {
++        errors.push(
++          `expected projectId "_fleet", got "${ev.projectId}"`,
++        );
++      }
++      const expectKeys = [
++        "duration_minutes",
++        "total_cycles",
++        "total_verified",
++        "total_failed",
++        "stop_reason",
++      ];
++      for (const k of expectKeys) {
++        if (!(k in ev.data)) {
++          errors.push(`session_complete.data missing key "${k}"`);
++        }
++      }
++      if (ev.data.total_cycles !== executeCycleCalls) {
++        errors.push(
++          `total_cycles mismatch: event=${ev.data.total_cycles} actual=${executeCycleCalls}`,
++        );
++      }
++      if (ev.data.total_verified !== executeCycleCalls) {
++        errors.push(
++          `total_verified mismatch: event=${ev.data.total_verified} expected=${executeCycleCalls}`,
++        );
++      }
++      if (ev.data.total_failed !== 0) {
++        errors.push(`total_failed should be 0, got ${ev.data.total_failed}`);
++      }
++    }
++
++    const output = {
++      pass: errors.length === 0,
++      complete_event_count: completeEvents.length,
++      execute_cycle_calls: executeCycleCalls,
++      fleet_project_id: ev?.projectId ?? null,
++      event_data: ev?.data ?? null,
++      errors,
++    };
++    console.log(JSON.stringify(output));
++    process.exit(errors.length > 0 ? 1 : 0);
++  } catch (err) {
++    console.log = origLog;
++    console.error("Test helper crashed:", err);
++    process.exit(1);
++  } finally {
++    rmSync(TEST_DIR, { recursive: true, force: true });
++  }
++}
++
++run();
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index fe6a7ca..b59e89b 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -541,6 +541,24 @@ describe("runSession safeguards", () => {
+     expect(String(result.captured)).toContain("Stop reason:");
+   }, 30_000);
+ 
++  it("emits exactly one fleet-level session_complete event", async () => {
++    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
++      "verify_session_complete_event.ts",
++    );
++    if (exitCode !== 0) {
++      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
++    }
++    expect(result.pass).toBe(true);
++    expect(result.complete_event_count).toBe(1);
++    expect(result.fleet_project_id).toBe("_fleet");
++    const data = result.event_data as Record<string, unknown>;
++    expect(data).toBeTruthy();
++    expect(data.total_cycles).toBe(result.execute_cycle_calls);
++    expect(data.total_failed).toBe(0);
++    expect(typeof data.duration_minutes).toBe("number");
++    expect(typeof data.stop_reason).toBe("string");
++  }, 30_000);
++
+   it("adds capped projects to the skip set", async () => {
+     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+       "verify_capped_projects_skipped.ts",

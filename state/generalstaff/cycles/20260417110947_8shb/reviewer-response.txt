@@ -1,0 +1,25 @@
+{
+  "verdict": "verified",
+  "reason": "All tasks have corresponding changes in the diff, no scope drift, no hands-off violations, and verification exit code is 0.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "You added a session summary to the GeneralStaff bot",
+      "evidence": "src/session.ts contains new code for generating session summaries",
+      "confidence": "high"
+    },
+    {
+      "task": "You updated the types.ts file to include new type definitions",
+      "evidence": "src/types.ts has新增 type definitions for session summaries",
+      "confidence": "high"
+    },
+    {
+      "task": "You added tests for the new session summary functionality",
+      "evidence": "tests/helpers/verify_session_complete_event.ts and tests/session.test.ts contain new test cases",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification output shows all tests passed, confirming the changes are valid."
+}
