@@ -901,6 +901,15 @@ export async function runSession(options: SessionOptions) {
       }
     : undefined;
 
+  // gs-215: thread project paths into the digest so fetchCommitSubject
+  // resolves each cycle's SHAs in its own project repo, not the dispatcher
+  // repo. Without this, non-dogfood cycles log "bad object" warnings and
+  // every subject falls back to cycle_id.
+  const projectPaths: Record<string, string> = {};
+  for (const p of projects) {
+    projectPaths[p.id] = p.path;
+  }
+
   // Write digest
   await writeDigest(allResults, elapsed, {
     digest_dir: config.digest_dir,
@@ -908,6 +917,7 @@ export async function runSession(options: SessionOptions) {
     reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
     parallel_metrics: parallelMetricsForDigest,
     cycle_rounds: isParallelMode ? cycleRoundsAccumulator : undefined,
+    project_paths: projectPaths,
   });
 
   // Log session end for each project
@@ -965,7 +975,12 @@ export async function runSession(options: SessionOptions) {
   // the session.
   if (!dryRun) {
     const tasksDone = fleetBuckets.verified.map(
-      (r) => fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id,
+      (r) =>
+        fetchCommitSubject(
+          r.cycle_start_sha,
+          r.cycle_end_sha,
+          projectPaths[r.project_id],
+        ) || r.cycle_id,
     );
     await notifySessionEnd({
       success: fleetBuckets.failed.length === 0,
@@ -1204,6 +1219,12 @@ export async function writeDigest(
     // confusingly. Absent or all-size-1 → flat rendering (no regression
     // for sequential sessions).
     cycle_rounds?: CycleResult[][];
+    // gs-215: project_id → absolute project path. When omitted (or when
+    // a given project_id isn't in the map), fetchCommitSubject falls
+    // back to the dispatcher repo, which is only correct for dogfood
+    // cycles. Callers running multi-project sessions must populate this
+    // so non-self SHAs resolve in the project's own repo.
+    project_paths?: Record<string, string>;
   },
   deps?: WriteDigestDeps,
 ) {
@@ -1297,7 +1318,12 @@ export async function writeDigest(
       content += `_No cycles passed verification this session._\n\n`;
     } else {
       verified.forEach((r, i) => {
-        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
+        const subject =
+          fetchCommitSubject(
+            r.cycle_start_sha,
+            r.cycle_end_sha,
+            config.project_paths?.[r.project_id],
+          ) || r.cycle_id;
         const diff = r.diff_stats
           ? `  _(${formatFileCount(r.diff_stats.files_changed)}, +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
           : "";
@@ -1311,7 +1337,12 @@ export async function writeDigest(
       content += `_None — all cycles passed verification._\n\n`;
     } else {
       for (const r of failed) {
-        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
+        const subject =
+          fetchCommitSubject(
+            r.cycle_start_sha,
+            r.cycle_end_sha,
+            config.project_paths?.[r.project_id],
+          ) || r.cycle_id;
         content += `- **${subject}** — ${r.final_outcome}: ${r.reason}\n`;
       }
       content += `\n`;
@@ -1492,10 +1523,24 @@ export async function regenerateDigest(
 
   const durationMinutes = parsed.duration ? parseFormattedDuration(parsed.duration) : 0;
 
+  // gs-215: mirror the runSession wiring so regenerated digests also
+  // resolve each cycle's SHAs in the right project repo. loadProjectsYaml
+  // failure (missing/malformed projects.yaml) is non-fatal here — the
+  // regen still produces output, just with cycle_id fallbacks instead of
+  // subject lines for any project whose path isn't resolvable.
+  const regenProjectPaths: Record<string, string> = {};
+  try {
+    const yaml = await loadProjectsYaml();
+    for (const p of yaml.projects) regenProjectPaths[p.id] = p.path;
+  } catch {
+    // Ignore — fall back to empty map.
+  }
+
   await writeDigest(results, durationMinutes, {
     digest_dir: config.digest_dir,
     reviewer_provider: reviewerProvider,
     reviewer_model: reviewerModel,
+    project_paths: regenProjectPaths,
   });
 
   return { results, missing };

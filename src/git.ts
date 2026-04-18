@@ -8,6 +8,13 @@ import { getRootDir } from "./state";
  *  Returns "" for equal-SHA / empty-input / unresolvable-SHA. Swallows all
  *  errors — caller uses the return value to decide fallback display.
  *
+ *  The optional `cwd` parameter selects which repository to resolve the SHA
+ *  in. When omitted, falls back to `getRootDir()` (the dispatcher repo),
+ *  which only makes sense for dogfood cycles. Non-dogfood callers must pass
+ *  the project's own path — otherwise the log call runs in the wrong repo
+ *  and every non-self SHA produces a "bad object" warning (observed during
+ *  the 2026-04-18 raybrain session).
+ *
  *  Retries once on empty result. Background: during the 2026-04-17 morning
  *  Ollama practice runs, the first cycle's subject resolution intermittently
  *  returned empty even though the commit was reachable and a later manual
@@ -16,8 +23,14 @@ import { getRootDir } from "./state";
  *  Retry hides the symptom and stderr capture gives future sessions a trail
  *  if the underlying cause resurfaces.
  */
-export function fetchCommitSubject(startSha: string, endSha: string): string {
+export function fetchCommitSubject(
+  startSha: string,
+  endSha: string,
+  cwd?: string,
+): string {
   if (!endSha || endSha === startSha) return "";
+
+  const gitCwd = cwd ?? getRootDir();
 
   let lastStderr = "";
   let lastStatus: number | null = null;
@@ -25,7 +38,7 @@ export function fetchCommitSubject(startSha: string, endSha: string): string {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = spawnSync("git", ["log", "-1", "--format=%s", endSha], {
-        cwd: getRootDir(),
+        cwd: gitCwd,
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 5_000,
       });

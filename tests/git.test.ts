@@ -79,6 +79,66 @@ describe("fetchCommitSubject", () => {
   // being reachable. If this test ever fails, the bug has a genuine git-level
   // cause (object missing, ref collision, etc.) rather than a data-plumbing
   // issue upstream.
+  // gs-215: `cwd` parameter lets callers pick which repo to resolve the
+  // SHA in. Without it, multi-project sessions try to resolve non-dogfood
+  // SHAs in the dispatcher repo and every lookup fails with "bad object".
+  it("resolves SHAs in the repo specified by cwd (non-dogfood project)", async () => {
+    const rootRepo = join(tmpdir(), "gs-git-root-" + Date.now());
+    const projectRepo = join(tmpdir(), "gs-git-project-" + Date.now());
+    try {
+      await initRepo(rootRepo);
+      await commitFile(rootRepo, "root.txt", "root", "root initial commit");
+      setRootDir(rootRepo);
+
+      await initRepo(projectRepo);
+      const sha1 = await commitFile(projectRepo, "p.txt", "one", "project first commit");
+      const sha2 = await commitFile(
+        projectRepo,
+        "p.txt",
+        "two",
+        "project subject only visible in project repo",
+      );
+
+      // Without cwd, the lookup runs in rootRepo and fails.
+      expect(fetchCommitSubject(sha1, sha2)).toBe("");
+      // With cwd, the lookup runs in projectRepo and succeeds.
+      expect(fetchCommitSubject(sha1, sha2, projectRepo)).toBe(
+        "project subject only visible in project repo",
+      );
+    } finally {
+      rmSync(rootRepo, { recursive: true, force: true });
+      rmSync(projectRepo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns empty string when SHA is unresolvable in the given cwd (no crash)", async () => {
+    const repo = join(tmpdir(), "gs-git-cwd-bad-" + Date.now());
+    try {
+      await initRepo(repo);
+      await commitFile(repo, "a.txt", "one", "initial");
+      setRootDir(repo);
+      expect(
+        fetchCommitSubject("abc", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", repo),
+      ).toBe("");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("default (no cwd) still resolves SHAs in getRootDir() — back-compat", async () => {
+    const repo = join(tmpdir(), "gs-git-backcompat-" + Date.now());
+    try {
+      await initRepo(repo);
+      const sha1 = await commitFile(repo, "a.txt", "one", "first");
+      const sha2 = await commitFile(repo, "b.txt", "two", "back-compat subject");
+      setRootDir(repo);
+      // Omitting cwd — must still resolve via getRootDir().
+      expect(fetchCommitSubject(sha1, sha2)).toBe("back-compat subject");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("resolves end SHA after session-init + merge-into-master flow", async () => {
     const repo = join(tmpdir(), "gs-git-merged-" + Date.now());
     try {
