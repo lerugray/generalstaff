@@ -1271,7 +1271,7 @@
   {
     "id": "gs-217",
     "title": "Add `generalstaff status --fleet` subview showing a one-row-per-project snapshot. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --fleet flag handler; add exported `formatFleetTable(rows: FleetRow[]): string` + `FleetRow` interface in `src/sessions.ts` alongside formatSessionsTable / formatBacklogTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output columns (one row per registered project, plus a TOTAL row): `Project | Last cycle (relative) | Total cycles | Verified | Failed | Bot-pickable (pending) | Auto-merge | Branch`. Last-cycle relative time uses formatRelativeTime (already imported); bot-pickable uses countRemainingWorkDetailed (gs-200). Pulls from: projects.yaml via loadProjects(), fleet_state.json via loadFleetState(), per-project state dirs via countRemainingWorkDetailed(). `--json` flag emits structured data. Mutually exclusive with --sessions, --summary, --backlog, --totals, --watch (error + exit 1 on combined flags). Tests: (a) 2-project fleet renders 2 rows + TOTAL; (b) --json output shape; (c) empty fleet edge case; (d) mutex error. Expected diff: ~150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",

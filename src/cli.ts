@@ -54,9 +54,11 @@ import {
   computeBacklogTotals,
   computeSessionTotals,
   formatSessionTotals,
+  formatFleetTable,
   parseSessionsFlag,
   stripSessionsArgs,
   type BacklogRow,
+  type FleetRow,
 } from "./sessions";
 import { countRemainingWorkDetailed } from "./work_detection";
 import {
@@ -88,7 +90,7 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals]
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet]
                                                           Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
@@ -102,6 +104,8 @@ Usage:
     Example: generalstaff status --backlog --json       # same, as JSON
     Example: generalstaff status --totals               # all-time aggregate session metrics
     Example: generalstaff status --totals --json        # same, as JSON
+    Example: generalstaff status --fleet                # one-row-per-project fleet snapshot
+    Example: generalstaff status --fleet --json         # same, as JSON
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -375,6 +379,7 @@ switch (command) {
         summary: { type: "boolean", default: false },
         backlog: { type: "boolean", default: false },
         totals: { type: "boolean", default: false },
+        fleet: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -407,7 +412,80 @@ switch (command) {
       process.exit(1);
     }
 
+    // gs-217: --fleet renders a one-row-per-project snapshot; mutually
+    // exclusive with every other status subview.
+    if (
+      statusValues.fleet &&
+      (sessionsFlag.enabled ||
+        statusValues.summary ||
+        statusValues.backlog ||
+        statusValues.totals ||
+        watch.enabled)
+    ) {
+      console.error(
+        "Error: --fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
+      );
+      process.exit(1);
+    }
+
     const renderStatus = async () => {
+      if (statusValues.fleet) {
+        const projects = await loadProjects();
+        const fleet = await loadFleetState();
+        const rows: FleetRow[] = [];
+        for (const p of projects) {
+          const state = fleet.projects[p.id] ?? null;
+          const breakdown = await countRemainingWorkDetailed(p);
+          rows.push({
+            project_id: p.id,
+            last_cycle_at: state?.last_cycle_at ?? null,
+            total_cycles: state?.total_cycles ?? 0,
+            total_verified: state?.total_verified ?? 0,
+            total_failed: state?.total_failed ?? 0,
+            bot_pickable: breakdown.pending_bot_pickable,
+            auto_merge: p.auto_merge,
+            branch: p.branch,
+          });
+        }
+        if (statusValues.json) {
+          const totals = rows.reduce(
+            (a, r) => ({
+              total_cycles: a.total_cycles + r.total_cycles,
+              total_verified: a.total_verified + r.total_verified,
+              total_failed: a.total_failed + r.total_failed,
+              bot_pickable: a.bot_pickable + r.bot_pickable,
+            }),
+            {
+              total_cycles: 0,
+              total_verified: 0,
+              total_failed: 0,
+              bot_pickable: 0,
+            },
+          );
+          console.log(
+            JSON.stringify(
+              {
+                projects: rows.map((r) => ({
+                  id: r.project_id,
+                  last_cycle_at: r.last_cycle_at,
+                  total_cycles: r.total_cycles,
+                  total_verified: r.total_verified,
+                  total_failed: r.total_failed,
+                  bot_pickable: r.bot_pickable,
+                  auto_merge: r.auto_merge,
+                  branch: r.branch,
+                })),
+                totals,
+              },
+              null,
+              2,
+            ),
+          );
+        } else {
+          console.log(formatFleetTable(rows));
+        }
+        return;
+      }
       if (statusValues.totals) {
         const sessions = await loadRecentSessions(Number.MAX_SAFE_INTEGER);
         const totals = computeSessionTotals(sessions);

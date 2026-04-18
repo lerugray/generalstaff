@@ -2061,6 +2061,181 @@ dispatcher:
     });
   });
 
+  describe("status --fleet (gs-217)", () => {
+    const FLEET_DIR = join(import.meta.dir, "fixtures", "status_fleet_test");
+    const ALPHA_DIR = join(FLEET_DIR, "alpha");
+    const BETA_DIR = join(FLEET_DIR, "beta");
+
+    const PROJECTS_YAML = () => `
+projects:
+  - id: alpha
+    path: ${ALPHA_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: bot/work
+    auto_merge: true
+    hands_off:
+      - src/reviewer.ts
+  - id: beta
+    path: ${BETA_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: main
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
+      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(FLEET_DIR, "projects.yaml"), PROJECTS_YAML());
+      // alpha: 2 bot-pickable tasks
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([
+          { id: "a-1", title: "t1", status: "pending", priority: 1 },
+          { id: "a-2", title: "t2", status: "pending", priority: 2 },
+        ]),
+      );
+      // beta: 1 bot-pickable task
+      writeFileSync(
+        join(BETA_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([
+          { id: "b-1", title: "t1", status: "pending", priority: 1 },
+        ]),
+      );
+      // Fleet state with activity on alpha only
+      writeFileSync(
+        join(FLEET_DIR, "fleet_state.json"),
+        JSON.stringify({
+          version: 1,
+          updated_at: "2026-04-18T12:00:00.000Z",
+          projects: {
+            alpha: {
+              last_cycle_at: "2026-04-18T11:30:00.000Z",
+              last_cycle_outcome: "verified",
+              total_cycles: 4,
+              total_verified: 3,
+              total_failed: 1,
+              accumulated_minutes: 25,
+            },
+          },
+        }),
+      );
+    });
+
+    afterEach(() => {
+      rmSync(FLEET_DIR, { recursive: true, force: true });
+    });
+
+    it("renders 2 rows + TOTAL in the text table", async () => {
+      const result = await runCli(["status", "--fleet"], FLEET_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("alpha");
+      expect(result.stdout).toContain("beta");
+      expect(result.stdout).toContain("TOTAL");
+      expect(result.stdout).toContain("bot/work");
+      expect(result.stdout).toContain("main");
+      expect(result.stdout).toContain("never"); // beta has no state
+    });
+
+    it("--json emits projects + totals in the expected shape", async () => {
+      const result = await runCli(["status", "--fleet", "--json"], FLEET_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("projects");
+      expect(parsed).toHaveProperty("totals");
+      expect(parsed.projects).toHaveLength(2);
+      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
+      expect(alpha).toEqual({
+        id: "alpha",
+        last_cycle_at: "2026-04-18T11:30:00.000Z",
+        total_cycles: 4,
+        total_verified: 3,
+        total_failed: 1,
+        bot_pickable: 2,
+        auto_merge: true,
+        branch: "bot/work",
+      });
+      const beta = parsed.projects.find((p: { id: string }) => p.id === "beta");
+      expect(beta).toEqual({
+        id: "beta",
+        last_cycle_at: null,
+        total_cycles: 0,
+        total_verified: 0,
+        total_failed: 0,
+        bot_pickable: 1,
+        auto_merge: false,
+        branch: "main",
+      });
+      expect(parsed.totals).toEqual({
+        total_cycles: 4,
+        total_verified: 3,
+        total_failed: 1,
+        bot_pickable: 3,
+      });
+    });
+
+    it("rejects --fleet combined with --sessions", async () => {
+      const result = await runCli(
+        ["status", "--fleet", "--sessions"],
+        FLEET_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
+      );
+    });
+
+    it("rejects --fleet combined with --summary", async () => {
+      const result = await runCli(
+        ["status", "--fleet", "--summary"],
+        FLEET_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
+      );
+    });
+
+    it("rejects --fleet combined with --backlog", async () => {
+      const result = await runCli(
+        ["status", "--fleet", "--backlog"],
+        FLEET_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
+      );
+    });
+
+    it("rejects --fleet combined with --totals", async () => {
+      const result = await runCli(
+        ["status", "--fleet", "--totals"],
+        FLEET_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
+      );
+    });
+  });
+
   describe("diff subcommand (gs-207)", () => {
     const DIFF_TEST_DIR = join(import.meta.dir, "fixtures", "diff_cmd_test");
 
