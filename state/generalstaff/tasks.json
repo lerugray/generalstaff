@@ -1013,7 +1013,7 @@
   {
     "id": "gs-169",
     "title": "Add test coverage for runBootstrap in src/bootstrap.ts covering the force path re-running on an existing scaffolded project WITHOUT a proposal dir — should re-create the proposal dir without re-scaffolding (since scaffold files already exist). Exercises the branch where dirExists=true, dirEmpty=false, proposalPath doesn't exist. Verifies result.createdScaffold === false even though force was true but nothing to force-overwrite.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {
