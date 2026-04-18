@@ -8,6 +8,8 @@ import {
   sessionPidFilePath,
   killProcessTree,
   stopForce,
+  isExemptFromCleanTreeCheck,
+  filterCleanTreePorcelain,
 } from "../src/safety";
 import { setRootDir } from "../src/state";
 import { existsSync } from "fs";
@@ -389,5 +391,117 @@ describe("stopForce (gs-119)", () => {
     expect(result.killed).toBe(true);
     expect(calls[0]!.args).toEqual(["/pid", "88888", "/f", "/t"]);
     expect(existsSync(sessionPidFilePath())).toBe(false);
+  });
+});
+
+// gs-178: clean-tree check exempts state/<id>/PROGRESS.jsonl so the
+// dispatcher's per-cycle audit log writes don't block subsequent cycles
+// in the same session. Existing strictness on every other state path is
+// preserved — only PROGRESS.jsonl files are exempt, by name.
+describe("clean-tree exemption (gs-178)", () => {
+  describe("isExemptFromCleanTreeCheck", () => {
+    it("exempts state/<id>/PROGRESS.jsonl for any project id", () => {
+      expect(isExemptFromCleanTreeCheck("state/generalstaff/PROGRESS.jsonl")).toBe(true);
+      expect(isExemptFromCleanTreeCheck("state/gamr/PROGRESS.jsonl")).toBe(true);
+      expect(isExemptFromCleanTreeCheck("state/_fleet/PROGRESS.jsonl")).toBe(true);
+      expect(isExemptFromCleanTreeCheck("state/some-future-project/PROGRESS.jsonl")).toBe(true);
+    });
+
+    it("does NOT exempt other state-dir files", () => {
+      // tasks.json mutations are real state changes — must trip the check
+      expect(isExemptFromCleanTreeCheck("state/gamr/tasks.json")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("state/gamr/MISSION.md")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("state/gamr/STATE.json")).toBe(false);
+      // session.pid is lifecycle, not audit — out of scope for gs-178
+      expect(isExemptFromCleanTreeCheck("state/session.pid")).toBe(false);
+      // Cycle artifacts under state/<id>/cycles/ are real state — must trip
+      expect(isExemptFromCleanTreeCheck("state/gamr/cycles/foo/diff.patch")).toBe(false);
+    });
+
+    it("does NOT exempt PROGRESS.jsonl outside the state/<id>/ shape", () => {
+      // Path discipline: the exemption is for the dispatcher-managed
+      // audit log specifically, not "any file named PROGRESS.jsonl"
+      expect(isExemptFromCleanTreeCheck("PROGRESS.jsonl")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("state/PROGRESS.jsonl")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("state/gamr/sub/PROGRESS.jsonl")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("docs/PROGRESS.jsonl")).toBe(false);
+    });
+
+    it("does NOT exempt non-state code files", () => {
+      expect(isExemptFromCleanTreeCheck("src/safety.ts")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("CLAUDE.md")).toBe(false);
+      expect(isExemptFromCleanTreeCheck("projects.yaml")).toBe(false);
+    });
+  });
+
+  describe("filterCleanTreePorcelain", () => {
+    it("returns empty for empty input", () => {
+      expect(filterCleanTreePorcelain("")).toBe("");
+    });
+
+    it("drops only-PROGRESS.jsonl lines, returning empty (effectively clean)", () => {
+      const input = [
+        " M state/gamr/PROGRESS.jsonl",
+        " M state/generalstaff/PROGRESS.jsonl",
+        " M state/_fleet/PROGRESS.jsonl",
+      ].join("\n");
+      expect(filterCleanTreePorcelain(input)).toBe("");
+    });
+
+    it("preserves non-exempt dirty paths (real state changes)", () => {
+      const input = [
+        " M state/gamr/PROGRESS.jsonl",
+        " M state/gamr/tasks.json",
+        " M src/foo.ts",
+      ].join("\n");
+      const result = filterCleanTreePorcelain(input);
+      expect(result).toContain("state/gamr/tasks.json");
+      expect(result).toContain("src/foo.ts");
+      expect(result).not.toContain("PROGRESS.jsonl");
+    });
+
+    it("handles deletion lines (D path)", () => {
+      const input = [
+        " D state/session.pid",
+        " M state/gamr/PROGRESS.jsonl",
+      ].join("\n");
+      const result = filterCleanTreePorcelain(input);
+      expect(result).toContain("state/session.pid");
+      expect(result).not.toContain("PROGRESS.jsonl");
+    });
+
+    it("handles untracked lines (?? path)", () => {
+      const input = [
+        "?? new_file.ts",
+        " M state/gamr/PROGRESS.jsonl",
+      ].join("\n");
+      const result = filterCleanTreePorcelain(input);
+      expect(result).toContain("new_file.ts");
+    });
+
+    it("handles renames (R old -> new) by filtering on the new path", () => {
+      // If the renamed-to path is exempt, drop the line; else keep it
+      const exemptRename = "R  old.ts -> state/gamr/PROGRESS.jsonl";
+      expect(filterCleanTreePorcelain(exemptRename)).toBe("");
+      const realRename = "R  state/gamr/PROGRESS.jsonl -> src/foo.ts";
+      expect(filterCleanTreePorcelain(realRename)).toContain("src/foo.ts");
+    });
+
+    it("preserves the gs-178-motivating real-world case", () => {
+      // Verbatim shape from cycle 20260418112438_fcsb (gamr cycle 1):
+      // bot wrote state/gamr/PROGRESS.jsonl during cycle, then dispatcher
+      // tried to start the next cycle and saw this dirty tree.
+      const input = [
+        " M state/_fleet/PROGRESS.jsonl",
+        " M state/gamr/PROGRESS.jsonl",
+        " M state/generalstaff/PROGRESS.jsonl",
+        " D state/session.pid",
+      ].join("\n");
+      const result = filterCleanTreePorcelain(input);
+      // session.pid is not exempt — the original safety surface is preserved
+      // for genuine state mutations. PROGRESS.jsonl lines are gone.
+      expect(result).toContain("state/session.pid");
+      expect(result).not.toContain("PROGRESS.jsonl");
+    });
   });
 });

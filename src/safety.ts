@@ -154,6 +154,57 @@ export async function stopForce(
 
 // --- Working tree clean check ---
 
+// gs-178: paths exempt from the working-tree-clean check. These files are
+// expected to mutate during normal session execution (audit log appends
+// most prominently) and would otherwise block cross-project cycle chaining
+// within a session — once cycle N writes state/<id>/PROGRESS.jsonl, cycle
+// N+1's preflight check sees a dirty tree and refuses to start, even for
+// the OTHER project that wasn't being audited. Hard Rule #9 (open audit
+// log) means we keep the file in git; this exemption ensures the audit
+// trail's append rate doesn't destroy session-level chaining.
+//
+// Narrow on purpose: only the per-project audit log path. Anything else
+// under state/ (tasks.json, MISSION.md, fleet_state.json, session.pid,
+// cycle artifacts) still trips the dirty-tree check, preserving the
+// original safety surface for genuine state mutations.
+const CLEAN_TREE_EXEMPT_PATTERNS: RegExp[] = [
+  /^state\/[^/]+\/PROGRESS\.jsonl$/,
+];
+
+export function isExemptFromCleanTreeCheck(filePath: string): boolean {
+  return CLEAN_TREE_EXEMPT_PATTERNS.some((re) => re.test(filePath));
+}
+
+// Parse a `git status --porcelain` line and extract the changed file
+// path. Porcelain v1 format is `XY path` where XY is two status chars
+// (space-padded if not staged/not unstaged respectively), then a single
+// space, then the path. For renames (`R  old -> new`) we keep the new
+// path. Untracked files (`?? path`) use the same column layout.
+function porcelainPath(line: string): string {
+  // First two chars are status; char 2 is the separating space; path
+  // starts at char 3.
+  const after = line.slice(3);
+  // Renames look like "old -> new"; the file we care about is "new"
+  // because that's what's actually present in the tree.
+  const arrow = after.indexOf(" -> ");
+  return arrow >= 0 ? after.slice(arrow + 4) : after;
+}
+
+// Filter raw `git status --porcelain` output to drop lines for files
+// the clean-tree check exempts (gs-178). Returns the filtered output
+// (still in porcelain format) — empty string means tree is effectively
+// clean for the dispatcher's purposes.
+export function filterCleanTreePorcelain(porcelainOutput: string): string {
+  return porcelainOutput
+    .split("\n")
+    .filter((line) => {
+      if (line.length === 0) return false;
+      const path = porcelainPath(line);
+      return !isExemptFromCleanTreeCheck(path);
+    })
+    .join("\n");
+}
+
 export async function isWorkingTreeClean(projectPath: string): Promise<{
   clean: boolean;
   reason?: string;
@@ -161,13 +212,13 @@ export async function isWorkingTreeClean(projectPath: string): Promise<{
   try {
     const result =
       await $`git -C ${projectPath} status --porcelain`.text();
-    const trimmed = result.trim();
-    if (trimmed.length === 0) {
+    const filtered = filterCleanTreePorcelain(result.trim());
+    if (filtered.length === 0) {
       return { clean: true };
     }
     return {
       clean: false,
-      reason: `Uncommitted changes in ${projectPath}:\n${trimmed}`,
+      reason: `Uncommitted changes in ${projectPath}:\n${filtered}`,
     };
   } catch (e) {
     return {
