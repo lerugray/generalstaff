@@ -6,7 +6,7 @@ import { basename, join, resolve } from "path";
 import { runSession, runSessionChain } from "./session";
 import { runSingleCycle, countCommitsAhead } from "./cycle";
 import { $ } from "bun";
-import { loadFleetState, getProjectSummary, getRootDir } from "./state";
+import { loadFleetState, getProjectSummary, getRootDir, cycleDir } from "./state";
 import {
   loadProjects,
   loadProjectsYaml,
@@ -218,6 +218,10 @@ Usage:
   generalstaff bot-status [--project=<id>]                Show unmerged commits on each project's bot branch
     Example: generalstaff bot-status                    # all projects
     Example: generalstaff bot-status --project=myapp    # single project
+
+  generalstaff diff <project-id> <cycle-id> [--stat]      Show a past cycle's diff
+    Example: generalstaff diff myapp 20260416125750_8w9n
+    Example: generalstaff diff myapp 20260416125750_8w9n --stat
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -1533,6 +1537,100 @@ switch (command) {
       console.log(
         `${p.id}: ${n} commit(s) on ${p.branch} not yet on ${headBranch}`,
       );
+    }
+    break;
+  }
+
+  case "diff": {
+    const { values: diffValues, positionals: diffPositionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        stat: { type: "boolean", default: false },
+      },
+      allowPositionals: true,
+    });
+    const diffProjectId = diffPositionals[0];
+    const diffCycleId = diffPositionals[1];
+    if (!diffProjectId || !diffCycleId) {
+      console.error(
+        "Error: project-id and cycle-id are required\n  Usage: generalstaff diff <project-id> <cycle-id> [--stat]",
+      );
+      process.exit(1);
+    }
+    const allDiffProjects = await loadProjects();
+    const diffProject = allDiffProjects.find((p) => p.id === diffProjectId);
+    if (!diffProject) {
+      const registered = allDiffProjects.map((p) => p.id).join(", ");
+      console.error(
+        `Error: project '${diffProjectId}' not found. Registered: ${registered}`,
+      );
+      process.exit(1);
+    }
+    const diffDispatcher = await loadDispatcherConfig();
+    const diffDir = cycleDir(diffProjectId, diffCycleId, diffDispatcher);
+    if (!existsSync(diffDir)) {
+      const cyclesRoot = join(
+        getRootDir(),
+        diffDispatcher.state_dir,
+        diffProjectId,
+        "cycles",
+      );
+      let recentIds: string[] = [];
+      if (existsSync(cyclesRoot)) {
+        recentIds = readdirSync(cyclesRoot).sort().reverse().slice(0, 5);
+      }
+      const recentLabel =
+        recentIds.length > 0 ? recentIds.join(", ") : "(none)";
+      console.error(
+        `Error: cycle '${diffCycleId}' not found under project '${diffProjectId}'. Recent cycle ids: ${recentLabel}`,
+      );
+      process.exit(1);
+    }
+    const patchPath = join(diffDir, "diff.patch");
+    let patchContent = "";
+    if (existsSync(patchPath)) {
+      patchContent = readFileSync(patchPath, "utf8");
+    }
+    if (patchContent.trim().length === 0) {
+      console.log("(no diff captured for this cycle)");
+      break;
+    }
+    if (diffValues.stat) {
+      const lines = patchContent.split("\n");
+      const files: Array<{
+        path: string;
+        insertions: number;
+        deletions: number;
+      }> = [];
+      let current: { path: string; insertions: number; deletions: number } | null = null;
+      for (const line of lines) {
+        const gitMatch = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+        if (gitMatch) {
+          if (current) files.push(current);
+          current = { path: gitMatch[2], insertions: 0, deletions: 0 };
+          continue;
+        }
+        if (!current) continue;
+        if (line.startsWith("+++") || line.startsWith("---")) continue;
+        if (line.startsWith("+")) current.insertions++;
+        else if (line.startsWith("-")) current.deletions++;
+      }
+      if (current) files.push(current);
+      const pad = files.reduce((m, f) => Math.max(m, f.path.length), 0);
+      let totalIns = 0;
+      let totalDel = 0;
+      for (const f of files) {
+        totalIns += f.insertions;
+        totalDel += f.deletions;
+        const total = f.insertions + f.deletions;
+        const bar = "+".repeat(f.insertions) + "-".repeat(f.deletions);
+        console.log(` ${f.path.padEnd(pad)} | ${String(total).padStart(4)} ${bar}`);
+      }
+      console.log(
+        ` ${files.length} file${files.length === 1 ? "" : "s"} changed, ${totalIns} insertion${totalIns === 1 ? "" : "s"}(+), ${totalDel} deletion${totalDel === 1 ? "" : "s"}(-)`,
+      );
+    } else {
+      process.stdout.write(patchContent);
     }
     break;
   }

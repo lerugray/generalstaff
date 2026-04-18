@@ -2060,4 +2060,166 @@ dispatcher:
       );
     });
   });
+
+  describe("diff subcommand (gs-207)", () => {
+    const DIFF_TEST_DIR = join(import.meta.dir, "fixtures", "diff_cmd_test");
+
+    const PROJECTS_YAML = `
+projects:
+  - id: alpha
+    path: /tmp/generalstaff_test_diff_alpha_nonexistent
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    const SAMPLE_PATCH = `diff --git a/src/foo.ts b/src/foo.ts
+index abc..def 100644
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,3 +1,4 @@
+ line1
+-old line
++new line
++added line
+ line3
+diff --git a/src/bar.ts b/src/bar.ts
+index 111..222 100644
+--- a/src/bar.ts
++++ b/src/bar.ts
+@@ -1,2 +1,1 @@
+-removed
+ kept
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-001"), {
+        recursive: true,
+      });
+      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-002"), {
+        recursive: true,
+      });
+      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-003"), {
+        recursive: true,
+      });
+      writeFileSync(join(DIFF_TEST_DIR, "projects.yaml"), PROJECTS_YAML);
+      writeFileSync(
+        join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-001", "diff.patch"),
+        SAMPLE_PATCH,
+      );
+      // cyc-002 has an empty diff.patch
+      writeFileSync(
+        join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-002", "diff.patch"),
+        "",
+      );
+      // cyc-003 has no diff.patch at all
+    });
+
+    afterEach(() => {
+      rmSync(DIFF_TEST_DIR, { recursive: true, force: true });
+    });
+
+    it("prints the full patch to stdout without --stat", async () => {
+      const result = await runCli(
+        ["diff", "alpha", "cyc-001"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("diff --git a/src/foo.ts b/src/foo.ts");
+      expect(result.stdout).toContain("+new line");
+      expect(result.stdout).toContain("-old line");
+      expect(result.stdout).toContain("diff --git a/src/bar.ts b/src/bar.ts");
+    });
+
+    it("prints a --stat summary", async () => {
+      const result = await runCli(
+        ["diff", "alpha", "cyc-001", "--stat"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("src/foo.ts");
+      expect(result.stdout).toContain("src/bar.ts");
+      // foo.ts: 2 insertions, 1 deletion
+      expect(result.stdout).toMatch(/src\/foo\.ts\s*\|\s*3\s*\+\++-/);
+      // bar.ts: 0 insertions, 1 deletion
+      expect(result.stdout).toMatch(/src\/bar\.ts\s*\|\s*1\s*-/);
+      // totals line
+      expect(result.stdout).toContain(
+        "2 files changed, 2 insertions(+), 2 deletions(-)",
+      );
+      // raw diff headers absent
+      expect(result.stdout).not.toContain("@@");
+    });
+
+    it("errors with registered-projects hint when project is unknown", async () => {
+      const result = await runCli(
+        ["diff", "bogus", "cyc-001"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Error: project 'bogus' not found");
+      expect(result.stderr).toContain("Registered: alpha");
+    });
+
+    it("errors with recent cycle ids when cycle dir is missing", async () => {
+      const result = await runCli(
+        ["diff", "alpha", "cyc-missing"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: cycle 'cyc-missing' not found under project 'alpha'",
+      );
+      expect(result.stderr).toContain("Recent cycle ids:");
+      expect(result.stderr).toContain("cyc-003");
+      expect(result.stderr).toContain("cyc-002");
+      expect(result.stderr).toContain("cyc-001");
+    });
+
+    it("prints a friendly message when diff.patch is absent", async () => {
+      const result = await runCli(
+        ["diff", "alpha", "cyc-003"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("(no diff captured for this cycle)");
+    });
+
+    it("prints a friendly message when diff.patch is empty", async () => {
+      const result = await runCli(
+        ["diff", "alpha", "cyc-002"],
+        DIFF_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("(no diff captured for this cycle)");
+    });
+
+    it("errors when positional args are missing", async () => {
+      const result = await runCli(["diff", "alpha"], DIFF_TEST_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "project-id and cycle-id are required",
+      );
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        "generalstaff diff <project-id> <cycle-id>",
+      );
+    });
+  });
 });

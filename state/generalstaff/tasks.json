@@ -1214,7 +1214,7 @@
   {
     "id": "gs-207",
     "title": "Add `generalstaff diff <project-id> <cycle-id> [--stat]` subcommand to show a past cycle's diff. CREATE ONLY: add a `case 'diff'` block to `src/cli.ts`'s top-level switch; put any small helper logic inline in cli.ts or reuse existing helpers from `src/state.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Behaviour: reads `state/<project-id>/cycles/<cycle-id>/diff.patch` (path derivable from existing state helpers). Without --stat prints the full patch to stdout; with --stat prints a summary (can shell out to `git diff --stat` by piping the patch, or a simpler own-parser that counts insertions/deletions per file via regex on the `diff --git` and `+/-` lines — either works, pick the cleaner). Error handling: (a) project not found → stderr `Error: project '<id>' not found. Registered: <comma-separated-list>` + exit 1; (b) cycle-dir not present for project → stderr `Error: cycle '<cycle-id>' not found under project '<pid>'. Recent cycle ids: <last-5 sorted desc>` + exit 1; (c) cycle dir exists but diff.patch absent or empty → print `(no diff captured for this cycle)` and exit 0. Add to --help output. Tests: happy path (fixture state dir with a real patch file), each error path, --stat flag output shape. Expected diff: ~140 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
