@@ -36,8 +36,11 @@ async function runCli(
   return { stdout, stderr, exitCode };
 }
 
-function seedStateDir(rootDir: string, projectId: string): void {
-  const stateDir = join(rootDir, "state", projectId);
+// gs-175: register now reads tasks.json from the TARGET project
+// (aligned with work_detection.ts, bootstrap.ts), not GeneralStaff's
+// root. Seed inside projectDir, not rootDir.
+function seedStateDir(projectDir: string, projectId: string): void {
+  const stateDir = join(projectDir, "state", projectId);
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(
     join(stateDir, "tasks.json"),
@@ -79,8 +82,8 @@ describe("register command", () => {
   beforeEach(() => {
     rmSync(TEST_DIR, { recursive: true, force: true });
     mkdirSync(TEST_DIR, { recursive: true });
-    seedStateDir(TEST_DIR, "myproj");
     seedProjectDir(PROJECT_DIR);
+    seedStateDir(PROJECT_DIR, "myproj");
   });
 
   afterEach(() => {
@@ -150,6 +153,29 @@ describe("register command", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("register");
     expect(result.stdout).toContain("hands_off");
+  });
+
+  // gs-175 regression: for non-dogfood projects (projectPath != cwd),
+  // register must read tasks.json from the TARGET project, not from
+  // GeneralStaff's root. Seed only in the root and verify rejection.
+  it("rejects when tasks.json is only in GeneralStaff root (not in target project)", async () => {
+    const OTHER_PROJECT = join(TEST_DIR, "otherproj");
+    seedProjectDir(OTHER_PROJECT);
+    const rootStateDir = join(TEST_DIR, "state", "otherproj");
+    mkdirSync(rootStateDir, { recursive: true });
+    writeFileSync(
+      join(rootStateDir, "tasks.json"),
+      JSON.stringify([], null, 2) + "\n",
+    );
+
+    const result = await runCli(
+      ["register", "otherproj", `--path=${OTHER_PROJECT}`, "--yes"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("state/otherproj/tasks.json not found");
+    // Error should point at the target project path, not GeneralStaff's.
+    expect(result.stderr).toContain(OTHER_PROJECT);
   });
 
   it("inserts new project above a `dispatcher:` section when present", async () => {

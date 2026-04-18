@@ -45,14 +45,17 @@ export async function runRegister(
     };
   }
 
-  const stateDir = join(rootDir, "state", projectId);
+  const resolvedProjectPath = resolve(opts.projectPath);
+  const stateDir = join(resolvedProjectPath, "state", projectId);
   const tasksPath = join(stateDir, "tasks.json");
   if (!existsSync(stateDir) || !existsSync(tasksPath)) {
     return {
       ok: false,
       reason:
-        `state/${projectId}/tasks.json not found. Run 'generalstaff bootstrap ${opts.projectPath} "<idea>"' first — ` +
-        `it writes state/${projectId}/tasks.json here and a .generalstaff-proposal/ staging dir in the target.`,
+        `state/${projectId}/tasks.json not found at ${tasksPath}. ` +
+        `Run 'generalstaff bootstrap ${opts.projectPath} "<idea>"' first — ` +
+        `gs-167 aligned bootstrap to write state/${projectId}/tasks.json inside ` +
+        `the target project (alongside a .generalstaff-proposal/ staging dir).`,
     };
   }
 
@@ -82,7 +85,6 @@ export async function runRegister(
     }
   }
 
-  const resolvedProjectPath = resolve(opts.projectPath);
   const rootedHandsOff = join(resolvedProjectPath, "hands_off.yaml");
   const stagedHandsOff = join(
     resolvedProjectPath,
