@@ -1142,5 +1142,49 @@
     "title": "Phase 4 step 4: observability for parallel sessions. The existing session_complete event aggregates across cycles. With parallel cycles, the aggregation needs to capture effective wall-clock parallelism — e.g. {cycles: 12, slots_used: 3, parallel_efficiency: 0.92}. The status command and digest format need light updates to not present parallel cycles as a flat sequential list (they will look weird in git log order if interleaved). Also emit slot_idle_time so we can measure whether the round-based wait pattern is painful enough to warrant the (b) upgrade in DESIGN.md §v6.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-200",
+    "title": "Extend work_detection.ts with a detailed-breakdown helper. CREATE ONLY: modify `src/work_detection.ts` (add new exported `countRemainingWorkDetailed` + `WorkBreakdown` type; leave existing `countRemainingWork` unchanged for back-compat); append new describe block to `tests/work_detection.test.ts`. DO NOT CREATE: new files; anything under `src/prompts/`, `src/safety.ts`, `src/reviewer.ts`, `src/state.ts`, `scripts/`, or any design doc (.md, PIVOT-*, PHASE-*, DESIGN.md, FUTURE-DIRECTIONS-*, RULE-RELAXATION-*, README.md, INDEX.md, CLAUDE.md, LAUNCH-PLAN.md, VOICE.md, UI-VISION-*). The new helper returns `{pending_bot_pickable, pending_interactive_only, pending_handsoff_conflict, in_progress, done, skipped, total}` (all numbers). For `work_detection: 'tasks_json'` projects, use `isTaskBotPickable(task, project.hands_off)` from `src/tasks.ts` to classify each pending task: bot_pickable if `.ok === true`, interactive_only if reason is interactive_only, handsoff_conflict if reason is hands_off_intersect. For other work_detection modes (catalogdna_bot_tasks, git_issues, git_unmerged), return a breakdown with `pending_bot_pickable === total_pending` (existing count) and refinement fields zeroed. Tests: fixture tasks.json with a mix of pending + interactive_only + expected_touches-that-conflict + done; assert each bucket's count. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 1,
+    "expected_touches": [
+      "src/work_detection.ts",
+      "tests/work_detection.test.ts"
+    ]
+  },
+  {
+    "id": "gs-196",
+    "title": "Parallel-mode digest: group cycle-detail sections by round. CREATE ONLY: modify `src/session.ts` writeDigest + the session_complete call path that invokes it (wire the cycle-rounds data through); append new tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch any file outside src/session.ts and tests/session.test.ts; do not touch design docs, prompts, safety modules, scripts, or any hands_off path. Today the `## Details` section lists cycles flatly; in parallel mode the cycles interleave and make the rendering look jumbled. Fix: (1) extend the `writeDigest` config param to accept an optional `cycle_rounds: CycleResult[][]` — array of per-round cycle arrays, populated by runSession in parallel mode; (2) when `cycle_rounds` is supplied with at least one round of size > 1, render `### Round N (Ns wall, X cycle(s))` headers before each round's cycles, with `## <project> — <cycle>` sub-sections nested under each round header; (3) when `cycle_rounds` is absent or every round has size 1, fall back to the existing flat rendering — no regression for sequential sessions. Round wall = max cycle duration within that round (take max of ended_at - started_at). Tests: (a) sequential writeDigest call (no cycle_rounds) has NO `### Round` headers; (b) parallel writeDigest with 2 rounds of 2 cycles each has exactly 2 `### Round` headers; (c) round-wall text is formatted via formatDuration. Expected diff: ~180 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/session.ts",
+      "tests/session.test.ts"
+    ]
+  },
+  {
+    "id": "gs-201",
+    "title": "JSDoc pass on six Phase 4 exports. CREATE ONLY: add JSDoc comment blocks immediately above the six named functions/interfaces listed below. Do not modify their bodies or signatures. DO NOT CREATE: new files; do not refactor; do not touch design docs, safety modules, prompts, scripts, or any hands_off path. Targets and their files: (1) `updateFailureStreak` in `src/session.ts` (document params prev/isFailure/nowMs/maxFailures/windowSeconds + returned shape); (2) `hotReloadProjects` in `src/session.ts` (params cached/loader + return shape including the error field semantics); (3) `computeParallelEfficiency` in `src/session.ts` (params slotIdleSeconds/elapsedSeconds/maxParallelSlots + clamping); (4) `pickNextProjects` in `src/dispatcher.ts` (params projects/config/fleet/skipProjectIds/maxCount + override-file semantics for slot 0); (5) `isTaskBotPickable` in `src/tasks.ts` (params task/handsOff + the tagged-union return); (6) `withReviewerSemaphore` in `src/reviewer.ts` (type param T, params provider/fn, release-on-throw behaviour). Each JSDoc block should be concise — one-line summary + @param + @returns only where non-trivial. No @example unless the call shape is non-obvious. No test changes — JSDoc is doc-only. Verify with `bun x tsc --noEmit` still clean + full `bun test` still green. Expected diff: ~80 lines, all additions.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/session.ts",
+      "src/dispatcher.ts",
+      "src/tasks.ts",
+      "src/reviewer.ts"
+    ]
+  },
+  {
+    "id": "gs-199",
+    "title": "Add `generalstaff status --backlog` subview. CREATE ONLY: extend the `case 'status'` block in `src/cli.ts` (new --backlog flag handling + a new renderBacklogTable helper — put the helper in `src/sessions.ts` alongside formatSessionsTable); append new tests to `tests/cli.test.ts` and/or `tests/sessions.test.ts`. DO NOT CREATE: new files outside tests; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output format: one row per project showing columns `Project | Bot-pickable | Interactive-only | Hands-off-conflict | In-progress | Done`, plus a total row summing the first four numeric columns. Data source: call `countRemainingWorkDetailed(project)` from gs-200 (assume it has landed; if it hasn't, fall back to simple pending/done counts from the existing countRemainingWork + loadTasks). `--json` flag emits the same data as `{projects: [{id, bot_pickable, interactive_only, handsoff_conflict, in_progress, done}], totals: {...}}`. Mutually exclusive with --sessions, --summary, --watch — print an error like `Error: --backlog cannot be combined with --sessions/--summary/--watch` and exit code 1 if combined. Tests: (a) table format with mixed-status fixture; (b) --json output shape; (c) mutex error with exit code 1 on combined flags. Expected diff: ~150 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/sessions.ts",
+      "tests/cli.test.ts",
+      "tests/sessions.test.ts"
+    ]
   }
 ]
