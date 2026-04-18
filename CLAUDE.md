@@ -405,6 +405,22 @@ candidate set is narrow:
   hands-off enforcement, cycle-to-cycle compounding), not by
   whether the features are shippable. Web version preferred
   over mobile for scaffolding simplicity.
+- **raybrain is bot-eligible as of 2026-04-18 evening.** Earlier
+  in the day it was excluded from GeneralStaff bot sessions
+  because Ray had parallel interactive work on the raybrain
+  policy surface (`src/**/schema/**`, `src/**/privacy/**`,
+  `src/**/policy/**`). As of raybrain commit 5003012, the
+  schema and privacy patterns have been mechanically translated
+  per CLAUDE.md prose rules and flipped to bot-owned (see
+  `projects.yaml` note on those `hands_off` entries). raybrain
+  Phase 1 shipped autonomously 2026-04-18 morning (rayb-001..005
+  in one 27-min session); future Phase 2+ tasks are fair game
+  for bot cycles. When launching a dedicated raybrain session,
+  use `--exclude-project=generalstaff,gamr` until the ergonomic
+  `--project=<id>` shortcut ships (queued as gs-214). raybrain's
+  real-user profile is still solo — Ray is the only user — so
+  "sensitive stage" considerations that apply to catalogdna
+  don't apply here.
 
 ## Prefer existing OSS tools over custom code
 
