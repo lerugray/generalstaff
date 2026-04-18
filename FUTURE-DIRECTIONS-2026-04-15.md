@@ -1448,3 +1448,65 @@ don't pre-build (b) or (c), manual-relay is enough until a
 real UI workflow stresses it. This addendum just records that
 the empirical foundation for that recommendation is now real,
 not hypothetical.
+
+### Addendum-2 — 2026-04-18 evening: gamr profile-card validation + Windows-MCP as a Phase 5 candidate
+
+**Second empirical data point on path (a).** Ray relayed a
+gamr profile-card brief to Claude Design this afternoon and
+the output was substantively usable — warm cream palette,
+analog index-card metaphor, keyboard-first interaction, good
+typographic hierarchy. Some rendering glitches (text column
+overlap) but nothing that blocks the artifact's role as a
+Phase 5 reference. The zip is committed at
+`docs/phase-5-references/gamr-prototype.zip` with a README
+explaining its keeping. Two successful path-(a) manual-relays
+now (catalogdna 2026-04-18 afternoon + gamr 2026-04-18 evening)
+— the evidence for "don't pre-build (b) or (c)" is stronger
+still.
+
+**Load-bearing observation for Phase 5.** The gamr aesthetic
+— analog, typographic, keyboard-first, muted palette — is
+directly adjacent to the kriegspiel / command-room direction
+sketched in `UI-VISION-2026-04-15.md`. Both reject the
+SaaS-gradient and Discord-dark-purple defaults in favor of
+considered, legible, taste-heavy design. When Phase 5 UI work
+starts, `docs/phase-5-references/gamr-prototype.zip` is the
+first design-language reference to review.
+
+**Windows-MCP (github.com/CursorTouch/Windows-MCP) as a Phase 5
+candidate.** Ray flagged this MIT-licensed MCP server
+2026-04-18 evening. It is NOT a multi-agent communication
+layer — it's a Windows desktop-automation bridge exposing ~15
+tools (Click, Type, Screenshot, Snapshot, Shell, Clipboard,
+App launch/resize/switch, Scrape, Notification, Registry, etc.).
+The initial hope was that it might help with inter-session
+comms, but its actual purpose is single-user desktop
+automation.
+
+**Where it WOULD fit in Phase 5:**
+- **UI validation loops.** Bot edits a component → Windows-MCP
+  takes a screenshot → reviewer agent compares to the reference
+  design → iterates. Closes a feedback loop that currently
+  requires Ray as a human-in-the-loop.
+- **Claude Design manual-relay automation.** Clipboard-push
+  the brief, screenshot the rendered output. Reduces the
+  cognitive load of the path (a) ergonomics without needing
+  Playwright's fragility (the §7 path-(b) concern).
+- **Dev-server preview.** Bot launches `bun dev`, Windows-MCP
+  navigates to it in Chrome, screenshot the result for the
+  reviewer. First-class "did the bot's UI edit actually render
+  without breaking?" check.
+
+**What it doesn't replace.** Inter-session messaging between
+the GeneralStaff dispatcher and a sibling interactive bot still
+wants a file-based approach (shared inbox JSONL in
+`state/_fleet/` — parked as a future idea, not urgent since
+git-based handoff works fine for the current cadence).
+Windows-MCP can't solve that because it's about driving a
+single desktop session, not coordinating across agents.
+
+**Recommendation: park it until Phase 5 UI work starts.**
+Same principle as path (b)/(c) — don't pre-build the
+integration before the workflow exists. Note it, move on,
+revisit when the UI loop genuinely needs a preview-and-compare
+automation step.
