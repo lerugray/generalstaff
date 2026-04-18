@@ -12,6 +12,7 @@ import {
   formatUnmergedBranchError,
   crossCheckReviewerHandsOff,
   applyReviewerSanityCheck,
+  decideBotBranchHandling,
 } from "../src/cycle";
 import type { ProjectConfig, ReviewerResponse } from "../src/types";
 import type { ReviewerResult } from "../src/reviewer";
@@ -780,6 +781,77 @@ describe("formatUnmergedBranchError", () => {
     const project = makeProject({ id: "p", path: absPath });
     const msg = formatUnmergedBranchError(project, "bot/work", 2);
     expect(msg).toContain(`git -C ${absPath} merge --no-ff bot/work`);
+  });
+});
+
+// gs-177 / DESIGN.md §v5(a): the policy decision for what to do with the
+// bot's branch when starting a new cycle. Pure function — no git calls,
+// just the four-way truth table over (auto_merge ∈ {true,false}) ×
+// (branch exists × has unmerged > 0).
+describe("decideBotBranchHandling (gs-177)", () => {
+  it("returns reset when the branch doesn't exist yet", () => {
+    // Either auto_merge value — branch doesn't exist, no work to lose.
+    const projAuto = makeProject({ auto_merge: true });
+    const projManual = makeProject({ auto_merge: false });
+    expect(decideBotBranchHandling(projAuto, false, 0).kind).toBe("reset");
+    expect(decideBotBranchHandling(projManual, false, 0).kind).toBe("reset");
+    // Even if `unmerged` is reported >0 (shouldn't happen but defensive),
+    // a non-existent branch can't have unmerged work to protect.
+    expect(decideBotBranchHandling(projAuto, false, 99).kind).toBe("reset");
+  });
+
+  it("returns reset when the branch exists but has no unmerged commits", () => {
+    // Branch is at master HEAD (or behind) — nothing to protect.
+    const projAuto = makeProject({ auto_merge: true });
+    const projManual = makeProject({ auto_merge: false });
+    expect(decideBotBranchHandling(projAuto, true, 0).kind).toBe("reset");
+    expect(decideBotBranchHandling(projManual, true, 0).kind).toBe("reset");
+  });
+
+  it("returns merge-then-reset when auto_merge=true with unmerged work", () => {
+    const project = makeProject({ auto_merge: true });
+    const decision = decideBotBranchHandling(project, true, 3);
+    expect(decision.kind).toBe("merge-then-reset");
+    if (decision.kind === "merge-then-reset") {
+      expect(decision.unmerged).toBe(3);
+    }
+  });
+
+  it("returns accumulate when auto_merge=false with unmerged work (gs-177 NEW)", () => {
+    // Pre-gs-177 this would have aborted the cycle. Post-gs-177 the
+    // dispatcher leaves bot/work alone and lets the new cycle's work
+    // pile on top.
+    const project = makeProject({ auto_merge: false });
+    const decision = decideBotBranchHandling(project, true, 1);
+    expect(decision.kind).toBe("accumulate");
+    if (decision.kind === "accumulate") {
+      expect(decision.unmerged).toBe(1);
+    }
+  });
+
+  it("preserves the unmerged count in both write decisions for logging", () => {
+    // The dispatcher logs the count in both the merge-then-reset path
+    // and the accumulate path; the helper's job is to surface it.
+    const projAuto = makeProject({ auto_merge: true });
+    const projManual = makeProject({ auto_merge: false });
+    expect(decideBotBranchHandling(projAuto, true, 7)).toEqual({
+      kind: "merge-then-reset",
+      unmerged: 7,
+    });
+    expect(decideBotBranchHandling(projManual, true, 7)).toEqual({
+      kind: "accumulate",
+      unmerged: 7,
+    });
+  });
+
+  it("treats undefined auto_merge as false (default per Hard Rule #4)", () => {
+    // ProjectConfig may have auto_merge as a missing field for projects
+    // declared in projects.yaml without the key. The helper must treat
+    // a falsy auto_merge as the conservative default.
+    const project = makeProject();
+    delete (project as { auto_merge?: boolean }).auto_merge;
+    const decision = decideBotBranchHandling(project, true, 2);
+    expect(decision.kind).toBe("accumulate");
   });
 });
 

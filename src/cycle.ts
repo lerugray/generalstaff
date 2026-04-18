@@ -73,6 +73,13 @@ export async function countCommitsAhead(
 // Build the "bot branch has unmerged commits ahead of HEAD" error reason.
 // Resolves project.path to an absolute path so the suggested `git -C <path>`
 // command works regardless of the user's current working directory.
+//
+// Retained post-gs-177 for the auto_merge=true conflict path
+// (`auto-merge of <branch> into HEAD failed`) and for any future
+// strict-abort use case. With gs-177 the auto_merge=false path no
+// longer aborts — it accumulates instead, so this helper is unused by
+// the dispatcher's normal happy paths but kept exported because tests
+// pin its message shape.
 export function formatUnmergedBranchError(
   project: ProjectConfig,
   branch: string,
@@ -85,6 +92,38 @@ export function formatUnmergedBranchError(
     `(git -C ${resolvedPath} merge --no-ff ${branch}) or set ` +
     `auto_merge: true in projects.yaml for project ${project.id}.`
   );
+}
+
+// gs-177: decide what to do with the bot's branch when it has commits
+// the main HEAD doesn't. Pure function so the policy can be tested in
+// isolation from the cycle orchestration. See DESIGN.md §v5 for the
+// design rationale (option (a) — accumulator).
+//
+// Three outcomes:
+//   "reset"             — branch is clean of unmerged work (or doesn't
+//                         exist yet). Safe to fast-reset bot/work to
+//                         HEAD before the new cycle.
+//   "merge-then-reset"  — auto_merge=true and there's unmerged work.
+//                         Merge bot/work into HEAD first, then reset
+//                         (which is then a no-op anyway).
+//   "accumulate"        — auto_merge=false and there's unmerged work.
+//                         Skip the reset; let bot/work accumulate
+//                         verified-cycle commits across the session.
+//                         Master is untouched until human merge.
+export type BotBranchHandling =
+  | { kind: "reset" }
+  | { kind: "merge-then-reset"; unmerged: number }
+  | { kind: "accumulate"; unmerged: number };
+
+export function decideBotBranchHandling(
+  project: ProjectConfig,
+  branchExists: boolean,
+  unmerged: number,
+): BotBranchHandling {
+  if (!branchExists) return { kind: "reset" };
+  if (unmerged <= 0) return { kind: "reset" };
+  if (project.auto_merge) return { kind: "merge-then-reset", unmerged };
+  return { kind: "accumulate", unmerged };
 }
 
 async function autoCommitState(
@@ -458,52 +497,69 @@ export async function executeCycle(
       }
     }
 
-    // 2. Before resetting bot branch to HEAD, check whether it has unmerged
-    //    work. `branch -f <branch> HEAD` is destructive — without this guard,
-    //    a verified cycle's commits sit on bot/work, then the next cycle starts
-    //    and overwrites them, leaving the work orphaned in the reflog and
-    //    never integrated into master. (Discovered 2026-04-16, observation run
-    //    cycles 1-3 all reimplemented gs-056 because of this gap.)
+    // 2. Decide what to do with the bot's branch (gs-177 / DESIGN.md §v5).
+    //    Three handling modes:
+    //      - "reset"            : branch clean of unmerged or doesn't exist
+    //      - "merge-then-reset" : auto_merge=true, fold unmerged into HEAD
+    //      - "accumulate"       : auto_merge=false, leave bot/work alone
+    //                             (gs-177's new path — eliminates the
+    //                              one-cycle-per-session ceiling)
     const branch = project.branch;
     const branchSha = await getGitSha(project.path, branch);
-    if (branchSha !== "unknown") {
-      const unmerged = await countCommitsAhead(project.path, branch, "HEAD");
-      if (unmerged > 0) {
-        if (project.auto_merge) {
-          // Opt-in: fast-forward-or-merge bot's prior verified work into HEAD
-          // before resetting. Use --no-ff so the merge is always legible in
-          // the history even when a fast-forward would work.
-          console.log(
-            `Auto-merging ${unmerged} commit(s) from ${branch} into HEAD...`,
-          );
-          try {
-            const msg = `Merge branch '${branch}' (auto, ${unmerged} cycle-commit(s))`;
-            await $`git -C ${project.path} merge --no-ff ${branch} -m ${msg}`.quiet();
-            console.log(`Merged ${branch} into HEAD.`);
-          } catch {
-            result.reason =
-              `auto-merge of ${branch} into HEAD failed — ` +
-              `manual intervention required (likely a conflict with interactive work on master)`;
-            console.log(`\nERROR: ${result.reason}\n`);
-            break assemble;
-          }
-        } else {
-          // auto_merge: false — default per Hard Rule #4. Do NOT overwrite work.
-          result.reason = formatUnmergedBranchError(project, branch, unmerged);
-          console.log(`\nERROR: ${result.reason}\n`);
-          break assemble;
-        }
+    const initialBranchExists = branchSha !== "unknown";
+    const unmerged = initialBranchExists
+      ? await countCommitsAhead(project.path, branch, "HEAD")
+      : 0;
+    const handling = decideBotBranchHandling(
+      project,
+      initialBranchExists,
+      unmerged,
+    );
+
+    let skipReset = false;
+    if (handling.kind === "merge-then-reset") {
+      // Opt-in: fast-forward-or-merge bot's prior verified work into HEAD
+      // before resetting. Use --no-ff so the merge is always legible in
+      // the history even when a fast-forward would work.
+      console.log(
+        `Auto-merging ${handling.unmerged} commit(s) from ${branch} into HEAD...`,
+      );
+      try {
+        const msg = `Merge branch '${branch}' (auto, ${handling.unmerged} cycle-commit(s))`;
+        await $`git -C ${project.path} merge --no-ff ${branch} -m ${msg}`.quiet();
+        console.log(`Merged ${branch} into HEAD.`);
+      } catch {
+        result.reason =
+          `auto-merge of ${branch} into HEAD failed — ` +
+          `manual intervention required (likely a conflict with interactive work on master)`;
+        console.log(`\nERROR: ${result.reason}\n`);
+        break assemble;
       }
+    } else if (handling.kind === "accumulate") {
+      // gs-177 / DESIGN.md §v5(a): auto_merge=false with unmerged work.
+      // Leave bot/work where it is — the new cycle's worktree will start
+      // from the accumulated head, and Cycle N+1 sees Cycle N's
+      // tasks.json updates naturally. Master is unchanged; the user
+      // reviews bot/work in batch when they're ready.
+      console.log(
+        `Branch ${branch} has ${handling.unmerged} unmerged commit(s); ` +
+          `accumulating (auto_merge=false). Master is untouched — ` +
+          `human review then \`git merge --no-ff ${branch}\` when ready.`,
+      );
+      skipReset = true;
     }
 
-    // Now safe to reset — either branch was clean of unmerged work, didn't
-    // exist, or we just merged it in above.
-    try {
-      await $`git -C ${project.path} branch -f ${branch} HEAD`.quiet();
-      console.log(`Branch ${branch} reset to HEAD`);
-    } catch {
-      // Branch may not exist yet or may be checked out — log and continue
-      console.log(`Warning: could not reset ${branch} to HEAD, continuing with current position`);
+    if (!skipReset) {
+      // Either branch was clean of unmerged work, didn't exist, or we just
+      // merged it in above (in which case bot/work and HEAD are now equal
+      // and the reset is a no-op).
+      try {
+        await $`git -C ${project.path} branch -f ${branch} HEAD`.quiet();
+        console.log(`Branch ${branch} reset to HEAD`);
+      } catch {
+        // Branch may not exist yet or may be checked out — log and continue
+        console.log(`Warning: could not reset ${branch} to HEAD, continuing with current position`);
+      }
     }
 
     // 3. Capture start SHA on the bot's branch
