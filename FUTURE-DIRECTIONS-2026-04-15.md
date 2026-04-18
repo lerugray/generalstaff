@@ -1510,3 +1510,99 @@ Same principle as path (b)/(c) — don't pre-build the
 integration before the workflow exists. Note it, move on,
 revisit when the UI loop genuinely needs a preview-and-compare
 automation step.
+
+### Addendum-3 — 2026-04-18 late evening: anchor-extension strategy validated on GeneralStaff's own dashboard
+
+**What landed.** Phase 5 UI work kicked off tonight. Three views
+shipped as reference HTML in `docs/phase-5-references/`:
+
+1. `fleet-overview-2026-04-18.zip` — Claude Design output. One
+   brief, one artifact. Burned an estimated 5-10% of Ray's weekly
+   Claude Max Design budget.
+2. `task-queue-v1.html` — hand-built in the interactive Claude
+   Code session that drove the brief. Reuses the anchor's CSS
+   wholesale; extends the vocabulary with a 3-column `.task` grid,
+   priority tiers, touch chips, in-flight pulse indicator, and a
+   compact shipped-rail variant. Zero Design spend.
+3. `session-tail-v1.html` — also hand-built. Temporal/streaming
+   data shape. Reuses anchor + queue vocabulary; extends with
+   `.session-head` banner, `.dispatch` timeline block,
+   `.verdict-prose` italic pull-quote, `.earlier-row` compact
+   rail. Zero Design spend.
+
+Total Design spend: one brief. Total views shipped: three. The
+ratio is the point.
+
+**The strategy that produced this ratio.** Ray flagged it at the
+start of the session as the "budget-smart" play: spend the
+Design-budget dollar on one carefully-scoped **anchor view** that
+forces CD to produce a full vocabulary — palette, typography,
+component patterns, layout system — then hand-extend that
+vocabulary for every subsequent view in the same system. The
+anchor brief is expensive per-artifact; every subsequent view is
+free.
+
+For this to work, the anchor view has to be chosen for vocabulary
+coverage, not aesthetic flash. Fleet-overview was right because
+it forced CD to solve: masthead + doc-line + summary band +
+tabular data rows + TOTAL treatment + afterword prose + colophon
+— seven distinct layout patterns in one brief. Subsequent views
+shuffled the same seven patterns into new configurations.
+
+**Concrete discipline rules observed (and validated by reading
+the output):**
+
+1. **Decline CD's follow-up offers.** When the first-pass anchor
+   comes back, CD offers to iterate — different type pairings, a
+   second variation, dialed accents. Taking any of them costs
+   5-10% more weekly budget for marginal polish. Decline all
+   three. Edit the HTML directly if something's off.
+2. **Don't re-brief the same view.** CD's second pass on the same
+   view is usually not 2× better but is 2× the spend. Same
+   principle as (1), same budget math. Hand-edit instead.
+3. **Hand-built extensions reuse, they don't reinvent.** Each
+   subsequent view inherits the anchor's `:root` palette variable
+   block verbatim, the same type stack, the same grid patterns.
+   New CSS classes *extend* with the anchor's vocabulary rather
+   than *replace* it. Reader learns one system, not N.
+4. **Consolidating rules emerge from cross-view discipline.**
+   Tonight's rust-accent rule — "rust = this asks for your eyes,
+   whether attention-good or attention-bad" — wasn't designed
+   upfront. It emerged by the third view: used for P1 priorities,
+   in-flight dots, interactive flags (queue); failed verdicts,
+   mixed-outcome sessions (tail); bot-pickable cell, hot failure
+   counts (fleet). Once you notice the pattern, hold it. A reader
+   learns the color's meaning once and carries it forward.
+
+**When to break the pattern and brief a second anchor.** If a
+Phase 5 view genuinely can't be expressed in the existing
+vocabulary — a graph view, a canvas, a modal interaction, a
+visualization with real motion — then the anchor doesn't cover
+that domain and a second brief is earned. The burden of proof is
+on "vocabulary actually insufficient," not on "want something
+new." Don't brief a second anchor for variety's sake.
+
+**What this updates in addendum-2's framing.** Addendum-2 said
+the gamr profile-card validated path (a) as "substantively
+usable." Addendum-3 sharpens the claim: path (a) is not just
+usable — it's the **load-bearing path for all non-trivial UI
+work** as long as the anchor-extension discipline is held. Paths
+(b) Playwright-automated and (c) direct-API remain speculative
+upgrades, not necessary ones. After three views produced from one
+brief, there's no empirical pressure to build either.
+
+**What this says for Phase 5's remaining scope.** Two more views
+expected — dispatch detail (per-cycle drill-in with full REVIEW.md
++ diff + tool-call transcript) and inbox (shared-message channel
+in `state/_fleet/messages.jsonl`). Both should follow the
+hand-extension pattern. If either hits a genuine vocabulary gap,
+that's the moment to consider a second brief — not before.
+
+**Cost calibration for the reader.** Ray's Claude Max sub at
+$200/mo includes Claude Design quota that resets weekly. After
+tonight's work, ~65% of this week's budget remains. That budget
+is now available for other projects (catalogdna feature UI,
+raybrain Phase 3 query interface, personal page redesign) without
+having to ration against Phase 5 specifically. This is the
+practical payoff of the discipline: one brief's investment frees
+the rest of the week for other surfaces.
