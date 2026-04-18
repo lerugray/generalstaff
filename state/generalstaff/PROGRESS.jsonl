@@ -2156,3 +2156,5 @@
 {"timestamp":"2026-04-18T11:30:02.178Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":30,"dry_run":false,"registered_projects":["generalstaff","gamr"]}}
 {"timestamp":"2026-04-18T11:30:02.452Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":0,"total_cycles":0,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-18T11:30:43.156Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr"]}}
+{"timestamp":"2026-04-18T11:32:42.133Z","event":"cycle_skipped","cycle_id":"20260418113242_7w3g","project_id":"generalstaff","data":{"reason":"Uncommitted changes in C:/Users/rweis/OneDrive/Documents/GeneralStaff:\nM state/gamr/PROGRESS.jsonl"}}
+{"timestamp":"2026-04-18T11:32:42.209Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":2,"total_cycles":1,"total_verified":0,"total_failed":0}}
