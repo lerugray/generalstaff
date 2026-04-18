@@ -1057,5 +1057,17 @@
     "title": "Fix `src/bootstrap.ts` engineer_command.sh template: the bootstrap-generated script for new (non-dogfood) projects is just `claude -p --dangerously-skip-permissions` with NO PROMPT and NO WORKTREE MANAGEMENT — when invoked by the dispatcher, claude has no instructions and the bot would write to the main working tree (clobbering Ray's interactive work). Surfaced 2026-04-18 during gs-173: had to manually patch gamr/engineer_command.sh to (1) create/manage `.bot-worktree` on `bot/work` branch, (2) bun install in worktree, (3) invoke `claude -p` with a full prompt scoped to the project's tasks.json + hands_off + verify command + budget. Use the manually-patched gamr/engineer_command.sh as the template — parameterize project_id, hands-off path, verify command. Add a test using a temp-dir bootstrap that verifies the generated script contains both the worktree-add line and a non-empty prompt arg to claude. Without this, every newly-bootstrapped project's first bot cycle fails immediately.",
     "status": "pending",
     "priority": 1
+  },
+  {
+    "id": "gs-177",
+    "title": "Decide and implement dispatcher behavior for the auto_merge=false / chained-cycles tension. Surfaced 2026-04-18 during gs-174: with auto_merge=false (default per Hard Rule #4), the first verified cycle's commits stay on bot/work; the dispatcher then refuses to start cycle 2 because resetting bot/work would destroy that unmerged work (\"bot/work has 1 unmerged commit(s) ahead of HEAD\"). This caps every project at one cycle per session until a human merges. The same constraint blocks Hard Rule #4's own opt-in path: it requires 5 clean cycles before auto_merge can be turned on, but auto_merge=false makes 5 cycles take 5 separate sessions. Options to consider: (a) dispatcher prompts/queues a \"pending merge\" rather than skipping silently — at minimum the user-facing log should explain the catch-22; (b) per-cycle merge approval (escalating opt-in: each verified cycle generates a one-line merge command the user can run/skip); (c) push bot/work to a per-cycle branch (`bot/work-<cycle_id>`) so subsequent cycles can start fresh from master without overwriting prior work. (c) is the most architecturally clean but requires more thought. Capture the discussion in DESIGN.md as v5.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-178",
+    "title": "Fix audit-log writes dirtying the GS working tree mid-session. Surfaced 2026-04-18 during gs-174: when the bot ran a gamr cycle, `audit.ts` appended events to `state/gamr/PROGRESS.jsonl` (which lives in GS's tracked working tree per audit.ts:21 — `${getRootDir()}/state/${projectId}/PROGRESS.jsonl`). The next cycle's clean-tree safety check then refused to run a generalstaff cycle (\"Uncommitted changes: M state/gamr/PROGRESS.jsonl\"), structurally blocking cross-project chaining within a session. Options: (a) dispatcher commits PROGRESS.jsonl writes between cycles (cleanest, preserves audit-trail-in-git); (b) clean-tree check whitelists `state/<id>/PROGRESS.jsonl` paths — narrow exception, doesn't lose the safety on real changes; (c) gitignore PROGRESS.jsonl files — cheapest but loses git-as-audit-log. Recommend (b) for narrowness + low risk, with (a) as a follow-up if the audit-trail-in-git semantics turn out to matter for archival. Add a test that simulates a multi-cycle session producing PROGRESS.jsonl writes between cycles and verifies the next cycle proceeds.",
+    "status": "pending",
+    "priority": 1
   }
 ]
