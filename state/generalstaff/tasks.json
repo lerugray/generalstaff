@@ -1007,7 +1007,7 @@
   {
     "id": "gs-168",
     "title": "Add an integration test that exercises a FULL non-dogfood cycle end-to-end with a tmp fixture project. Create a fixture at tests/fixtures/fake_project/ with: a package.json (bun-plain stack), a state/fake_project/tasks.json with 1 pending task, a stub verify command that always passes. Register it in a test-only projects.yaml fixture. Spawn a dry-run cycle; assert: (a) worktree creates, (b) tasks.json is read correctly from project.path, (c) verification runs, (d) task-done detection reads from project.path. This is the regression guard so the state-path inconsistency from gs-166 cannot silently recur. Skip when running in CI without a usable bun binary.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
