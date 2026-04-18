@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task, no hands-off violations, and the verification command passed successfully.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-204",
+      "evidence": "Added buildCycleWatchdogEvent function in src/session.ts, updated src/types.ts to include 'cycle_watchdog' in ProgressEventType and VALID_EVENTS, and added comprehensive tests in tests/session.test.ts covering the new functionality.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The diff shows the complete implementation of emitting 'cycle_watchdog' audit events when cycles exceed 2x their budget, including the new function, type updates, and test coverage as required by task gs-204."
+}
