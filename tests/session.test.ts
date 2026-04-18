@@ -366,6 +366,121 @@ describe("writeDigest", () => {
     const content = readFileSync(join(digestDir, files[0]), "utf8");
     expect(content).toContain("**Reviewer:** mycustomprovider\n");
   });
+
+  // gs-196: per-round grouping in the Details section.
+  it("renders flat Details (no ### Round headers) when cycle_rounds is absent", async () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", project_id: "pa" }),
+      makeCycleResult({ cycle_id: "c-2", project_id: "pb" }),
+    ];
+    await writeDigest(results, 3, { digest_dir: "digests" });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("### Round");
+    expect(content).toContain("## pa — c-1");
+    expect(content).toContain("## pb — c-2");
+  });
+
+  it("renders flat Details when every round is size 1 (gs-196 fallback)", async () => {
+    const r1 = makeCycleResult({ cycle_id: "c-1", project_id: "pa" });
+    const r2 = makeCycleResult({ cycle_id: "c-2", project_id: "pb" });
+    await writeDigest([r1, r2], 3, {
+      digest_dir: "digests",
+      cycle_rounds: [[r1], [r2]],
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("### Round");
+    expect(content).toContain("## pa — c-1");
+    expect(content).toContain("## pb — c-2");
+  });
+
+  it("renders exactly 2 ### Round headers for 2 rounds of 2 cycles (gs-196)", async () => {
+    // Round 1: 30s and 60s (max = 60s = 1m).
+    // Round 2: 90s and 45s (max = 90s = 1m30s).
+    const r1a = makeCycleResult({
+      cycle_id: "c-1a",
+      project_id: "pa",
+      started_at: "2026-04-18T10:00:00.000Z",
+      ended_at: "2026-04-18T10:00:30.000Z",
+    });
+    const r1b = makeCycleResult({
+      cycle_id: "c-1b",
+      project_id: "pb",
+      started_at: "2026-04-18T10:00:00.000Z",
+      ended_at: "2026-04-18T10:01:00.000Z",
+    });
+    const r2a = makeCycleResult({
+      cycle_id: "c-2a",
+      project_id: "pa",
+      started_at: "2026-04-18T10:02:00.000Z",
+      ended_at: "2026-04-18T10:03:30.000Z",
+    });
+    const r2b = makeCycleResult({
+      cycle_id: "c-2b",
+      project_id: "pb",
+      started_at: "2026-04-18T10:02:00.000Z",
+      ended_at: "2026-04-18T10:02:45.000Z",
+    });
+    await writeDigest([r1a, r1b, r2a, r2b], 5, {
+      digest_dir: "digests",
+      cycle_rounds: [
+        [r1a, r1b],
+        [r2a, r2b],
+      ],
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+
+    const roundHeaders = content.match(/^### Round \d+ /gm) ?? [];
+    expect(roundHeaders).toHaveLength(2);
+    expect(content).toContain("### Round 1 (1m wall, 2 cycle(s))");
+    expect(content).toContain("### Round 2 (1m30s wall, 2 cycle(s))");
+
+    // Round 1 block precedes Round 2 block, and each cycle sits under
+    // its round header.
+    const r1Idx = content.indexOf("### Round 1");
+    const r2Idx = content.indexOf("### Round 2");
+    expect(r1Idx).toBeGreaterThan(-1);
+    expect(r2Idx).toBeGreaterThan(r1Idx);
+    expect(content.indexOf("## pa — c-1a")).toBeGreaterThan(r1Idx);
+    expect(content.indexOf("## pb — c-1b")).toBeGreaterThan(r1Idx);
+    expect(content.indexOf("## pa — c-1a")).toBeLessThan(r2Idx);
+    expect(content.indexOf("## pa — c-2a")).toBeGreaterThan(r2Idx);
+    expect(content.indexOf("## pb — c-2b")).toBeGreaterThan(r2Idx);
+  });
+
+  it("formats round wall via formatDuration (seconds granularity, gs-196)", async () => {
+    // Single round of 2 cycles, max duration 45s — exercises the <1min
+    // path of formatDuration.
+    const ra = makeCycleResult({
+      cycle_id: "c-a",
+      project_id: "p",
+      started_at: "2026-04-18T10:00:00.000Z",
+      ended_at: "2026-04-18T10:00:20.000Z",
+    });
+    const rb = makeCycleResult({
+      cycle_id: "c-b",
+      project_id: "p",
+      started_at: "2026-04-18T10:00:00.000Z",
+      ended_at: "2026-04-18T10:00:45.000Z",
+    });
+    await writeDigest([ra, rb], 1, {
+      digest_dir: "digests",
+      cycle_rounds: [[ra, rb]],
+    });
+
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("### Round 1 (45s wall, 2 cycle(s))");
+  });
 });
 
 describe("writeDigest narrative (gs-158)", () => {

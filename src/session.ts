@@ -313,6 +313,11 @@ export async function runSession(options: SessionOptions) {
   // decision from real data, not guesses.
   let slotIdleTotalSeconds = 0;
   let parallelRounds = 0;
+  // gs-196: per-round cycle arrays, accumulated only in parallel mode so
+  // writeDigest can group the `## Details` section under `### Round N`
+  // headers. Left empty in sequential mode — the digest falls back to the
+  // flat rendering unchanged.
+  const cycleRoundsAccumulator: CycleResult[][] = [];
 
   // gs-131: mid-cycle STOP file detection. isStopFilePresent() is only
   // checked at cycle boundaries; this fs.watch on the STOP path kills the
@@ -427,6 +432,7 @@ export async function runSession(options: SessionOptions) {
         eligible.map((p) => executeCycle(p.project, config, dryRun)),
       );
       const roundWallMs = Date.now() - roundStartMs;
+      cycleRoundsAccumulator.push([...roundResults]);
 
       // slot_idle accounting: per-slot idle is roundWall - cycleDuration;
       // total idle across the round is the sum (an approximation of
@@ -808,6 +814,7 @@ export async function runSession(options: SessionOptions) {
     reviewer_provider: process.env.GENERALSTAFF_REVIEWER_PROVIDER,
     reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
     parallel_metrics: parallelMetricsForDigest,
+    cycle_rounds: isParallelMode ? cycleRoundsAccumulator : undefined,
   });
 
   // Log session end for each project
@@ -1007,6 +1014,12 @@ export async function writeDigest(
     reviewer_provider?: string;
     reviewer_model?: string;
     parallel_metrics?: DigestParallelMetrics;
+    // gs-196: when supplied with at least one round of size > 1, the
+    // `## Details` section is grouped under per-round `### Round N`
+    // headers so parallel-mode digests don't interleave cycles
+    // confusingly. Absent or all-size-1 → flat rendering (no regression
+    // for sequential sessions).
+    cycle_rounds?: CycleResult[][];
   },
   deps?: WriteDigestDeps,
 ) {
@@ -1104,18 +1117,45 @@ export async function writeDigest(
     content += `_Per-cycle technical detail (SHAs, reviewer verdicts) below._\n\n`;
   }
 
-  for (const r of results) {
-    content += `## ${r.project_id} — ${r.cycle_id}\n\n`;
-    content += `- **Outcome:** ${r.final_outcome}\n`;
-    content += `- **Reason:** ${r.reason}\n`;
-    content += `- **SHA:** ${r.cycle_start_sha.slice(0, 8)} → ${r.cycle_end_sha.slice(0, 8)}\n`;
+  // gs-196: group by round if any round has >1 cycle. Otherwise use flat
+  // rendering (matches sequential sessions, no regression).
+  const useRoundHeaders =
+    !!config.cycle_rounds && config.cycle_rounds.some((rd) => rd.length > 1);
+
+  const renderCycleBlock = (r: CycleResult) => {
+    let block = `## ${r.project_id} — ${r.cycle_id}\n\n`;
+    block += `- **Outcome:** ${r.final_outcome}\n`;
+    block += `- **Reason:** ${r.reason}\n`;
+    block += `- **SHA:** ${r.cycle_start_sha.slice(0, 8)} → ${r.cycle_end_sha.slice(0, 8)}\n`;
     if (r.diff_stats) {
       const s = r.diff_stats;
-      content += `- **Diff:** ${s.files_changed} file(s), +${s.insertions}/-${s.deletions}\n`;
+      block += `- **Diff:** ${s.files_changed} file(s), +${s.insertions}/-${s.deletions}\n`;
     }
-    content += `- **Engineer exit:** ${r.engineer_exit_code}\n`;
-    content += `- **Verification:** ${r.verification_outcome}\n`;
-    content += `- **Reviewer:** ${r.reviewer_verdict}\n\n`;
+    block += `- **Engineer exit:** ${r.engineer_exit_code}\n`;
+    block += `- **Verification:** ${r.verification_outcome}\n`;
+    block += `- **Reviewer:** ${r.reviewer_verdict}\n\n`;
+    return block;
+  };
+
+  if (useRoundHeaders && config.cycle_rounds) {
+    config.cycle_rounds.forEach((round, idx) => {
+      const maxCycleMs = round.reduce((acc, r) => {
+        const d =
+          new Date(r.ended_at).getTime() - new Date(r.started_at).getTime();
+        return d > acc ? d : acc;
+      }, 0);
+      const roundWallSec = Math.max(0, Math.round(maxCycleMs / 1000));
+      content +=
+        `### Round ${idx + 1} (${formatDuration(roundWallSec)} wall, ` +
+        `${round.length} cycle(s))\n\n`;
+      for (const r of round) {
+        content += renderCycleBlock(r);
+      }
+    });
+  } else {
+    for (const r of results) {
+      content += renderCycleBlock(r);
+    }
   }
 
   await writeFile(digestPath, content, "utf8");
