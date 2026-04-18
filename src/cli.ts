@@ -39,9 +39,11 @@ import {
 } from "./tasks";
 import {
   buildFleetSummary,
+  buildTodaySessionSummary,
   computeDiskUsage,
   countTests,
   formatSummary,
+  formatTodaySessionSummary,
 } from "./summary";
 import { formatRelativeTime } from "./format";
 import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
@@ -78,7 +80,7 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]]
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary]
                                                           Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
@@ -86,6 +88,8 @@ Usage:
     Example: generalstaff status --watch=10             # refresh every 10s
     Example: generalstaff status --sessions             # last 10 sessions as a table
     Example: generalstaff status --sessions=20 --json   # last 20 sessions, JSON
+    Example: generalstaff status --summary              # today's cycle/session metrics (UTC)
+    Example: generalstaff status --summary --json       # same, as JSON
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -323,11 +327,22 @@ switch (command) {
       args: stripSessionsArgs(stripWatchArgs(rawStatusArgs)),
       options: {
         json: { type: "boolean", default: false },
+        summary: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
 
     const renderStatus = async () => {
+      if (statusValues.summary) {
+        const todaySummary = await buildTodaySessionSummary();
+        if (statusValues.json) {
+          console.log(JSON.stringify(todaySummary, null, 2));
+        } else {
+          console.log(formatTodaySessionSummary(todaySummary));
+        }
+        return;
+      }
+
       const projects = await loadProjects();
       const fleet = await loadFleetState();
       const stopped = await isStopFilePresent();

@@ -3,9 +3,11 @@ import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import {
   buildFleetSummary,
+  buildTodaySessionSummary,
   computeDiskUsage,
   countTests,
   formatSummary,
+  formatTodaySessionSummary,
 } from "../src/summary";
 import { setRootDir } from "../src/state";
 
@@ -425,5 +427,125 @@ describe("computeDiskUsage", () => {
     expect(d.digests).toBe(0);
     expect(d.state).toBe(42);
     expect(d.total).toBe(42);
+  });
+});
+
+describe("buildTodaySessionSummary", () => {
+  const NOW = new Date("2026-04-18T15:30:00.000Z");
+
+  function sessionComplete(ts: string, minutes: number): string {
+    return JSON.stringify({
+      timestamp: ts,
+      event: "session_complete",
+      project_id: "_fleet",
+      data: {
+        duration_minutes: minutes,
+        total_cycles: 1,
+        total_verified: 1,
+        total_failed: 0,
+        stop_reason: "budget",
+      },
+    });
+  }
+
+  it("returns zeros when state dir does not exist", async () => {
+    rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.date).toBe("2026-04-18");
+    expect(s.cycles_total).toBe(0);
+    expect(s.verified).toBe(0);
+    expect(s.verification_failed).toBe(0);
+    expect(s.avg_cycle_duration_seconds).toBe(0);
+    expect(s.wall_clock_minutes).toBe(0);
+    expect(s.last_session_end).toBeNull();
+  });
+
+  it("filters cross-day events to today (UTC midnight cutoff)", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
+
+    const alphaLog = [
+      // yesterday — excluded
+      cycleEnd({ project: "alpha", cycleId: "c-y1", ts: "2026-04-17T23:59:59.000Z", outcome: "verified", durationSeconds: 100 }),
+      // today — included
+      cycleEnd({ project: "alpha", cycleId: "c-t1", ts: "2026-04-18T00:00:01.000Z", outcome: "verified", durationSeconds: 120 }),
+      cycleEnd({ project: "alpha", cycleId: "c-t2", ts: "2026-04-18T10:00:00.000Z", outcome: "verification_failed", durationSeconds: 60 }),
+      cycleEnd({ project: "alpha", cycleId: "c-t3", ts: "2026-04-18T11:00:00.000Z", outcome: "verified", durationSeconds: 180 }),
+    ].join("\n") + "\n";
+
+    const fleetLog = [
+      sessionComplete("2026-04-17T20:00:00.000Z", 999), // yesterday — excluded
+      sessionComplete("2026-04-18T09:00:00.000Z", 30),
+      sessionComplete("2026-04-18T14:00:00.000Z", 45),
+    ].join("\n") + "\n";
+
+    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), alphaLog);
+    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), fleetLog);
+
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.date).toBe("2026-04-18");
+    expect(s.cycles_total).toBe(3);
+    expect(s.verified).toBe(2);
+    expect(s.verification_failed).toBe(1);
+    expect(s.avg_cycle_duration_seconds).toBe((120 + 60 + 180) / 3);
+    expect(s.wall_clock_minutes).toBe(30 + 45);
+    expect(s.last_session_end).toBe("2026-04-18T14:00:00.000Z");
+  });
+
+  it("aggregates cycles across multiple project dirs", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    mkdirSync(join(stateDir, "beta"), { recursive: true });
+
+    writeFileSync(
+      join(stateDir, "alpha", "PROGRESS.jsonl"),
+      cycleEnd({ project: "alpha", cycleId: "c-a1", ts: "2026-04-18T10:00:00.000Z", outcome: "verified", durationSeconds: 60 }) + "\n",
+    );
+    writeFileSync(
+      join(stateDir, "beta", "PROGRESS.jsonl"),
+      cycleEnd({ project: "beta", cycleId: "c-b1", ts: "2026-04-18T11:00:00.000Z", outcome: "verification_failed", durationSeconds: 90 }) + "\n",
+    );
+
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.cycles_total).toBe(2);
+    expect(s.verified).toBe(1);
+    expect(s.verification_failed).toBe(1);
+    expect(s.avg_cycle_duration_seconds).toBe((60 + 90) / 2);
+  });
+
+  it("formatTodaySessionSummary prints one line per metric", () => {
+    const s = {
+      date: "2026-04-18",
+      cycles_total: 5,
+      verified: 4,
+      verification_failed: 1,
+      avg_cycle_duration_seconds: 90,
+      wall_clock_minutes: 60,
+      last_session_end: "2026-04-18T14:00:00.000Z",
+    };
+    const out = formatTodaySessionSummary(s);
+    const lines = out.split("\n");
+    expect(lines[0]).toContain("2026-04-18");
+    expect(out).toContain("Cycles total:              5");
+    expect(out).toContain("Verified:                  4");
+    expect(out).toContain("Verification failed:       1");
+    expect(out).toContain("Total bot wall-clock:      60 min");
+    expect(out).toContain("Last session end:          2026-04-18T14:00:00.000Z");
+  });
+
+  it("formats n/a when no cycles or session ends today", () => {
+    const s = {
+      date: "2026-04-18",
+      cycles_total: 0,
+      verified: 0,
+      verification_failed: 0,
+      avg_cycle_duration_seconds: 0,
+      wall_clock_minutes: 0,
+      last_session_end: null,
+    };
+    const out = formatTodaySessionSummary(s);
+    expect(out).toContain("Average cycle duration:    n/a");
+    expect(out).toContain("Last session end:          n/a");
   });
 });

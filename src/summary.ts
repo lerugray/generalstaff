@@ -3,8 +3,9 @@
 import { existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import { getRootDir } from "./state";
-import { loadProgressEvents } from "./audit";
+import { loadProgressEvents, readJsonl } from "./audit";
 import { formatBytes, formatDuration, formatPercent } from "./format";
+import { isProgressEntry } from "./types";
 
 export interface OutcomeCounts {
   verified: number;
@@ -294,5 +295,118 @@ export function formatSummary(
     lines.push(`  state/:        ${formatBytes(disk.state)}`);
     lines.push(`  Total:         ${formatBytes(disk.total)}`);
   }
+  return lines.join("\n");
+}
+
+// --- Today's session summary (gs-180) ---
+
+export interface TodaySessionSummary {
+  date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
+  cycles_total: number;
+  verified: number;
+  verification_failed: number;
+  avg_cycle_duration_seconds: number;
+  wall_clock_minutes: number;
+  last_session_end: string | null;
+}
+
+export async function buildTodaySessionSummary(
+  now: Date = new Date(),
+): Promise<TodaySessionSummary> {
+  const todayStartMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    0, 0, 0, 0,
+  );
+  const date = new Date(todayStartMs).toISOString().slice(0, 10);
+
+  const result: TodaySessionSummary = {
+    date,
+    cycles_total: 0,
+    verified: 0,
+    verification_failed: 0,
+    avg_cycle_duration_seconds: 0,
+    wall_clock_minutes: 0,
+    last_session_end: null,
+  };
+
+  const stateDir = join(getRootDir(), "state");
+  if (!existsSync(stateDir)) return result;
+
+  let totalDurationSeconds = 0;
+  let lastSessionEndMs = -Infinity;
+
+  let projectDirs: string[];
+  try {
+    projectDirs = readdirSync(stateDir);
+  } catch {
+    return result;
+  }
+
+  for (const dir of projectDirs) {
+    const full = join(stateDir, dir);
+    try {
+      if (!statSync(full).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+
+    const logPath = join(full, "PROGRESS.jsonl");
+    for (const value of await readJsonl(logPath)) {
+      if (!isProgressEntry(value)) continue;
+      const ts = Date.parse(value.timestamp);
+      if (Number.isNaN(ts) || ts < todayStartMs) continue;
+
+      if (dir === "_fleet") {
+        if (
+          value.event === "session_complete" ||
+          value.event === "session_end"
+        ) {
+          const mins = value.data.duration_minutes;
+          if (typeof mins === "number" && Number.isFinite(mins) && mins > 0) {
+            result.wall_clock_minutes += mins;
+          }
+          if (ts > lastSessionEndMs) {
+            lastSessionEndMs = ts;
+            result.last_session_end = value.timestamp;
+          }
+        }
+      } else if (value.event === "cycle_end") {
+        result.cycles_total += 1;
+        const outcome = String(value.data.outcome ?? "");
+        if (outcome === "verified") {
+          result.verified += 1;
+        } else if (outcome === "verification_failed") {
+          result.verification_failed += 1;
+        }
+        const dur = value.data.duration_seconds;
+        if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
+          totalDurationSeconds += dur;
+        }
+      }
+    }
+  }
+
+  if (result.cycles_total > 0) {
+    result.avg_cycle_duration_seconds =
+      totalDurationSeconds / result.cycles_total;
+  }
+  return result;
+}
+
+export function formatTodaySessionSummary(s: TodaySessionSummary): string {
+  const lines: string[] = [];
+  lines.push(`=== Today's Session Summary (UTC ${s.date}) ===`);
+  lines.push(`Cycles total:              ${s.cycles_total}`);
+  lines.push(`Verified:                  ${s.verified}`);
+  lines.push(`Verification failed:       ${s.verification_failed}`);
+  lines.push(
+    `Average cycle duration:    ${
+      s.cycles_total > 0 ? formatDuration(s.avg_cycle_duration_seconds) : "n/a"
+    }`,
+  );
+  lines.push(`Total bot wall-clock:      ${s.wall_clock_minutes} min`);
+  lines.push(`Last session end:          ${s.last_session_end ?? "n/a"}`);
   return lines.join("\n");
 }
