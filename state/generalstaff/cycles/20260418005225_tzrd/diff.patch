@@ -1,0 +1,576 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index b8eb277..220f0db 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -102,6 +102,16 @@ Usage:
+     # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-poetry, go-mod
+     # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
+ 
++  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]
++                                                          Append a bootstrapped project to projects.yaml
++    Example: generalstaff register gamr --path=../gamr
++    Example: generalstaff register gamr --path=../gamr --priority=3 --yes
++    # Reads <target-dir>/state/<id>/tasks.json + hands_off.yaml + detected stack metadata,
++    # prompts y/N before editing projects.yaml. Rejects if <id> already registered or if
++    # the project hasn't been bootstrapped (no state/<id>/tasks.json). Note: projects.yaml
++    # is in the default hands_off surface for every project — this command is an explicit
++    # exception (the tool's own write path to its own config, equivalent to 'init').
++
+   generalstaff stop [--force] | [--status|--check]        Create STOP file (halt dispatcher)
+     Example: generalstaff stop                          # halt before next cycle
+     Example: generalstaff stop --force                  # also kill the running session process
+@@ -1491,6 +1501,60 @@ switch (command) {
+     break;
+   }
+ 
++  case "register": {
++    const { values: regValues, positionals: regPositionals } = parseArgs({
++      args: args.slice(1),
++      options: {
++        path: { type: "string" },
++        priority: { type: "string" },
++        yes: { type: "boolean", short: "y", default: false },
++      },
++      allowPositionals: true,
++    });
++    const regId = regPositionals[0];
++    if (!regId) {
++      console.error(
++        "Error: project-id is required\n  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]",
++      );
++      process.exit(1);
++    }
++    if (!regValues.path) {
++      console.error(
++        "Error: --path=<target-dir> is required\n  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]",
++      );
++      process.exit(1);
++    }
++    let regPriority: number | undefined;
++    if (regValues.priority !== undefined) {
++      const parsed = parseInt(regValues.priority, 10);
++      if (
++        isNaN(parsed) ||
++        parsed < 1 ||
++        String(parsed) !== regValues.priority.trim()
++      ) {
++        console.error("Error: --priority must be a positive integer");
++        process.exit(1);
++      }
++      regPriority = parsed;
++    }
++    const { runRegister } = await import("./register");
++    const regResult = await runRegister({
++      projectId: regId,
++      targetDir: regValues.path,
++      priority: regPriority,
++      assumeYes: Boolean(regValues.yes),
++    });
++    if (!regResult.ok) {
++      console.error(`Error: ${regResult.reason}`);
++      process.exit(1);
++    }
++    console.log(`Registered project "${regId}" in ${regResult.projectsYamlPath}.`);
++    console.log(
++      `Note: register is an explicit exception to the hands_off rule — it writes to projects.yaml on your behalf.`,
++    );
++    break;
++  }
++
+   default:
+     console.error(`Unknown command: ${command}`);
+     printUsage();
+diff --git a/src/register.ts b/src/register.ts
+new file mode 100644
+index 0000000..945660e
+--- /dev/null
++++ b/src/register.ts
+@@ -0,0 +1,210 @@
++// GeneralStaff — register command: append a bootstrapped project to
++// projects.yaml after reading state/<id>/tasks.json + hands_off.yaml
++// + project metadata. Confirmation-gated; rejects duplicates and
++// missing-bootstrap cases.
++//
++// Rule 5 keeps projects.yaml in every project's hands_off surface by
++// default, but this command — like `init` — is the tool's own write
++// path to its own config and is therefore an explicit exception. The
++// bot never invokes `register`; only a human operator does.
++
++import { existsSync, readFileSync } from "fs";
++import { readFile, writeFile } from "fs/promises";
++import { join, resolve } from "path";
++import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
++import { createInterface } from "readline";
++import { getRootDir } from "./state";
++import { detectStack, type StackKind } from "./bootstrap";
++
++const PROPOSAL_DIR = ".generalstaff-proposal";
++
++export interface RegisterOptions {
++  projectId: string;
++  targetDir: string;
++  priority?: number;
++  assumeYes?: boolean;
++  prompt?: (question: string) => Promise<boolean>;
++  stack?: StackKind;
++}
++
++export interface RegisterResult {
++  ok: boolean;
++  reason?: string;
++  wrote?: boolean;
++  projectsYamlPath?: string;
++  projectsYamlInHandsOff?: boolean;
++}
++
++async function defaultPrompt(question: string): Promise<boolean> {
++  const rl = createInterface({ input: process.stdin, output: process.stdout });
++  return new Promise<boolean>((resolvePromise) => {
++    rl.question(`${question} [y/N] `, (answer) => {
++      rl.close();
++      resolvePromise(/^y(es)?$/i.test(answer.trim()));
++    });
++  });
++}
++
++function loadHandsOffPatterns(
++  targetDir: string,
++): { source: string; patterns: string[] } | null {
++  const candidates = [
++    join(targetDir, "hands_off.yaml"),
++    join(targetDir, PROPOSAL_DIR, "hands_off.yaml"),
++  ];
++  for (const p of candidates) {
++    if (!existsSync(p)) continue;
++    try {
++      const parsed = parseYaml(readFileSync(p, "utf8")) as
++        | { patterns?: unknown }
++        | null
++        | undefined;
++      if (
++        parsed &&
++        Array.isArray(parsed.patterns) &&
++        parsed.patterns.length > 0
++      ) {
++        return { source: p, patterns: parsed.patterns.map(String) };
++      }
++    } catch {
++      continue;
++    }
++  }
++  return null;
++}
++
++const DEFAULT_DISPATCHER = {
++  state_dir: "./state",
++  fleet_state_file: "./fleet_state.json",
++  stop_file: "./STOP",
++  override_file: "./next_project.txt",
++  picker: "priority_x_staleness",
++  max_cycles_per_project_per_session: 3,
++  log_dir: "./logs",
++  digest_dir: "./digests",
++};
++
++export async function runRegister(
++  opts: RegisterOptions,
++): Promise<RegisterResult> {
++  const { projectId } = opts;
++
++  if (!projectId || !/^[a-z0-9_-]+$/i.test(projectId)) {
++    return {
++      ok: false,
++      reason: `Project id "${projectId}" invalid. Use alphanumerics, dashes, and underscores only.`,
++    };
++  }
++
++  const resolvedTarget = resolve(opts.targetDir);
++  if (!existsSync(resolvedTarget)) {
++    return {
++      ok: false,
++      reason: `Target dir ${resolvedTarget} does not exist.`,
++    };
++  }
++
++  const stateDir = join(resolvedTarget, "state", projectId);
++  const tasksPath = join(stateDir, "tasks.json");
++  if (!existsSync(tasksPath)) {
++    const proposalHint = join(resolvedTarget, PROPOSAL_DIR);
++    return {
++      ok: false,
++      reason:
++        `No tasks.json at ${tasksPath}. ` +
++        `The project has not been bootstrapped yet — run ` +
++        `\`generalstaff bootstrap ${resolvedTarget} "<idea>" --stack=<stack>\` ` +
++        `first (see ${proposalHint}/ for generated scaffolding).`,
++    };
++  }
++
++  const projectsYamlPath = join(getRootDir(), "projects.yaml");
++  type RawYaml = {
++    projects?: Array<Record<string, unknown>>;
++    dispatcher?: Record<string, unknown>;
++  };
++  let existing: RawYaml = { projects: [], dispatcher: {} };
++  if (existsSync(projectsYamlPath)) {
++    try {
++      const parsed = parseYaml(
++        await readFile(projectsYamlPath, "utf8"),
++      ) as RawYaml | null;
++      existing = parsed ?? { projects: [], dispatcher: {} };
++    } catch (e) {
++      return {
++        ok: false,
++        reason: `Failed to parse ${projectsYamlPath}: ${(e as Error).message}`,
++      };
++    }
++    if (!Array.isArray(existing.projects)) existing.projects = [];
++  }
++  const projectsArr = existing.projects ?? [];
++  if (projectsArr.some((p) => p && p.id === projectId)) {
++    return {
++      ok: false,
++      reason: `Project id "${projectId}" is already registered in ${projectsYamlPath}.`,
++    };
++  }
++
++  const handsOff = loadHandsOffPatterns(resolvedTarget);
++  if (!handsOff) {
++    const proposalHint = join(resolvedTarget, PROPOSAL_DIR, "hands_off.yaml");
++    return {
++      ok: false,
++      reason:
++        `No hands_off.yaml found at ${resolvedTarget}/hands_off.yaml or ` +
++        `${proposalHint}. Bootstrap the project first or move ` +
++        `hands_off.yaml from the ${PROPOSAL_DIR}/ staging dir to the project root.`,
++    };
++  }
++
++  const stack = detectStack(resolvedTarget, opts.stack);
++
++  const promptFn = opts.prompt ?? defaultPrompt;
++  const confirmed =
++    opts.assumeYes === true
++      ? true
++      : await promptFn(
++          `Register project "${projectId}" at ${resolvedTarget}?`,
++        );
++  if (!confirmed) {
++    return { ok: false, reason: "Registration cancelled." };
++  }
++
++  const entry: Record<string, unknown> = {
++    id: projectId,
++    path: resolvedTarget,
++    priority: opts.priority ?? 2,
++    engineer_command: stack.engineerCommand,
++    verification_command: stack.verifyCommand,
++    cycle_budget_minutes: 30,
++    work_detection: "tasks_json",
++    concurrency_detection: "worktree",
++    branch: "bot/work",
++    auto_merge: false,
++    hands_off: handsOff.patterns,
++  };
++  projectsArr.push(entry);
++  existing.projects = projectsArr;
++
++  if (!existing.dispatcher || typeof existing.dispatcher !== "object") {
++    existing.dispatcher = { ...DEFAULT_DISPATCHER };
++  }
++
++  await writeFile(
++    projectsYamlPath,
++    stringifyYaml(existing, { lineWidth: 0 }),
++    "utf8",
++  );
++
++  const projectsYamlInHandsOff = handsOff.patterns.some(
++    (p) => p === "projects.yaml" || p === "./projects.yaml",
++  );
++
++  return {
++    ok: true,
++    wrote: true,
++    projectsYamlPath,
++    projectsYamlInHandsOff,
++  };
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0d0034c..66eb718 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1019,7 +1019,7 @@
+   {
+     "id": "gs-170",
+     "title": "Add a `generalstaff register <project-id>` CLI subcommand that reads state/<id>/tasks.json + a generated hands_off.yaml + project metadata and appends the project to projects.yaml. Prompts for confirmation (y/N) before editing; rejects if project id already registered. Error messages reference the bootstrap staging dir (`.generalstaff-proposal/`) if the project hasn't been bootstrapped yet. Tests covering: add new project, reject duplicate id, reject without confirmation, reject if state/<id>/ doesn't exist. Note: this modifies projects.yaml which is in hands_off — add an explicit exception for this command (it's the tool's own write path to its own config, equivalent to `init`). Document the exception in the command's help text. Depends on gs-166, gs-167.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+diff --git a/tests/register.test.ts b/tests/register.test.ts
+new file mode 100644
+index 0000000..05862f8
+--- /dev/null
++++ b/tests/register.test.ts
+@@ -0,0 +1,259 @@
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import { join } from "path";
++import {
++  mkdirSync,
++  rmSync,
++  existsSync,
++  readFileSync,
++  writeFileSync,
++} from "fs";
++import { parse as parseYaml } from "yaml";
++
++const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
++const FIXTURE_ROOT = join(import.meta.dir, "fixtures", "register_test");
++
++interface CliResult {
++  stdout: string;
++  stderr: string;
++  exitCode: number;
++}
++
++async function runCli(
++  args: string[],
++  cwd: string,
++  stdin?: string,
++): Promise<CliResult> {
++  const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
++    stdout: "pipe",
++    stderr: "pipe",
++    stdin: stdin !== undefined ? "pipe" : "ignore",
++    env: { ...process.env },
++    cwd,
++  });
++  if (stdin !== undefined && proc.stdin) {
++    proc.stdin.write(stdin);
++    await proc.stdin.end();
++  }
++  const [stdout, stderr] = await Promise.all([
++    new Response(proc.stdout).text(),
++    new Response(proc.stderr).text(),
++  ]);
++  const exitCode = await proc.exited;
++  return { stdout, stderr, exitCode };
++}
++
++// Set up a target project with the layout `generalstaff bootstrap`
++// would leave behind: state/<id>/tasks.json inside the target dir,
++// plus hands_off.yaml at the target-dir root (moved out of the
++// .generalstaff-proposal/ staging dir, as the bootstrap's
++// README-PROPOSAL.md instructs).
++function seedBootstrappedProject(
++  targetDir: string,
++  projectId: string,
++): void {
++  mkdirSync(join(targetDir, "state", projectId), { recursive: true });
++  writeFileSync(
++    join(targetDir, "state", projectId, "tasks.json"),
++    JSON.stringify(
++      [
++        {
++          id: `${projectId}-001`,
++          title: "seed",
++          status: "pending",
++          priority: 1,
++        },
++      ],
++      null,
++      2,
++    ) + "\n",
++  );
++  writeFileSync(
++    join(targetDir, "hands_off.yaml"),
++    `patterns:\n  - "node_modules/"\n  - "CLAUDE-AUTONOMOUS.md"\n  - "hands_off.yaml"\n`,
++  );
++  // Minimal package.json so detectStack returns bun-plain (predictable
++  // verify/engineer commands in the assertions below).
++  writeFileSync(
++    join(targetDir, "package.json"),
++    JSON.stringify({ name: projectId, devDependencies: { "@types/bun": "latest" } }),
++  );
++}
++
++describe("register command", () => {
++  const HARNESS_DIR = join(FIXTURE_ROOT, "harness");
++  const TARGET_DIR = join(FIXTURE_ROOT, "target");
++
++  beforeEach(() => {
++    mkdirSync(HARNESS_DIR, { recursive: true });
++    mkdirSync(TARGET_DIR, { recursive: true });
++  });
++
++  afterEach(() => {
++    rmSync(FIXTURE_ROOT, { recursive: true, force: true });
++  });
++
++  it("adds a new project to projects.yaml after y confirmation", async () => {
++    seedBootstrappedProject(TARGET_DIR, "gamr");
++
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`, "--yes"],
++      HARNESS_DIR,
++    );
++
++    expect(result.exitCode).toBe(0);
++    expect(result.stdout).toContain('Registered project "gamr"');
++
++    const projectsYamlPath = join(HARNESS_DIR, "projects.yaml");
++    expect(existsSync(projectsYamlPath)).toBe(true);
++    const parsed = parseYaml(readFileSync(projectsYamlPath, "utf8")) as {
++      projects: Array<Record<string, unknown>>;
++    };
++    expect(parsed.projects).toHaveLength(1);
++    const entry = parsed.projects[0];
++    expect(entry.id).toBe("gamr");
++    // path is resolved absolute
++    expect(typeof entry.path).toBe("string");
++    expect(entry.hands_off).toEqual([
++      "node_modules/",
++      "CLAUDE-AUTONOMOUS.md",
++      "hands_off.yaml",
++    ]);
++    expect(entry.priority).toBe(2);
++    expect(entry.work_detection).toBe("tasks_json");
++    expect(entry.branch).toBe("bot/work");
++    expect(entry.auto_merge).toBe(false);
++    expect(entry.verification_command).toContain("bun test");
++  });
++
++  it("rejects a duplicate project id", async () => {
++    seedBootstrappedProject(TARGET_DIR, "gamr");
++    writeFileSync(
++      join(HARNESS_DIR, "projects.yaml"),
++      [
++        "projects:",
++        "  - id: gamr",
++        `    path: ${TARGET_DIR}`,
++        "    priority: 2",
++        '    engineer_command: "x"',
++        '    verification_command: "x"',
++        "    cycle_budget_minutes: 30",
++        "    work_detection: tasks_json",
++        "    concurrency_detection: none",
++        "    branch: bot/work",
++        "    auto_merge: false",
++        "    hands_off:",
++        '      - "node_modules/"',
++        "",
++      ].join("\n"),
++    );
++
++    const before = readFileSync(
++      join(HARNESS_DIR, "projects.yaml"),
++      "utf8",
++    );
++
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`, "--yes"],
++      HARNESS_DIR,
++    );
++
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("already registered");
++
++    // File must be unchanged
++    const after = readFileSync(join(HARNESS_DIR, "projects.yaml"), "utf8");
++    expect(after).toBe(before);
++  });
++
++  it("rejects without confirmation (empty stdin defaults to no)", async () => {
++    seedBootstrappedProject(TARGET_DIR, "gamr");
++
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`],
++      HARNESS_DIR,
++      "\n", // empty answer → default "no"
++    );
++
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("Registration cancelled");
++    expect(existsSync(join(HARNESS_DIR, "projects.yaml"))).toBe(false);
++  });
++
++  it("rejects when state/<id>/ does not exist in the target dir", async () => {
++    // Target exists but was never bootstrapped — no state/<id>/tasks.json.
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`, "--yes"],
++      HARNESS_DIR,
++    );
++
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("tasks.json");
++    // Error must point the user at the bootstrap staging dir so they
++    // know the project needs bootstrapping first.
++    expect(result.stderr).toContain(".generalstaff-proposal");
++    expect(existsSync(join(HARNESS_DIR, "projects.yaml"))).toBe(false);
++  });
++
++  it("rejects without --path", async () => {
++    const result = await runCli(["register", "gamr"], HARNESS_DIR);
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("--path");
++  });
++
++  it("rejects without project-id", async () => {
++    const result = await runCli(
++      ["register", `--path=${TARGET_DIR}`],
++      HARNESS_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("project-id");
++  });
++
++  it("rejects when hands_off.yaml is missing", async () => {
++    // Seed tasks.json but deliberately skip hands_off.yaml.
++    mkdirSync(join(TARGET_DIR, "state", "gamr"), { recursive: true });
++    writeFileSync(
++      join(TARGET_DIR, "state", "gamr", "tasks.json"),
++      JSON.stringify([{ id: "gamr-001", title: "x", status: "pending", priority: 1 }]),
++    );
++
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`, "--yes"],
++      HARNESS_DIR,
++    );
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("hands_off.yaml");
++    expect(existsSync(join(HARNESS_DIR, "projects.yaml"))).toBe(false);
++  });
++
++  it("falls back to .generalstaff-proposal/hands_off.yaml when root hands_off.yaml is absent", async () => {
++    // Simulate a user who hasn't moved hands_off.yaml out of the
++    // staging dir yet — register should still succeed.
++    mkdirSync(join(TARGET_DIR, "state", "gamr"), { recursive: true });
++    writeFileSync(
++      join(TARGET_DIR, "state", "gamr", "tasks.json"),
++      JSON.stringify([{ id: "gamr-001", title: "x", status: "pending", priority: 1 }]),
++    );
++    mkdirSync(join(TARGET_DIR, ".generalstaff-proposal"), { recursive: true });
++    writeFileSync(
++      join(TARGET_DIR, ".generalstaff-proposal", "hands_off.yaml"),
++      `patterns:\n  - "node_modules/"\n`,
++    );
++
++    const result = await runCli(
++      ["register", "gamr", `--path=${TARGET_DIR}`, "--yes"],
++      HARNESS_DIR,
++    );
++    expect(result.exitCode).toBe(0);
++    const parsed = parseYaml(
++      readFileSync(join(HARNESS_DIR, "projects.yaml"), "utf8"),
++    ) as { projects: Array<Record<string, unknown>> };
++    expect(parsed.projects[0].hands_off).toEqual(["node_modules/"]);
++  });
++
++  it("help text mentions the register command and the hands_off exception", async () => {
++    const result = await runCli(["--help"], HARNESS_DIR);
++    expect(result.stdout).toContain("register");
++    expect(result.stdout).toContain("hands_off");
++  });
++});
