@@ -1,0 +1,545 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index b1785a0..64313aa 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -52,6 +52,8 @@ import {
+   formatSessionsTable,
+   formatBacklogTable,
+   computeBacklogTotals,
++  computeSessionTotals,
++  formatSessionTotals,
+   parseSessionsFlag,
+   stripSessionsArgs,
+   type BacklogRow,
+@@ -84,7 +86,7 @@ Usage:
+     Example: generalstaff cycle --project=myapp
+     Example: generalstaff cycle --project=myapp --dry-run
+ 
+-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog]
++  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals]
+                                                           Show fleet state
+     Example: generalstaff status
+     Example: generalstaff status --json                 # machine-readable output
+@@ -96,6 +98,8 @@ Usage:
+     Example: generalstaff status --summary --json       # same, as JSON
+     Example: generalstaff status --backlog              # per-project backlog buckets
+     Example: generalstaff status --backlog --json       # same, as JSON
++    Example: generalstaff status --totals               # all-time aggregate session metrics
++    Example: generalstaff status --totals --json        # same, as JSON
+ 
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+@@ -337,6 +341,7 @@ switch (command) {
+         json: { type: "boolean", default: false },
+         summary: { type: "boolean", default: false },
+         backlog: { type: "boolean", default: false },
++        totals: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -354,7 +359,32 @@ switch (command) {
+       process.exit(1);
+     }
+ 
++    // gs-202: --totals aggregates across the full session history; it
++    // can't coexist with any other subview.
++    if (
++      statusValues.totals &&
++      (sessionsFlag.enabled ||
++        statusValues.summary ||
++        statusValues.backlog ||
++        watch.enabled)
++    ) {
++      console.error(
++        "Error: --totals cannot be combined with --sessions/--summary/--backlog/--watch",
++      );
++      process.exit(1);
++    }
++
+     const renderStatus = async () => {
++      if (statusValues.totals) {
++        const sessions = await loadRecentSessions(Number.MAX_SAFE_INTEGER);
++        const totals = computeSessionTotals(sessions);
++        if (statusValues.json) {
++          console.log(JSON.stringify(totals, null, 2));
++        } else {
++          console.log(formatSessionTotals(totals));
++        }
++        return;
++      }
+       if (statusValues.backlog) {
+         const projects = await loadProjects();
+         const rows: BacklogRow[] = [];
+diff --git a/src/sessions.ts b/src/sessions.ts
+index 9bf8cdc..6b8cd14 100644
+--- a/src/sessions.ts
++++ b/src/sessions.ts
+@@ -189,6 +189,110 @@ export function formatBacklogTable(rows: BacklogRow[]): string {
+   return lines.join("\n");
+ }
+ 
++// gs-202: aggregate totals across the full session history for
++// `generalstaff status --totals`. Summarises cycle throughput, time
++// spent, parallel-vs-sequential mix, and a duration-weighted average
++// efficiency for the parallel runs.
++export interface SessionTotals {
++  total_sessions: number;
++  total_cycles: number;
++  total_verified: number;
++  total_failed: number;
++  total_duration_hours: number;
++  parallel_sessions: number;
++  sequential_sessions: number;
++  weighted_avg_parallel_efficiency: number | null;
++  first_seen: string | null;
++  last_seen: string | null;
++}
++
++export function computeSessionTotals(sessions: SessionSummary[]): SessionTotals {
++  if (sessions.length === 0) {
++    return {
++      total_sessions: 0,
++      total_cycles: 0,
++      total_verified: 0,
++      total_failed: 0,
++      total_duration_hours: 0,
++      parallel_sessions: 0,
++      sequential_sessions: 0,
++      weighted_avg_parallel_efficiency: null,
++      first_seen: null,
++      last_seen: null,
++    };
++  }
++  let total_cycles = 0;
++  let total_verified = 0;
++  let total_failed = 0;
++  let total_duration_min = 0;
++  let parallel_sessions = 0;
++  let sequential_sessions = 0;
++  let weighted_eff_num = 0;
++  let weighted_eff_den = 0;
++  let first_seen_ms = Infinity;
++  let last_seen_ms = -Infinity;
++  for (const s of sessions) {
++    total_cycles += s.total_cycles;
++    total_verified += s.total_verified;
++    total_failed += s.total_failed;
++    total_duration_min += s.duration_minutes;
++    const isParallel =
++      typeof s.max_parallel_slots === "number" && s.max_parallel_slots > 1;
++    if (isParallel) {
++      parallel_sessions += 1;
++      if (typeof s.parallel_efficiency === "number") {
++        weighted_eff_num += s.parallel_efficiency * s.duration_minutes;
++        weighted_eff_den += s.duration_minutes;
++      }
++    } else {
++      sequential_sessions += 1;
++    }
++    const ms = new Date(s.started_at).getTime();
++    if (Number.isFinite(ms)) {
++      if (ms < first_seen_ms) first_seen_ms = ms;
++      if (ms > last_seen_ms) last_seen_ms = ms;
++    }
++  }
++  return {
++    total_sessions: sessions.length,
++    total_cycles,
++    total_verified,
++    total_failed,
++    total_duration_hours: total_duration_min / 60,
++    parallel_sessions,
++    sequential_sessions,
++    weighted_avg_parallel_efficiency:
++      weighted_eff_den > 0 ? weighted_eff_num / weighted_eff_den : null,
++    first_seen:
++      first_seen_ms === Infinity ? null : new Date(first_seen_ms).toISOString(),
++    last_seen:
++      last_seen_ms === -Infinity ? null : new Date(last_seen_ms).toISOString(),
++  };
++}
++
++export function formatSessionTotals(t: SessionTotals): string {
++  if (t.total_sessions === 0) {
++    return "No sessions recorded yet.";
++  }
++  const eff =
++    t.weighted_avg_parallel_efficiency !== null
++      ? `${(t.weighted_avg_parallel_efficiency * 100).toFixed(1)}%`
++      : "—";
++  const lines = [
++    `Total sessions:                   ${t.total_sessions}`,
++    `Total cycles:                     ${t.total_cycles}`,
++    `Total verified:                   ${t.total_verified}`,
++    `Total failed:                     ${t.total_failed}`,
++    `Total duration:                   ${t.total_duration_hours.toFixed(2)} hours`,
++    `Parallel sessions:                ${t.parallel_sessions}`,
++    `Sequential sessions:              ${t.sequential_sessions}`,
++    `Weighted-avg parallel efficiency: ${eff}`,
++    `First seen:                       ${t.first_seen ?? "—"}`,
++    `Last seen:                        ${t.last_seen ?? "—"}`,
++  ];
++  return lines.join("\n");
++}
++
+ export function formatSessionsTable(
+   sessions: SessionSummary[],
+   now: Date = new Date(),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ad6d9ab..2fd282f 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1190,14 +1190,15 @@
+   {
+     "id": "gs-202",
+     "title": "Add `generalstaff status --totals` subview. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --totals flag handler; add exported `computeSessionTotals(sessions: SessionSummary[]): SessionTotals` helper + `SessionTotals` interface in `src/sessions.ts` alongside formatSessionsTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output is a multi-line summary: total sessions recorded, total cycles, total verified, total failed, total duration in hours, count of parallel vs sequential sessions, weighted-average parallel_efficiency across parallel sessions (weight = session duration), first-seen timestamp, last-seen timestamp. `--json` flag emits the same data as structured JSON. Mutually exclusive with --sessions, --summary, --backlog, --watch — print an error like `Error: --totals cannot be combined with --sessions/--summary/--backlog/--watch` and exit code 1 if combined. Tests: (a) fixture with 3 sessions (1 parallel efficiency=0.8 duration=60min, 2 sequential duration=30min each) asserting totals math + weighted avg efficiency; (b) --json output shape; (c) mutex error exit code 1 on combined flags; (d) empty history → zero totals. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+       "src/sessions.ts",
+       "tests/sessions.test.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T18:24:23.065Z"
+   },
+   {
+     "id": "gs-204",
+@@ -1230,4 +1231,4 @@
+       "tests/session.test.ts"
+     ]
+   }
+-]
++]
+\ No newline at end of file
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 3c62017..1423b10 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -1793,4 +1793,160 @@ dispatcher:
+       );
+     });
+   });
++
++  describe("status --totals (gs-202)", () => {
++    const TOTALS_DIR = join(
++      import.meta.dir,
++      "fixtures",
++      "status_totals_test",
++    );
++
++    const PROJECTS_YAML = `
++projects:
++  - id: alpha
++    path: ${TOTALS_DIR.replace(/\\/g, "/")}
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    hands_off: []
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(join(TOTALS_DIR, "state", "_fleet"), { recursive: true });
++      writeFileSync(join(TOTALS_DIR, "projects.yaml"), PROJECTS_YAML);
++    });
++
++    afterEach(() => {
++      rmSync(TOTALS_DIR, { recursive: true, force: true });
++    });
++
++    it("--totals --json emits zero totals for an empty history", async () => {
++      const result = await runCli(["status", "--totals", "--json"], TOTALS_DIR);
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed).toEqual({
++        total_sessions: 0,
++        total_cycles: 0,
++        total_verified: 0,
++        total_failed: 0,
++        total_duration_hours: 0,
++        parallel_sessions: 0,
++        sequential_sessions: 0,
++        weighted_avg_parallel_efficiency: null,
++        first_seen: null,
++        last_seen: null,
++      });
++    });
++
++    it("--totals --json aggregates across recorded sessions", async () => {
++      const logPath = join(TOTALS_DIR, "state", "_fleet", "PROGRESS.jsonl");
++      const lines = [
++        {
++          timestamp: "2026-04-17T11:00:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 60,
++            total_cycles: 8,
++            total_verified: 7,
++            total_failed: 1,
++            stop_reason: "budget",
++            reviewer: "openrouter",
++            max_parallel_slots: 2,
++            parallel_rounds: 3,
++            slot_idle_seconds: 30,
++            parallel_efficiency: 0.8,
++          },
++        },
++        {
++          timestamp: "2026-04-17T12:30:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 3,
++            total_verified: 3,
++            total_failed: 0,
++            stop_reason: "budget",
++            reviewer: "claude",
++          },
++        },
++        {
++          timestamp: "2026-04-17T14:30:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 2,
++            total_verified: 1,
++            total_failed: 1,
++            stop_reason: "max-cycles",
++            reviewer: "claude",
++          },
++        },
++      ];
++      writeFileSync(
++        logPath,
++        lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
++      );
++      const result = await runCli(
++        ["status", "--totals", "--json"],
++        TOTALS_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.total_sessions).toBe(3);
++      expect(parsed.total_cycles).toBe(13);
++      expect(parsed.total_verified).toBe(11);
++      expect(parsed.total_failed).toBe(2);
++      expect(parsed.total_duration_hours).toBeCloseTo(2.0, 6);
++      expect(parsed.parallel_sessions).toBe(1);
++      expect(parsed.sequential_sessions).toBe(2);
++      expect(parsed.weighted_avg_parallel_efficiency).toBeCloseTo(0.8, 6);
++    });
++
++    it("rejects --totals combined with --sessions", async () => {
++      const result = await runCli(
++        ["status", "--totals", "--sessions"],
++        TOTALS_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
++      );
++    });
++
++    it("rejects --totals combined with --summary", async () => {
++      const result = await runCli(
++        ["status", "--totals", "--summary"],
++        TOTALS_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
++      );
++    });
++
++    it("rejects --totals combined with --backlog", async () => {
++      const result = await runCli(
++        ["status", "--totals", "--backlog"],
++        TOTALS_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
++      );
++    });
++  });
+ });
+diff --git a/tests/sessions.test.ts b/tests/sessions.test.ts
+index 6fc7fd9..51343e5 100644
+--- a/tests/sessions.test.ts
++++ b/tests/sessions.test.ts
+@@ -9,6 +9,8 @@ import {
+   formatSessionsTable,
+   formatBacklogTable,
+   computeBacklogTotals,
++  computeSessionTotals,
++  formatSessionTotals,
+   type SessionSummary,
+   type BacklogRow,
+ } from "../src/sessions";
+@@ -319,6 +321,150 @@ describe("formatSessionsTable", () => {
+   });
+ });
+ 
++describe("computeSessionTotals (gs-202)", () => {
++  it("returns zero totals for an empty history", () => {
++    const totals = computeSessionTotals([]);
++    expect(totals).toEqual({
++      total_sessions: 0,
++      total_cycles: 0,
++      total_verified: 0,
++      total_failed: 0,
++      total_duration_hours: 0,
++      parallel_sessions: 0,
++      sequential_sessions: 0,
++      weighted_avg_parallel_efficiency: null,
++      first_seen: null,
++      last_seen: null,
++    });
++  });
++
++  it("aggregates counts, duration, and weighted efficiency across a mixed fixture", () => {
++    const sessions: SessionSummary[] = [
++      {
++        started_at: "2026-04-17T10:00:00.000Z",
++        duration_minutes: 60,
++        total_cycles: 8,
++        total_verified: 7,
++        total_failed: 1,
++        stop_reason: "budget",
++        reviewer: "openrouter",
++        max_parallel_slots: 2,
++        parallel_rounds: 3,
++        slot_idle_seconds: 30,
++        parallel_efficiency: 0.8,
++      },
++      {
++        started_at: "2026-04-17T12:00:00.000Z",
++        duration_minutes: 30,
++        total_cycles: 3,
++        total_verified: 3,
++        total_failed: 0,
++        stop_reason: "budget",
++        reviewer: "claude",
++      },
++      {
++        started_at: "2026-04-17T14:00:00.000Z",
++        duration_minutes: 30,
++        total_cycles: 2,
++        total_verified: 1,
++        total_failed: 1,
++        stop_reason: "max-cycles",
++        reviewer: "claude",
++      },
++    ];
++    const totals = computeSessionTotals(sessions);
++    expect(totals.total_sessions).toBe(3);
++    expect(totals.total_cycles).toBe(13);
++    expect(totals.total_verified).toBe(11);
++    expect(totals.total_failed).toBe(2);
++    expect(totals.total_duration_hours).toBeCloseTo(2.0, 6);
++    expect(totals.parallel_sessions).toBe(1);
++    expect(totals.sequential_sessions).toBe(2);
++    // Only one parallel session so the duration-weighted avg equals its own efficiency.
++    expect(totals.weighted_avg_parallel_efficiency).toBeCloseTo(0.8, 6);
++    expect(totals.first_seen).toBe("2026-04-17T10:00:00.000Z");
++    expect(totals.last_seen).toBe("2026-04-17T14:00:00.000Z");
++  });
++
++  it("weighted-average efficiency is duration-weighted across multiple parallel sessions", () => {
++    const sessions: SessionSummary[] = [
++      {
++        started_at: "2026-04-17T10:00:00.000Z",
++        duration_minutes: 60,
++        total_cycles: 10,
++        total_verified: 10,
++        total_failed: 0,
++        stop_reason: "budget",
++        reviewer: "openrouter",
++        max_parallel_slots: 2,
++        parallel_efficiency: 1.0,
++      },
++      {
++        started_at: "2026-04-17T12:00:00.000Z",
++        duration_minutes: 20,
++        total_cycles: 4,
++        total_verified: 4,
++        total_failed: 0,
++        stop_reason: "budget",
++        reviewer: "openrouter",
++        max_parallel_slots: 2,
++        parallel_efficiency: 0.5,
++      },
++    ];
++    const totals = computeSessionTotals(sessions);
++    // (1.0 * 60 + 0.5 * 20) / (60 + 20) = 70 / 80 = 0.875
++    expect(totals.weighted_avg_parallel_efficiency).toBeCloseTo(0.875, 6);
++  });
++
++  it("leaves weighted-avg null when no session ran in parallel mode", () => {
++    const sessions: SessionSummary[] = [
++      {
++        started_at: "2026-04-17T10:00:00.000Z",
++        duration_minutes: 30,
++        total_cycles: 5,
++        total_verified: 5,
++        total_failed: 0,
++        stop_reason: "budget",
++        reviewer: "claude",
++      },
++    ];
++    expect(
++      computeSessionTotals(sessions).weighted_avg_parallel_efficiency,
++    ).toBeNull();
++  });
++});
++
++describe("formatSessionTotals (gs-202)", () => {
++  it("renders a placeholder when no sessions exist", () => {
++    expect(formatSessionTotals(computeSessionTotals([]))).toBe(
++      "No sessions recorded yet.",
++    );
++  });
++
++  it("renders every field on a populated fixture", () => {
++    const sessions: SessionSummary[] = [
++      {
++        started_at: "2026-04-17T10:00:00.000Z",
++        duration_minutes: 60,
++        total_cycles: 8,
++        total_verified: 7,
++        total_failed: 1,
++        stop_reason: "budget",
++        reviewer: "openrouter",
++        max_parallel_slots: 2,
++        parallel_efficiency: 0.8,
++      },
++    ];
++    const out = formatSessionTotals(computeSessionTotals(sessions));
++    expect(out).toContain("Total sessions:");
++    expect(out).toContain("Total cycles:");
++    expect(out).toContain("Parallel sessions:");
++    expect(out).toContain("Weighted-avg parallel efficiency: 80.0%");
++    expect(out).toContain("First seen:");
++    expect(out).toContain("Last seen:");
++  });
++});
++
+ describe("formatBacklogTable (gs-199)", () => {
+   it("returns placeholder when there are no projects", () => {
+     expect(formatBacklogTable([])).toBe("No projects registered.");
