@@ -278,6 +278,20 @@ free, offline). The Hard-Rule 8 BYOK principle applies: nothing
 about the reviewer is hosted, no key is shipped, every credential
 is sourced from the user's own environment at launch.
 
+**Observed cost calibration (Ray, 2026-04-18 afternoon):** after
+22 verified morning cycles + a 2-cycle parallel validation run,
+Ray's OpenRouter account had been charged **~$0.06 total** across
+the day's sessions. That's the real data point behind the
+"reviewer=openrouter keeps pressure off Claude subscription
+quota" routing default. For **unattended or high-volume runs**
+(overnight, long chain sessions, parallel mode where the
+semaphore would otherwise stampede claude -p), route the
+reviewer to OpenRouter — the per-session spend is a rounding
+error against the subscription-quota cost of doing the same
+work on Claude. Reserve `reviewer=claude` for attended
+interactive sessions where the operator is actively watching
+and low cycle-count means quota isn't at risk.
+
 **Environment variables:**
 
 - `GENERALSTAFF_REVIEWER_PROVIDER` — selects the provider.
