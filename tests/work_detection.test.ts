@@ -5,6 +5,8 @@ import {
   catalogdnaCountRemaining,
   greenfieldCountRemaining,
   countRemainingWork,
+  countRemainingWorkDetailed,
+  greenfieldCountRemainingDetailed,
   hasMoreWork,
   gitIssuesCountRemaining,
   gitIssuesHasMoreWork,
@@ -553,6 +555,170 @@ describe("countRemainingWork", () => {
       work_detection: "bogus_mode" as unknown as ProjectConfig["work_detection"],
     });
     expect(await countRemainingWork(project)).toBe(0);
+  });
+});
+
+// gs-200: countRemainingWorkDetailed — structured breakdown of
+// pending/in_progress/done/skipped with the three "pending" buckets
+// (bot-pickable vs. interactive_only vs. hands_off_intersect).
+describe("countRemainingWorkDetailed", () => {
+  function makeProject(
+    overrides: Partial<ProjectConfig> & Pick<ProjectConfig, "work_detection">,
+  ): ProjectConfig {
+    return {
+      id: "proj",
+      path: FIXTURES,
+      priority: 1,
+      engineer_command: "",
+      verification_command: "",
+      cycle_budget_minutes: 10,
+      concurrency_detection: "none",
+      branch: "bot/work",
+      auto_merge: false,
+      hands_off: [],
+      ...overrides,
+    };
+  }
+
+  it("buckets pending tasks across bot_pickable / interactive_only / hands_off_intersect", async () => {
+    writeFixture(
+      "state/gs-200-mix/tasks.json",
+      JSON.stringify([
+        { id: "1", title: "plain pending", status: "pending", priority: 1 },
+        {
+          id: "2",
+          title: "pending with safe expected_touches",
+          status: "pending",
+          priority: 1,
+          expected_touches: ["src/cli.ts"],
+        },
+        {
+          id: "3",
+          title: "interactive-only",
+          status: "pending",
+          priority: 1,
+          interactive_only: true,
+        },
+        {
+          id: "4",
+          title: "conflicts with hands_off",
+          status: "pending",
+          priority: 1,
+          expected_touches: ["src/prompts/engineer.md"],
+        },
+        { id: "5", title: "running", status: "in_progress", priority: 1 },
+        { id: "6", title: "done", status: "done", priority: 1 },
+        { id: "7", title: "skipped", status: "skipped", priority: 1 },
+      ]),
+    );
+    const project = makeProject({
+      id: "gs-200-mix",
+      work_detection: "tasks_json",
+      hands_off: ["src/prompts/**"],
+    });
+
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.pending_bot_pickable).toBe(2);
+    expect(b.pending_interactive_only).toBe(1);
+    expect(b.pending_handsoff_conflict).toBe(1);
+    expect(b.in_progress).toBe(1);
+    expect(b.done).toBe(1);
+    expect(b.skipped).toBe(1);
+    expect(b.total).toBe(7);
+  });
+
+  it("returns an all-zero breakdown when tasks.json is missing", async () => {
+    const project = makeProject({
+      id: "gs-200-missing",
+      work_detection: "tasks_json",
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.pending_bot_pickable).toBe(0);
+    expect(b.pending_interactive_only).toBe(0);
+    expect(b.pending_handsoff_conflict).toBe(0);
+    expect(b.in_progress).toBe(0);
+    expect(b.done).toBe(0);
+    expect(b.skipped).toBe(0);
+    expect(b.total).toBe(0);
+  });
+
+  it("returns an all-zero breakdown on malformed tasks.json", async () => {
+    writeFixture("state/gs-200-bad/tasks.json", "{ not json");
+    const project = makeProject({
+      id: "gs-200-bad",
+      work_detection: "tasks_json",
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.total).toBe(0);
+    expect(b.pending_bot_pickable).toBe(0);
+  });
+
+  it("delegates to greenfieldCountRemainingDetailed for tasks_json mode", async () => {
+    writeFixture(
+      "state/gs-200-direct/tasks.json",
+      JSON.stringify([
+        { id: "1", status: "pending", priority: 1, title: "a" },
+        {
+          id: "2",
+          status: "pending",
+          priority: 1,
+          title: "b",
+          interactive_only: true,
+        },
+      ]),
+    );
+    const direct = await greenfieldCountRemainingDetailed(
+      FIXTURES,
+      "gs-200-direct",
+      [],
+    );
+    expect(direct.pending_bot_pickable).toBe(1);
+    expect(direct.pending_interactive_only).toBe(1);
+    expect(direct.total).toBe(2);
+  });
+
+  it("for catalogdna mode, puts the full count into pending_bot_pickable with refinement fields zeroed", async () => {
+    const projectPath = join(FIXTURES, "gs-200-cat");
+    writeFixture(
+      "gs-200-cat/bot_tasks.md",
+      `## P0\n- [ ] one\n- [ ] two\n- [x] done\n`,
+    );
+    const project = makeProject({
+      work_detection: "catalogdna_bot_tasks",
+      path: projectPath,
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.pending_bot_pickable).toBe(2);
+    expect(b.pending_interactive_only).toBe(0);
+    expect(b.pending_handsoff_conflict).toBe(0);
+    expect(b.in_progress).toBe(0);
+    expect(b.done).toBe(0);
+    expect(b.skipped).toBe(0);
+    expect(b.total).toBe(2);
+  });
+
+  it("for git_unmerged mode, puts the branch-ahead count into pending_bot_pickable", async () => {
+    const workDir = setupRepoWithBranch("gs-200-unmerged", 2);
+    const project = makeProject({
+      work_detection: "git_unmerged",
+      path: workDir,
+      branch: "bot/work",
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.pending_bot_pickable).toBe(2);
+    expect(b.pending_interactive_only).toBe(0);
+    expect(b.pending_handsoff_conflict).toBe(0);
+    expect(b.total).toBe(2);
+  });
+
+  it("returns an all-zero breakdown for an unknown work_detection mode", async () => {
+    const project = makeProject({
+      work_detection:
+        "nope_mode" as unknown as ProjectConfig["work_detection"],
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.total).toBe(0);
+    expect(b.pending_bot_pickable).toBe(0);
   });
 });
 

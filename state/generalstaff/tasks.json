@@ -1146,7 +1146,7 @@
   {
     "id": "gs-200",
     "title": "Extend work_detection.ts with a detailed-breakdown helper. CREATE ONLY: modify `src/work_detection.ts` (add new exported `countRemainingWorkDetailed` + `WorkBreakdown` type; leave existing `countRemainingWork` unchanged for back-compat); append new describe block to `tests/work_detection.test.ts`. DO NOT CREATE: new files; anything under `src/prompts/`, `src/safety.ts`, `src/reviewer.ts`, `src/state.ts`, `scripts/`, or any design doc (.md, PIVOT-*, PHASE-*, DESIGN.md, FUTURE-DIRECTIONS-*, RULE-RELAXATION-*, README.md, INDEX.md, CLAUDE.md, LAUNCH-PLAN.md, VOICE.md, UI-VISION-*). The new helper returns `{pending_bot_pickable, pending_interactive_only, pending_handsoff_conflict, in_progress, done, skipped, total}` (all numbers). For `work_detection: 'tasks_json'` projects, use `isTaskBotPickable(task, project.hands_off)` from `src/tasks.ts` to classify each pending task: bot_pickable if `.ok === true`, interactive_only if reason is interactive_only, handsoff_conflict if reason is hands_off_intersect. For other work_detection modes (catalogdna_bot_tasks, git_issues, git_unmerged), return a breakdown with `pending_bot_pickable === total_pending` (existing count) and refinement fields zeroed. Tests: fixture tasks.json with a mix of pending + interactive_only + expected_touches-that-conflict + done; assert each bucket's count. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "expected_touches": [
       "src/work_detection.ts",
