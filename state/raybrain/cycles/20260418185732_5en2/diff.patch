@@ -1,0 +1,438 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 312f1b0..c694fb3 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -10,6 +10,7 @@ dependencies = [
+     "llama-index-readers-file>=0.4",
+     "python-frontmatter>=1.1",
+     "ragas>=0.2",
++    "httpx>=0.27",
+ ]
+ 
+ [project.scripts]
+diff --git a/src/raybrain/ingest/ollama_client.py b/src/raybrain/ingest/ollama_client.py
+new file mode 100644
+index 0000000..9641aa4
+--- /dev/null
++++ b/src/raybrain/ingest/ollama_client.py
+@@ -0,0 +1,52 @@
++"""Ollama HTTP client — local-only LLM egress.
++
++Thin wrapper around Ollama's ``/api/generate``. Every call passes
++through :func:`raybrain.privacy.network_guard.assert_local` before
++dispatch. Base URL + default model read from ``OLLAMA_HOST`` and
++``RAYBRAIN_INGEST_MODEL`` env vars.
++"""
++
++from __future__ import annotations
++
++import os
++
++import httpx
++
++from raybrain.privacy.network_guard import assert_local
++
++__all__ = ["DEFAULT_MODEL", "OllamaClient"]
++
++DEFAULT_BASE_URL = "http://localhost:11434"
++DEFAULT_MODEL = "llama3.1:8b"
++
++
++class OllamaClient:
++    def __init__(self, base_url: str | None = None, timeout: float = 120.0) -> None:
++        self.base_url = (
++            base_url or os.environ.get("OLLAMA_HOST", DEFAULT_BASE_URL)
++        ).rstrip("/")
++        self.timeout = timeout
++
++    def generate(
++        self,
++        prompt: str,
++        model: str | None = None,
++        temperature: float = 0.0,
++        seed: int = 42,
++    ) -> str:
++        """Call ``/api/generate`` and return the response text.
++
++        Temperature 0 + fixed seed so repeated calls over the same
++        prompt yield deterministic output — a precondition for §2.2.
++        """
++        url = f"{self.base_url}/api/generate"
++        assert_local(url)
++        payload = {
++            "model": model or os.environ.get("RAYBRAIN_INGEST_MODEL", DEFAULT_MODEL),
++            "prompt": prompt,
++            "stream": False,
++            "options": {"temperature": temperature, "seed": seed},
++        }
++        response = httpx.post(url, json=payload, timeout=self.timeout)
++        response.raise_for_status()
++        return response.json().get("response", "")
+diff --git a/src/raybrain/ingest/pipeline.py b/src/raybrain/ingest/pipeline.py
+new file mode 100644
+index 0000000..83279f4
+--- /dev/null
++++ b/src/raybrain/ingest/pipeline.py
+@@ -0,0 +1,166 @@
++"""Ingest orchestrator — SourceDocument + OllamaClient → WikiPage.
++
++Calls the client, runs the §2.1 citation-floor sweep, retries with
++a correction nudge up to :data:`MAX_RETRIES` times on violation,
++then parses the validated markdown into a :class:`WikiPage`.
++
++Excerpt resolution is best-effort: line-range locators whose
++source_id matches *doc* slice *doc.body* to populate the excerpt;
++cross-document resolution is a later task's job.
++"""
++
++from __future__ import annotations
++
++import re
++
++from raybrain.ingest.citation_floor import CitationFloorViolation, check_citation_floor
++from raybrain.ingest.ollama_client import OllamaClient
++from raybrain.ingest.prompt import build_ingest_prompt
++from raybrain.loaders.base import SourceDocument
++from raybrain.schema.citation import (
++    Citation,
++    LineRangeLocator,
++    Locator,
++    PageLocator,
++    ParaAnchorLocator,
++    TimestampLocator,
++)
++from raybrain.schema.source_id import SourceId
++from raybrain.schema.wiki_page import Paragraph, WikiPage
++
++__all__ = ["MAX_RETRIES", "ingest_source"]
++
++MAX_RETRIES = 2
++
++_REF_MARKER = re.compile(
++    r"\[ref:(?P<sid>[a-z0-9_-]+):"
++    r"(?P<loc>"
++    r"lines=\d+-\d+"
++    r"|page=\d+"
++    r"|timestamp=\d{2}:\d{2}:\d{2}-\d{2}:\d{2}:\d{2}"
++    r"|para=[^\]\s]+"
++    r")\]"
++)
++_ATX_HEADING = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
++_SETEXT_UNDERLINE = re.compile(r"^\s{0,3}(?:=+|-+)\s*$")
++_ATX_TITLE = re.compile(r"^\s{0,3}#\s+(?P<title>.+?)\s*#*\s*$")
++
++
++def _parse_locator(raw: str) -> Locator:
++    if raw.startswith("lines="):
++        s, e = raw.removeprefix("lines=").split("-", 1)
++        return LineRangeLocator(start=int(s), end=int(e))
++    if raw.startswith("page="):
++        return PageLocator(page=int(raw.removeprefix("page=")))
++    if raw.startswith("timestamp="):
++        s, e = raw.removeprefix("timestamp=").split("-", 1)
++        return TimestampLocator(start=s, end=e)
++    if raw.startswith("para="):
++        return ParaAnchorLocator(anchor=raw.removeprefix("para="))
++    raise ValueError(f"unrecognized locator syntax: {raw!r}")
++
++
++def _resolve_excerpt(sid: SourceId, loc: Locator, doc: SourceDocument) -> str:
++    if sid != doc.source_path.stem or not isinstance(loc, LineRangeLocator):
++        return ""
++    lines = doc.body.splitlines()
++    return "\n".join(lines[max(loc.start - 1, 0) : min(loc.end, len(lines))])
++
++
++def _split_blocks(markdown: str) -> list[list[str]]:
++    blocks: list[list[str]] = []
++    current: list[str] = []
++    in_fence = False
++    marker: str | None = None
++    for line in markdown.splitlines():
++        stripped = line.lstrip()
++        leading = len(line) - len(stripped)
++        is_fence = leading <= 3 and (
++            stripped.startswith("```") or stripped.startswith("~~~")
++        )
++        if is_fence:
++            if current:
++                blocks.append(current)
++                current = []
++            if not in_fence:
++                in_fence, marker = True, "```" if stripped.startswith("```") else "~~~"
++            elif marker and stripped.startswith(marker):
++                in_fence, marker = False, None
++            continue
++        if in_fence:
++            continue
++        if line.strip() == "":
++            if current:
++                blocks.append(current)
++                current = []
++        else:
++            current.append(line)
++    if current:
++        blocks.append(current)
++    return blocks
++
++
++def _is_heading(block: list[str]) -> bool:
++    if _ATX_HEADING.match(block[0]):
++        return True
++    return len(block) >= 2 and bool(_SETEXT_UNDERLINE.match(block[-1]))
++
++
++def _extract_title(markdown: str, fallback: str) -> str:
++    for line in markdown.splitlines():
++        m = _ATX_TITLE.match(line)
++        if m:
++            return m.group("title").strip()
++    return fallback
++
++
++def _parse_to_wiki_page(markdown: str, doc: SourceDocument) -> WikiPage:
++    title = _extract_title(markdown, fallback=doc.title)
++    paragraphs: list[Paragraph] = []
++    seen: list[SourceId] = []
++    for block in _split_blocks(markdown):
++        if _is_heading(block):
++            continue
++        text = "\n".join(block)
++        citations: list[Citation] = []
++        for m in _REF_MARKER.finditer(text):
++            sid = SourceId(m.group("sid"))
++            loc = _parse_locator(m.group("loc"))
++            citations.append(
++                Citation(source_id=sid, locator=loc, excerpt=_resolve_excerpt(sid, loc, doc))
++            )
++            if sid not in seen:
++                seen.append(sid)
++        paragraphs.append(
++            Paragraph(text=_REF_MARKER.sub("", text).strip(), citations=citations)
++        )
++    return WikiPage(title=title, source_ids=seen, paragraphs=paragraphs)
++
++
++def ingest_source(
++    doc: SourceDocument,
++    prior_wiki: WikiPage | None,
++    client: OllamaClient,
++    claude_md_text: str = "",
++) -> WikiPage:
++    """Synthesize a :class:`WikiPage` from *doc* via *client*."""
++    base_prompt = build_ingest_prompt(doc, prior_wiki, claude_md_text)
++    last_error: CitationFloorViolation | None = None
++    for attempt in range(MAX_RETRIES + 1):
++        prompt = base_prompt
++        if attempt > 0 and last_error is not None:
++            prompt = (
++                base_prompt
++                + f"\n\nCORRECTION: previous response violated the citation floor "
++                f"({last_error}). Every non-empty paragraph must carry at least one "
++                "[ref:<source_id>:<locator>] marker. Try again.\n"
++            )
++        markdown = client.generate(prompt)
++        try:
++            check_citation_floor(markdown)
++        except CitationFloorViolation as exc:
++            last_error = exc
++            continue
++        return _parse_to_wiki_page(markdown, doc)
++    assert last_error is not None
++    raise last_error
+diff --git a/src/raybrain/ingest/prompt.py b/src/raybrain/ingest/prompt.py
+new file mode 100644
+index 0000000..62ac844
+--- /dev/null
++++ b/src/raybrain/ingest/prompt.py
+@@ -0,0 +1,51 @@
++"""Ingest prompt builder (CLAUDE.md §3.1 step 4).
++
++Assembles schema + optional prior wiki page + source doc into a
++single in-context prompt for the ingest LLM.
++"""
++
++from __future__ import annotations
++
++from raybrain.loaders.base import SourceDocument
++from raybrain.schema.wiki_page import WikiPage
++
++__all__ = ["build_ingest_prompt"]
++
++_SECTION = "=" * 60
++
++
++def _render_prior_page(page: WikiPage) -> str:
++    lines = [f"# {page.title}", ""]
++    for para in page.paragraphs:
++        lines.append(para.text)
++        if para.citations:
++            lines.append(" ".join(c.render() for c in para.citations))
++        lines.append("")
++    return "\n".join(lines).rstrip() + "\n"
++
++
++def build_ingest_prompt(
++    source_doc: SourceDocument,
++    prior_wiki_page: WikiPage | None,
++    claude_md_text: str,
++) -> str:
++    parts: list[str] = [
++        f"{_SECTION}\nSCHEMA (CLAUDE.md)\n{_SECTION}\n{claude_md_text}\n"
++    ]
++    if prior_wiki_page is not None:
++        parts.append(
++            f"{_SECTION}\nPRIOR WIKI PAGE (update, do not re-synthesize)\n"
++            f"{_SECTION}\n{_render_prior_page(prior_wiki_page)}\n"
++        )
++    parts.append(
++        f"{_SECTION}\nSOURCE DOCUMENT ({source_doc.source_path.stem})\n"
++        f"{_SECTION}\ntitle: {source_doc.title}\n\n{source_doc.body}\n"
++    )
++    parts.append(
++        f"{_SECTION}\nTASK\n{_SECTION}\n"
++        "Emit a wiki page in markdown. Every non-empty paragraph must\n"
++        "carry at least one [ref:<source_id>:<locator>] marker per the\n"
++        "schema above. Headings and code blocks are exempt. Output the\n"
++        "markdown only — no preamble, no commentary.\n"
++    )
++    return "\n".join(parts)
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index ed34f0c..5eee08c 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -44,7 +44,7 @@
+   {
+     "id": "rayb-008",
+     "title": "Ollama client + ingest orchestrator (depends on rayb-006 schema + rayb-007 privacy). CREATE ONLY: src/raybrain/ingest/ollama_client.py with OllamaClient class exposing generate(prompt: str, model: str, temperature: float = 0.0, seed: int = 42) -> str via HTTP POST to http://localhost:11434/api/generate — calls privacy.network_guard.assert_local() before every call; reads the base URL from env var OLLAMA_HOST defaulting to http://localhost:11434; default model from env var RAYBRAIN_INGEST_MODEL defaulting to 'llama3.1:8b' (escape hatch for Ray to override to llama3.2:3b or other per hardware); src/raybrain/ingest/prompt.py with build_ingest_prompt(source_doc, prior_wiki_page, claude_md_text) -> str that builds the in-context prompt (CLAUDE.md as first system segment, source doc as user turn, prior wiki page as context if present); src/raybrain/ingest/pipeline.py with ingest_source(doc: SourceDocument, prior_wiki: Optional[WikiPage], client: OllamaClient) -> WikiPage that calls the client, parses LLM markdown output into WikiPage via the schema from rayb-006, raises CitationFloorViolation on invalid output — retries with an explicit 'you omitted required citations, try again' prompt up to 2 times, then gives up and raises; update pyproject.toml to add httpx dependency if not already transitive; tests/unit/test_ingest_pipeline.py using a mock OllamaClient (no network, returns canned markdown strings) covering: valid output parses to WikiPage, citation-floor violation raises after retry exhaustion, network_guard is invoked before each generate call. DO NOT CREATE: src/raybrain/query/ (rayb-010); src/raybrain/wiki/ (rayb-009); src/raybrain/policy/; vault/; corpus/; eval/golden/. Do NOT make architectural choices beyond CLAUDE.md and phase2-plan.md §2 — if a decision point arises that CLAUDE.md doesn't answer, stop and open a follow-on task. Expected diff: ~280-380 lines (hard cap 380; split into ollama_client.py + pipeline.py tasks if that cap is at risk).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/unit/test_ingest_pipeline.py b/tests/unit/test_ingest_pipeline.py
+new file mode 100644
+index 0000000..ff5cf29
+--- /dev/null
++++ b/tests/unit/test_ingest_pipeline.py
+@@ -0,0 +1,100 @@
++"""Tests for `raybrain.ingest.pipeline` using a mock OllamaClient."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from raybrain.ingest.citation_floor import CitationFloorViolation
++from raybrain.ingest.ollama_client import OllamaClient
++from raybrain.ingest.pipeline import MAX_RETRIES, ingest_source
++from raybrain.loaders.base import SourceDocument
++from raybrain.privacy.network_guard import NetworkEgressViolation
++from raybrain.schema.citation import LineRangeLocator
++
++
++class _CannedClient:
++    def __init__(self, responses: list[str]) -> None:
++        self._responses = list(responses)
++        self.calls: list[str] = []
++
++    def generate(self, prompt: str, **_: object) -> str:
++        self.calls.append(prompt)
++        if not self._responses:
++            raise RuntimeError("canned client exhausted")
++        return self._responses.pop(0)
++
++
++def _source_doc() -> SourceDocument:
++    return SourceDocument(
++        title="Asymmetric Objectives",
++        body=(
++            "Ray describes asymmetric objectives as a third way\n"
++            "between victory conditions and pure scoring.\n"
++            "He returns to this in later design notes.\n"
++        ),
++        frontmatter={},
++        line_count=3,
++        content_hash="deadbeef",
++        source_path=Path("journal-2016-09.md"),
++        source_type="plain_markdown",
++        loader_version="1.0",
++    )
++
++
++VALID_MARKDOWN = (
++    "# Asymmetric Objectives\n\n"
++    "Ray frames asymmetric objectives as a third way between\n"
++    "victory conditions and pure scoring "
++    "[ref:journal-2016-09:lines=1-2].\n\n"
++    "He returns to the framing in later design notes "
++    "[ref:journal-2016-09:lines=3-3].\n"
++)
++
++INVALID_MARKDOWN = "# Asymmetric Objectives\n\nThis paragraph has no citation at all.\n"
++
++
++def test_valid_output_parses_to_wiki_page() -> None:
++    client = _CannedClient([VALID_MARKDOWN])
++    page = ingest_source(_source_doc(), None, client)  # type: ignore[arg-type]
++
++    assert page.title == "Asymmetric Objectives"
++    assert len(page.paragraphs) == 2
++    assert all(len(p.citations) == 1 for p in page.paragraphs)
++    first = page.paragraphs[0].citations[0]
++    assert first.source_id == "journal-2016-09"
++    assert isinstance(first.locator, LineRangeLocator)
++    assert (first.locator.start, first.locator.end) == (1, 2)
++    assert "[ref:" not in page.paragraphs[0].text
++    assert "third way" in first.excerpt
++    assert page.source_ids == ["journal-2016-09"]
++
++
++def test_retry_succeeds_after_one_violation() -> None:
++    client = _CannedClient([INVALID_MARKDOWN, VALID_MARKDOWN])
++    page = ingest_source(_source_doc(), None, client)  # type: ignore[arg-type]
++    assert len(client.calls) == 2
++    assert "CORRECTION" in client.calls[1]
++    assert page.title == "Asymmetric Objectives"
++
++
++def test_retry_exhaustion_raises() -> None:
++    client = _CannedClient([INVALID_MARKDOWN] * (MAX_RETRIES + 1))
++    with pytest.raises(CitationFloorViolation):
++        ingest_source(_source_doc(), None, client)  # type: ignore[arg-type]
++    assert len(client.calls) == MAX_RETRIES + 1
++
++
++def test_ollama_client_rejects_non_local_host() -> None:
++    client = OllamaClient(base_url="http://example.com")
++    with pytest.raises(NetworkEgressViolation):
++        client.generate("hello")
++
++
++def test_ollama_client_uses_env_host(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("OLLAMA_HOST", "http://8.8.8.8:11434")
++    client = OllamaClient()
++    assert client.base_url == "http://8.8.8.8:11434"
++    with pytest.raises(NetworkEgressViolation):
++        client.generate("hello")
+diff --git a/uv.lock b/uv.lock
+index ede75a4..b69a368 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -2075,6 +2075,7 @@ name = "raybrain"
+ version = "0.1.0"
+ source = { editable = "." }
+ dependencies = [
++    { name = "httpx" },
+     { name = "llama-index-core" },
+     { name = "llama-index-readers-file" },
+     { name = "pydantic" },
+@@ -2091,6 +2092,7 @@ dev = [
+ 
+ [package.metadata]
+ requires-dist = [
++    { name = "httpx", specifier = ">=0.27" },
+     { name = "llama-index-core", specifier = ">=0.12" },
+     { name = "llama-index-readers-file", specifier = ">=0.4" },
+     { name = "pydantic", specifier = ">=2" },
