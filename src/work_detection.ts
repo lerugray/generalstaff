@@ -5,8 +5,38 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { botPickableTasks } from "./tasks";
+import { botPickableTasks, isTaskBotPickable } from "./tasks";
 import type { ProjectConfig, GreenfieldTask } from "./types";
+
+// gs-200: structured breakdown of remaining work. Distinguishes the
+// three "pending" buckets that the dispatcher/queuer care about —
+// bot-pickable work vs. interactive-only tasks vs. tasks whose
+// expected_touches collide with hands_off — and reports in_progress /
+// done / skipped alongside for `status --backlog` UIs. For non-
+// tasks_json modes the fine-grained breakdown isn't observable from
+// the source, so pending_bot_pickable carries the whole count and
+// the refinement fields zero out.
+export interface WorkBreakdown {
+  pending_bot_pickable: number;
+  pending_interactive_only: number;
+  pending_handsoff_conflict: number;
+  in_progress: number;
+  done: number;
+  skipped: number;
+  total: number;
+}
+
+function emptyBreakdown(): WorkBreakdown {
+  return {
+    pending_bot_pickable: 0,
+    pending_interactive_only: 0,
+    pending_handsoff_conflict: 0,
+    in_progress: 0,
+    done: 0,
+    skipped: 0,
+    total: 0,
+  };
+}
 
 export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
   switch (project.work_detection) {
@@ -45,6 +75,77 @@ export async function countRemainingWork(
     default:
       return 0;
   }
+}
+
+export async function countRemainingWorkDetailed(
+  project: ProjectConfig,
+): Promise<WorkBreakdown> {
+  if (project.work_detection === "tasks_json") {
+    return greenfieldCountRemainingDetailed(
+      project.path,
+      project.id,
+      project.hands_off,
+    );
+  }
+  // Non-tasks_json modes only expose a flat "pending" count at their
+  // source (bot_tasks.md checkbox count, git commits ahead, etc.).
+  // Surface that number in pending_bot_pickable and zero the rest.
+  const count = await countRemainingWork(project);
+  const b = emptyBreakdown();
+  b.pending_bot_pickable = count;
+  b.total = count;
+  return b;
+}
+
+export async function greenfieldCountRemainingDetailed(
+  projectPath: string,
+  projectId: string,
+  handsOff: string[] = [],
+): Promise<WorkBreakdown> {
+  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
+  if (!existsSync(tasksPath)) return emptyBreakdown();
+
+  let tasks: GreenfieldTask[];
+  try {
+    const raw = await readFile(tasksPath, "utf8");
+    tasks = JSON.parse(raw) as GreenfieldTask[];
+    if (!Array.isArray(tasks)) return emptyBreakdown();
+  } catch {
+    return emptyBreakdown();
+  }
+
+  const b = emptyBreakdown();
+  b.total = tasks.length;
+  for (const task of tasks) {
+    if (task.status === "done") {
+      b.done += 1;
+      continue;
+    }
+    if (task.status === "skipped") {
+      b.skipped += 1;
+      continue;
+    }
+    if (task.status === "in_progress") {
+      b.in_progress += 1;
+      continue;
+    }
+    // status === "pending" (or any unknown status treated as pending);
+    // classify via isTaskBotPickable so the bucket split matches the
+    // dispatcher's actual pick logic.
+    const p = isTaskBotPickable(task, handsOff);
+    if (p.ok) {
+      b.pending_bot_pickable += 1;
+    } else if (p.reason === "interactive_only") {
+      b.pending_interactive_only += 1;
+    } else if (p.reason === "hands_off_intersect") {
+      b.pending_handsoff_conflict += 1;
+    } else {
+      // reason === "not_pending" — covered by the status branches
+      // above. Defensive no-op in case isTaskBotPickable grows a new
+      // reason later.
+    }
+  }
+  return b;
 }
 
 export async function catalogdnaCountRemaining(
