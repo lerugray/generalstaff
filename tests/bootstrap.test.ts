@@ -175,15 +175,18 @@ describe("runBootstrap", () => {
     // Proposal files
     const pDir = join(dir, ".generalstaff-proposal");
     expect(existsSync(join(pDir, "CLAUDE-AUTONOMOUS.md"))).toBe(true);
-    expect(existsSync(join(pDir, "tasks.json"))).toBe(true);
     expect(existsSync(join(pDir, "hands_off.yaml"))).toBe(true);
     expect(existsSync(join(pDir, "verify_command.sh"))).toBe(true);
     expect(existsSync(join(pDir, "engineer_command.sh"))).toBe(true);
     expect(existsSync(join(pDir, "idea.md"))).toBe(true);
     expect(existsSync(join(pDir, "README-PROPOSAL.md"))).toBe(true);
 
-    // Proposal content sanity
-    const tasks = JSON.parse(readFileSync(join(pDir, "tasks.json"), "utf8"));
+    // tasks.json lives at the canonical dispatcher-readable
+    // location, NOT in the proposal staging dir (gs-167).
+    expect(existsSync(join(pDir, "tasks.json"))).toBe(false);
+    const tasksPath = join(dir, "state", "gamr", "tasks.json");
+    expect(existsSync(tasksPath)).toBe(true);
+    const tasks = JSON.parse(readFileSync(tasksPath, "utf8"));
     expect(Array.isArray(tasks)).toBe(true);
     expect(tasks.length).toBeGreaterThanOrEqual(10);
     for (const t of tasks) {
@@ -275,6 +278,35 @@ describe("runBootstrap", () => {
       "utf8",
     );
     expect(idea).toContain("second idea");
+  });
+
+  it("preserves user edits to state/<id>/tasks.json across --force re-runs", async () => {
+    const dir = freshDir("rb-tasks-preserved");
+    const r1 = await runBootstrap({
+      targetDir: dir,
+      idea: "first idea",
+      stack: "bun-next",
+      projectId: "thing",
+    });
+    expect(r1.ok).toBe(true);
+
+    const tasksPath = join(dir, "state", "thing", "tasks.json");
+    writeFileSync(
+      tasksPath,
+      JSON.stringify([{ id: "thin-001", title: "user edit", status: "pending", priority: 1 }], null, 2) + "\n",
+    );
+
+    const r2 = await runBootstrap({
+      targetDir: dir,
+      idea: "second idea",
+      projectId: "thing",
+      force: true,
+    });
+    expect(r2.ok).toBe(true);
+
+    const tasks = JSON.parse(readFileSync(tasksPath, "utf8"));
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0].title).toBe("user edit");
   });
 
   it("defaults project id to basename of targetDir", async () => {
