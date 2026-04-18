@@ -1,0 +1,8 @@
+[
+  {
+    "id": "fake-1",
+    "title": "Mark this task done to prove cycle reads tasks.json from project.path (gs-168 regression guard for gs-166).",
+    "status": "pending",
+    "priority": 1
+  }
+]

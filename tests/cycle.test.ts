@@ -829,3 +829,59 @@ describe("runSingleCycle — unknown project", () => {
     }
   });
 });
+
+// gs-168: regression guard against the gs-166 state-path inconsistency.
+// Drives a full cycle on a fixture project where project.path !=
+// getRootDir(), and asserts every path resolves to project.path (NOT
+// the GeneralStaff repo root). If anyone reverts gs-166 — or if a new
+// state-path lookup creeps in that uses getRootDir() instead of
+// project.path — this test goes red.
+describe("non-dogfood cycle end-to-end (gs-168)", () => {
+  it("runs a full cycle against a fixture project at project.path != getRootDir()", async () => {
+    // Skip if bun isn't usable in this environment (the helper is bun-only).
+    if (typeof Bun === "undefined") return;
+
+    const helperPath = join(
+      import.meta.dir,
+      "helpers",
+      "verify_full_non_dogfood_cycle.ts",
+    );
+    const proc = Bun.spawn(["bun", "run", helperPath], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+
+    if (exitCode !== 0) {
+      throw new Error(
+        `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
+      );
+    }
+
+    const lastLine = stdout.trim().split("\n").pop()!;
+    const out = JSON.parse(lastLine);
+
+    // (a) worktree creates at project.path/.bot-worktree
+    expect(out.worktree_was_created).toBe(true);
+    expect(out.worktree_existed_at_engineer_time).toBe(true);
+
+    // (b) tasks.json is read from project.path
+    expect(out.remaining_before_from_proj_path).toBe(1);
+    expect(out.has_more_before_from_proj_path).toBe(true);
+
+    // (c) verification runs (in the worktree under project.path)
+    expect(out.verify_ran_in_worktree).toBe(true);
+    expect(out.verification_outcome).toBe("passed");
+
+    // (d) task-done detection sees the change in project.path's tasks.json
+    expect(out.task_status_after_cycle).toBe("done");
+    expect(out.diff_files_changed).toBeGreaterThan(0);
+    expect(out.cycle_start_sha_changed).toBe(true);
+
+    // overall: cycle completed verified
+    expect(out.reviewer_called).toBe(true);
+    expect(out.final_outcome).toBe("verified");
+  }, 60_000);
+});

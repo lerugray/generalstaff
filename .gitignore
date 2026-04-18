@@ -28,6 +28,7 @@ dist/
 tests/fixtures/*
 !tests/fixtures/reviewer_calibration/
 !tests/fixtures/provider_config_malformed/
+!tests/fixtures/fake_project/
 
 # Bot worktree (created by scripts/run_bot.sh, cleaned on exit)
 .bot-worktree/

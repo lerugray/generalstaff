@@ -1,0 +1,8 @@
+{
+  "name": "fake-project",
+  "version": "0.0.1",
+  "description": "Fixture project for the GeneralStaff non-dogfood integration test (gs-168). Uses a deliberately bare bun-plain stack — no dependencies, no test framework — so the regression guard does not depend on third-party tooling.",
+  "scripts": {
+    "verify": "bash verify.sh"
+  }
+}
