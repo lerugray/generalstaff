@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>generalstaff — task queue</title>
+<meta name="viewport" content="width=1280">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Archivo+Narrow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f1e7d3;
+    --paper-2:     #ede1c9;
+    --paper-edge:  #e4d5b7;
+    --ink:         #2a2418;
+    --ink-soft:    #4a4131;
+    --ink-faint:   #8a7f66;
+    --ink-ghost:   #b7ab8e;
+    --rule:        #3a3122;
+    --rule-soft:   #c9bb9b;
+    --rust:        #8a3a1c;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 60%, rgba(80,55,15,0.10) 100%),
+      radial-gradient(circle at 20% 10%, rgba(255,255,255,0.25), transparent 40%);
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(90,65,25,0.12) 1px, transparent 1px),
+      radial-gradient(rgba(90,65,25,0.08) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    z-index: 0;
+  }
+
+  .sheet {
+    position: relative;
+    z-index: 1;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  /* ——— masthead (same pattern as fleet overview) ——— */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+    gap: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+
+  .wordmark {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 32px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .wordmark .dot {
+    color: var(--rust);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 14px;
+    vertical-align: 6px;
+    margin-right: 10px;
+  }
+
+  .sub {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    color: var(--ink-soft);
+    justify-self: start;
+    align-self: center;
+    padding-left: 4px;
+    border-left: 1px solid var(--rule-soft);
+    padding: 4px 0 4px 14px;
+    line-height: 1.5;
+  }
+  .sub b { font-weight: 600; color: var(--ink); letter-spacing: 0.14em; }
+
+  .stamp {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+  }
+  .stamp .k { color: var(--ink-faint); }
+
+  .docline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0 44px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .docline .title {
+    font-family: 'Spectral', Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13.5px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* ——— summary band (reused from fleet overview) ——— */
+
+  .summary {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    gap: 0;
+    margin-bottom: 48px;
+    border-top: 0.5px solid var(--rule-soft);
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+
+  .cell {
+    padding: 22px 24px 20px;
+    border-right: 0.5px solid var(--rule-soft);
+    position: relative;
+  }
+  .cell:last-child { border-right: none; }
+  .cell:first-child { padding-left: 0; }
+  .cell:last-child { padding-right: 0; }
+
+  .lab {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 14px;
+  }
+  .big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+  .big .slash { color: var(--ink-ghost); font-weight: 400; margin: 0 4px; }
+  .big .denom { color: var(--ink-faint); font-weight: 400; font-size: 22px; }
+
+  .note {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    line-height: 1.35;
+  }
+  .note .em {
+    font-style: normal;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+    background: rgba(138,58,28,0.08);
+    padding: 1px 6px 2px;
+    margin-right: 4px;
+  }
+  .attn .note .em { background: rgba(138,58,28,0.14); color: var(--rust); }
+  .attn .big    { color: var(--rust); }
+
+  .summary .headline {
+    padding: 22px 32px 20px 0;
+    border-right: 0.5px solid var(--rule-soft);
+  }
+  .headline .over {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  .headline h1 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-size: 30px;
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+    text-wrap: pretty;
+    max-width: 22ch;
+  }
+  .headline h1 em { font-style: italic; color: var(--ink-soft); }
+
+  /* ——— section head (reused) ——— */
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 40px 0 14px;
+  }
+  .sec-head h2 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 18px;
+    letter-spacing: 0;
+    color: var(--ink);
+  }
+  .sec-head h2 .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    color: var(--ink-faint);
+    font-size: 13px;
+    margin-left: 10px;
+    letter-spacing: 0.04em;
+  }
+  .sec-head .legend {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+  }
+
+  /* ——— task block (NEW — extending the vocabulary) ——— */
+
+  .tasks {
+    border-top: 1.25px solid var(--rule);
+  }
+
+  .task {
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    column-gap: 20px;
+    padding: 18px 0 20px;
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+
+  .task .pri {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    padding-top: 4px;
+  }
+  .task .pri.p1 { color: var(--rust); }
+  .task .pri.p2 { color: var(--ink-soft); }
+  .task .pri.p3 { color: var(--ink-ghost); }
+
+  .task .body { min-width: 0; }
+  .task .id {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 15px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+    margin-right: 14px;
+  }
+  .task .flag {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    margin-right: 14px;
+  }
+  .task .flag.interactive { color: var(--rust); }
+  .task .flag.in-flight  { color: var(--ink); }
+  .task .flag.in-flight::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--rust);
+    margin-right: 8px;
+    vertical-align: 1px;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+
+  .task .summary-line {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 15.5px;
+    line-height: 1.38;
+    color: var(--ink);
+    margin: 6px 0 0;
+    text-wrap: pretty;
+  }
+  .task .summary-line em {
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  .task .meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  .task .meta .k {
+    color: var(--ink-faint);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+  .task .meta .touch {
+    color: var(--ink);
+    margin-right: 2px;
+  }
+  .task .meta .touch + .touch::before {
+    content: " · ";
+    color: var(--ink-ghost);
+    margin: 0 4px 0 2px;
+  }
+  .task .meta .touch.hot {
+    color: var(--rust);
+  }
+
+  .task .aside {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    text-align: right;
+    padding-top: 4px;
+    min-width: 120px;
+  }
+  .task .aside .age {
+    display: block;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  .task .aside .val {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+
+  /* compact shipped rail */
+  .shipped .task {
+    grid-template-columns: 52px 1fr auto;
+    padding: 10px 0 11px;
+  }
+  .shipped .task .summary-line {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin: 2px 0 0;
+  }
+  .shipped .task .id { font-size: 13px; color: var(--ink-soft); }
+  .shipped .task .meta { display: none; }
+  .shipped .task .aside .age { display: none; }
+  .shipped .task .aside .val {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+  }
+
+  /* ——— afterword / colophon ——— */
+
+  .afterword {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .afterword h3 {
+    margin: 0 0 10px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .afterword p {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .afterword p code,
+  .afterword p .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+
+  .colophon {
+    margin-top: 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+    padding-top: 16px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .colophon .run {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ——— masthead ——— -->
+  <header class="masthead">
+    <div class="wordmark"><span class="dot">●</span>generalstaff</div>
+    <div class="sub">
+      Task queue · <b>generalstaff</b>
+    </div>
+    <div class="stamp">
+      <span class="k">sheet</span>&nbsp;&nbsp;02 / queue<br>
+      <span class="k">host</span>&nbsp;&nbsp;&nbsp;localhost:7823
+    </div>
+  </header>
+
+  <div class="docline">
+    <span>Project queue · read-only view</span>
+    <span class="title">“Pickup work the dispatcher has already triaged.”</span>
+    <span>Rev. 0.4 · April 2026</span>
+  </div>
+
+  <!-- ——— summary band ——— -->
+  <section class="summary">
+    <div class="cell headline">
+      <div class="over">At a glance</div>
+      <h1>Six open tasks. <em>Four ready for pickup, one blocked on taste, one in flight.</em></h1>
+    </div>
+
+    <div class="cell attn">
+      <div class="lab">Ready</div>
+      <div class="big">4</div>
+      <div class="note">Bot-pickable. Highest priority drawn first.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Blocked</div>
+      <div class="big">1</div>
+      <div class="note">Interactive-only. Touches taste or hands-off paths.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">In flight</div>
+      <div class="big">1</div>
+      <div class="note">Currently running in session <span class="em">b9m3kvq0a</span>.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Shipped / 7d</div>
+      <div class="big">24</div>
+      <div class="note">Recent cadence — see rail below.</div>
+    </div>
+  </section>
+
+  <!-- ——— in flight ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>In flight <span class="n">— 1 task</span></h2>
+      <div class="legend">Active cycle · wait-for-close</div>
+    </div>
+    <div class="tasks">
+      <div class="task">
+        <div class="pri p1">P1</div>
+        <div class="body">
+          <span class="id">gs-221</span>
+          <span class="flag in-flight">Running</span>
+          <p class="summary-line">Tighten the STOP-file check to run before <em>cycle_start</em>, not after <em>engineer_complete</em>, so the kill-switch takes effect within the current cycle instead of the next one.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch">src/safety.ts</span>
+            <span class="touch">tests/safety.test.ts</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Started</span>
+          <span class="val">4m ago</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ——— ready ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Ready for pickup <span class="n">— 4 tasks</span></h2>
+      <div class="legend">Sorted by priority</div>
+    </div>
+    <div class="tasks">
+
+      <div class="task">
+        <div class="pri p1">P1</div>
+        <div class="body">
+          <span class="id">gs-222</span>
+          <p class="summary-line">Digest subject-line resolution regression — <em>fetchCommitSubject</em> falls back to <em>cycle_id</em> whenever the SHA is shorter than seven characters because the git-log shell call silently returns nothing.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch">src/git.ts</span>
+            <span class="touch">tests/git.test.ts</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Queued</span>
+          <span class="val">31m ago</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-223</span>
+          <p class="summary-line">Extend the <em>status --sessions</em> table with a <em>reviewer</em> column so a user can tell at a glance whether a session ran on <em>openrouter</em>, <em>claude</em>, or <em>ollama</em> without opening PROGRESS.jsonl.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch">src/sessions.ts</span>
+            <span class="touch">tests/sessions.test.ts</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Queued</span>
+          <span class="val">2h ago</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-224</span>
+          <p class="summary-line">Parallel-mode efficiency line should render <em>slot_idle_seconds</em> in <em>m:ss</em> format when it exceeds sixty seconds — current output reads <em>1m15s</em> vs <em>75s</em> inconsistently across runs.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch">src/session.ts</span>
+            <span class="touch">tests/session.test.ts</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Queued</span>
+          <span class="val">5h ago</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p3">P3</div>
+        <div class="body">
+          <span class="id">gs-225</span>
+          <p class="summary-line">Add a <em>--project=&lt;id&gt;</em> shortcut to <em>scripts/run_session.bat</em> so a user running a one-project-only session doesn't have to type <em>--exclude-project</em> for every other registered project.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch">scripts/run_session.bat</span>
+            <span class="touch">src/cli.ts</span>
+            <span class="touch">tests/cli.test.ts</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Queued</span>
+          <span class="val">1d ago</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ——— blocked ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Blocked on taste <span class="n">— 1 task</span></h2>
+      <div class="legend">Interactive-only · not bot-pickable</div>
+    </div>
+    <div class="tasks">
+
+      <div class="task">
+        <div class="pri p1">P1</div>
+        <div class="body">
+          <span class="id">gs-226</span>
+          <span class="flag interactive">Interactive-only</span>
+          <p class="summary-line">Rewrite the reviewer prompt in <em>src/prompts/review.md</em> to emphasise scope-match over diff-size heuristic — current prompt has a 200-line soft threshold that some verified cycles exceed legitimately.</p>
+          <div class="meta">
+            <span class="k">touches</span>
+            <span class="touch hot">src/prompts/review.md</span>
+          </div>
+        </div>
+        <div class="aside">
+          <span class="age">Queued</span>
+          <span class="val">6h ago</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ——— recently shipped (compact rail) ——— -->
+  <section class="shipped">
+    <div class="sec-head">
+      <h2>Recently shipped <span class="n">— last 6</span></h2>
+      <div class="legend">Lifetime total 198 · see fleet overview</div>
+    </div>
+    <div class="tasks">
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-220</span>
+          <p class="summary-line">Add unproductive-streak soft-skip — the time-window escape gs-193 was missing.</p>
+        </div>
+        <div class="aside">
+          <span class="val">1h ago · verified</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-216</span>
+          <p class="summary-line">Finish test-fixture refactor across six subprocess helpers (~73-line net reduction).</p>
+        </div>
+        <div class="aside">
+          <span class="val">1h ago · verified</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p1">P1</div>
+        <div class="body">
+          <span class="id">gs-219</span>
+          <p class="summary-line">Shared-inbox JSONL at <em>state/_fleet/messages.jsonl</em> for cross-session handoff.</p>
+        </div>
+        <div class="aside">
+          <span class="val">2h ago · verified</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-218</span>
+          <p class="summary-line">Schema validation for <em>tasks.json</em> entries with forward-compatible unknown-field passthrough.</p>
+        </div>
+        <div class="aside">
+          <span class="val">2h ago · verified</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p1">P1</div>
+        <div class="body">
+          <span class="id">gs-217</span>
+          <p class="summary-line"><em>status --fleet</em> — one-row-per-project snapshot with TOTAL row.</p>
+        </div>
+        <div class="aside">
+          <span class="val">3h ago · verified</span>
+        </div>
+      </div>
+
+      <div class="task">
+        <div class="pri p2">P2</div>
+        <div class="body">
+          <span class="id">gs-215</span>
+          <p class="summary-line">Thread <em>cwd</em> through <em>fetchCommitSubject</em> so SHAs resolve in the right project's git repo.</p>
+        </div>
+        <div class="aside">
+          <span class="val">5h ago · verified</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ——— afterword ——— -->
+  <section class="afterword">
+    <div>
+      <h3>Priority</h3>
+      <p><span class="mono">P1</span> is drawn first by the dispatcher, then <span class="mono">P2</span>, then <span class="mono">P3</span>. Within the same priority band, older tasks go first. The rust color on <span class="mono">P1</span> is just attention, not severity — nothing here is on fire.</p>
+    </div>
+    <div>
+      <h3>Touches</h3>
+      <p>Declared paths a task is expected to edit. If any of them intersect the project's <span class="mono">hands_off</span> list, the dispatcher skips the task with reason <span class="mono">hands_off_intersect</span>. A rust path in the list means such an intersection.</p>
+    </div>
+    <div>
+      <h3>Interactive-only</h3>
+      <p>Tasks the author flagged as needing human judgment — typically prompt edits, taste calls, or <span class="mono">CLAUDE.md</span> revisions. The bot picker skips them outright. Pick one up in an interactive session instead.</p>
+    </div>
+  </section>
+
+  <!-- ——— colophon ——— -->
+  <div class="colophon">
+    <span>generalstaff · open-source autonomous-bot dispatcher</span>
+    <span class="run">rendered 19:41 · pid 48213 · sheet refreshed on load</span>
+    <span>page 1 of 1</span>
+  </div>
+
+</div>
+
+</body>
+</html>

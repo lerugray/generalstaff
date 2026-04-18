@@ -88,6 +88,60 @@ budget for marginal polish. Subsequent Phase 5 views (session tail,
 task queue, dispatch detail, inbox) are meant to be hand-built reusing
 this CSS, not re-briefed.
 
+## 2026-04-18 — task queue (hand-built, zero Design spend)
+
+`task-queue-v1.html` is the second Phase 5 view, built by extending
+the fleet-overview anchor's CSS vocabulary without touching Claude
+Design. It's per-project (as opposed to fleet-overview's
+cross-project view) and renders the queue for `generalstaff` with
+four sections: in-flight, ready-for-pickup, blocked-on-taste, and a
+compact recently-shipped rail.
+
+**What carries over verbatim from the anchor:**
+- Full 10-variable palette
+- Type stack (Spectral / JetBrains Mono / Archivo Narrow)
+- Masthead + docline + sheet + section-head + summary-band +
+  afterword + colophon — every structural pattern
+- `.attn` highlight, `.note .em` inline tags, hairline rules, dash
+  conventions, ON/OFF typographic indicators
+
+**New vocabulary this view adds (extension of the anchor):**
+- `.task` — 3-column grid (priority / body / right-aside) for
+  structured records that don't fit a flat table
+- `.pri.p1/.p2/.p3` — priority small-caps with tiered colors (rust
+  for P1, ink-soft for P2, ink-ghost for P3)
+- `.flag.interactive` and `.flag.in-flight` — rust-toned status
+  flags for non-pickable reasons and active runs
+- `.summary-line` — Spectral italic treatment for task titles (one
+  visual step down from the masthead headline)
+- `.meta` with `.touch` chips — monospaced path lists with `.hot`
+  variant for hands-off intersections
+- `.aside` — right-aligned temporal metadata (age label + value)
+- `.shipped .task` override — compact row variant for high-density
+  ambient-context rails
+
+**What's synthesized (real queue was empty at build time):**
+- `gs-221..226` don't exist. All `expected_touches` reference real
+  files in the repo so paths read honestly, but descriptions are
+  fabricated. Same placeholder pattern as the fleet-overview
+  invented chrome — will be replaced with live data when the view
+  is wired up.
+
+**One deliberate violation of the anchor's "no animation" rule:**
+- `.flag.in-flight` pulses at 1.8s on its rust dot. This isn't a
+  loading state — it signals a cycle that's actively running right
+  now. Ambient status, not decoration. If it reads as fidgety when
+  implemented live, delete the `@keyframes pulse` rule and the
+  `animation:` declaration — the static dot still reads correctly.
+
+**What this validates for Phase 5:** the anchor CSS generalizes to a
+non-tabular data shape (structured records with per-item metadata,
+status flags, and nested lists) without new Design spend. Budget
+discipline ratio observed: 1 anchor brief (~5-10% weekly budget)
+produced reusable vocabulary for 2 distinct views and counting.
+Remaining Phase 5 views (session tail, dispatch detail, inbox) are
+expected to follow the same extension pattern.
+
 ## Conventions for this directory
 
 - One subdirectory or zipped artifact per design artifact.
