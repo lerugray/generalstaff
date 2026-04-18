@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff fully addresses the claimed task gs-176 by rewriting the engineer_command.sh template to include worktree management, dependency installation, and a full claude prompt, with accompanying test coverage and task status update.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-176",
+      "evidence": "The diff replaces the bare 'claude -p --dangerously-skip-permissions' template with a full engineer_command.sh script that manages git worktrees, installs dependencies, and invokes claude with a detailed prompt scoped to tasks.json and hands_off.yaml. A new test verifies the generated script contains worktree management and non-empty claude prompt.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' passed with exit code 0, confirming the changes are syntactically correct and tests pass. The task status in tasks.json was updated from 'pending' to 'done' as expected."
+}
