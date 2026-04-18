@@ -1012,3 +1012,286 @@ accumulator.
 - A test verifies cycle N+1's engineer sees cycle N's
   tasks.json updates (the "successor sees predecessor" semantic).
 - DESIGN.md §v5 is referenced in the gs-177 commit message.
+
+## v6 — Parallel worktrees / multi-project concurrent cycles (2026-04-18, Phase 4)
+
+**Status:** design only. Implementation queued (gs-185+).
+This section is the architectural discussion before code,
+written 2026-04-18 morning after the Phase 3 closure tail
+(gs-175..178) shipped and validated the bot's
+single-project autonomous chaining. Phase 4's user-value
+proposition is **multiplicative throughput** — N projects
+cycling in parallel instead of serially — now that we have
+3 registered projects (generalstaff, gamr, raybrain) with
+real backlogs each.
+
+### The bug-of-omission as observed
+
+Today's single-project sessions: ~90s engineer + ~1s verify
++ ~10s reviewer + ~5s dispatcher overhead = ~110s wall per
+cycle. With 3 projects each having pending work, a 60-min
+session sequentially produces ~32 cycles maximum, distributed
+by the priority×staleness picker — but in practice the
+picker rotates back to the same project before others have
+caught up, and verified-cycle output looks like 5-8 cycles
+on the busiest project, 2-4 on each of the others.
+
+Parallel worktrees would let three projects each run their
+own cycle simultaneously: 3× the engineer parallelism, 3×
+the verify parallelism, 3× the reviewer call volume — and
+3× the per-minute productive output, modulo new
+contention surfaces.
+
+### Why "now":
+
+1. **Phase 3 proved single-project autonomy works.** gs-177 +
+   gs-178 close the chaining gaps; bot can now genuinely
+   iterate on one project without human between-cycle
+   intervention. Parallelism multiplies a working unit; it
+   doesn't fix a broken one.
+2. **Project count justifies the complexity.** Up through
+   2026-04-18 morning, GeneralStaff was its own only
+   registered project. Phase 3 added gamr; raybrain is
+   bootstrapping in parallel. With ≥3 projects, sequential
+   becomes the bottleneck.
+3. **The worktree pattern is already per-project isolated.**
+   Each project's `.bot-worktree` lives inside that project's
+   own repo. No filesystem contention between projects'
+   worktrees by design.
+
+### Constraints to design against
+
+1. **Per-project worktree isolation already holds.** No
+   change needed — the design is "naturally parallel" at the
+   filesystem layer.
+2. **`git worktree` forbids two worktrees on the same
+   branch.** This means parallelism is BETWEEN projects, not
+   within a project. A single project's cycles still serialize
+   through its own bot/work branch (gs-177's accumulator
+   handles that path). This is a constraint, not a problem —
+   serializing within a project preserves the
+   successor-sees-predecessor semantic.
+3. **Reviewer rate limits.** OpenRouter free tier has shared
+   upstream rate limits (observed 2026-04-14: 429 on the free
+   tier). With N parallel cycles all hitting OpenRouter
+   simultaneously, the rate-limit wall comes faster. Mitigation
+   options: (a) per-provider concurrency semaphore in
+   `src/reviewer.ts`; (b) stagger cycle starts by a few
+   seconds; (c) failover to a different provider in
+   `GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER`. Probably need (a)
+   regardless of (b) and (c).
+4. **Cost: parallel × N = N × model spend.** If reviewers are
+   OpenRouter, 4 parallel slots = 4× the per-cycle reviewer
+   spend (still ~$0.08/min in the worst case — cheap). If
+   reviewers are `claude` (subscription), N parallel = N×
+   subscription quota burn — worth a config-time warning.
+5. **Engineer subprocess pressure.** Each engineer cycle is a
+   long-running `claude -p` subprocess (~90s in observed
+   cycles). Four parallel = four concurrent Claude streams.
+   Memory + token cost increases linearly. CPU usually not the
+   bottleneck (engineer is mostly waiting on model output).
+6. **Verify subprocess pressure.** `bun test && bun x tsc
+   --noEmit` runs in the worktree's CPU. Four parallel verify
+   commands = four parallel CPU loads. On a typical laptop, up
+   to ~4 parallel is fine; beyond that throughput plateaus.
+7. **Audit-log writes.** Each project's PROGRESS.jsonl is its
+   own file. Different cycles writing to different files do
+   not conflict. State files (fleet_state.json) DO need
+   atomic-write coordination — already implemented. The
+   per-project STATE.json + tasks.json updates land in
+   different files, so no inter-project conflict.
+8. **STOP file is already global.** Killing the global STOP
+   should kill all parallel cycles in flight. Need to ensure
+   the per-cycle STOP polling fires across all parallel slots.
+9. **Session budget allocation.** If session budget is 60 min
+   and there are 2 parallel slots, does each slot get 60 min
+   wall time (i.e. parallel = throughput multiplier, not time
+   multiplier) or 30 min each (parallel = budget split)?
+   Almost certainly the former — parallel slots SHARE the
+   same wall clock. The session ends when wall clock hits
+   budget regardless of slot count.
+
+### Three candidate designs
+
+#### (a) Static parallelism — `dispatcher.max_parallel_slots: int` config
+
+**How it works.** Add a `dispatcher.max_parallel_slots` field
+to `projects.yaml` (default 1 = current behavior). At session
+start, the picker selects up to N projects sorted by
+priority×staleness score. `session.ts` runs all N cycles in
+`Promise.all`, waiting for the slowest before starting the
+next round of N. If fewer than N eligible projects exist
+(some have empty queues, some are bot-already-running), spin
+up only the available ones for that round.
+
+**Pros.**
+- Single config knob, easy to reason about.
+- Trivial to disable (set to 1 → behavior reverts).
+- Maps cleanly onto today's single-cycle code path —
+  `runSingleCycle` is already self-contained per cycle.
+
+**Cons.**
+- Hard cap regardless of actual load. If N=4 but only 2
+  projects have work, the other 2 slots sit idle (not bad,
+  just suboptimal).
+- Round-based — slowest cycle in a batch holds up the next
+  batch's start. A 5-min cycle pairing with a 1-min cycle
+  wastes 4 min of slot time waiting for the slow one.
+
+#### (b) Dynamic parallelism — fixed slot pool, slot-as-soon-as-free
+
+**How it works.** A persistent pool of N worker slots. Each
+slot independently picks a project, runs a cycle, then loops
+to pick the next available project. Slots are independent —
+slot A finishing cycle 1 doesn't wait for slot B's cycle 1
+before picking cycle 2. The picker takes a `currently_running:
+Set<projectId>` and excludes those.
+
+**Pros.**
+- No "slowest holds up the batch" — slots fill as fast as
+  they free up.
+- Naturally handles uneven workloads (one project's work
+  takes 3× longer than another's).
+
+**Cons.**
+- More moving parts: need a shared "currently_running"
+  registry, a slot scheduler, and careful shutdown semantics
+  (what happens to in-flight cycles when STOP fires or
+  budget runs out mid-cycle?).
+- Harder to test deterministically — slot ordering depends on
+  cycle wall-clock variance.
+
+#### (c) Per-project background processes — independent dispatcher per project
+
+**How it works.** Each project gets its own dispatcher process,
+launched at session start. Each project independently loops
+through its own pickNextTask + runSingleCycle until its budget
+or empty-cycles cap is reached. The `generalstaff session`
+command becomes an orchestrator that spawns N project
+dispatchers and waits for all to exit.
+
+**Pros.**
+- Maximum isolation: a crash in project A's dispatcher
+  doesn't take down project B's.
+- Each project can have its own provider config, budget, etc.
+  with no cross-project coordination needed.
+
+**Cons.**
+- Significant rearchitecture — `session.ts` becomes a thin
+  spawner; most of today's session logic moves into a
+  per-project loop module.
+- Cross-project policies (global STOP, total cost ceiling,
+  fleet-wide rate limits) become harder to enforce — each
+  child needs to read shared state independently.
+- IPC for status reporting back to the orchestrator adds
+  complexity.
+
+### Recommendation: ship (a) first, (b) only if (a) bottlenecks
+
+**Implement (a) in gs-185 + gs-186** — same incremental
+philosophy as v5. The static-N round-based scheduler is the
+smallest change that makes parallelism real, gives us
+quantitative data on whether the round-based "slowest holds
+up the batch" cost is meaningful in practice, and is trivial
+to disable if it goes wrong.
+
+**Capture (b) as gs-189 (P3)** — the dynamic-pool refinement
+becomes worth doing only when (a)'s round-based wait is
+demonstrably the bottleneck. With 2-3 projects of similar
+cycle duration (which is the realistic state for now), (b)'s
+benefit over (a) is small.
+
+**Do NOT pursue (c) standalone.** The per-project-process
+isolation pattern is over-architected for the current state
+— GeneralStaff doesn't have crash-isolation problems serious
+enough to justify the IPC cost. Revisit if and only if a
+specific failure mode demands it.
+
+### Phased implementation for the recommended path
+
+**gs-185 (P2): the picker returns N candidates.** Modify
+`pickNextProject` in `src/dispatcher.ts` to take a
+`max_count: number` param (default 1, preserving current
+behavior). Return up to N highest-scored projects, excluding
+the `skipProjectIds` set. Add tests using existing fleet
+fixtures + the new param. No `session.ts` changes yet.
+
+**gs-186 (P1): `session.ts` runs N cycles in parallel.**
+`max_parallel_slots` config field with default 1. The session
+loop calls `pickNextProject(N - alreadyRunning)` and
+`Promise.all` over the resulting cycles. Each cycle still
+calls `runSingleCycle` unmodified — atomicity per cycle is
+preserved. STOP file polling is already in `runSingleCycle`
+so each parallel cycle sees STOP independently. Tests: a
+two-project fixture session, asserting both cycles run and
+both produce verified outcomes within the wall-clock budget.
+
+**gs-187 (P2): per-provider concurrency semaphore.** Add a
+small in-memory semaphore in `src/reviewer.ts` keyed on
+provider name (default unbounded for `claude`, default 4 for
+`openrouter` — heuristic; can tune). Reviewer calls acquire
+before sending the HTTP request, release on response. Tests:
+a synthetic 8-cycle parallel session with the semaphore
+limiting OpenRouter to 2 concurrent calls correctly serializes
+the reviewer step without breaking cycle parallelism.
+
+**gs-188 (P2): observability for parallel sessions.** The
+existing `session_complete` event aggregates across cycles.
+With parallel cycles, the aggregation needs to capture
+"effective wall-clock parallelism" — e.g.
+`{cycles: 12, slots_used: 3, parallel_efficiency: 0.92}`.
+The status command and digest format need light updates to
+not present parallel cycles as a flat sequential list (they
+will look weird in `git log` order if interleaved).
+
+### Open questions for the v6 implementation arc
+
+1. **Should the picker prefer to fill all slots even if it
+   means picking a stale-but-low-priority project over an
+   already-cycling-this-session high-priority project?** The
+   priority×staleness scoring assumes serial execution. With
+   N slots, you might want to fill empty slots even with low
+   scores rather than leave them idle. Probably yes, but
+   worth a config flag.
+2. **Per-provider semaphore default for `openrouter` paid
+   tier vs free tier?** Free tier needs aggressive limiting
+   (~2 concurrent); paid tier is much more permissive
+   (~10+). The user might not know which tier they're on.
+   Probably default to the conservative (free-tier) value
+   and let users opt up.
+3. **What happens to the round-based scheduler when one slot
+   finishes 4 minutes before the others?** Option (a)
+   strictly waits; option (b) doesn't. If we ship (a) first
+   and discover the wait is painful in practice, that's the
+   trigger to escalate to (b). We should measure this from
+   day 1 — emit a `slot_idle_time` field in `session_complete`
+   so we can see cumulative idle minutes and decide whether
+   the upgrade is worth it.
+
+### Definition-of-done for the v6 arc
+
+- gs-185, gs-186, gs-187 land in src/.
+- A new integration test simulates a 2-project parallel
+  session with both `auto_merge` modes mixed (e.g.,
+  generalstaff=true + gamr=false) and verifies both cycles
+  land verified, both projects' bot/work behaves correctly
+  per their auto_merge setting, and the session_complete
+  event aggregates cleanly.
+- DESIGN.md §v6 is referenced in each gs-NNN commit
+  message.
+- The default `max_parallel_slots` stays at 1 for backward
+  compat — opt-in per project (or global) via projects.yaml.
+- A documentation pass updates README.md to mention the
+  parallel mode + when to enable it.
+
+### Out of scope for v6
+
+- Cross-machine parallelism. Phase 4 is local-machine only.
+  Distributed dispatchers (one machine per worker pool) is a
+  separate phase if it ever happens.
+- Cross-project task dependencies (e.g. "wait for project A's
+  cycle to land before starting project B's cycle"). All
+  projects are independent in v6; if cross-project
+  dependencies become a thing, that's its own design pass.
+- Heterogeneous slot pools (e.g. "GPU-only slot for ML
+  cycles"). Slots are interchangeable in v6.
