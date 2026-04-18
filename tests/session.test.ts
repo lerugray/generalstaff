@@ -12,6 +12,7 @@ import {
   DEFAULT_SOFT_SKIP_THRESHOLD,
   DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
   hotReloadProjects,
+  computeParallelEfficiency,
 } from "../src/session";
 import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
 import { setRootDir } from "../src/state";
@@ -95,6 +96,52 @@ describe("writeDigest", () => {
     expect(content).toContain("**Duration:** 12m30s");
     expect(content).toContain("**Cycles:** 2");
     expect(content).toMatch(/\*\*Date:\*\* \d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("omits the Parallel: line in sequential sessions (gs-188 default)", async () => {
+    await writeDigest([makeCycleResult()], 5.2, { digest_dir: "digests" });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Parallel:**");
+  });
+
+  it("renders a Parallel: line when parallel_metrics is supplied (gs-188)", async () => {
+    await writeDigest([makeCycleResult()], 5.2, {
+      digest_dir: "digests",
+      parallel_metrics: {
+        max_parallel_slots: 3,
+        parallel_rounds: 4,
+        slot_idle_seconds: 75,
+        parallel_efficiency: 0.82,
+      },
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("**Parallel:**");
+    expect(content).toContain("3 slots");
+    expect(content).toContain("4 round(s)");
+    expect(content).toContain("1m15s slot-idle");
+    expect(content).toContain("82.0% efficiency");
+  });
+
+  it("omits the Parallel: line when max_parallel_slots is 1 (gs-188 edge)", async () => {
+    // A session that was notionally parallel-capable but ran with N=1
+    // should not emit the line — treat it as sequential for the digest.
+    await writeDigest([makeCycleResult()], 5.2, {
+      digest_dir: "digests",
+      parallel_metrics: {
+        max_parallel_slots: 1,
+        parallel_rounds: 0,
+        slot_idle_seconds: 0,
+        parallel_efficiency: 1,
+      },
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Parallel:**");
   });
 
   it("includes cycle outcomes with correct fields", async () => {
@@ -1026,6 +1073,10 @@ describe("runSession safeguards", () => {
     expect(data.max_parallel_slots).toBe(2);
     expect(typeof data.slot_idle_seconds).toBe("number");
     expect(data.slot_idle_seconds as number).toBeGreaterThanOrEqual(0);
+    // gs-188: parallel_efficiency emitted in [0, 1] range
+    expect(typeof data.parallel_efficiency).toBe("number");
+    expect(data.parallel_efficiency as number).toBeGreaterThanOrEqual(0);
+    expect(data.parallel_efficiency as number).toBeLessThanOrEqual(1);
   }, 30_000);
 
   it("adds capped projects to the skip set", async () => {
@@ -1332,6 +1383,43 @@ describe("updateFailureStreak (gs-193 fast-fail backoff)", () => {
     const u2 = updateFailureStreak(u1.streak, true, 70_000, 2, 60);
     expect(u2.streak.count).toBe(2);
     expect(u2.shouldSoftSkip).toBe(false);
+  });
+});
+
+describe("computeParallelEfficiency (gs-188)", () => {
+  it("returns 1 when sequential (slots=1)", () => {
+    expect(computeParallelEfficiency(0, 600, 1)).toBe(1);
+    expect(computeParallelEfficiency(100, 600, 1)).toBe(1);
+  });
+
+  it("returns 1 when elapsed is zero (guards against divide-by-zero)", () => {
+    expect(computeParallelEfficiency(0, 0, 2)).toBe(1);
+  });
+
+  it("returns 1 with zero idle across the full wall clock", () => {
+    // 2 slots × 600s wall = 1200 slot-seconds; 0 idle → 100% efficient
+    expect(computeParallelEfficiency(0, 600, 2)).toBe(1);
+  });
+
+  it("returns 0.5 when half the slot-time was idle", () => {
+    // 2 slots × 600s = 1200 slot-seconds; 600s idle = 50% used
+    expect(computeParallelEfficiency(600, 600, 2)).toBe(0.5);
+  });
+
+  it("returns 0 when every slot-second was idle (degenerate)", () => {
+    expect(computeParallelEfficiency(1200, 600, 2)).toBe(0);
+  });
+
+  it("clamps to [0, 1] when rounding would push it outside", () => {
+    // idle > total_slot_seconds is impossible in practice but the
+    // formula is defensive.
+    expect(computeParallelEfficiency(1500, 600, 2)).toBe(0);
+    expect(computeParallelEfficiency(-100, 600, 2)).toBe(1);
+  });
+
+  it("scales with slot count", () => {
+    // 4 slots × 300s = 1200 slot-seconds; 300s idle = 75% used
+    expect(computeParallelEfficiency(300, 300, 4)).toBeCloseTo(0.75, 5);
   });
 });
 

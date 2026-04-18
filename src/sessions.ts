@@ -16,6 +16,14 @@ export interface SessionSummary {
   total_failed: number;
   stop_reason: string;
   reviewer: string;
+  // gs-188: optional parallel-mode metrics. Only set when the session
+  // ran with dispatcher.max_parallel_slots > 1. Sequential sessions
+  // leave these undefined so the sessions table degrades gracefully
+  // for pre-gs-186 history.
+  max_parallel_slots?: number;
+  parallel_rounds?: number;
+  slot_idle_seconds?: number;
+  parallel_efficiency?: number;
 }
 
 function asString(v: unknown, fallback = "-"): string {
@@ -45,7 +53,7 @@ export async function loadRecentSessions(
     const durationMin = asNumber(d.duration_minutes);
     const startedAtMs =
       new Date(value.timestamp).getTime() - durationMin * 60_000;
-    sessions.push({
+    const summary: SessionSummary = {
       started_at: new Date(startedAtMs).toISOString(),
       duration_minutes: durationMin,
       total_cycles: asNumber(d.total_cycles),
@@ -53,7 +61,20 @@ export async function loadRecentSessions(
       total_failed: asNumber(d.total_failed),
       stop_reason: asString(d.stop_reason, "-"),
       reviewer: asString(d.reviewer, "-"),
-    });
+    };
+    // gs-188: lift parallel metrics when present. `> 1` guard filters
+    // out legacy sessions that pre-dated gs-186 without the field, as
+    // well as explicit sequential sessions that emit max_parallel_slots
+    // = 1.
+    if (typeof d.max_parallel_slots === "number" && d.max_parallel_slots > 1) {
+      summary.max_parallel_slots = d.max_parallel_slots;
+      summary.parallel_rounds = asNumber(d.parallel_rounds);
+      summary.slot_idle_seconds = asNumber(d.slot_idle_seconds);
+      if (typeof d.parallel_efficiency === "number") {
+        summary.parallel_efficiency = d.parallel_efficiency;
+      }
+    }
+    sessions.push(summary);
   }
   sessions.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
   return sessions.slice(0, limit);
@@ -99,9 +120,15 @@ export function formatSessionsTable(
   if (sessions.length === 0) {
     return "No sessions recorded yet.";
   }
+  // gs-188: only add the Parallel column when at least one session in
+  // the window actually used parallel mode — sequential-only tables
+  // stay identical to the pre-gs-188 layout.
+  const anyParallel = sessions.some(
+    (s) => typeof s.max_parallel_slots === "number" && s.max_parallel_slots > 1,
+  );
   const rows = sessions.map((s) => {
     const pass = `${s.total_verified}/${s.total_cycles}`;
-    return [
+    const base = [
       formatRelativeTime(s.started_at, now),
       formatDuration(s.duration_minutes * 60),
       `${s.total_cycles} cycle${s.total_cycles === 1 ? "" : "s"}`,
@@ -109,6 +136,17 @@ export function formatSessionsTable(
       s.reviewer,
       s.stop_reason,
     ];
+    if (anyParallel) {
+      const slots = s.max_parallel_slots;
+      const cell =
+        typeof slots === "number" && slots > 1
+          ? typeof s.parallel_efficiency === "number"
+            ? `${slots}× @ ${(s.parallel_efficiency * 100).toFixed(0)}%`
+            : `${slots}×`
+          : "—";
+      base.push(cell);
+    }
+    return base;
   });
   const header = [
     "Started",
@@ -118,6 +156,7 @@ export function formatSessionsTable(
     "Reviewer",
     "Stop reason",
   ];
+  if (anyParallel) header.push("Parallel");
   const widths = header.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => r[i]!.length)),
   );

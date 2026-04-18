@@ -202,4 +202,116 @@ describe("formatSessionsTable", () => {
     };
     expect(formatSessionsTable([s], now)).toContain("1 cycle ");
   });
+
+  it("adds a Parallel column when any session used parallel mode (gs-188)", () => {
+    const now = new Date("2026-04-17T15:00:00.000Z");
+    const seq: SessionSummary = {
+      started_at: "2026-04-17T13:00:00.000Z",
+      duration_minutes: 30,
+      total_cycles: 4,
+      total_verified: 4,
+      total_failed: 0,
+      stop_reason: "budget",
+      reviewer: "openrouter",
+    };
+    const par: SessionSummary = {
+      started_at: "2026-04-17T14:00:00.000Z",
+      duration_minutes: 30,
+      total_cycles: 6,
+      total_verified: 6,
+      total_failed: 0,
+      stop_reason: "budget",
+      reviewer: "openrouter",
+      max_parallel_slots: 3,
+      parallel_rounds: 2,
+      slot_idle_seconds: 30,
+      parallel_efficiency: 0.95,
+    };
+    const out = formatSessionsTable([par, seq], now);
+    expect(out).toContain("Parallel");
+    // Parallel row shows slots × efficiency%
+    expect(out).toContain("3× @ 95%");
+    // Sequential row in a mixed-table shows an em-dash placeholder so
+    // columns line up, not a blank cell.
+    expect(out).toContain("—");
+  });
+
+  it("does NOT add a Parallel column when every session was sequential (gs-188 back-compat)", () => {
+    const now = new Date("2026-04-17T15:00:00.000Z");
+    const s: SessionSummary = {
+      started_at: "2026-04-17T14:00:00.000Z",
+      duration_minutes: 30,
+      total_cycles: 5,
+      total_verified: 5,
+      total_failed: 0,
+      stop_reason: "budget",
+      reviewer: "claude",
+    };
+    const out = formatSessionsTable([s], now);
+    expect(out).not.toContain("Parallel");
+  });
+
+  it("loadRecentSessions lifts parallel metrics from session_complete (gs-188)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "gs188-"));
+    const logPath = join(tmp, "PROGRESS.jsonl");
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        timestamp: "2026-04-17T10:30:00.000Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: {
+          duration_minutes: 30,
+          total_cycles: 8,
+          total_verified: 7,
+          total_failed: 1,
+          stop_reason: "budget",
+          reviewer: "openrouter",
+          max_parallel_slots: 2,
+          parallel_rounds: 4,
+          slot_idle_seconds: 120,
+          parallel_efficiency: 0.88,
+        },
+      }) + "\n",
+    );
+    try {
+      const sessions = await loadRecentSessions(10, logPath);
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.max_parallel_slots).toBe(2);
+      expect(sessions[0]!.parallel_rounds).toBe(4);
+      expect(sessions[0]!.slot_idle_seconds).toBe(120);
+      expect(sessions[0]!.parallel_efficiency).toBe(0.88);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("loadRecentSessions leaves parallel fields undefined for sequential sessions (gs-188)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "gs188seq-"));
+    const logPath = join(tmp, "PROGRESS.jsonl");
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        timestamp: "2026-04-17T10:30:00.000Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: {
+          duration_minutes: 30,
+          total_cycles: 5,
+          total_verified: 5,
+          total_failed: 0,
+          stop_reason: "budget",
+          reviewer: "claude",
+          max_parallel_slots: 1, // explicitly sequential
+        },
+      }) + "\n",
+    );
+    try {
+      const sessions = await loadRecentSessions(10, logPath);
+      expect(sessions[0]!.max_parallel_slots).toBeUndefined();
+      expect(sessions[0]!.parallel_rounds).toBeUndefined();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });

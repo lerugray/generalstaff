@@ -785,11 +785,29 @@ export async function runSession(options: SessionOptions) {
     );
   }
 
+  // gs-188: compute parallel efficiency once for both the digest and
+  // the session_complete event. elapsed is minutes; convert to seconds
+  // for the formula which matches slot_idle_seconds' unit.
+  const parallelEfficiency = computeParallelEfficiency(
+    slotIdleTotalSeconds,
+    elapsed * 60,
+    config.max_parallel_slots,
+  );
+  const parallelMetricsForDigest: DigestParallelMetrics | undefined = isParallelMode
+    ? {
+        max_parallel_slots: config.max_parallel_slots,
+        parallel_rounds: parallelRounds,
+        slot_idle_seconds: Math.round(slotIdleTotalSeconds),
+        parallel_efficiency: parallelEfficiency,
+      }
+    : undefined;
+
   // Write digest
   await writeDigest(allResults, elapsed, {
     digest_dir: config.digest_dir,
     reviewer_provider: process.env.GENERALSTAFF_REVIEWER_PROVIDER,
     reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
+    parallel_metrics: parallelMetricsForDigest,
   });
 
   // Log session end for each project
@@ -824,6 +842,7 @@ export async function runSession(options: SessionOptions) {
         parallel_rounds: parallelRounds,
         max_parallel_slots: config.max_parallel_slots,
         slot_idle_seconds: Math.round(slotIdleTotalSeconds),
+        parallel_efficiency: Math.round(parallelEfficiency * 1000) / 1000,
       }
     : {};
   await appendProgress("_fleet", "session_complete", {
@@ -950,6 +969,36 @@ export interface WriteDigestDeps {
   narrativeProvider?: LLMProvider;
 }
 
+// gs-188: optional parallel-mode metrics rendered into the digest when
+// the session ran with max_parallel_slots > 1. Skipped entirely in
+// sequential mode (undefined / omitted) so the digest shape stays
+// identical for the common case.
+export interface DigestParallelMetrics {
+  max_parallel_slots: number;
+  parallel_rounds: number;
+  slot_idle_seconds: number;
+  parallel_efficiency: number; // 0..1
+}
+
+// gs-188: compute parallel_efficiency from cumulative slot idle and
+// the session's wall-clock elapsed × slot count. 1.0 = every slot
+// fully utilized; lower = some slots waited idle for slower siblings.
+// Clamped to [0, 1] because rounding in elapsed/slot_idle can push it
+// marginally outside the range.
+export function computeParallelEfficiency(
+  slotIdleSeconds: number,
+  elapsedSeconds: number,
+  maxParallelSlots: number,
+): number {
+  if (maxParallelSlots <= 1 || elapsedSeconds <= 0) return 1;
+  const totalSlotSeconds = elapsedSeconds * maxParallelSlots;
+  if (totalSlotSeconds <= 0) return 1;
+  const efficiency = 1 - slotIdleSeconds / totalSlotSeconds;
+  if (efficiency < 0) return 0;
+  if (efficiency > 1) return 1;
+  return efficiency;
+}
+
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
@@ -957,6 +1006,7 @@ export async function writeDigest(
     digest_dir: string;
     reviewer_provider?: string;
     reviewer_model?: string;
+    parallel_metrics?: DigestParallelMetrics;
   },
   deps?: WriteDigestDeps,
 ) {
@@ -1008,6 +1058,18 @@ export async function writeDigest(
     if (narrative) {
       content += `**Narrative:** ${narrative}\n`;
     }
+  }
+  // gs-188: parallel-mode summary. Only rendered when the session
+  // actually ran with max_parallel_slots > 1 — sequential sessions
+  // show an unchanged digest header.
+  if (config.parallel_metrics && config.parallel_metrics.max_parallel_slots > 1) {
+    const pm = config.parallel_metrics;
+    const effPct = (pm.parallel_efficiency * 100).toFixed(1);
+    content +=
+      `**Parallel:** ${pm.max_parallel_slots} slots, ` +
+      `${pm.parallel_rounds} round(s), ` +
+      `${formatDuration(pm.slot_idle_seconds)} slot-idle, ` +
+      `${effPct}% efficiency\n`;
   }
   content += `\n`;
 

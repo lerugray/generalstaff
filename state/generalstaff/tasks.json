@@ -1140,7 +1140,7 @@
   {
     "id": "gs-188",
     "title": "Phase 4 step 4: observability for parallel sessions. The existing session_complete event aggregates across cycles. With parallel cycles, the aggregation needs to capture effective wall-clock parallelism — e.g. {cycles: 12, slots_used: 3, parallel_efficiency: 0.92}. The status command and digest format need light updates to not present parallel cycles as a flat sequential list (they will look weird in git log order if interleaved). Also emit slot_idle_time so we can measure whether the round-based wait pattern is painful enough to warrant the (b) upgrade in DESIGN.md §v6.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]
