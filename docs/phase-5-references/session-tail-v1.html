@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>generalstaff — session tail</title>
+<meta name="viewport" content="width=1280">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Archivo+Narrow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f1e7d3;
+    --paper-2:     #ede1c9;
+    --paper-edge:  #e4d5b7;
+    --ink:         #2a2418;
+    --ink-soft:    #4a4131;
+    --ink-faint:   #8a7f66;
+    --ink-ghost:   #b7ab8e;
+    --rule:        #3a3122;
+    --rule-soft:   #c9bb9b;
+    --rust:        #8a3a1c;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 60%, rgba(80,55,15,0.10) 100%),
+      radial-gradient(circle at 20% 10%, rgba(255,255,255,0.25), transparent 40%);
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(90,65,25,0.12) 1px, transparent 1px),
+      radial-gradient(rgba(90,65,25,0.08) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    z-index: 0;
+  }
+
+  .sheet {
+    position: relative;
+    z-index: 1;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  /* ——— masthead (unchanged from anchor) ——— */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+    gap: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+  .wordmark {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 32px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .wordmark .dot {
+    color: var(--rust);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 14px;
+    vertical-align: 6px;
+    margin-right: 10px;
+  }
+  .sub {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    color: var(--ink-soft);
+    justify-self: start;
+    align-self: center;
+    padding-left: 4px;
+    border-left: 1px solid var(--rule-soft);
+    padding: 4px 0 4px 14px;
+    line-height: 1.5;
+  }
+  .sub b { font-weight: 600; color: var(--ink); letter-spacing: 0.14em; }
+  .stamp {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+  }
+  .stamp .k { color: var(--ink-faint); }
+
+  .docline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0 44px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .docline .title {
+    font-family: 'Spectral', Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13.5px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* ——— summary band (unchanged) ——— */
+
+  .summary {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    gap: 0;
+    margin-bottom: 48px;
+    border-top: 0.5px solid var(--rule-soft);
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+  .cell {
+    padding: 22px 24px 20px;
+    border-right: 0.5px solid var(--rule-soft);
+    position: relative;
+  }
+  .cell:last-child { border-right: none; }
+  .cell:first-child { padding-left: 0; }
+  .cell:last-child { padding-right: 0; }
+  .lab {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 14px;
+  }
+  .big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+  .big .slash { color: var(--ink-ghost); font-weight: 400; margin: 0 4px; }
+  .big .denom { color: var(--ink-faint); font-weight: 400; font-size: 22px; }
+  .note {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    line-height: 1.35;
+  }
+  .note .em {
+    font-style: normal;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+    background: rgba(138,58,28,0.08);
+    padding: 1px 6px 2px;
+    margin-right: 4px;
+  }
+  .attn .note .em { background: rgba(138,58,28,0.14); color: var(--rust); }
+  .attn .big    { color: var(--rust); }
+
+  .summary .headline {
+    padding: 22px 32px 20px 0;
+    border-right: 0.5px solid var(--rule-soft);
+  }
+  .headline .over {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  .headline h1 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-size: 30px;
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+    text-wrap: pretty;
+    max-width: 22ch;
+  }
+  .headline h1 em { font-style: italic; color: var(--ink-soft); }
+
+  /* ——— section head (unchanged) ——— */
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 40px 0 14px;
+  }
+  .sec-head h2 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 18px;
+    letter-spacing: 0;
+    color: var(--ink);
+  }
+  .sec-head h2 .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    color: var(--ink-faint);
+    font-size: 13px;
+    margin-left: 10px;
+    letter-spacing: 0.04em;
+  }
+  .sec-head .legend {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+  }
+
+  /* ——— session-level block ——— */
+
+  .session-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    padding: 6px 0 10px;
+    border-top: 1.25px solid var(--rule);
+    border-bottom: 0.5px solid var(--rule-soft);
+    margin-top: 8px;
+  }
+  .session-head .sid {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+  }
+  .session-head .sid .prefix {
+    color: var(--ink-faint);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 10px;
+  }
+  .session-head .meta {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .session-head .meta span + span::before {
+    content: " · ";
+    color: var(--ink-ghost);
+    margin: 0 6px;
+  }
+  .session-head .meta b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ——— dispatch block (NEW — extending anchor's 3-col pattern) ——— */
+
+  .dispatches { }
+
+  .dispatch {
+    display: grid;
+    grid-template-columns: 80px 1fr 120px;
+    column-gap: 24px;
+    padding: 20px 0 22px;
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+
+  .dispatch .timerail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--ink-soft);
+    font-feature-settings: "tnum" 1;
+    line-height: 1.5;
+    text-align: right;
+    padding-top: 2px;
+  }
+  .dispatch .timerail .arrow {
+    display: block;
+    color: var(--ink-ghost);
+    font-size: 11px;
+    line-height: 0.8;
+    margin: 3px 0;
+  }
+  .dispatch .timerail .edge {
+    display: block;
+    color: var(--ink-ghost);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    margin-top: 10px;
+    font-weight: 600;
+  }
+
+  .dispatch .body { min-width: 0; }
+
+  .dispatch .cycle-heading {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  .dispatch .cycle-heading .tid {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+  }
+  .dispatch .cycle-heading .verdict {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .dispatch .cycle-heading .verdict.verified { color: var(--ink); }
+  .dispatch .cycle-heading .verdict.verified::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--ink);
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+  .dispatch .cycle-heading .verdict.failed { color: var(--rust); }
+  .dispatch .cycle-heading .verdict.failed::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--rust);
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+  .dispatch .cycle-heading .verdict.rolled {
+    color: var(--rust);
+    font-style: italic;
+    font-family: 'Spectral', Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .dispatch .cycle-heading .cycle-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+    margin-left: auto;
+  }
+
+  .dispatch .phases {
+    display: flex;
+    gap: 0;
+    margin: 4px 0 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+  }
+  .dispatch .phases .ph {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .dispatch .phases .ph + .ph::before {
+    content: "→";
+    color: var(--ink-ghost);
+    margin: 0 12px;
+    font-family: 'Archivo Narrow', sans-serif;
+    font-weight: 600;
+  }
+  .dispatch .phases .ph .k {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+
+  .dispatch .verdict-prose {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 14.5px;
+    font-style: italic;
+    line-height: 1.45;
+    color: var(--ink-soft);
+    margin: 0 0 10px;
+    text-wrap: pretty;
+    padding-left: 14px;
+    border-left: 1.5px solid var(--rule-soft);
+  }
+  .dispatch .verdict-prose::before {
+    content: "“";
+    color: var(--ink-ghost);
+    font-size: 20px;
+    vertical-align: -6px;
+    margin-right: 2px;
+  }
+  .dispatch .verdict-prose::after {
+    content: "”";
+    color: var(--ink-ghost);
+    font-size: 20px;
+    vertical-align: -6px;
+    margin-left: 2px;
+  }
+
+  .dispatch .files-row {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    line-height: 1.6;
+  }
+  .dispatch .files-row .k {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    margin-right: 6px;
+  }
+  .dispatch .files-row .file + .file::before {
+    content: " · ";
+    color: var(--ink-ghost);
+    margin: 0 4px 0 2px;
+  }
+  .dispatch .files-row .add { color: var(--ink); }
+  .dispatch .files-row .del { color: var(--ink-faint); }
+
+  .dispatch .aside {
+    text-align: right;
+    padding-top: 4px;
+  }
+  .dispatch .aside .dur-big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1;
+  }
+  .dispatch .aside .dur-lab {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-top: 6px;
+  }
+  .dispatch .aside .sha {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    margin-top: 12px;
+    letter-spacing: 0.02em;
+  }
+  .dispatch .aside .sha .k {
+    color: var(--ink-faint);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 6px;
+  }
+
+  /* session-end ribbon — closes a block */
+  .session-end {
+    display: grid;
+    grid-template-columns: 80px 1fr 120px;
+    column-gap: 24px;
+    padding: 14px 0 8px;
+    margin-bottom: 32px;
+    border-bottom: 1.25px solid var(--rule);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .session-end .ts {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    text-align: right;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink-soft);
+  }
+  .session-end .msg b { color: var(--ink); font-weight: 600; }
+  .session-end .out { text-align: right; color: var(--ink); font-weight: 600; }
+
+  /* earlier sessions rail */
+  .earlier {
+    margin-top: 8px;
+  }
+  .earlier-row {
+    display: grid;
+    grid-template-columns: 170px 1fr auto;
+    column-gap: 24px;
+    padding: 12px 0 11px;
+    border-bottom: 0.5px solid var(--rule-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    letter-spacing: 0.02em;
+  }
+  .earlier-row .when {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--ink-faint);
+  }
+  .earlier-row .sid {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .earlier-row .sid .detail {
+    color: var(--ink-faint);
+    font-weight: 400;
+    margin-left: 10px;
+    font-size: 11.5px;
+  }
+  .earlier-row .outcome {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .earlier-row .outcome.mixed { color: var(--rust); }
+
+  /* ——— afterword / colophon (unchanged) ——— */
+
+  .afterword {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .afterword h3 {
+    margin: 0 0 10px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .afterword p {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .afterword p .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+
+  .colophon {
+    margin-top: 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+    padding-top: 16px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .colophon .run {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ——— masthead ——— -->
+  <header class="masthead">
+    <div class="wordmark"><span class="dot">●</span>generalstaff</div>
+    <div class="sub">Session tail · <b>generalstaff</b></div>
+    <div class="stamp">
+      <span class="k">sheet</span>&nbsp;&nbsp;03 / tail<br>
+      <span class="k">host</span>&nbsp;&nbsp;&nbsp;localhost:7823
+    </div>
+  </header>
+
+  <div class="docline">
+    <span>Dispatch log · newest first</span>
+    <span class="title">“Reports from the field.”</span>
+    <span>Rev. 0.4 · April 2026</span>
+  </div>
+
+  <!-- ——— summary band ——— -->
+  <section class="summary">
+    <div class="cell headline">
+      <div class="over">Recent activity</div>
+      <h1>Two sessions closed tonight. <em>Five cycles verified, zero failed.</em></h1>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Last session</div>
+      <div class="big" style="font-size:26px;padding-top:8px">16<span style="font-size:14px;color:var(--ink-faint);margin-left:2px">m</span><span class="slash" style="font-size:14px"> · </span>2 cyc</div>
+      <div class="note">Closed <span class="em">7m ago</span>on generalstaff.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Cycles · tonight</div>
+      <div class="big">5<span class="slash">/</span><span class="denom">5</span></div>
+      <div class="note">Verified over two sessions. No rollbacks.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Reviewer</div>
+      <div class="big" style="font-size:18px;padding-top:14px">openrouter</div>
+      <div class="note"><span class="em">qwen3-coder</span>carried both sessions.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Parallel</div>
+      <div class="big" style="font-size:22px;padding-top:11px">2 × 99.7%</div>
+      <div class="note">Slots × efficiency. Minimal idle.</div>
+    </div>
+  </section>
+
+  <!-- ——— current / most recent session ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Current dispatch <span class="n">— session bc4nbrro5</span></h2>
+      <div class="legend">Closed 21:43 · 7m ago</div>
+    </div>
+
+    <div class="session-head">
+      <div class="sid"><span class="prefix">session</span>bc4nbrro5</div>
+      <div class="meta">
+        <span>Opened <b>21:27</b></span>
+        <span>Budget <b>45m</b></span>
+        <span>Reviewer <b>openrouter</b></span>
+        <span><b>2</b> slots</span>
+        <span>Stop reason <b>max-cycles</b></span>
+      </div>
+    </div>
+
+    <div class="dispatches">
+
+      <div class="dispatch">
+        <div class="timerail">
+          21:27<span class="arrow">↓</span>21:36
+          <span class="edge">9m 31s</span>
+        </div>
+        <div class="body">
+          <div class="cycle-heading">
+            <span class="tid">gs-220</span>
+            <span class="verdict verified">Verified</span>
+            <span class="cycle-id">20260418212705_qkbw</span>
+          </div>
+          <div class="phases">
+            <span class="ph"><span class="k">Engineer</span>8m 17s</span>
+            <span class="ph"><span class="k">Verify</span>1m 08s</span>
+            <span class="ph"><span class="k">Review</span>6s</span>
+          </div>
+          <p class="verdict-prose">All changes align with the claimed task gs-220, no hands-off violations, and the verification command passed.</p>
+          <div class="files-row">
+            <span class="k">touched</span>
+            <span class="file">src/session.ts <span class="add">+126</span></span>
+            <span class="file">tests/session.test.ts <span class="add">+95</span></span>
+            <span class="file">state/generalstaff/tasks.json</span>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="dur-big">9m 31s</div>
+          <div class="dur-lab">Elapsed</div>
+          <div class="sha"><span class="k">sha</span>50a8da4</div>
+        </div>
+      </div>
+
+      <div class="dispatch">
+        <div class="timerail">
+          21:36<span class="arrow">↓</span>21:43
+          <span class="edge">6m 21s</span>
+        </div>
+        <div class="body">
+          <div class="cycle-heading">
+            <span class="tid">gs-216</span>
+            <span class="verdict verified">Verified</span>
+            <span class="cycle-id">20260418213639_5pcj</span>
+          </div>
+          <div class="phases">
+            <span class="ph"><span class="k">Engineer</span>5m 02s</span>
+            <span class="ph"><span class="k">Verify</span>1m 12s</span>
+            <span class="ph"><span class="k">Review</span>5s</span>
+          </div>
+          <p class="verdict-prose">All changes align with the claimed task, no hands-off violations, and verification command passed.</p>
+          <div class="files-row">
+            <span class="k">touched</span>
+            <span class="file">tests/helpers/verify_capped_projects_skipped.ts <span class="del">−23</span></span>
+            <span class="file">tests/helpers/verify_exclude_project.ts <span class="del">−31</span></span>
+            <span class="file">tests/helpers/verify_parallel_session.ts <span class="del">−19</span></span>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="dur-big">6m 21s</div>
+          <div class="dur-lab">Elapsed</div>
+          <div class="sha"><span class="k">sha</span>2b8f3d1</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="session-end">
+      <div class="ts">21:43</div>
+      <div class="msg">Session closed · <b>2 verified</b> · 0 failed · reason <b>max-cycles</b></div>
+      <div class="out">16m total</div>
+    </div>
+  </section>
+
+  <!-- ——— prior session (still expanded for validation) ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Prior dispatch <span class="n">— session b05evw3nt</span></h2>
+      <div class="legend">Closed 21:25 · ~25m ago</div>
+    </div>
+
+    <div class="session-head">
+      <div class="sid"><span class="prefix">session</span>b05evw3nt</div>
+      <div class="meta">
+        <span>Opened <b>21:04</b></span>
+        <span>Budget <b>30m</b></span>
+        <span>Reviewer <b>openrouter</b></span>
+        <span><b>1</b> slot</span>
+        <span>Stop reason <b>max-cycles</b></span>
+      </div>
+    </div>
+
+    <div class="dispatches">
+
+      <div class="dispatch">
+        <div class="timerail">
+          21:04<span class="arrow">↓</span>21:13
+          <span class="edge">9m 29s</span>
+        </div>
+        <div class="body">
+          <div class="cycle-heading">
+            <span class="tid">gs-217</span>
+            <span class="verdict verified">Verified</span>
+            <span class="cycle-id">20260418210410_jbnz</span>
+          </div>
+          <div class="phases">
+            <span class="ph"><span class="k">Engineer</span>8m 04s</span>
+            <span class="ph"><span class="k">Verify</span>1m 18s</span>
+            <span class="ph"><span class="k">Review</span>7s</span>
+          </div>
+          <p class="verdict-prose">All files in the diff relate to the claimed task gs-217, no hands-off violations, and the diff provides strong evidence for completing the task.</p>
+          <div class="files-row">
+            <span class="k">touched</span>
+            <span class="file">src/cli.ts <span class="add">+80</span></span>
+            <span class="file">src/sessions.ts <span class="add">+73</span></span>
+            <span class="file">state/generalstaff/tasks.json</span>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="dur-big">9m 29s</div>
+          <div class="dur-lab">Elapsed</div>
+          <div class="sha"><span class="k">sha</span>2848a31</div>
+        </div>
+      </div>
+
+      <div class="dispatch">
+        <div class="timerail">
+          21:13<span class="arrow">↓</span>21:18
+          <span class="edge">4m 58s</span>
+        </div>
+        <div class="body">
+          <div class="cycle-heading">
+            <span class="tid">gs-218</span>
+            <span class="verdict verified">Verified</span>
+            <span class="cycle-id">20260418211342_v590</span>
+          </div>
+          <div class="phases">
+            <span class="ph"><span class="k">Engineer</span>3m 41s</span>
+            <span class="ph"><span class="k">Verify</span>1m 11s</span>
+            <span class="ph"><span class="k">Review</span>6s</span>
+          </div>
+          <p class="verdict-prose">All changes align with the claimed task gs-218, no hands-off violations, and verification command passed.</p>
+          <div class="files-row">
+            <span class="k">touched</span>
+            <span class="file">src/tasks.ts <span class="add">+88</span></span>
+            <span class="file">tests/tasks.test.ts <span class="add">+156</span></span>
+            <span class="file">state/generalstaff/tasks.json</span>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="dur-big">4m 58s</div>
+          <div class="dur-lab">Elapsed</div>
+          <div class="sha"><span class="k">sha</span>4c252ee</div>
+        </div>
+      </div>
+
+      <div class="dispatch">
+        <div class="timerail">
+          21:18<span class="arrow">↓</span>21:25
+          <span class="edge">7m 14s</span>
+        </div>
+        <div class="body">
+          <div class="cycle-heading">
+            <span class="tid">gs-219</span>
+            <span class="verdict verified">Verified</span>
+            <span class="cycle-id">20260418211842_4vrs</span>
+          </div>
+          <div class="phases">
+            <span class="ph"><span class="k">Engineer</span>5m 54s</span>
+            <span class="ph"><span class="k">Verify</span>1m 14s</span>
+            <span class="ph"><span class="k">Review</span>6s</span>
+          </div>
+          <p class="verdict-prose">All files in the diff correspond to the claimed task gs-219, no hands-off violations, and the diff provides strong evidence for completing the task.</p>
+          <div class="files-row">
+            <span class="k">touched</span>
+            <span class="file">src/fleet_messages.ts <span class="add">+90</span></span>
+            <span class="file">src/session.ts <span class="add">+16</span></span>
+            <span class="file">state/generalstaff/tasks.json</span>
+          </div>
+        </div>
+        <div class="aside">
+          <div class="dur-big">7m 14s</div>
+          <div class="dur-lab">Elapsed</div>
+          <div class="sha"><span class="k">sha</span>fa2cf37</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="session-end">
+      <div class="ts">21:25</div>
+      <div class="msg">Session closed · <b>3 verified</b> · 0 failed · reason <b>max-cycles</b></div>
+      <div class="out">21m total</div>
+    </div>
+  </section>
+
+  <!-- ——— earlier sessions (compact rail) ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Earlier sessions <span class="n">— last 6 before tonight</span></h2>
+      <div class="legend">Lifetime total 51 · see fleet overview</div>
+    </div>
+    <div class="earlier">
+
+      <div class="earlier-row">
+        <div class="when">Today · 18:42</div>
+        <div class="sid">bxs08e22x<span class="detail">raybrain · 6 cycles · rayb-006..011</span></div>
+        <div class="outcome">6 verified</div>
+      </div>
+
+      <div class="earlier-row">
+        <div class="when">Today · 16:04</div>
+        <div class="sid">b3op0qe55<span class="detail">generalstaff · 4 cycles · gs-185..188</span></div>
+        <div class="outcome">4 verified</div>
+      </div>
+
+      <div class="earlier-row">
+        <div class="when">Today · 11:18</div>
+        <div class="sid">b9m3kvq0a<span class="detail">raybrain · 82 cycles · retry-spin on rayb-001 (fast-fail added gs-193)</span></div>
+        <div class="outcome mixed">1 v · 81 f</div>
+      </div>
+
+      <div class="earlier-row">
+        <div class="when">Today · 09:12</div>
+        <div class="sid">bq2h7t10c<span class="detail">generalstaff · 5 cycles · gs-171..175</span></div>
+        <div class="outcome">5 verified</div>
+      </div>
+
+      <div class="earlier-row">
+        <div class="when">Yesterday · 22:01</div>
+        <div class="sid">bn1zck88p<span class="detail">gamr · 4 cycles · gamr-001..004</span></div>
+        <div class="outcome">4 verified</div>
+      </div>
+
+      <div class="earlier-row">
+        <div class="when">Yesterday · 19:38</div>
+        <div class="sid">bm4l6xv7n<span class="detail">generalstaff · 5 cycles · gs-166..170</span></div>
+        <div class="outcome">5 verified</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ——— afterword ——— -->
+  <section class="afterword">
+    <div>
+      <h3>Cycle phases</h3>
+      <p>Every cycle runs <span class="mono">engineer → verify → review</span>. Engineer is the Claude Code session doing the work; verify is <span class="mono">bun test &amp;&amp; tsc --noEmit</span>; review is the verdict model reading the diff against the claimed task. Any phase can fail and roll the cycle back.</p>
+    </div>
+    <div>
+      <h3>Verdicts</h3>
+      <p><span class="mono">verified</span> means the diff matches the claimed task with no hands-off violations. <span class="mono">failed</span> means the reviewer rejected the diff or verification didn't pass. A <em>rolled-back</em> cycle had its changes reverted on the branch.</p>
+    </div>
+    <div>
+      <h3>Stop reasons</h3>
+      <p>Sessions end on <span class="mono">max-cycles</span>, <span class="mono">budget-elapsed</span>, <span class="mono">no-work</span>, or the <span class="mono">STOP</span> file. The summary band above shows how tonight's sessions closed. Read-only here — start and stop sessions from the CLI.</p>
+    </div>
+  </section>
+
+  <!-- ——— colophon ——— -->
+  <div class="colophon">
+    <span>generalstaff · open-source autonomous-bot dispatcher</span>
+    <span class="run">rendered 19:47 · pid 48213 · sheet refreshed on load</span>
+    <span>page 1 of 1</span>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -142,6 +142,72 @@ produced reusable vocabulary for 2 distinct views and counting.
 Remaining Phase 5 views (session tail, dispatch detail, inbox) are
 expected to follow the same extension pattern.
 
+## 2026-04-18 — session tail (hand-built, zero Design spend)
+
+`session-tail-v1.html` is the third Phase 5 view. Temporal/streaming
+data shape — a dispatch log of recent bot sessions, newest first,
+each cycle rendered as a "dispatch from the field" block. Built by
+extending the anchor + task-queue vocabularies; no Claude Design
+spend.
+
+**What carries over from prior views:**
+- Full palette, type stack, masthead, docline, summary band,
+  section head, afterword, colophon — structural skeleton
+  identical to fleet-overview + task-queue
+- The 3-column grid pattern (left-narrow / body / right-narrow)
+  established in task-queue's `.task` reused here as `.dispatch`
+- `.attn` highlight, `.note .em` inline tags, dash conventions,
+  tabular-num numerals, Archivo Narrow small-caps labels
+
+**New vocabulary this view adds:**
+- `.session-head` — session-level banner (session id + open time +
+  budget + reviewer + slot config + stop reason)
+- `.dispatch` — per-cycle block, grid is timerail / body / aside
+  (mirrors `.task` pattern but swaps pri-column for timerail)
+- `.timerail` — stacked start/end timestamps with arrow glyph and
+  elapsed-duration edge tag in small caps
+- `.cycle-heading` — task id in Spectral + verdict chip with square
+  dot (verified=ink / failed=rust) + cycle_id drifted right in faded
+  mono
+- `.phases` — engineer → verify → review strip with per-phase
+  durations, arrow separators styled in Archivo Narrow
+- `.verdict-prose` — italic Spectral pull-quote treatment with
+  curly-quote glyphs and hairline left-border, carries the
+  reviewer's actual prose reason
+- `.files-row` — mono path list with inline `+126` / `−23` diff
+  indicators
+- `.session-end` — closing ribbon matching the session_end event
+  (rule above, mono timestamp, outcome summary)
+- `.earlier-row` — compact one-line rail for older sessions,
+  cross-project (mixed-outcome sessions styled in rust)
+
+**Real data shipped in the view:**
+- Sessions `bc4nbrro5` (gs-220, gs-216) and `b05evw3nt` (gs-217,
+  gs-218, gs-219) — actual SHAs, actual verdict prose, actual file
+  touches pulled from `state/generalstaff/PROGRESS.jsonl`
+
+**What's fabricated:**
+- Per-phase durations inside each cycle (engineer + verify + review
+  splits). The PROGRESS.jsonl has real cycle-total durations but
+  not per-phase splits of the engineer step itself; the splits are
+  plausible and sum to the real total
+- The earlier-sessions rail — session IDs look real but timings and
+  cycle counts are inferred/invented (b9m3kvq0a's "82 cycles
+  retry-spin" is rooted in the real morning incident documented in
+  `CLAUDE.md` §"Report fidelity")
+
+**Rust-accent rule consolidating across all three views:**
+Rust = "this asks for your eyes, whether attention-good or
+attention-bad." Used for P1 priorities, in-flight dots, interactive
+flags (queue); failed verdicts, mixed-outcome sessions (tail);
+bot-pickable cell, hot failure counts (fleet). Consistent meaning
+across views — a reader learns it once.
+
+**Phase 5 remaining:** dispatch detail (per-cycle drill-in with
+full REVIEW.md + diff view), inbox (state/_fleet/messages.jsonl
+shared channel). Both expected to follow the same hand-extension
+pattern.
+
 ## Conventions for this directory
 
 - One subdirectory or zipped artifact per design artifact.
