@@ -1110,7 +1110,7 @@
   {
     "id": "gs-193",
     "title": "Add fast-fail backoff to dispatcher: if N consecutive cycles on same project end with any failure outcome (engineer_exit_code != 0, OR verification_failed, OR hands_off violations, OR rolled-back-then-retried) in less than M seconds wall, soft-skip that project for rest of session and log a warning. Surfaced twice on 2026-04-18: (a) raybrain broken engineer_command.sh exited code 2 in 1 second per cycle, dispatcher spun retrying at ~1/sec producing 82 failed cycles in 2 minutes before STOP fired; (b) raybrain rayb-001 scope-collision with hands_off list caused 5 consecutive verification_failed cycles of ~5 min each, wasting ~25 min of OpenRouter spend (~$0.15) before session budget exhausted. Original task body was narrower (engineer_exit_code != 0 only) — broadened 2026-04-18 afternoon to cover the verification_failed case too. Defaults: N=3 consecutive failures, M=600 seconds (10 min, accommodates longer cycle durations). Add ProgressEventType project_soft_skipped with reason field citing the failure pattern. Bot-doable — src/cycle.ts and src/session.ts are not in hands-off.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

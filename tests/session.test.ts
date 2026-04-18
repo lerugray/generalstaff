@@ -8,6 +8,9 @@ import {
   regenerateDigest,
   parseFormattedDuration,
   runSessionChain,
+  updateFailureStreak,
+  DEFAULT_SOFT_SKIP_THRESHOLD,
+  DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
 } from "../src/session";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -1202,5 +1205,104 @@ describe("runSessionChain", () => {
       "start-2", "end-2",
       "start-3", "end-3",
     ]);
+  });
+});
+
+describe("updateFailureStreak (gs-193 fast-fail backoff)", () => {
+  it("exports defaults matching the task spec (N=3, M=600s)", () => {
+    expect(DEFAULT_SOFT_SKIP_THRESHOLD).toBe(3);
+    expect(DEFAULT_SOFT_SKIP_WINDOW_SECONDS).toBe(600);
+  });
+
+  it("success on empty streak stays at count 0", () => {
+    const u = updateFailureStreak(undefined, false, 1000);
+    expect(u.streak.count).toBe(0);
+    expect(u.shouldSoftSkip).toBe(false);
+  });
+
+  it("first failure starts a streak at count 1, no soft-skip yet", () => {
+    const u = updateFailureStreak(undefined, true, 1000);
+    expect(u.streak.count).toBe(1);
+    expect(u.streak.windowStartMs).toBe(1000);
+    expect(u.shouldSoftSkip).toBe(false);
+    expect(u.spanSeconds).toBe(0);
+  });
+
+  it("second failure extends the streak, still no soft-skip", () => {
+    const u1 = updateFailureStreak(undefined, true, 1000);
+    const u2 = updateFailureStreak(u1.streak, true, 2000);
+    expect(u2.streak.count).toBe(2);
+    expect(u2.streak.windowStartMs).toBe(1000);
+    expect(u2.shouldSoftSkip).toBe(false);
+    expect(u2.spanSeconds).toBe(1);
+  });
+
+  it("third failure inside window triggers soft-skip (case a: fast crash loop)", () => {
+    const u1 = updateFailureStreak(undefined, true, 0);
+    const u2 = updateFailureStreak(u1.streak, true, 1000);
+    const u3 = updateFailureStreak(u2.streak, true, 2000);
+    expect(u3.streak.count).toBe(3);
+    expect(u3.shouldSoftSkip).toBe(true);
+    expect(u3.spanSeconds).toBe(2);
+  });
+
+  it("third failure at exact window boundary triggers (inclusive, case b edge)", () => {
+    // Case b: 3 verification_failed cycles × 5 min each, first-to-third span = 10 min.
+    const u1 = updateFailureStreak(undefined, true, 0);
+    const u2 = updateFailureStreak(u1.streak, true, 300_000);
+    const u3 = updateFailureStreak(u2.streak, true, 600_000);
+    expect(u3.streak.count).toBe(3);
+    expect(u3.spanSeconds).toBe(600);
+    expect(u3.shouldSoftSkip).toBe(true);
+  });
+
+  it("third failure outside window does NOT trigger soft-skip", () => {
+    const u1 = updateFailureStreak(undefined, true, 0);
+    const u2 = updateFailureStreak(u1.streak, true, 300_000);
+    // 15-min span, outside the 10-min window
+    const u3 = updateFailureStreak(u2.streak, true, 900_000);
+    expect(u3.streak.count).toBe(3);
+    expect(u3.spanSeconds).toBe(900);
+    expect(u3.shouldSoftSkip).toBe(false);
+  });
+
+  it("success mid-streak resets count to 0", () => {
+    const u1 = updateFailureStreak(undefined, true, 1000);
+    const u2 = updateFailureStreak(u1.streak, true, 2000);
+    const u3 = updateFailureStreak(u2.streak, false, 3000);
+    expect(u3.streak.count).toBe(0);
+    expect(u3.shouldSoftSkip).toBe(false);
+  });
+
+  it("failure after success starts a fresh streak anchored at the new time", () => {
+    const u1 = updateFailureStreak(undefined, true, 1000);
+    const u2 = updateFailureStreak(u1.streak, false, 2000);
+    const u3 = updateFailureStreak(u2.streak, true, 3000);
+    expect(u3.streak.count).toBe(1);
+    expect(u3.streak.windowStartMs).toBe(3000);
+    expect(u3.shouldSoftSkip).toBe(false);
+  });
+
+  it("fourth+ failure keeps streak growing and shouldSoftSkip stays true in-window", () => {
+    let s = updateFailureStreak(undefined, true, 0).streak;
+    s = updateFailureStreak(s, true, 1000).streak;
+    s = updateFailureStreak(s, true, 2000).streak;
+    const u4 = updateFailureStreak(s, true, 3000);
+    expect(u4.streak.count).toBe(4);
+    expect(u4.shouldSoftSkip).toBe(true);
+  });
+
+  it("honours custom thresholds (N=2, M=60s)", () => {
+    const u1 = updateFailureStreak(undefined, true, 0, 2, 60);
+    expect(u1.shouldSoftSkip).toBe(false);
+    const u2 = updateFailureStreak(u1.streak, true, 30_000, 2, 60);
+    expect(u2.shouldSoftSkip).toBe(true);
+  });
+
+  it("custom threshold respects window — N=2 at 70s does not trigger", () => {
+    const u1 = updateFailureStreak(undefined, true, 0, 2, 60);
+    const u2 = updateFailureStreak(u1.streak, true, 70_000, 2, 60);
+    expect(u2.streak.count).toBe(2);
+    expect(u2.shouldSoftSkip).toBe(false);
   });
 });

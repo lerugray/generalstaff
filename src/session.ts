@@ -36,6 +36,60 @@ import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
 // engineer or reviewer step that deserves human eyes.
 export const WATCHDOG_MULTIPLIER = 2;
 
+// gs-193: fast-fail backoff thresholds. N consecutive verification_failed
+// outcomes within M seconds wall → soft-skip the project for the rest of
+// the session. Defaults chosen to catch (a) ~1-sec engineer crashes (82
+// retries in 2 min observed on raybrain 2026-04-18) and (b) ~5-min
+// verification failures from hands-off scope collisions (5 retries × 5
+// min = ~$0.15 OpenRouter spend wasted on the same collision).
+export const DEFAULT_SOFT_SKIP_THRESHOLD = 3;
+export const DEFAULT_SOFT_SKIP_WINDOW_SECONDS = 600;
+
+export interface FailureStreak {
+  count: number;
+  windowStartMs: number;
+}
+
+export interface FailureStreakUpdate {
+  streak: FailureStreak;
+  shouldSoftSkip: boolean;
+  spanSeconds: number;
+}
+
+// Pure state transition for a project's consecutive-failure streak.
+// A "failure" here is any verification_failed outcome — that bucket
+// covers engineer abnormal exit, hands-off violations, verification
+// gate failures, and reviewer rejections (all routed through
+// cycle.ts to final_outcome=verification_failed). cycle_skipped is
+// NOT counted as a failure (pre-flight abort, not a progress signal)
+// and should short-circuit before calling this function; verified /
+// verified_weak are successes that reset the streak.
+export function updateFailureStreak(
+  prev: FailureStreak | undefined,
+  isFailure: boolean,
+  nowMs: number,
+  maxFailures: number = DEFAULT_SOFT_SKIP_THRESHOLD,
+  windowSeconds: number = DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+): FailureStreakUpdate {
+  if (!isFailure) {
+    return {
+      streak: { count: 0, windowStartMs: nowMs },
+      shouldSoftSkip: false,
+      spanSeconds: 0,
+    };
+  }
+  const windowStartMs =
+    prev && prev.count > 0 ? prev.windowStartMs : nowMs;
+  const count = (prev?.count ?? 0) + 1;
+  const spanSeconds = Math.max(0, (nowMs - windowStartMs) / 1000);
+  const shouldSoftSkip = count >= maxFailures && spanSeconds <= windowSeconds;
+  return {
+    streak: { count, windowStartMs },
+    shouldSoftSkip,
+    spanSeconds,
+  };
+}
+
 export function checkCycleWatchdog(
   durationSeconds: number,
   cycleBudgetMinutes: number,
@@ -161,6 +215,7 @@ export async function runSession(options: SessionOptions) {
   const allResults: CycleResult[] = [];
   const cyclesPerProject = new Map<string, number>();
   const skippedProjects = new Set<string>(excludeSet);
+  const failureStreaks = new Map<string, FailureStreak>();
 
   function elapsedMinutes(): number {
     return (Date.now() - sessionStart) / 60_000;
@@ -344,6 +399,42 @@ export async function runSession(options: SessionOptions) {
     // Handle skipped cycles
     if (result.final_outcome === "cycle_skipped") {
       skippedProjects.add(currentProject.id);
+      currentProject = null;
+      continue;
+    }
+
+    // gs-193: fast-fail backoff. Accumulate consecutive verification_failed
+    // outcomes per project; if the streak reaches the threshold inside the
+    // window, drop the project from the session. Prevents retry-spin when
+    // a project's engineer_command is broken (case a: 82 cycles in 2 min)
+    // or when queued tasks collide with hands_off patterns (case b: 5
+    // cycles × 5 min each, ~$0.15 of OpenRouter spend wasted).
+    const isFailure = result.final_outcome === "verification_failed";
+    const streakUpdate = updateFailureStreak(
+      failureStreaks.get(currentProject.id),
+      isFailure,
+      Date.now(),
+    );
+    failureStreaks.set(currentProject.id, streakUpdate.streak);
+
+    if (streakUpdate.shouldSoftSkip) {
+      const span = Math.round(streakUpdate.spanSeconds);
+      const reason =
+        `${streakUpdate.streak.count} consecutive failures in ${span}s ` +
+        `(threshold ${DEFAULT_SOFT_SKIP_THRESHOLD} failures / ` +
+        `${DEFAULT_SOFT_SKIP_WINDOW_SECONDS}s window)`;
+      console.log(
+        `\n[SOFT-SKIP] ${currentProject.id}: ${reason} — ` +
+          `dropping project for rest of session.`,
+      );
+      skippedProjects.add(currentProject.id);
+      await appendProgress(currentProject.id, "project_soft_skipped", {
+        reason,
+        consecutive_failures: streakUpdate.streak.count,
+        span_seconds: span,
+        threshold_failures: DEFAULT_SOFT_SKIP_THRESHOLD,
+        threshold_seconds: DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+      });
       currentProject = null;
       continue;
     }

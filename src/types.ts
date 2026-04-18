@@ -138,6 +138,7 @@ export type ProgressEventType =
   | "provider_invoked"
   | "provider_fallback"
   | "cycle_end"
+  | "project_soft_skipped"
   | "session_start"
   | "session_end"
   | "session_complete";
@@ -191,7 +192,8 @@ const VALID_EVENTS: readonly string[] = [
   "reviewer_fallback", "reviewer_hallucination",
   "worktree_preflight", "cycle_rollback",
   "provider_invoked", "provider_fallback",
-  "cycle_end", "session_start", "session_end", "session_complete",
+  "cycle_end", "project_soft_skipped",
+  "session_start", "session_end", "session_complete",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {
