@@ -1257,7 +1257,7 @@
   {
     "id": "gs-216",
     "title": "Finish the test-fixture refactor started 2026-04-18 afternoon. CREATE ONLY: edit the six remaining subprocess helpers under `tests/helpers/` that still have inline `ProjectConfig` / `DispatcherConfig` literals, replacing them with calls to `makeProjectConfig(overrides)` + `makeDispatcherConfig(overrides)` from `tests/helpers/fixtures.ts` (the shared factory module that already exists). DO NOT CREATE: new files; do not touch src/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Targets: (1) `tests/helpers/verify_capped_projects_skipped.ts`, (2) `tests/helpers/verify_exclude_project.ts`, (3) `tests/helpers/verify_max_cycles.ts`, (4) `tests/helpers/verify_session_complete_event.ts`, (5) `tests/helpers/verify_ollama_preflight_warning.ts`, (6) `tests/helpers/verify_parallel_session.ts`. Pattern for each: add `import { makeProjectConfig, makeDispatcherConfig } from './fixtures'` near the top; replace the ProjectConfig literal with `makeProjectConfig({ path: ..., hands_off: ..., etc })` passing only the fields that specialize from defaults; replace the DispatcherConfig literal similarly. Preserve each helper's specific customizations — don't change test semantics. No removal of the `ProjectConfig`/`DispatcherConfig` type imports since some helpers still reference them for other local typing. Verify `bun test` still passes all helpers (no regression) and `bunx tsc --noEmit` is clean. Expected diff: ~100 lines net reduction across 6 files.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "tests/helpers/verify_capped_projects_skipped.ts",
@@ -1266,7 +1266,8 @@
       "tests/helpers/verify_session_complete_event.ts",
       "tests/helpers/verify_ollama_preflight_warning.ts",
       "tests/helpers/verify_parallel_session.ts"
-    ]
+    ],
+    "completed_at": "2026-04-18T21:41:24.984Z"
   },
   {
     "id": "gs-217",

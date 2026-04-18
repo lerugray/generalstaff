@@ -10,6 +10,7 @@ import { mock } from "bun:test";
 import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
+import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
 
 const TEST_DIR = join(
   import.meta.dir,
@@ -26,33 +27,19 @@ mock.module("../../src/ollama", () => ({
   }),
 }));
 
-const project: ProjectConfig = {
-  id: "test-proj",
+const project = makeProjectConfig({
   path: TEST_DIR,
-  priority: 1,
-  engineer_command: "echo ok",
   verification_command: "bun test",
   cycle_budget_minutes: 1,
-  work_detection: "tasks_json",
-  concurrency_detection: "none",
-  branch: "bot/work",
-  auto_merge: false,
-  hands_off: [],
-};
+});
 
 mock.module("../../src/projects", () => ({
   loadProjectsYaml: async () => ({
     projects: [project],
-    dispatcher: {
+    dispatcher: makeDispatcherConfig({
       state_dir: join(TEST_DIR, "state"),
-      fleet_state_file: "fleet_state.json",
-      stop_file: "STOP",
-      override_file: "OVERRIDE",
-      picker: "priority_staleness",
       max_cycles_per_project_per_session: 1,
-      log_dir: "logs",
-      digest_dir: "digests",
-    },
+    }),
   }),
 }));
 

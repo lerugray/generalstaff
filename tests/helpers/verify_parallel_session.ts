@@ -11,6 +11,7 @@ import { mock } from "bun:test";
 import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
+import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
 
 const TEST_DIR = join(import.meta.dir, "..", "fixtures", "parallel_session_test");
 
@@ -20,35 +21,24 @@ let pickNextProjectsCalls = 0;
 let pickNextProjectCalls = 0; // must stay 0 in parallel mode
 let sessionCompleteEvent: Record<string, unknown> | null = null;
 
-const projectA: ProjectConfig = {
+const projectA = makeProjectConfig({
   id: "proj-a",
   path: TEST_DIR,
-  priority: 1,
   engineer_command: "echo a",
   verification_command: "echo",
   cycle_budget_minutes: 1,
-  work_detection: "tasks_json",
-  concurrency_detection: "none",
-  branch: "bot/work",
-  auto_merge: false,
-  hands_off: [],
-};
+});
 const projectB: ProjectConfig = { ...projectA, id: "proj-b" };
 
 mock.module("../../src/projects", () => ({
   loadProjectsYaml: async () => ({
     projects: [projectA, projectB],
-    dispatcher: {
+    dispatcher: makeDispatcherConfig({
       state_dir: join(TEST_DIR, "state"),
-      fleet_state_file: "fleet_state.json",
-      stop_file: "STOP",
-      override_file: "OVERRIDE",
-      picker: "priority_staleness",
-      max_cycles_per_project_per_session: 1, // 1 cycle per project → session ends after one round
-      log_dir: "logs",
-      digest_dir: "digests",
+      // 1 cycle per project → session ends after one round
+      max_cycles_per_project_per_session: 1,
       max_parallel_slots: 2,
-    },
+    }),
   }),
 }));
 
