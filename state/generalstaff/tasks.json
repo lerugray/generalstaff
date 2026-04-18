@@ -1066,8 +1066,8 @@
   },
   {
     "id": "gs-178",
-    "title": "Fix audit-log writes dirtying the GS working tree mid-session. Surfaced 2026-04-18 during gs-174: when the bot ran a gamr cycle, `audit.ts` appended events to `state/gamr/PROGRESS.jsonl` (which lives in GS's tracked working tree per audit.ts:21 — `${getRootDir()}/state/${projectId}/PROGRESS.jsonl`). The next cycle's clean-tree safety check then refused to run a generalstaff cycle (\"Uncommitted changes: M state/gamr/PROGRESS.jsonl\"), structurally blocking cross-project chaining within a session. Options: (a) dispatcher commits PROGRESS.jsonl writes between cycles (cleanest, preserves audit-trail-in-git); (b) clean-tree check whitelists `state/<id>/PROGRESS.jsonl` paths — narrow exception, doesn't lose the safety on real changes; (c) gitignore PROGRESS.jsonl files — cheapest but loses git-as-audit-log. Recommend (b) for narrowness + low risk, with (a) as a follow-up if the audit-trail-in-git semantics turn out to matter for archival. Add a test that simulates a multi-cycle session producing PROGRESS.jsonl writes between cycles and verifies the next cycle proceeds.",
-    "status": "pending",
+    "title": "Fix audit-log writes dirtying the GS working tree mid-session. CLOSED 2026-04-18 with option (b) — narrow whitelist for state/<id>/PROGRESS.jsonl in isWorkingTreeClean via two new exported helpers (isExemptFromCleanTreeCheck, filterCleanTreePorcelain). 11 new tests cover the exemption pattern (positive + negative cases) and the porcelain-filtering logic, including the verbatim real-world fixture from cycle 20260418112438_fcsb. Existing safety surface preserved for tasks.json, MISSION.md, session.pid, cycle artifacts. Original task body: Fix audit-log writes dirtying the GS working tree mid-session. Surfaced 2026-04-18 during gs-174: when the bot ran a gamr cycle, audit.ts appended events to state/gamr/PROGRESS.jsonl (which lives in GS's tracked working tree per audit.ts:21). The next cycle's clean-tree safety check then refused to run a generalstaff cycle, structurally blocking cross-project chaining within a session.",
+    "status": "done",
     "priority": 1
   }
 ]
