@@ -1268,6 +1268,34 @@ will look weird in `git log` order if interleaved).
    so we can see cumulative idle minutes and decide whether
    the upgrade is worth it.
 
+### External precedent (gstack + Conductor)
+
+Worth noting before building: Garry Tan's `gstack`
+(`github.com/garrytan/gstack`, noted 2026-04-18) explicitly
+pairs with **Conductor** (`conductor.build`) to run "10–15
+isolated Claude Code sessions in parallel, each with its own
+workspace." Gstack is Tan's personal AI-assisted engineering
+setup at YC-partner scale; Conductor is third-party orchestration
+infrastructure. The combination ships the pattern we're
+designing here in production, which confirms:
+
+1. Parallel worktrees at the ~10× scale is real, not
+   speculative — someone is shipping it.
+2. Conductor's architectural choice (one workspace per
+   parallel slot, filesystem isolation) matches our v6
+   constraint #1 ("per-project worktree isolation already
+   holds"). Our projects.yaml `project.path` is the same
+   shape as their per-workspace isolation.
+3. The pattern IS worth the complexity at that parallelism
+   level — gstack is using it because sequential caps
+   throughput at exactly the wall we identified in §v6
+   "The bug-of-omission as observed".
+
+We should NOT wrap Conductor itself (it's external
+infrastructure with its own opinions). But we can steal
+conviction from the pattern's existence in production and
+ship (a) faster with fewer premature-optimization concerns.
+
 ### Definition-of-done for the v6 arc
 
 - gs-185, gs-186, gs-187 land in src/.
