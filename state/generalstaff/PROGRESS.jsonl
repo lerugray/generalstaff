@@ -2150,3 +2150,4 @@
 {"timestamp":"2026-04-18T11:02:41.763Z","event":"engineer_completed","cycle_id":"20260418110221_cizo","project_id":"generalstaff","data":{"exit_code":1,"duration_seconds":20,"timed_out":false}}
 {"timestamp":"2026-04-18T11:02:41.764Z","event":"cycle_skipped","cycle_id":"20260418110221_cizo","project_id":"generalstaff","data":{"reason":"STOP file triggered during engineer"}}
 {"timestamp":"2026-04-18T11:02:42.008Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":9,"total_cycles":2,"total_verified":0,"total_failed":1}}
+{"timestamp":"2026-04-18T11:24:38.025Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr"]}}
