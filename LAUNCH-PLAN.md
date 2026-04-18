@@ -187,3 +187,61 @@ dogfood project. Either is fine; Ray picks.
 **Author:** Initial draft captured by Claude (interactive session)
 during the 2026-04-17 afternoon chain-session prep. Follow-on
 edits should append to this file with date headers, not rewrite.
+
+## 2026-04-18 — Phase renumbering + gate updates
+
+The 2026-04-17 initial capture above used PIVOT-2026-04-15.md's
+original Phase numbering, where Phase 4 = Tauri UI shell. That
+numbering was re-sequenced during 2026-04-18 when multi-project
+throughput became the actual next bottleneck ahead of UI — we
+had three registered projects (generalstaff + gamr + raybrain)
+each with real backlogs, and sequential dispatch was leaving
+60-75% of wall clock idle from the picker's perspective. The
+original "Phase 8" parallel worktrees moved up to Phase 4 and
+shipped 2026-04-18 afternoon; UI shifts to Phase 5.
+
+**Pre-launch gate updates:**
+
+- Gate #1 (Phase 1+2 shipped): ✓ closed 2026-04-17.
+- Gate #2 (Phase 3 second-project validation): ✓ closed
+  2026-04-18 morning — `gamr` ran 5 verified cycles + `raybrain`
+  was registered and ran Phase 1 autonomously (27-min session,
+  zero intervention). See PHASE-3-COMPLETE-2026-04-18.md.
+- Gate #3 **re-scoped from Tauri UI preview → Phase 4 parallel
+  worktrees shipped**. Parallel mode closed 2026-04-18 afternoon
+  (PHASE-4-COMPLETE-2026-04-18.md). The original Tauri/UI gate
+  is now a Phase 5 target; we don't gate launch on it because:
+    - The CLI surface is feature-complete for the MVP value
+      proposition (verification gate + audit log + multi-project
+      + parallel throughput).
+    - Non-CLI onboarding can ship via a web README walkthrough +
+      `generalstaff bootstrap` first, with the Tauri installer
+      as a Phase 5 enhancement post-launch.
+    - The gs-188 observability surface (`parallel_efficiency`,
+      `slot_idle_seconds`, digest rendering, status --sessions
+      Parallel column) gives the eventual UI its data contract
+      — read side is already done; Phase 5 is view/control only.
+- Gate #4 (README polished) and Gate #5 (SUPPORTERS.md): still
+  open. The README status block was refreshed 2026-04-18 to
+  reflect Phases 1-4 shipped; a full voice pass per VOICE.md is
+  the remaining polish item.
+
+**New lesson worth capturing from the 2026-04-18 arc:** the
+"minimal human interaction post-seed" thesis — feed 5 bounded
+tasks into `state/<project>/tasks.json`, launch one bot session,
+land 5 verified implementations — is now structurally
+demonstrated across 3 projects (generalstaff, gamr, raybrain).
+That's a stronger demo artifact for the launch than any UI
+preview would be. **The demo should be the PROGRESS.jsonl of
+the raybrain Phase 1 session** (27 min wall, 5/5 verified, zero
+intervention mid-session), not a Tauri screenshot. The audit
+log is the product.
+
+**Still on the don't-over-promise list:** the parallelism story
+is real but load-bearing for a very specific user — someone
+with ≥2 managed projects and BYOK spend willingness. The README
+copy should NOT frame it as "10× speedup" or similar — that's
+Polsia territory. It's opt-in multiplicative throughput, and
+the honest framing is "when your fleet grows past one project,
+you can set `max_parallel_slots: N` and pay roughly N× reviewer
+spend for N× cycle count per session." Literal, not aspirational.
