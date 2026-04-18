@@ -197,3 +197,48 @@ without breaking dogfood. Phase 3 = generalize cleanly to
 non-dogfood. Whatever comes next is "harden Phase 3" — likely
 Phase 4 = parallel worktrees, Phase 5 = local UI per the original
 PIVOT plan.
+
+## Closure-tail addendum (2026-04-18 morning)
+
+All four catalogued P1 generality gaps from "Generality gaps
+surfaced" above shipped same day, by 2026-04-18T12:24 UTC:
+
+| Gap | Mechanism | Validation |
+|---|---|---|
+| gs-175 register CLI state-path drift | bot session 6 cycle 1 (auto, OpenRouter reviewer) | reviewer cited "task gs-175" using the gs-172 bare-ID convention |
+| gs-176 bootstrap engineer_command template | bot session 6 cycle 2 (auto, chained via gs-177's merge-then-reset path) | gamr's manually-patched scaffold became the new template; verified by tests |
+| gs-177 auto_merge=false accumulator | interactive — DESIGN.md §v5 design discussion first, then code | session 5 ran 5 gamr cycles (2 substantive + 3 empty-drained) chained without a single human merge |
+| gs-178 audit-tree dirty-check exemption | interactive — narrow whitelist for state/<id>/PROGRESS.jsonl | session 6's 5 cycles each appended to PROGRESS.jsonl without blocking the next cycle's preflight |
+
+**The "minimal human interaction" milestone.** Pre-2026-04-18,
+the bot could do exactly one cycle per project per session
+under the default `auto_merge=false`, requiring a human merge
+between every cycle. By 2026-04-18T12:24 UTC, both halves of
+the truth table were validated:
+- gamr (`auto_merge: false`) chained gamr-004 → gamr-005 in
+  one session via gs-177's accumulator path; cycle 2's
+  engineer imported the type cycle 1 had just authored,
+  proving the successor-sees-predecessor semantic.
+- generalstaff (`auto_merge: true`) chained gs-175 → gs-176
+  in one session via the merge-then-reset path; bot/work
+  fast-forwarded to master after each verified cycle, no
+  unmerged-commits guard ever fired.
+
+This is the core user-experience thesis Ray articulated
+2026-04-18 morning: *"the process should need as little human
+interaction as possible after seeding the initial idea."*
+That goal is now structurally achievable for any registered
+project, not just dogfood — which retroactively re-validates
+Phase 3's whole experimental design.
+
+**One open implicit gap (gs-184) deferred deliberately.** The
+within-project task picker (in `scripts/run_bot.sh`'s claude-p
+prompt) has no defined tiebreak between same-priority entries.
+Today's workaround was to demote gs-173 from P1 to P2
+temporarily so gs-171 was uniquely P1. The structural fix —
+adding "lowest gs-NNN id first" as the tiebreak rule in the
+prompt — is interactive-only (run_bot.sh is hands-off) and
+small (one prompt line); queued as gs-184 marked
+interactive-only per the new CLAUDE.md "Hands-off-aware task
+queueing" convention. Workaround-fine until same-priority
+collisions become routine.

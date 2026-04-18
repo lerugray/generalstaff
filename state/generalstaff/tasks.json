@@ -1069,5 +1069,29 @@
     "title": "Fix audit-log writes dirtying the GS working tree mid-session. CLOSED 2026-04-18 with option (b) — narrow whitelist for state/<id>/PROGRESS.jsonl in isWorkingTreeClean via two new exported helpers (isExemptFromCleanTreeCheck, filterCleanTreePorcelain). 11 new tests cover the exemption pattern (positive + negative cases) and the porcelain-filtering logic, including the verbatim real-world fixture from cycle 20260418112438_fcsb. Existing safety surface preserved for tasks.json, MISSION.md, session.pid, cycle artifacts. Original task body: Fix audit-log writes dirtying the GS working tree mid-session. Surfaced 2026-04-18 during gs-174: when the bot ran a gamr cycle, audit.ts appended events to state/gamr/PROGRESS.jsonl (which lives in GS's tracked working tree per audit.ts:21). The next cycle's clean-tree safety check then refused to run a generalstaff cycle, structurally blocking cross-project chaining within a session.",
     "status": "done",
     "priority": 1
+  },
+  {
+    "id": "gs-179",
+    "title": "Add `generalstaff doctor` CLI subcommand that fails fast with a clear human-readable message when the runtime environment isn't ready for a session. Checks: (1) `bun --version` resolves and is >=1.3.0; (2) `claude --version` resolves; (3) `git --version` resolves; (4) the project root has projects.yaml that parses; (5) for each registered project, project.path exists and is a git repo; (6) for each registered project with concurrency_detection=worktree, no `.bot-worktree` exists (or if it does, fail with the path so the user can investigate). Output: one-line PASS or itemized FAIL with remediation hints (e.g. \"bun not in PATH — install from https://bun.sh\"). Touch points: src/cli.ts (new subcommand) + new src/doctor.ts module + tests/doctor.test.ts. Pure read-only — no side effects, no file writes. Useful for new users hitting first-launch friction. Should pass under `bun test && bun x tsc --noEmit`.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-180",
+    "title": "Add `--summary` flag to `generalstaff status` that prints today's session metrics: total cycles, verified count, verification-failed count, average cycle duration, total bot wall-clock minutes, last session end timestamp. Source: read state/_fleet/PROGRESS.jsonl + each project's PROGRESS.jsonl, filter to events from today (UTC midnight cutoff), aggregate. Format as one-line-per-metric for terminal readability; `--json` flag (already exists for status) should also work with --summary. Touch points: src/cli.ts + maybe a small helper in src/audit.ts or src/digest.ts. Tests covering: a synthetic PROGRESS.jsonl fixture with cross-day events filtered correctly, empty fixture returning zeros, --json output structure. Should pass under `bun test && bun x tsc --noEmit`.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-181",
+    "title": "Improve src/projects.ts parse error messages to cite line numbers and suggest fixes. Today's behavior: a malformed projects.yaml gives a generic YAML parse error pointing at the wrong line (the `yaml` library's column-counting is off-by-one in some cases per its own docs). Goal: when parsing fails, walk the parsed AST (or fall back to the raw error from `yaml`) and produce a message of the form: `projects.yaml line X: <specific issue>. Likely cause: <hint>. Fix: <suggested edit>.` Common cases to handle: missing required field (id, path, hands_off), hands_off list empty (Hard Rule #5 violation), hands_off path entry that doesn't look like a glob, project id with invalid chars, duplicate project id. At least 5 fixture-based tests covering these cases. Should pass under `bun test && bun x tsc --noEmit`.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-184",
+    "title": "[INTERACTIVE-ONLY — touches scripts/run_bot.sh which is hands-off; bot will roll back if it tries] Add a within-project task-picker tiebreak rule to scripts/run_bot.sh's claude-p prompt. Today: the prompt says \"pick the highest-priority unfinished task\" with no defined tiebreak between same-priority entries, and the LLM picks unpredictably (potentially the last task in the JSON, the most recently mentioned, or random). On 2026-04-18 morning we worked around this by demoting gs-173 from P1 to P2 so gs-171 was uniquely P1. Structural fix: add one prompt line — `If multiple tasks have the same priority, pick the lowest gs-NNN (numeric suffix) first.` — to scripts/run_bot.sh AND to the bootstrap-template prompt in src/bootstrap.ts (so newly-bootstrapped projects inherit it). Test: regression for the bootstrap template's emitted prompt containing this line. Workaround-fine for now — only worth doing when same-priority collisions become routine.",
+    "status": "pending",
+    "priority": 3
   }
 ]
