@@ -56,6 +56,20 @@ export const WATCHDOG_MULTIPLIER = 2;
 export const DEFAULT_SOFT_SKIP_THRESHOLD = 3;
 export const DEFAULT_SOFT_SKIP_WINDOW_SECONDS = 600;
 
+// gs-220: unproductive-streak backoff (time-window-agnostic escape hatch
+// for gs-193). gs-193 soft-skips on N failures inside M seconds, which
+// catches fast-crash loops but misses slow-crash-with-zero-progress
+// streaks — e.g. during session bbjko8dw6 the engineer OOM'd 3× with
+// a 33-min hang-before-death on the third crash, so first-to-third
+// span exceeded gs-193's 600s window and the existing path never
+// fired. gs-220 soft-skips on N consecutive verification_failed
+// outcomes whose diff_stats.files_changed is 0 — no wall-clock
+// window. A diff-producing failure (reviewer rejected real work on
+// scope) resets the counter because that's a different problem
+// pattern that deserves its own handling, not a blind retry-loop
+// symptom.
+export const DEFAULT_UNPRODUCTIVE_THRESHOLD = 3;
+
 export interface FailureStreak {
   count: number;
   windowStartMs: number;
@@ -120,6 +134,61 @@ export function updateFailureStreak(
     streak: { count, windowStartMs },
     shouldSoftSkip,
     spanSeconds,
+  };
+}
+
+// gs-220: unproductive-streak state. No wall-clock window — the whole
+// point is to catch slow-crash streaks whose first-to-last span would
+// exceed gs-193's 600s window.
+export interface UnproductiveStreak {
+  count: number;
+}
+
+export interface UnproductiveStreakUpdate {
+  streak: UnproductiveStreak;
+  shouldSoftSkip: boolean;
+}
+
+/**
+ * Advance a project's consecutive zero-diff-failure streak.
+ *
+ * Only verification_failed outcomes with no files changed count as
+ * unproductive. Any other cycle result — verified / verified_weak, or
+ * verification_failed that did produce a diff — resets the streak. In
+ * particular, a diff-producing verification_failed (reviewer rejected
+ * engineer work on scope) is a real scope problem that deserves its
+ * own handling path, not a retry-loop soft-skip.
+ *
+ * cycle_skipped is a pre-flight abort and should short-circuit before
+ * reaching this function (mirrors updateFailureStreak).
+ *
+ * @param prev Previous streak state (omit / undefined for first call).
+ * @param isUnproductiveFailure True iff `final_outcome ===
+ *   "verification_failed"` AND `diff_stats?.files_changed === 0`.
+ *   If missing, treat as 0 (engineer never started a meaningful diff).
+ * @param resetStreak True iff the cycle is a non-unproductive event
+ *   that should reset the counter — i.e. any success OR a diff-
+ *   producing failure. Callers compute both flags so the rules live
+ *   in one place at the call site.
+ * @param maxUnproductive Streak length that triggers soft-skip.
+ *   Defaults to `DEFAULT_UNPRODUCTIVE_THRESHOLD` (3).
+ */
+export function updateUnproductiveStreak(
+  prev: UnproductiveStreak | undefined,
+  isUnproductiveFailure: boolean,
+  resetStreak: boolean,
+  maxUnproductive: number = DEFAULT_UNPRODUCTIVE_THRESHOLD,
+): UnproductiveStreakUpdate {
+  if (resetStreak) {
+    return { streak: { count: 0 }, shouldSoftSkip: false };
+  }
+  if (!isUnproductiveFailure) {
+    return { streak: prev ?? { count: 0 }, shouldSoftSkip: false };
+  }
+  const count = (prev?.count ?? 0) + 1;
+  return {
+    streak: { count },
+    shouldSoftSkip: count >= maxUnproductive,
   };
 }
 
@@ -341,6 +410,7 @@ export async function runSession(options: SessionOptions) {
   const cyclesPerProject = new Map<string, number>();
   const skippedProjects = new Set<string>(excludeSet);
   const failureStreaks = new Map<string, FailureStreak>();
+  const unproductiveStreaks = new Map<string, UnproductiveStreak>();
 
   function elapsedMinutes(): number {
     return (Date.now() - sessionStart) / 60_000;
@@ -586,12 +656,23 @@ export async function runSession(options: SessionOptions) {
 
         // gs-193 fast-fail applies per project, irrespective of parallelism.
         const isFailure = result.final_outcome === "verification_failed";
+        const filesChanged = result.diff_stats?.files_changed ?? 0;
         const streakUpdate = updateFailureStreak(
           failureStreaks.get(project.id),
           isFailure,
           Date.now(),
         );
         failureStreaks.set(project.id, streakUpdate.streak);
+        // gs-220 unproductive-streak runs alongside gs-193. Either path
+        // can fire a soft-skip; when both trip on the same cycle we emit
+        // the gs-193 event and let gs-220 stay latent (already skipped).
+        const isUnproductiveFailure = isFailure && filesChanged === 0;
+        const unproductiveUpdate = updateUnproductiveStreak(
+          unproductiveStreaks.get(project.id),
+          isUnproductiveFailure,
+          !isUnproductiveFailure,
+        );
+        unproductiveStreaks.set(project.id, unproductiveUpdate.streak);
         if (streakUpdate.shouldSoftSkip) {
           const span = Math.round(streakUpdate.spanSeconds);
           const reason =
@@ -607,6 +688,22 @@ export async function runSession(options: SessionOptions) {
             span_seconds: span,
             threshold_failures: DEFAULT_SOFT_SKIP_THRESHOLD,
             threshold_seconds: DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+          });
+          continue;
+        }
+
+        if (unproductiveUpdate.shouldSoftSkip) {
+          const reason =
+            `${unproductiveUpdate.streak.count} consecutive unproductive ` +
+            `failures (zero-diff, threshold ${DEFAULT_UNPRODUCTIVE_THRESHOLD})`;
+          console.log(
+            `  [SOFT-SKIP] ${project.id}: ${reason} — dropping for rest of session.`,
+          );
+          skippedProjects.add(project.id);
+          await appendProgress(project.id, "project_soft_skipped", {
+            reason,
+            consecutive_unproductive: unproductiveUpdate.streak.count,
+            threshold_unproductive: DEFAULT_UNPRODUCTIVE_THRESHOLD,
           });
           continue;
         }
@@ -798,12 +895,23 @@ export async function runSession(options: SessionOptions) {
     // or when queued tasks collide with hands_off patterns (case b: 5
     // cycles × 5 min each, ~$0.15 of OpenRouter spend wasted).
     const isFailure = result.final_outcome === "verification_failed";
+    const filesChanged = result.diff_stats?.files_changed ?? 0;
     const streakUpdate = updateFailureStreak(
       failureStreaks.get(currentProject.id),
       isFailure,
       Date.now(),
     );
     failureStreaks.set(currentProject.id, streakUpdate.streak);
+    // gs-220 unproductive-streak runs alongside gs-193 (see parallel loop
+    // above for the full explanation). A diff-producing verification_failed
+    // is a scope-rejection, not a retry-loop symptom, so it resets.
+    const isUnproductiveFailure = isFailure && filesChanged === 0;
+    const unproductiveUpdate = updateUnproductiveStreak(
+      unproductiveStreaks.get(currentProject.id),
+      isUnproductiveFailure,
+      !isUnproductiveFailure,
+    );
+    unproductiveStreaks.set(currentProject.id, unproductiveUpdate.streak);
 
     if (streakUpdate.shouldSoftSkip) {
       const span = Math.round(streakUpdate.spanSeconds);
@@ -822,6 +930,24 @@ export async function runSession(options: SessionOptions) {
         span_seconds: span,
         threshold_failures: DEFAULT_SOFT_SKIP_THRESHOLD,
         threshold_seconds: DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+      });
+      currentProject = null;
+      continue;
+    }
+
+    if (unproductiveUpdate.shouldSoftSkip) {
+      const reason =
+        `${unproductiveUpdate.streak.count} consecutive unproductive ` +
+        `failures (zero-diff, threshold ${DEFAULT_UNPRODUCTIVE_THRESHOLD})`;
+      console.log(
+        `\n[SOFT-SKIP] ${currentProject.id}: ${reason} — ` +
+          `dropping project for rest of session.`,
+      );
+      skippedProjects.add(currentProject.id);
+      await appendProgress(currentProject.id, "project_soft_skipped", {
+        reason,
+        consecutive_unproductive: unproductiveUpdate.streak.count,
+        threshold_unproductive: DEFAULT_UNPRODUCTIVE_THRESHOLD,
       });
       currentProject = null;
       continue;

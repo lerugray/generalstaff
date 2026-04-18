@@ -10,8 +10,10 @@ import {
   parseFormattedDuration,
   runSessionChain,
   updateFailureStreak,
+  updateUnproductiveStreak,
   DEFAULT_SOFT_SKIP_THRESHOLD,
   DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+  DEFAULT_UNPRODUCTIVE_THRESHOLD,
   hotReloadProjects,
   computeParallelEfficiency,
   estimateReviewerSpendUSD,
@@ -1728,6 +1730,99 @@ describe("updateFailureStreak (gs-193 fast-fail backoff)", () => {
     const u2 = updateFailureStreak(u1.streak, true, 70_000, 2, 60);
     expect(u2.streak.count).toBe(2);
     expect(u2.shouldSoftSkip).toBe(false);
+  });
+});
+
+describe("updateUnproductiveStreak (gs-220 zero-diff-streak soft-skip)", () => {
+  it("exports a default threshold of 3", () => {
+    expect(DEFAULT_UNPRODUCTIVE_THRESHOLD).toBe(3);
+  });
+
+  // Case (a) back-compat: 3 fast zero-diff failures WOULD also satisfy
+  // gs-193 in-window. gs-220 is a superset that also fires here — the
+  // call-site emits the gs-193 event first and leaves gs-220 latent,
+  // but unit-level the new path must still return shouldSoftSkip=true.
+  it("case (a): 3 fast zero-diff failures still trigger (gs-193 overlap)", () => {
+    const u1 = updateUnproductiveStreak(undefined, true, false);
+    expect(u1.streak.count).toBe(1);
+    expect(u1.shouldSoftSkip).toBe(false);
+    const u2 = updateUnproductiveStreak(u1.streak, true, false);
+    expect(u2.streak.count).toBe(2);
+    expect(u2.shouldSoftSkip).toBe(false);
+    const u3 = updateUnproductiveStreak(u2.streak, true, false);
+    expect(u3.streak.count).toBe(3);
+    expect(u3.shouldSoftSkip).toBe(true);
+  });
+
+  // Case (b): the reason gs-220 exists. Three zero-diff failures spread
+  // over >600s — gs-193's time window would not catch this, gs-220 must.
+  // updateUnproductiveStreak is time-window-agnostic so the inputs here
+  // are just the booleans the call-site would compute after a >600s
+  // first-to-third span at the session level.
+  it("case (b): 3 slow zero-diff failures trigger regardless of wall-clock span", () => {
+    const u1 = updateUnproductiveStreak(undefined, true, false);
+    const u2 = updateUnproductiveStreak(u1.streak, true, false);
+    const u3 = updateUnproductiveStreak(u2.streak, true, false);
+    expect(u3.streak.count).toBe(3);
+    expect(u3.shouldSoftSkip).toBe(true);
+  });
+
+  // Case (c): a single verified cycle between failures resets the
+  // unproductive streak. Callers signal this via the resetStreak
+  // boolean (a success collapses isUnproductiveFailure=false AND
+  // !isUnproductiveFailure=true, i.e. resetStreak=true).
+  it("case (c): a verified cycle mid-streak resets the counter", () => {
+    const u1 = updateUnproductiveStreak(undefined, true, false);
+    const u2 = updateUnproductiveStreak(u1.streak, true, false);
+    expect(u2.streak.count).toBe(2);
+    const u3 = updateUnproductiveStreak(u2.streak, false, true);
+    expect(u3.streak.count).toBe(0);
+    expect(u3.shouldSoftSkip).toBe(false);
+    const u4 = updateUnproductiveStreak(u3.streak, true, false);
+    expect(u4.streak.count).toBe(1);
+    expect(u4.shouldSoftSkip).toBe(false);
+  });
+
+  // Case (d): 3 consecutive verification_failed WITH a real diff is a
+  // scope-rejection pattern, not a retry-loop. At the call site that
+  // collapses to (isUnproductiveFailure=false, resetStreak=true) each
+  // time — gs-220 must NOT fire.
+  it("case (d): diff-producing failures do NOT trigger gs-220", () => {
+    const u1 = updateUnproductiveStreak(undefined, false, true);
+    const u2 = updateUnproductiveStreak(u1.streak, false, true);
+    const u3 = updateUnproductiveStreak(u2.streak, false, true);
+    expect(u3.streak.count).toBe(0);
+    expect(u3.shouldSoftSkip).toBe(false);
+  });
+
+  // Call-site-shaped check: the two mutually-exclusive inputs map from
+  // (final_outcome, files_changed) the way both loops in session.ts
+  // compute them. This test pins the mapping so a future refactor
+  // can't silently split the contract.
+  it("diff-producing failure mid-streak resets (scope-rejection mixed with zero-diff crashes)", () => {
+    // Two zero-diff crashes…
+    const u1 = updateUnproductiveStreak(undefined, true, false);
+    const u2 = updateUnproductiveStreak(u1.streak, true, false);
+    expect(u2.streak.count).toBe(2);
+    // …then a scope-rejection with a real diff resets.
+    const u3 = updateUnproductiveStreak(u2.streak, false, true);
+    expect(u3.streak.count).toBe(0);
+    // One more zero-diff crash only lifts the count to 1, not 3.
+    const u4 = updateUnproductiveStreak(u3.streak, true, false);
+    expect(u4.shouldSoftSkip).toBe(false);
+  });
+
+  it("first failure starts at count 1 and does not trigger", () => {
+    const u = updateUnproductiveStreak(undefined, true, false);
+    expect(u.streak.count).toBe(1);
+    expect(u.shouldSoftSkip).toBe(false);
+  });
+
+  it("honours a custom threshold (N=2)", () => {
+    const u1 = updateUnproductiveStreak(undefined, true, false, 2);
+    expect(u1.shouldSoftSkip).toBe(false);
+    const u2 = updateUnproductiveStreak(u1.streak, true, false, 2);
+    expect(u2.shouldSoftSkip).toBe(true);
   });
 });
 
