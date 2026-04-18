@@ -1,0 +1,286 @@
+diff --git a/src/tasks.ts b/src/tasks.ts
+index 6e2ec8b..dd302f1 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -29,7 +29,83 @@ export class TaskValidationError extends Error {
+   }
+ }
+ 
+-export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
++const VALID_TASK_STATUSES: readonly GreenfieldTask["status"][] = [
++  "pending",
++  "in_progress",
++  "done",
++  "skipped",
++];
++
++// gs-218: structural validation for each tasks.json entry. Unknown
++// fields pass through silently so engineer-added bookkeeping
++// (e.g. `completed_at`, gs-195's `expected_touches` /
++// `interactive_only`) stays forward-compatible. The `fileLabel`
++// argument is the filename portion used in error messages ("tasks.json")
++// so callers can customize it if tasks ever land in a non-standard path.
++function validateTaskEntry(
++  entry: unknown,
++  index: number,
++  fileLabel: string,
++): GreenfieldTask {
++  const loc = `${fileLabel}[${index}]`;
++  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
++    throw new TaskValidationError(
++      `${loc}: expected an object, got ${entry === null ? "null" : Array.isArray(entry) ? "array" : typeof entry}`,
++    );
++  }
++  const rec = entry as Record<string, unknown>;
++
++  if (!("id" in rec)) {
++    throw new TaskValidationError(`${loc}: missing required field 'id'`);
++  }
++  if (typeof rec.id !== "string" || rec.id.length === 0) {
++    throw new TaskValidationError(
++      `${loc}: 'id' must be a non-empty string, got ${JSON.stringify(rec.id)}`,
++    );
++  }
++
++  if (!("title" in rec)) {
++    throw new TaskValidationError(`${loc}: missing required field 'title'`);
++  }
++  if (typeof rec.title !== "string") {
++    throw new TaskValidationError(
++      `${loc}: 'title' must be a string, got ${typeof rec.title}`,
++    );
++  }
++
++  if (!("status" in rec)) {
++    throw new TaskValidationError(`${loc}: missing required field 'status'`);
++  }
++  if (
++    typeof rec.status !== "string" ||
++    !VALID_TASK_STATUSES.includes(rec.status as GreenfieldTask["status"])
++  ) {
++    throw new TaskValidationError(
++      `${loc}: 'status' must be one of ${VALID_TASK_STATUSES.join(", ")}, got ${JSON.stringify(rec.status)}`,
++    );
++  }
++
++  if (!("priority" in rec)) {
++    throw new TaskValidationError(`${loc}: missing required field 'priority'`);
++  }
++  if (
++    typeof rec.priority !== "number" ||
++    !Number.isFinite(rec.priority) ||
++    !Number.isInteger(rec.priority) ||
++    rec.priority <= 0
++  ) {
++    throw new TaskValidationError(
++      `${loc}: 'priority' must be a positive integer, got ${JSON.stringify(rec.priority)}`,
++    );
++  }
++
++  return rec as unknown as GreenfieldTask;
++}
++
++export async function loadTasks(
++  projectId: string,
++  warn: (msg: string) => void = console.warn,
++): Promise<GreenfieldTask[]> {
+   const path = tasksPath(projectId);
+   if (!existsSync(path)) return [];
+   const raw = await readFile(path, "utf8");
+@@ -47,7 +123,15 @@ export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
+       `expected a JSON array, got ${parsed === null ? "null" : typeof parsed}`,
+     );
+   }
+-  return parsed as GreenfieldTask[];
++  const validated: GreenfieldTask[] = [];
++  for (let i = 0; i < parsed.length; i++) {
++    validated.push(validateTaskEntry(parsed[i], i, "tasks.json"));
++  }
++  // `warn` is plumbed in for future soft-diagnostic use (e.g. deprecated
++  // field shapes) without forcing callers to change their call sites.
++  // Present tense: unused here, but keeps the signature stable.
++  void warn;
++  return validated;
+ }
+ 
+ export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 9afde12..6e8f166 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1283,7 +1283,7 @@
+   {
+     "id": "gs-218",
+     "title": "Add schema validation to tasks.json loader. CREATE ONLY: modify `src/tasks.ts` loadTasks to validate each task has the required `GreenfieldTask` fields (id: non-empty string; title: string; status: valid enum value; priority: positive number) and correct types; on malformed entries, throw `TaskValidationError` with a clear message including the offending entry's index and the specific field that failed (e.g. `tasks.json[3]: missing required field 'id'` or `tasks.json[7]: priority must be a positive integer, got 'high'`). Add an optional `warn: (msg: string) => void` parameter with default `console.warn` so tests can capture warnings. Unknown fields (e.g. `completed_at` added by bot engineers, gs-195's `expected_touches`, gs-195's `interactive_only`) should NOT error — pass through silently for forward-compatibility. Append tests to `tests/tasks.test.ts` covering: (a) happy path; (b) missing id; (c) wrong status enum; (d) negative priority; (e) unknown field passes through; (f) empty array is valid; (g) error message includes entry index + field name. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Expected diff: ~150 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/tasks.ts",
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index 141e7f9..00f1b09 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -115,6 +115,162 @@ describe("tasks module", () => {
+       expect(tasks).toHaveLength(2);
+       expect(tasks[0]!.id).toBe("gs-001");
+     });
++
++    // gs-218: schema validation happy path + per-field rejection.
++    it("accepts valid tasks with all four required fields", async () => {
++      const data = [
++        { id: "gs-001", title: "first", status: "pending", priority: 1 },
++        { id: "gs-002", title: "second", status: "in_progress", priority: 2 },
++        { id: "gs-003", title: "third", status: "done", priority: 3 },
++        { id: "gs-004", title: "fourth", status: "skipped", priority: 4 },
++      ];
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify(data),
++      );
++      const tasks = await loadTasks("myproj");
++      expect(tasks).toHaveLength(4);
++    });
++
++    it("accepts an empty array as valid", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        "[]",
++      );
++      const tasks = await loadTasks("myproj");
++      expect(tasks).toEqual([]);
++    });
++
++    it("throws TaskValidationError when a task is missing id", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "first", status: "pending", priority: 1 },
++          { title: "no id here", status: "pending", priority: 1 },
++        ]),
++      );
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TaskValidationError);
++      const err = caught as TaskValidationError;
++      expect(err.message).toContain("tasks.json[1]");
++      expect(err.message).toContain("'id'");
++    });
++
++    it("throws TaskValidationError when a task has a wrong status enum", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "first", status: "blocked", priority: 1 },
++        ]),
++      );
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TaskValidationError);
++      const err = caught as TaskValidationError;
++      expect(err.message).toContain("tasks.json[0]");
++      expect(err.message).toContain("'status'");
++      expect(err.message).toContain("blocked");
++    });
++
++    it("throws TaskValidationError when priority is negative", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "a", status: "pending", priority: -2 },
++        ]),
++      );
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TaskValidationError);
++      const err = caught as TaskValidationError;
++      expect(err.message).toContain("tasks.json[0]");
++      expect(err.message).toContain("'priority'");
++      expect(err.message).toContain("positive");
++    });
++
++    it("throws TaskValidationError when priority is a non-numeric string", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "a", status: "pending", priority: "high" },
++        ]),
++      );
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TaskValidationError);
++      const err = caught as TaskValidationError;
++      expect(err.message).toContain("'priority'");
++      expect(err.message).toContain("high");
++    });
++
++    it("passes through unknown fields silently for forward-compat", async () => {
++      // Engineers have been known to append `completed_at`, gs-195's
++      // `expected_touches` / `interactive_only`, etc. Those must NOT
++      // break parsing — they're allowed and preserved.
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          {
++            id: "gs-001",
++            title: "a",
++            status: "done",
++            priority: 1,
++            completed_at: "2026-04-18T12:00:00Z",
++            expected_touches: ["src/foo.ts"],
++            interactive_only: false,
++            future_unknown_field: { nested: true },
++          },
++        ]),
++      );
++      const warned: string[] = [];
++      const tasks = await loadTasks("myproj", (m) => warned.push(m));
++      expect(tasks).toHaveLength(1);
++      expect(tasks[0]!.id).toBe("gs-001");
++      // Unknown fields are silently preserved in the parsed object.
++      expect(
++        (tasks[0] as unknown as { completed_at: string }).completed_at,
++      ).toBe("2026-04-18T12:00:00Z");
++      expect(warned).toEqual([]);
++    });
++
++    it("error messages identify the entry index and specific failing field", async () => {
++      writeFileSync(
++        join(TEST_DIR, "state", "myproj", "tasks.json"),
++        JSON.stringify([
++          { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++          { id: "gs-002", title: "ok", status: "pending", priority: 1 },
++          { id: "gs-003", title: "ok", status: "pending", priority: 1 },
++          { id: "gs-004", title: 42, status: "pending", priority: 1 },
++        ]),
++      );
++      let caught: unknown;
++      try {
++        await loadTasks("myproj");
++      } catch (err) {
++        caught = err;
++      }
++      expect(caught).toBeInstanceOf(TaskValidationError);
++      const err = caught as TaskValidationError;
++      expect(err.message).toContain("tasks.json[3]");
++      expect(err.message).toContain("'title'");
++    });
+   });
+ 
+   describe("pendingTasks", () => {
