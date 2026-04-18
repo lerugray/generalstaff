@@ -74,6 +74,23 @@ export type TaskPickabilityReason =
       conflict: { pattern: string; touch: string };
     };
 
+/**
+ * Decide whether a bot cycle can pick up this task.
+ *
+ * A task is bot-pickable when (1) its status is not `done` or `skipped`,
+ * (2) it isn't flagged `interactive_only`, and (3) its `expected_touches`
+ * (if any) don't intersect the project's `handsOff` patterns. Legacy tasks
+ * without the gs-195 fields (`expected_touches`, `interactive_only`)
+ * remain pickable by default so existing `tasks.json` files keep working.
+ *
+ * The returned tagged-union reason on a `false` result lets callers log
+ * the specific conflict — which `expected_touches` entry matched which
+ * hands_off pattern — for queuer feedback.
+ *
+ * @param task The task under consideration.
+ * @param handsOff The project's `hands_off` patterns (glob strings).
+ * @returns `{ok: true}` if pickable; otherwise a tagged reason object.
+ */
 export function isTaskBotPickable(
   task: GreenfieldTask,
   handsOff: string[],

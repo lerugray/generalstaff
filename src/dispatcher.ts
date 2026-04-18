@@ -75,6 +75,32 @@ async function readOverrideFile(
 
 // --- Pick next project ---
 
+/**
+ * Pick up to `maxCount` eligible projects in picker-preferred order.
+ *
+ * The override file (`next_project.txt`) claims the first slot when its
+ * target is eligible; subsequent slots are filled from priority × staleness
+ * scoring. Every returned project is distinct, not in `skipProjectIds`,
+ * and not currently running (`isBotRunning` returns false). Fewer than
+ * `maxCount` picks are returned when fewer eligible projects exist —
+ * empty slots stay idle rather than fill with low-value work (the
+ * Hammerstein / stupid-industrious avoidance).
+ *
+ * `pickNextProject` below is a back-compat `maxCount=1` wrapper for the
+ * Phase 1-3 sequential dispatcher path; `session.ts` (gs-186) calls
+ * `pickNextProjects` directly when `max_parallel_slots > 1`. See
+ * `DESIGN.md` §v6 for the full design narrative.
+ *
+ * @param projects Eligible project configs.
+ * @param config Dispatcher config (used for the override-file path).
+ * @param fleet Current fleet state (used for staleness scoring).
+ * @param skipProjectIds Projects to exclude from this pick (soft-skipped,
+ *   cap-reached, or currently running).
+ * @param maxCount Maximum number of picks to return. `0` returns `[]`.
+ * @returns Up to `maxCount` `{project, reason}` entries, each reasoning
+ *   string tagged with `override:` (first slot only) or `picker:`
+ *   (subsequent slots).
+ */
 // gs-185 (Phase 4 step 1): return up to `maxCount` eligible projects in
 // picker-preferred order. The override file claims the first slot if
 // present; subsequent slots are filled from priority × staleness scoring.

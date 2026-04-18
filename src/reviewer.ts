@@ -290,6 +290,23 @@ export function _resetReviewerSemaphoresForTests(): void {
   reviewerSemaphores.clear();
 }
 
+/**
+ * Run `fn` while holding a token on the named provider's semaphore.
+ *
+ * gs-187 per-provider throttle: when the dispatcher runs cycles in
+ * parallel (gs-186 / `max_parallel_slots > 1`), multiple cycles can hit
+ * the reviewer step simultaneously. Without throttling, parallel
+ * OpenRouter free-tier calls 429-cascade and parallel Ollama calls
+ * saturate the local GPU. This helper acquires the provider's semaphore
+ * before invoking `fn`, runs it, and releases the slot via `finally` so
+ * the release happens even if `fn` throws.
+ *
+ * @typeParam T The return type of the wrapped function.
+ * @param provider Lowercased provider name (`claude`, `openrouter`,
+ *   `ollama`, or any custom name — unknown names default to unbounded).
+ * @param fn The reviewer call to wrap.
+ * @returns Whatever `fn` returns; re-throws any error `fn` throws.
+ */
 export async function withReviewerSemaphore<T>(
   provider: string,
   fn: () => Promise<T>,

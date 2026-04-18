@@ -66,6 +66,28 @@ export interface FailureStreakUpdate {
   spanSeconds: number;
 }
 
+/**
+ * Advance a project's consecutive-failure streak by one cycle outcome.
+ *
+ * A "failure" here is any `verification_failed` outcome — that bucket
+ * covers engineer abnormal exit, hands-off violations, verification-gate
+ * failures, and reviewer rejections (all routed through cycle.ts to
+ * `final_outcome: "verification_failed"`). `cycle_skipped` is NOT counted
+ * as a failure (pre-flight abort, not a progress signal) and should
+ * short-circuit before calling this function; `verified` / `verified_weak`
+ * are successes that reset the streak.
+ *
+ * @param prev Previous streak state (omit / undefined for the first call).
+ * @param isFailure Whether the cycle just completed was a failure.
+ * @param nowMs Current wall-clock time in milliseconds.
+ * @param maxFailures Streak length that triggers soft-skip. Default
+ *   `DEFAULT_SOFT_SKIP_THRESHOLD` (3).
+ * @param windowSeconds Elapsed-seconds ceiling from first-failure-in-streak
+ *   to current failure that still triggers soft-skip. Default
+ *   `DEFAULT_SOFT_SKIP_WINDOW_SECONDS` (600).
+ * @returns The updated streak, whether this cycle crossed the soft-skip
+ *   threshold, and the span (seconds) from first failure to now.
+ */
 // Pure state transition for a project's consecutive-failure streak.
 // A "failure" here is any verification_failed outcome — that bucket
 // covers engineer abnormal exit, hands-off violations, verification
@@ -118,6 +140,21 @@ export interface HotReloadResult {
   error?: string;
 }
 
+/**
+ * Re-read `projects.yaml` and diff against the cached list.
+ *
+ * Called between cycles so mid-session edits to `projects.yaml` are visible
+ * to the picker. Only the projects list is refreshed; dispatcher config
+ * stays frozen at session start to avoid in-flight state corruption.
+ *
+ * If the loader throws (invalid YAML mid-edit), the cached list is returned
+ * with `error` populated — callers warn and continue rather than crashing.
+ *
+ * @param cached The projects list currently in use by the session loop.
+ * @param loader Injection point for tests; defaults to `loadProjectsYaml`.
+ * @returns `{projects, added, removed}` on success; `{projects: cached,
+ *   added: [], removed: [], error: string}` on loader failure.
+ */
 export async function hotReloadProjects(
   cached: ProjectConfig[],
   loader: () => Promise<ProjectsYaml> = loadProjectsYaml,
@@ -987,6 +1024,23 @@ export interface DigestParallelMetrics {
   parallel_efficiency: number; // 0..1
 }
 
+/**
+ * Compute `parallel_efficiency` for a session.
+ *
+ * Definition: `1 - slotIdleSeconds / (elapsedSeconds × maxParallelSlots)`.
+ * 1.0 means every slot-second was occupied by a cycle; 0.0 means every
+ * slot-second was idle. Result is clamped to `[0, 1]` because rounding in
+ * the input numbers can push the raw expression marginally outside range.
+ *
+ * Returns 1 when the session was sequential (`maxParallelSlots <= 1`) or
+ * when `elapsedSeconds` is non-positive (degenerate divide-by-zero guard).
+ *
+ * @param slotIdleSeconds Cumulative slot-idle seconds reported by the
+ *   parallel loop.
+ * @param elapsedSeconds Session wall-clock elapsed, in seconds.
+ * @param maxParallelSlots Configured slot count (`dispatcher.max_parallel_slots`).
+ * @returns Efficiency in `[0, 1]`.
+ */
 // gs-188: compute parallel_efficiency from cumulative slot idle and
 // the session's wall-clock elapsed × slot count. 1.0 = every slot
 // fully utilized; lower = some slots waited idle for slower siblings.
