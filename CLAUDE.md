@@ -182,6 +182,26 @@ explicitly, don't proactively write.
   high-stakes work). GeneralStaff Phase 2+ inherits these rules
   via `provider_config.yaml` per
   `FUTURE-DIRECTIONS-2026-04-15.md` §2.
+- **Report fidelity — read the full relevant span, not just the
+  tail.** When summarizing `PROGRESS.jsonl`, commit history, or
+  any sequence of events for Ray, read enough of the source to
+  ground the summary. Tail-only is fine when the tail is
+  genuinely all that matters (e.g. "what was the last error?").
+  It is NOT fine for session summaries, outcome reports, or
+  "how did the overnight run go" style questions. Rationale
+  captured 2026-04-18 after I reported on an overnight session
+  by reading only the last ~20 log lines + last ~40 commits;
+  that tail showed 3 empty-diff cycles, 2 failures, 1 success,
+  so I framed it as "only one task landed". The truth — visible
+  once Ray pushed back and I re-read structurally — was that all
+  5 queued tasks (gs-166..gs-170) had completed; the "failures"
+  were two retries on the same task, not four abandoned ones.
+  Mischaracterizing the bot's actual output is expensive: Ray
+  may re-queue shipped work, or tune a subsystem that isn't
+  broken. When in doubt, grep structurally (every `cycle_end`
+  in a time range, every commit touching a file, every state
+  transition) rather than reading the last N lines. Structural
+  queries scale; tail-reads lie.
 
 ### Reviewer provider configuration
 

@@ -688,3 +688,101 @@ What pi-autoresearch adds that karpathy's baseline lacks:
   status line, keyboard shortcuts (`Ctrl+X`,
   `Ctrl+Shift+X`), `autoresearch-finalize` skill that
   regroups kept commits into independent branches.
+
+## 2026-04-18 — Verification-gate reviewer-JSON false-negatives (10 cycles rolled back)
+
+**Source:** Investigation of the overnight 2026-04-18 session
+rollbacks. The interactive session this morning pulled every
+reviewer-response.txt for every cycle ending in
+`reviewer_verdict: "verification_failed"` with
+`reason: "reviewer response was not valid JSON"`.
+
+**The pattern.** 10 cycles across ~24 hours (2026-04-17T01:13
+→ 2026-04-18T01:11) rolled back with this exact reason.
+Every one I sampled — `20260417011019_86ct`,
+`20260417203143_9zvu`, `20260418005225_tzrd`,
+`20260418010138_xczm` — shows the **same failure shape**:
+
+- Reviewer actually approved (`"verdict": "verified"`).
+- Verification passed (`verification_outcome: "passed"`).
+- JSON parse failed on the `task_evidence[].task` field
+  because Qwen-3-Coder-Plus (the reviewer model in use)
+  emitted the inner content as literal unescaped
+  `"task": "status": "done"` — the unescaped colon after
+  `"status"` breaks `JSON.parse` with
+  `Unexpected token : in JSON at position N`.
+
+The successful 3rd attempt on gs-170 (`20260418011115_r59y`)
+showed the model can escape it correctly
+(`"task": "status: \"done\""`) when it chooses to — it
+is not a deterministic prompt-shape failure, it is an
+output-consistency failure that happens perhaps 10-20%
+of the time.
+
+**Impact.** Every one of those 10 cycles is a **false-negative
+rollback**. Engineer work that compiled, passed tests, and
+received a `verified` verdict was discarded because the
+dispatcher's strict `JSON.parse` couldn't tolerate the
+quirk. Cost per false-negative: one full engineer cycle
+(~6-13 minutes) plus the downstream delay of re-queueing
+the same task.
+
+**Worst-observed instance.** gs-170 required three attempts:
+
+| Attempt | Duration | Insertions | Outcome | Root cause |
+|---|---|---|---|---|
+| 1 | 546s | 534 | rolled back | reviewer JSON quirk |
+| 2 | 576s | 482 | rolled back | reviewer JSON quirk |
+| 3 | 462s | 451 | verified ✓ | reviewer escaped correctly |
+
+The rollback policy (`cycle_rollback` event in
+PROGRESS.jsonl) is a soft `git reset --hard start_sha`, so
+no permanent damage — but ~18 minutes of productive output
+was thrown away before the third attempt stuck.
+
+**Not a reviewer-accuracy issue.** This is purely a
+parsing-robustness issue. The reviewer is correctly
+judging the diff; the dispatcher is misreading the
+reviewer's judgment because of a surface-syntax quirk.
+
+**Candidate fixes (for gs-171):**
+
+1. **Tolerant extractor.** Parse the outermost `{...}`
+   block with a permissive parser (e.g. `jsonc-parser`
+   or a hand-rolled salvage path that extracts `verdict`,
+   `reason`, `scope_drift_files`, `hands_off_violations`,
+   `silent_failures` independently). Drop the
+   `task_evidence` field on malformed-inner-content — we
+   only need the verdict for the gate decision anyway.
+2. **Prompt hardening.** Reword the reviewer prompt to
+   forbid embedding quotes/colons in string field values;
+   ask for task references as bare identifiers
+   (`"task": "gs-170"`) instead of natural-language
+   summaries. Cheaper but relies on prompt compliance.
+3. **Both.** The robust path is (1) — the prompt change
+   is a free add-on for belt-and-braces.
+
+**Related false-positive risk.** None found in this
+sample. Every parse failure was an approved review that
+got rolled back, not a rejection that got waved through.
+If a future fix makes the parser more permissive, it
+should preserve the current strict-rejection default for
+malformed responses where `verdict` cannot be recovered.
+
+**Methodological note.** This finding only surfaced because
+`reviewer-response.txt` is archived per-cycle under
+`state/<project>/cycles/<cycle_id>/`. That archival was
+Hard Rule #9's "open audit log" principle in action —
+without it, the 10 rolled-back cycles would look like
+"reviewer didn't like the diff" in the progress log and
+no one would know there were 10 pieces of good work
+silently discarded. Archive-everything paid off.
+
+**Cross-reference.** Contradicts the initial session-report
+hypothesis that large-diff → reviewer truncation. All
+three gs-170 attempts were in the 450-535 insertion range
+and produced reviewer responses of 950-984 bytes — well
+under any plausible token limit. The failure mode is
+inner-content escaping, not response truncation. Future
+sessions digging into reviewer reliability should skip
+the truncation theory and look at escape-consistency.

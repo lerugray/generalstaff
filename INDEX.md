@@ -8,9 +8,9 @@ directory.
 **Cross-machine sync uses git, not OneDrive.** The folder happens
 to live in a `OneDrive\Documents\` path but OneDrive sync is not
 relied on. Ray moves work between his home and work PCs via git —
-commit and push on one machine, pull on the other. (The folder is
-not yet a git repo as of 2026-04-15; once it is initialized, this
-workflow applies.)
+commit and push on one machine, pull on the other. The repo is
+at `github.com/lerugray/generalstaff` (private) as of
+2026-04-15 evening.
 
 ## Start here
 
@@ -82,6 +82,13 @@ workflow applies.)
 - [[2026-04-16]] — first build session (work PC, morning, Opus
   4.6). Phase 1 code landed, dogfooding setup, 7+ verified
   autonomous cycles, 121+ tests, 3 bugs found and fixed.
+- [[2026-04-17]] — Phase 1 close + Phase 2 chain + Phase 3
+  kickoff (work PC, full-day arc, Opus 4.6). Phase 1 formally
+  closed, Phase 2 (reviewer pass, verification gate,
+  multi-provider routing) shipped in a 3.5h chain=3 session,
+  Phase 3 kicked off by attempting to register `gamr` as the
+  first non-dogfood project — which surfaced the state-path
+  architectural finding (gs-166..gs-170 queued for overnight).
 
 ## Conventions for working in this folder
 
@@ -157,12 +164,28 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
 - `scripts/run_bot.sh` — worktree-isolated bot launcher
 - `tests/` — 121+ tests across 11 files
 
-## Phase status (2026-04-16)
+## Phase status (2026-04-18)
 
 - **Phase 0:** Design docs complete (2026-04-15).
-- **Phase 1 (current):** Sequential MVP built and dogfooding.
-  GeneralStaff is its own first test project. 7+ verified
-  autonomous cycles completed. 121+ tests passing.
+- **Phase 1:** ✓ COMPLETE (2026-04-17). See
+  [[PHASE-1-COMPLETE-2026-04-17]]. Sequential MVP, independent
+  verification gate, reviewer pass, open audit log, all
+  dogfooding green. Hundreds of verified autonomous cycles.
+- **Phase 2:** ✓ COMPLETE (2026-04-17). See
+  [[PHASE-2-COMPLETE-2026-04-17]]. Multi-provider routing
+  (Ollama + OpenRouter + Claude), digest narrative, provider
+  registry + ping subcommands. 11 core Phase 2 tasks delivered
+  in a 3.5h chain=3 session window.
+- **Phase 3 (current):** Dispatcher generality — surfacing and
+  closing gaps that only appear on non-dogfood projects.
+  Kicked off 2026-04-17 evening by attempting to register
+  `gamr` as first non-dogfood project. First architectural
+  finding (inconsistent tasks.json path handling) closed by
+  the overnight 2026-04-18 run (gs-166..gs-170 all verified).
+  Next: harden reviewer JSON parser (gs-171, 10 observed
+  false-negative rollbacks in 24h — see DESIGN.md §v4 + the
+  reviewer-JSON entry in research-notes.md), then actually
+  register gamr and run first non-dogfood cycle.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it

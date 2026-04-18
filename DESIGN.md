@@ -717,3 +717,90 @@ reads as boring on purpose. The reservation model itself stays.
    need; see DESIGN.md §v3." This is cheap, catches the "my
    session stopped early" confusion, and is independent of
    whether (a), (b), or (c) is ultimately chosen.
+
+## v4 — Reviewer-response parsing robustness (2026-04-18, observational)
+
+**Status:** observational, not yet addressed in code. Captured
+after the 2026-04-18 overnight session revealed a systematic
+false-negative pattern in the verification gate. A fix is queued
+as **gs-171**. Full technical detail is in research-notes.md
+§"2026-04-18 — Verification-gate reviewer-JSON false-negatives";
+this section captures the design-level conclusion.
+
+### Observation
+
+`src/reviewer.ts` currently parses reviewer responses with
+strict `JSON.parse` on the outermost response body. Over the
+24-hour window 2026-04-17T01:13 → 2026-04-18T01:11, ten cycles
+hit `verification_failed` with reason "reviewer response was
+not valid JSON". Sampling their archived `reviewer-response.txt`
+files (preserved per Hard Rule #9) showed **every sampled
+failure was an approved review** (`"verdict": "verified"`) that
+parse-failed on a Qwen quirk: unescaped colons/quotes inside
+the `task_evidence[].task` string field (`"task": "status": "done"`).
+
+Result: 10 pieces of verified, tests-passing engineer work
+silently rolled back by a parser stricter than the semantics
+of the gate required.
+
+### Design conclusion
+
+**The verification gate's parse layer must be more tolerant
+than the verdict semantics demand.** The semantics are:
+
+- pass verification command ✓
+- reviewer-approved scope ✓
+- no hands-off violations ✓
+- no silent failures ✓
+
+The parser needs to extract *those* five fields robustly. It
+does not need, and probably should not need, the
+`task_evidence[]` structure to make a gate decision —
+`task_evidence[]` is an audit-aid field, not a verdict
+field. A parser that salvages the verdict even when
+`task_evidence[]` is malformed preserves the gate's strict
+semantics while eliminating the false-negative failure mode.
+
+### Principle for future gate surfaces
+
+When a machine-emitted structured response is consumed for a
+pass/fail decision, **bifurcate the parser** by field purpose:
+
+- **Decision-critical fields** (`verdict`, `scope_drift_files`,
+  `hands_off_violations`, `silent_failures`) → strict schema,
+  fail loud on anything suspicious.
+- **Observational-aid fields** (`task_evidence`, `notes`,
+  `reason`) → permissive extraction; drop malformed items,
+  don't fail the whole response.
+
+This is a generalization of the classic robustness principle
+("be conservative in what you send, liberal in what you
+accept") to structured LLM output. The cost of tightening
+parser tolerance on observation-aid fields is close to zero;
+the cost of false-negative rollbacks on decision-critical
+correctness is full engineer-cycle wall time.
+
+### Secondary principle — the open audit log earned its keep
+
+This observation was only possible because every cycle's
+`reviewer-response.txt` is archived at
+`state/<project>/cycles/<cycle_id>/`. Without that archive,
+the ten rolled-back cycles would read in PROGRESS.jsonl as
+"reviewer didn't like the diff" and the real failure mode
+would be invisible. Hard Rule #9 ("open audit log — full
+prompts, responses, tool calls, and diffs in PROGRESS.jsonl
+per cycle") bought the debugging surface that surfaced the
+parser-robustness issue. A Phase N+ consolidation of the
+rule should keep the per-cycle artifact archive explicit;
+compressing PROGRESS.jsonl alone would have hidden this.
+
+### Not in scope for v4
+
+v4 does not redesign the verification gate's semantic model.
+The gate's five-field verdict schema stays. What changes is
+the parsing layer below the schema: from strict
+`JSON.parse(responseBody)` to tolerant field-by-field
+extraction with strict-required / permissive-optional
+distinctions. gs-171 will land the parser change; a
+follow-up may also tighten the reviewer prompt to discourage
+Qwen from emitting unescaped inner content, as belt-and-braces.

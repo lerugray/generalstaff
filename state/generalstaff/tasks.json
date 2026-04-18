@@ -1021,5 +1021,29 @@
     "title": "Add a `generalstaff register <project-id>` CLI subcommand that reads state/<id>/tasks.json + a generated hands_off.yaml + project metadata and appends the project to projects.yaml. Prompts for confirmation (y/N) before editing; rejects if project id already registered. Error messages reference the bootstrap staging dir (`.generalstaff-proposal/`) if the project hasn't been bootstrapped yet. Tests covering: add new project, reject duplicate id, reject without confirmation, reject if state/<id>/ doesn't exist. Note: this modifies projects.yaml which is in hands_off — add an explicit exception for this command (it's the tool's own write path to its own config, equivalent to `init`). Document the exception in the command's help text. Depends on gs-166, gs-167.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-171",
+    "title": "Harden `src/reviewer.ts` JSON parser to tolerate unescaped inner content in `task_evidence[]` without false-negative rollback. Context: across 2026-04-17→18 (24h window) ten cycles rolled back with `reason: \"reviewer response was not valid JSON\"` — every sampled failure was a `verdict: \"verified\"` response where Qwen emitted `\"task\": \"status\": \"done\"` (unescaped inner colon). The verification gate's five decision-critical fields (`verdict`, `scope_drift_files`, `hands_off_violations`, `silent_failures`, and a usable `reason`) must be extracted strictly; the observational `task_evidence[]` and `notes` fields must be extracted permissively (drop malformed items, don't fail the whole response). Fail LOUD only if `verdict` itself cannot be recovered. Add tests with fixtures drawn from the archived failing responses under state/generalstaff/cycles/20260417011019_86ct/ and 20260418005225_tzrd/ — the parser must produce `verified` on these inputs. Do NOT weaken scope-drift / hands-off strictness. See DESIGN.md §v4 and research-notes.md §2026-04-18 for full rationale.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-172",
+    "title": "Add a belt-and-braces tightening to the reviewer prompt in `src/prompts/reviewer.ts` that discourages the model from embedding quotes/colons in string field values. Ask for `task_evidence[].task` as a bare identifier (`\"task\": \"gs-170\"`) rather than a natural-language status summary. This complements gs-171 (parser robustness) — the parser change is the load-bearing fix; this is a cheap prompt nudge to reduce the rate at which malformed responses arrive in the first place. Add a regression test that the updated prompt still elicits the full verdict schema from at least Qwen3-Coder-Plus and (if Ollama is running) llama3.1:8b. Depends on gs-171.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-173",
+    "title": "Register `gamr` as the first non-dogfood managed project using the new `generalstaff register` CLI subcommand (gs-170). Pre-conditions: gs-166 + gs-167 have landed (state-path alignment — tasks.json inside gamr's own repo); gs-171 ideally landed first so the reviewer parser doesn't eat productive gamr work. Bootstrap scaffold already exists at C:\\Users\\rweis\\OneDrive\\Documents\\gamr\\. Concrete steps: generate hands_off.yaml for gamr (small, open scaffold — low risk surface), commit the bootstrap scaffold in the gamr repo, run `generalstaff register gamr`, verify projects.yaml was updated correctly and state/gamr/ was NOT recreated in GeneralStaff's root. Capture outcome in research-notes.md under a new `## 2026-04-XX — gamr registration, first non-dogfood register`. If registration surfaces any additional generality gaps, queue follow-up tasks rather than patching inline. See CLAUDE.md §Test-project constraints for why gamr specifically (and why NOT catalogdna).",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-174",
+    "title": "Run the first bot cycle against `gamr` after gs-173 registers it. One-shot `generalstaff cycle gamr` (or natural pick via dispatcher if gamr is the staler project at the time). Target: produce any valid greenfield task completion against the gamr scaffold, exercise the full engineer → verification → reviewer → commit-merge pipeline end-to-end on a non-dogfood codebase. Expected to surface further generality gaps — document each in research-notes.md under the gamr registration entry and queue follow-up tasks (do NOT patch inline; Phase 3's whole point is cataloguing these before batch-fixing). Success criterion for Phase 3 closure: three consecutive gamr cycles land `verified` without dispatcher-level changes between them. Depends on gs-173.",
+    "status": "pending",
+    "priority": 2
   }
 ]
