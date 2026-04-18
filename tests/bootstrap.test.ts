@@ -309,6 +309,46 @@ describe("runBootstrap", () => {
     expect(tasks[0].title).toBe("user edit");
   });
 
+  it("force re-runs on existing scaffolded project without proposal dir — writes proposal without re-scaffolding (gs-169)", async () => {
+    const dir = freshDir("rb-force-existing-no-proposal");
+    mkdirSync(dir, { recursive: true });
+    // Pre-existing scaffolded repo: has files, but no proposal dir yet.
+    // Exercises the branch where dirExists=true, dirEmpty=false,
+    // proposalPath does NOT exist.
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "existing",
+        dependencies: { next: "^15.0.0" },
+        devDependencies: { "@types/bun": "latest" },
+      }),
+    );
+    writeFileSync(join(dir, "README.md"), "# existing\n\nPre-existing content.\n");
+
+    const r = await runBootstrap({
+      targetDir: dir,
+      idea: "some idea",
+      projectId: "existing",
+      force: true,
+    });
+    expect(r.ok).toBe(true);
+    // force was passed, but nothing to force-overwrite (no proposal
+    // existed). Existing scaffold files are not touched.
+    expect(r.createdScaffold).toBe(false);
+    expect(r.detectedStack?.kind).toBe("bun-next");
+
+    // Proposal dir is now created on this force re-run.
+    const pDir = join(dir, ".generalstaff-proposal");
+    expect(existsSync(join(pDir, "CLAUDE-AUTONOMOUS.md"))).toBe(true);
+    expect(existsSync(join(pDir, "hands_off.yaml"))).toBe(true);
+
+    // Pre-existing files untouched.
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    expect(pkg.name).toBe("existing");
+    const readme = readFileSync(join(dir, "README.md"), "utf8");
+    expect(readme).toContain("Pre-existing content.");
+  });
+
   it("defaults project id to basename of targetDir", async () => {
     const dir = freshDir("gamr-xyz");
     const r = await runBootstrap({
