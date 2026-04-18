@@ -1241,5 +1241,16 @@
       "tests/cli.test.ts"
     ],
     "completed_at": "2026-04-18T18:43:00.655Z"
+  },
+  {
+    "id": "gs-215",
+    "title": "Fix fetchCommitSubject to resolve SHAs in the correct project's git repo. CREATE ONLY: modify `src/git.ts` (fetchCommitSubject currently shell-outs to `git log -1 <sha>` in the current working directory; change it to accept an optional `cwd` parameter so callers can pass the project's path); modify call sites in `src/session.ts` writeDigest that iterate cycle results to pass `project.path` through; append tests to `tests/git.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Observed 2026-04-18 evening: raybrain session bxs08e22x produced 6 verified cycles. When writeDigest iterated those cycles, fetchCommitSubject tried resolving raybrain SHAs (f31a778, 0e5abe2, etc.) in the GeneralStaff repo and emitted 6 `[fetchCommitSubject] warning: bad object` lines. Non-fatal (digest falls back to cycle_id) but the output is ugly and the subject lookup never succeeds. Fix: thread project.path through so the git-log call runs in the right repo. Tests: (a) default (no cwd) still works (back-compat); (b) cwd=<project.path> for a non-dogfood project resolves SHAs correctly; (c) unresolvable SHA returns null without crashing. Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/git.ts",
+      "src/session.ts",
+      "tests/git.test.ts"
+    ]
   }
 ]
