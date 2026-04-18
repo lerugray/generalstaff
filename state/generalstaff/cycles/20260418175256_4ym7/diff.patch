@@ -1,0 +1,420 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 6cce66a..b1785a0 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -50,9 +50,13 @@ import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
+ import {
+   loadRecentSessions,
+   formatSessionsTable,
++  formatBacklogTable,
++  computeBacklogTotals,
+   parseSessionsFlag,
+   stripSessionsArgs,
++  type BacklogRow,
+ } from "./sessions";
++import { countRemainingWorkDetailed } from "./work_detection";
+ import {
+   loadProviderRegistry,
+   getProviderById,
+@@ -80,7 +84,7 @@ Usage:
+     Example: generalstaff cycle --project=myapp
+     Example: generalstaff cycle --project=myapp --dry-run
+ 
+-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary]
++  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog]
+                                                           Show fleet state
+     Example: generalstaff status
+     Example: generalstaff status --json                 # machine-readable output
+@@ -90,6 +94,8 @@ Usage:
+     Example: generalstaff status --sessions=20 --json   # last 20 sessions, JSON
+     Example: generalstaff status --summary              # today's cycle/session metrics (UTC)
+     Example: generalstaff status --summary --json       # same, as JSON
++    Example: generalstaff status --backlog              # per-project backlog buckets
++    Example: generalstaff status --backlog --json       # same, as JSON
+ 
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+@@ -330,11 +336,58 @@ switch (command) {
+       options: {
+         json: { type: "boolean", default: false },
+         summary: { type: "boolean", default: false },
++        backlog: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+ 
++    // gs-199: --backlog is mutually exclusive with the other status
++    // subviews. Detect the clash early so the user gets a single clear
++    // error instead of whichever branch runs first silently winning.
++    if (
++      statusValues.backlog &&
++      (sessionsFlag.enabled || statusValues.summary || watch.enabled)
++    ) {
++      console.error(
++        "Error: --backlog cannot be combined with --sessions/--summary/--watch",
++      );
++      process.exit(1);
++    }
++
+     const renderStatus = async () => {
++      if (statusValues.backlog) {
++        const projects = await loadProjects();
++        const rows: BacklogRow[] = [];
++        for (const p of projects) {
++          const b = await countRemainingWorkDetailed(p);
++          rows.push({
++            project_id: p.id,
++            bot_pickable: b.pending_bot_pickable,
++            interactive_only: b.pending_interactive_only,
++            handsoff_conflict: b.pending_handsoff_conflict,
++            in_progress: b.in_progress,
++            done: b.done,
++          });
++        }
++        if (statusValues.json) {
++          const totals = computeBacklogTotals(rows);
++          const out = {
++            projects: rows.map((r) => ({
++              id: r.project_id,
++              bot_pickable: r.bot_pickable,
++              interactive_only: r.interactive_only,
++              handsoff_conflict: r.handsoff_conflict,
++              in_progress: r.in_progress,
++              done: r.done,
++            })),
++            totals,
++          };
++          console.log(JSON.stringify(out, null, 2));
++        } else {
++          console.log(formatBacklogTable(rows));
++        }
++        return;
++      }
+       if (statusValues.summary) {
+         const todaySummary = await buildTodaySessionSummary();
+         if (statusValues.json) {
+diff --git a/src/sessions.ts b/src/sessions.ts
+index 1f75825..9bf8cdc 100644
+--- a/src/sessions.ts
++++ b/src/sessions.ts
+@@ -113,6 +113,82 @@ export function stripSessionsArgs(rawArgs: string[]): string[] {
+   );
+ }
+ 
++// gs-199: backlog subview. One row per project with the four
++// pending-bucket counts plus in_progress + done. Data shape mirrors
++// WorkBreakdown from src/work_detection.ts but flattened and renamed
++// for stable CLI/JSON output.
++export interface BacklogRow {
++  project_id: string;
++  bot_pickable: number;
++  interactive_only: number;
++  handsoff_conflict: number;
++  in_progress: number;
++  done: number;
++}
++
++export interface BacklogTotals {
++  bot_pickable: number;
++  interactive_only: number;
++  handsoff_conflict: number;
++  in_progress: number;
++}
++
++export function computeBacklogTotals(rows: BacklogRow[]): BacklogTotals {
++  const t: BacklogTotals = {
++    bot_pickable: 0,
++    interactive_only: 0,
++    handsoff_conflict: 0,
++    in_progress: 0,
++  };
++  for (const r of rows) {
++    t.bot_pickable += r.bot_pickable;
++    t.interactive_only += r.interactive_only;
++    t.handsoff_conflict += r.handsoff_conflict;
++    t.in_progress += r.in_progress;
++  }
++  return t;
++}
++
++export function formatBacklogTable(rows: BacklogRow[]): string {
++  if (rows.length === 0) {
++    return "No projects registered.";
++  }
++  const header = [
++    "Project",
++    "Bot-pickable",
++    "Interactive-only",
++    "Hands-off-conflict",
++    "In-progress",
++    "Done",
++  ];
++  const body: string[][] = rows.map((r) => [
++    r.project_id,
++    String(r.bot_pickable),
++    String(r.interactive_only),
++    String(r.handsoff_conflict),
++    String(r.in_progress),
++    String(r.done),
++  ]);
++  const totals = computeBacklogTotals(rows);
++  const totalDone = rows.reduce((a, r) => a + r.done, 0);
++  body.push([
++    "TOTAL",
++    String(totals.bot_pickable),
++    String(totals.interactive_only),
++    String(totals.handsoff_conflict),
++    String(totals.in_progress),
++    String(totalDone),
++  ]);
++  const widths = header.map((h, i) =>
++    Math.max(h.length, ...body.map((r) => r[i]!.length)),
++  );
++  const pad = (cells: string[]) =>
++    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
++  const lines = [pad(header), widths.map((w) => "-".repeat(w)).join("  ")];
++  for (const r of body) lines.push(pad(r));
++  return lines.join("\n");
++}
++
+ export function formatSessionsTable(
+   sessions: SessionSummary[],
+   now: Date = new Date(),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 23dcc6c..84ad41d 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1178,7 +1178,7 @@
+   {
+     "id": "gs-199",
+     "title": "Add `generalstaff status --backlog` subview. CREATE ONLY: extend the `case 'status'` block in `src/cli.ts` (new --backlog flag handling + a new renderBacklogTable helper — put the helper in `src/sessions.ts` alongside formatSessionsTable); append new tests to `tests/cli.test.ts` and/or `tests/sessions.test.ts`. DO NOT CREATE: new files outside tests; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output format: one row per project showing columns `Project | Bot-pickable | Interactive-only | Hands-off-conflict | In-progress | Done`, plus a total row summing the first four numeric columns. Data source: call `countRemainingWorkDetailed(project)` from gs-200 (assume it has landed; if it hasn't, fall back to simple pending/done counts from the existing countRemainingWork + loadTasks). `--json` flag emits the same data as `{projects: [{id, bot_pickable, interactive_only, handsoff_conflict, in_progress, done}], totals: {...}}`. Mutually exclusive with --sessions, --summary, --watch — print an error like `Error: --backlog cannot be combined with --sessions/--summary/--watch` and exit code 1 if combined. Tests: (a) table format with mixed-status fixture; (b) --json output shape; (c) mutex error with exit code 1 on combined flags. Expected diff: ~150 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 8eba606..3c62017 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -1665,4 +1665,132 @@ routes:
+       }
+     });
+   });
++
++  describe("status --backlog (gs-199)", () => {
++    const BACKLOG_DIR = join(import.meta.dir, "fixtures", "status_backlog_test");
++    const ALPHA_DIR = join(BACKLOG_DIR, "alpha");
++    const BETA_DIR = join(BACKLOG_DIR, "beta");
++
++    const PROJECTS_YAML = () => `
++projects:
++  - id: alpha
++    path: ${ALPHA_DIR.replace(/\\/g, "/")}
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    hands_off:
++      - src/reviewer.ts
++  - id: beta
++    path: ${BETA_DIR.replace(/\\/g, "/")}
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
++      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
++      writeFileSync(join(BACKLOG_DIR, "projects.yaml"), PROJECTS_YAML());
++      // alpha: 2 bot-pickable, 1 interactive_only, 1 done
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
++        JSON.stringify([
++          { id: "a-1", title: "t1", status: "pending", priority: 1 },
++          { id: "a-2", title: "t2", status: "pending", priority: 2 },
++          { id: "a-3", title: "t3", status: "pending", priority: 2, interactive_only: true },
++          { id: "a-4", title: "t4", status: "done", priority: 2 },
++        ]),
++      );
++      // beta: 1 bot-pickable, 1 hands_off conflict (touches src/reviewer.ts
++      // — not a hands_off path for beta, but CLAUDE.md is), 1 in_progress
++      writeFileSync(
++        join(BETA_DIR, "state", "beta", "tasks.json"),
++        JSON.stringify([
++          { id: "b-1", title: "t1", status: "pending", priority: 1 },
++          {
++            id: "b-2",
++            title: "t2",
++            status: "pending",
++            priority: 2,
++            expected_touches: ["CLAUDE.md"],
++          },
++          { id: "b-3", title: "t3", status: "in_progress", priority: 2 },
++        ]),
++      );
++    });
++
++    afterEach(() => {
++      rmSync(BACKLOG_DIR, { recursive: true, force: true });
++    });
++
++    it("--json emits projects + totals in the expected shape", async () => {
++      const result = await runCli(["status", "--backlog", "--json"], BACKLOG_DIR);
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed).toHaveProperty("projects");
++      expect(parsed).toHaveProperty("totals");
++      expect(parsed.projects).toHaveLength(2);
++      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
++      expect(alpha).toEqual({
++        id: "alpha",
++        bot_pickable: 2,
++        interactive_only: 1,
++        handsoff_conflict: 0,
++        in_progress: 0,
++        done: 1,
++      });
++      const beta = parsed.projects.find((p: { id: string }) => p.id === "beta");
++      expect(beta).toEqual({
++        id: "beta",
++        bot_pickable: 1,
++        interactive_only: 0,
++        handsoff_conflict: 1,
++        in_progress: 1,
++        done: 0,
++      });
++      expect(parsed.totals).toEqual({
++        bot_pickable: 3,
++        interactive_only: 1,
++        handsoff_conflict: 1,
++        in_progress: 1,
++      });
++    });
++
++    it("rejects --backlog combined with --sessions", async () => {
++      const result = await runCli(
++        ["status", "--backlog", "--sessions"],
++        BACKLOG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--backlog cannot be combined with --sessions/--summary/--watch",
++      );
++    });
++
++    it("rejects --backlog combined with --summary", async () => {
++      const result = await runCli(
++        ["status", "--backlog", "--summary"],
++        BACKLOG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--backlog cannot be combined with --sessions/--summary/--watch",
++      );
++    });
++  });
+ });
+diff --git a/tests/sessions.test.ts b/tests/sessions.test.ts
+index e88bd73..6fc7fd9 100644
+--- a/tests/sessions.test.ts
++++ b/tests/sessions.test.ts
+@@ -7,7 +7,10 @@ import {
+   stripSessionsArgs,
+   loadRecentSessions,
+   formatSessionsTable,
++  formatBacklogTable,
++  computeBacklogTotals,
+   type SessionSummary,
++  type BacklogRow,
+ } from "../src/sessions";
+ 
+ describe("parseSessionsFlag", () => {
+@@ -315,3 +318,72 @@ describe("formatSessionsTable", () => {
+     }
+   });
+ });
++
++describe("formatBacklogTable (gs-199)", () => {
++  it("returns placeholder when there are no projects", () => {
++    expect(formatBacklogTable([])).toBe("No projects registered.");
++  });
++
++  it("renders header, rows, and a TOTAL row with mixed-status fixture", () => {
++    const rows: BacklogRow[] = [
++      {
++        project_id: "alpha",
++        bot_pickable: 3,
++        interactive_only: 1,
++        handsoff_conflict: 0,
++        in_progress: 2,
++        done: 10,
++      },
++      {
++        project_id: "beta",
++        bot_pickable: 0,
++        interactive_only: 2,
++        handsoff_conflict: 4,
++        in_progress: 0,
++        done: 5,
++      },
++    ];
++    const out = formatBacklogTable(rows);
++    const lines = out.split("\n");
++    expect(lines[0]).toMatch(
++      /^Project\s+Bot-pickable\s+Interactive-only\s+Hands-off-conflict\s+In-progress\s+Done$/,
++    );
++    // Dividers under every column
++    expect(lines[1]).toMatch(/^-+\s+-+\s+-+\s+-+\s+-+\s+-+$/);
++    expect(out).toContain("alpha");
++    expect(out).toContain("beta");
++    // Totals row sums the four pending-bucket columns + done + in_progress
++    const totalLine = lines[lines.length - 1]!;
++    expect(totalLine).toContain("TOTAL");
++    expect(totalLine).toContain("3"); // bot_pickable total
++    expect(totalLine).toContain("4"); // handsoff_conflict total
++    expect(totalLine).toContain("15"); // done total 10+5
++  });
++
++  it("computeBacklogTotals sums the four pending buckets", () => {
++    const rows: BacklogRow[] = [
++      {
++        project_id: "a",
++        bot_pickable: 1,
++        interactive_only: 2,
++        handsoff_conflict: 3,
++        in_progress: 4,
++        done: 99,
++      },
++      {
++        project_id: "b",
++        bot_pickable: 10,
++        interactive_only: 20,
++        handsoff_conflict: 30,
++        in_progress: 40,
++        done: 99,
++      },
++    ];
++    expect(computeBacklogTotals(rows)).toEqual({
++      bot_pickable: 11,
++      interactive_only: 22,
++      handsoff_conflict: 33,
++      in_progress: 44,
++    });
++  });
++});
