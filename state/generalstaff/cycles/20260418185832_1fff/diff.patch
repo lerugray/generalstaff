@@ -1,0 +1,311 @@
+diff --git a/src/session.ts b/src/session.ts
+index 31c8114..039ca83 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -1116,6 +1116,80 @@ export function computeParallelEfficiency(
+   return efficiency;
+ }
+ 
++// gs-211: rate table for known OpenRouter reviewer models, in USD per
++// 1M tokens. Keys are the canonical model IDs used by src/reviewer.ts;
++// shortLabel is the human-readable tag rendered in the digest line.
++// Sourced from openrouter.ai as of 2026-04-18; update when the posted
++// prices change.
++const REVIEWER_RATES_USD_PER_M: Record<
++  string,
++  { input: number; output: number; shortLabel: string }
++> = {
++  "qwen/qwen3-coder-30b-a3b-instruct": {
++    input: 0.07,
++    output: 0.27,
++    shortLabel: "qwen3-coder-30b",
++  },
++  "qwen/qwen3-coder-flash": {
++    input: 0.195,
++    output: 0.975,
++    shortLabel: "qwen3-coder-flash",
++  },
++  "qwen/qwen3-coder-plus": {
++    input: 0.65,
++    output: 3.25,
++    shortLabel: "qwen3-coder-plus",
++  },
++};
++
++// Per-cycle token heuristic for a reviewer invocation that actually
++// fires. Rough averages observed 2026-04-18 across ~20 verified cycles;
++// refine when we have real token accounting in PROGRESS.jsonl.
++const REVIEWER_INPUT_TOKENS_PER_CYCLE = 2000;
++const REVIEWER_OUTPUT_TOKENS_PER_CYCLE = 500;
++
++const REVIEWER_DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-coder-30b-a3b-instruct";
++
++function countReviewerFiringCycles(results: CycleResult[]): number {
++  return results.filter(
++    (r) =>
++      r.final_outcome === "verified" ||
++      r.final_outcome === "verification_failed",
++  ).length;
++}
++
++/**
++ * Rough USD estimate of the reviewer's OpenRouter spend for a session.
++ *
++ * Returns `null` when the provider is anything other than `openrouter`,
++ * or when the model isn't in the known rate table (unknown model = we
++ * refuse to guess rather than print a wrong number). Only cycles that
++ * actually ran the reviewer are counted — `verified_weak` (empty diff)
++ * and `cycle_skipped` short-circuit before reviewer invocation so they
++ * cost nothing.
++ *
++ * The number is a crude order-of-magnitude: the token counts are flat
++ * per-cycle averages, not real accounting. Good enough for "am I at
++ * $0.01 or $0.10 this session?"; don't use it for billing.
++ */
++export function estimateReviewerSpendUSD(
++  results: CycleResult[],
++  provider: string,
++  model?: string,
++): number | null {
++  if (provider.toLowerCase() !== "openrouter") return null;
++  const modelKey = model ?? REVIEWER_DEFAULT_OPENROUTER_MODEL;
++  const rate = REVIEWER_RATES_USD_PER_M[modelKey];
++  if (!rate) return null;
++  const firingCycles = countReviewerFiringCycles(results);
++  return (
++    (firingCycles *
++      (REVIEWER_INPUT_TOKENS_PER_CYCLE * rate.input +
++        REVIEWER_OUTPUT_TOKENS_PER_CYCLE * rate.output)) /
++    1_000_000
++  );
++}
++
+ export async function writeDigest(
+   results: CycleResult[],
+   durationMinutes: number,
+@@ -1176,6 +1250,27 @@ export async function writeDigest(
+   content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
+   content += `**Cycles:** ${results.length}\n`;
+   content += `**Reviewer:** ${reviewerLabel}\n`;
++  // gs-211: rough reviewer-spend estimate for openrouter sessions. Omitted
++  // for non-openrouter providers and for unknown models (returns null).
++  if (config.reviewer_provider) {
++    const estUsd = estimateReviewerSpendUSD(
++      results,
++      config.reviewer_provider,
++      config.reviewer_model,
++    );
++    if (estUsd !== null) {
++      const modelKey =
++        config.reviewer_model ?? REVIEWER_DEFAULT_OPENROUTER_MODEL;
++      const rate = REVIEWER_RATES_USD_PER_M[modelKey];
++      const firingCycles = countReviewerFiringCycles(results);
++      content +=
++        `**Est. reviewer spend:** ~$${estUsd.toFixed(3)} ` +
++        `(${firingCycles} cycle${firingCycles === 1 ? "" : "s"} × ` +
++        `~${REVIEWER_INPUT_TOKENS_PER_CYCLE} in/` +
++        `${REVIEWER_OUTPUT_TOKENS_PER_CYCLE} out tokens @ ` +
++        `${rate.shortLabel} rates)\n`;
++    }
++  }
+   if (results.length > 0) {
+     content += `**Summary:** ${verified.length} verified, ${failed.length} failed\n`;
+     if (narrative) {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ec10b43..c30b69e 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1224,7 +1224,7 @@
+   {
+     "id": "gs-211",
+     "title": "Digest adds a rough reviewer-spend estimate for openrouter sessions. CREATE ONLY: modify `src/session.ts` writeDigest (add an optional rendered line under the Reviewer header) + add helper `estimateReviewerSpendUSD(results: CycleResult[], provider: string, model?: string): number | null` alongside writeDigest; append tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch src/reviewer.ts, src/prompts/, src/safety.ts, scripts/, or any hands_off path. Motivation: today the digest shows `**Reviewer:** openrouter` but no cost signal — Ray wants a rough running total. When provider.toLowerCase() === 'openrouter', render a line like `**Est. reviewer spend:** ~$0.012 (6 cycles × ~2000 in/500 out tokens @ qwen3-coder-30b rates)`. Rate table keyed on known models: `qwen/qwen3-coder-30b-a3b-instruct` (default per src/reviewer.ts) = $0.07 input / $0.27 output per M tokens; `qwen/qwen3-coder-flash` = $0.195 / $0.975; `qwen/qwen3-coder-plus` = $0.65 / $3.25. Token-count heuristic: 2000 input + 500 output per cycle that actually ran the reviewer (outcome === 'verified' || outcome === 'verification_failed' — skip verified_weak empty-diff and cycle_skipped). Non-openrouter providers: return null / omit the line. Unknown model: return null. Tests: (a) openrouter + 3 reviewer-firing cycles → estimate line with > $0 figure; (b) claude reviewer → no line; (c) openrouter + unknown model → no line; (d) mixed outcomes correctly counts only reviewer-firing cycles. Expected diff: ~140 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/session.ts",
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index b8914d6..1ff54fa 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -14,6 +14,7 @@ import {
+   DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+   hotReloadProjects,
+   computeParallelEfficiency,
++  estimateReviewerSpendUSD,
+ } from "../src/session";
+ import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
+ import { setRootDir } from "../src/state";
+@@ -484,6 +485,172 @@ describe("writeDigest", () => {
+   });
+ });
+ 
++// gs-211: rough reviewer-spend estimate for openrouter sessions.
++describe("estimateReviewerSpendUSD (gs-211)", () => {
++  it("returns a positive estimate for openrouter with reviewer-firing cycles", () => {
++    const results = [
++      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
++      makeCycleResult({ cycle_id: "c-2", final_outcome: "verified" }),
++      makeCycleResult({ cycle_id: "c-3", final_outcome: "verification_failed" }),
++    ];
++    const est = estimateReviewerSpendUSD(
++      results,
++      "openrouter",
++      "qwen/qwen3-coder-30b-a3b-instruct",
++    );
++    expect(est).not.toBeNull();
++    expect(est!).toBeGreaterThan(0);
++    // 3 cycles × (2000 × 0.07 + 500 × 0.27) / 1e6 = 3 × 275e-6 = 0.000825
++    expect(est!).toBeCloseTo(0.000825, 6);
++  });
++
++  it("returns null when provider is claude", () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    expect(estimateReviewerSpendUSD(results, "claude")).toBeNull();
++    expect(estimateReviewerSpendUSD(results, "ollama", "qwen3:8b")).toBeNull();
++  });
++
++  it("returns null for openrouter with an unknown model", () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    expect(
++      estimateReviewerSpendUSD(results, "openrouter", "some/unknown-model"),
++    ).toBeNull();
++  });
++
++  it("defaults to qwen3-coder-30b when model is unset (matches src/reviewer.ts default)", () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    const est = estimateReviewerSpendUSD(results, "openrouter");
++    expect(est).not.toBeNull();
++    expect(est!).toBeGreaterThan(0);
++  });
++
++  it("counts only reviewer-firing cycles (skips verified_weak empty-diff and cycle_skipped)", () => {
++    const results = [
++      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
++      makeCycleResult({
++        cycle_id: "c-2",
++        final_outcome: "verified_weak",
++        reason: "empty diff",
++      }),
++      makeCycleResult({
++        cycle_id: "c-3",
++        final_outcome: "cycle_skipped",
++        reason: "no work",
++      }),
++      makeCycleResult({ cycle_id: "c-4", final_outcome: "verification_failed" }),
++    ];
++    const est = estimateReviewerSpendUSD(
++      results,
++      "openrouter",
++      "qwen/qwen3-coder-30b-a3b-instruct",
++    );
++    // Only c-1 and c-4 fire the reviewer → 2 cycles.
++    // 2 × (2000 × 0.07 + 500 × 0.27) / 1e6 = 0.00055
++    expect(est).toBeCloseTo(0.00055, 6);
++  });
++
++  it("handles case-insensitive provider names", () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    const est = estimateReviewerSpendUSD(
++      results,
++      "OpenRouter",
++      "qwen/qwen3-coder-plus",
++    );
++    expect(est).not.toBeNull();
++    expect(est!).toBeGreaterThan(0);
++  });
++
++  it("scales with rate table — coder-plus costs more than coder-30b for same cycle count", () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    const cheap = estimateReviewerSpendUSD(
++      results,
++      "openrouter",
++      "qwen/qwen3-coder-30b-a3b-instruct",
++    );
++    const pricey = estimateReviewerSpendUSD(
++      results,
++      "openrouter",
++      "qwen/qwen3-coder-plus",
++    );
++    expect(pricey!).toBeGreaterThan(cheap!);
++  });
++});
++
++// gs-211: digest rendering of the spend line.
++describe("writeDigest reviewer-spend line (gs-211)", () => {
++  it("renders the Est. reviewer spend line for openrouter with a known model", async () => {
++    const results = [
++      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
++      makeCycleResult({ cycle_id: "c-2", final_outcome: "verified" }),
++      makeCycleResult({ cycle_id: "c-3", final_outcome: "verification_failed" }),
++    ];
++    await writeDigest(results, 5, {
++      digest_dir: "digests",
++      reviewer_provider: "openrouter",
++      reviewer_model: "qwen/qwen3-coder-30b-a3b-instruct",
++    });
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).toContain("**Est. reviewer spend:**");
++    expect(content).toContain("3 cycles");
++    expect(content).toContain("qwen3-coder-30b rates");
++    expect(content).toMatch(/\*\*Est\. reviewer spend:\*\* ~\$0\.\d+/);
++  });
++
++  it("omits the spend line when reviewer provider is claude", async () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    await writeDigest(results, 5, {
++      digest_dir: "digests",
++      reviewer_provider: "claude",
++    });
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).not.toContain("**Est. reviewer spend:**");
++  });
++
++  it("omits the spend line when the openrouter model is unknown", async () => {
++    const results = [makeCycleResult({ final_outcome: "verified" })];
++    await writeDigest(results, 5, {
++      digest_dir: "digests",
++      reviewer_provider: "openrouter",
++      reviewer_model: "some/unknown-model",
++    });
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).not.toContain("**Est. reviewer spend:**");
++  });
++
++  it("counts only reviewer-firing cycles in the rendered line", async () => {
++    const results = [
++      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
++      makeCycleResult({
++        cycle_id: "c-2",
++        final_outcome: "verified_weak",
++        reason: "empty diff",
++      }),
++      makeCycleResult({
++        cycle_id: "c-3",
++        final_outcome: "cycle_skipped",
++        reason: "no work",
++      }),
++      makeCycleResult({ cycle_id: "c-4", final_outcome: "verification_failed" }),
++    ];
++    await writeDigest(results, 5, {
++      digest_dir: "digests",
++      reviewer_provider: "openrouter",
++      reviewer_model: "qwen/qwen3-coder-30b-a3b-instruct",
++    });
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).toContain("2 cycles");
++    expect(content).not.toContain("4 cycles");
++  });
++});
++
+ describe("writeDigest narrative (gs-158)", () => {
+   const NARRATIVE_ENV = "GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER";
+   let savedEnv: string | undefined;
