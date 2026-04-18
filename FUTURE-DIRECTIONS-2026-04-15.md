@@ -1398,3 +1398,53 @@ bot's role is just routing the request and committing the
 artifact. The bot's industriousness is bounded by the
 user's preview-and-approve loop, not turned loose on
 "design something good".
+
+### Addendum — 2026-04-18 afternoon: path (a) manual-relay empirically validated
+
+Ray tested the **manual-relay path (a)** end-to-end on 2026-04-18
+afternoon by taking feedback from a Claude Design session and
+pasting it into a catalogdna interactive session. His report:
+*"incredible job"*. This is the first empirical data point we
+have on any of the three integration paths, and it validates
+the §7 "don't pre-build (b) or (c)" recommendation — the
+cheap path is already load-bearing useful.
+
+**Implications for the GeneralStaff build order:**
+
+1. **Phase 5 UI work starts with path (a).** Until a GeneralStaff
+   plugin ships, the fastest way to get a polished kriegspiel
+   dashboard (per `UI-VISION-2026-04-15.md`) is Ray running
+   Claude Design in a browser and relaying output into the
+   project via a regular interactive session. GeneralStaff
+   doesn't need to be "in the loop" — it just needs to not
+   block it.
+2. **Hands-off rules should anticipate Claude Design drop-ins.**
+   The projects.yaml hands_off list for any project doing UI
+   work should explicitly permit a drop-in directory — e.g.
+   `src/ui/generated/` — where Claude Design output lands
+   without tripping reviewer rollbacks. This is cheap to add
+   today; worth adding when the first UI workflow actually
+   ships.
+3. **(b) Playwright integration deferred further.** The
+   catalogdna manual-relay success suggests the activation
+   energy for (b) is higher than its marginal value over (a).
+   Ray's ergonomics are already fine with the manual path;
+   automating it would save minutes per iteration, not hours.
+   (c) direct API integration is still the "right" long-run
+   answer whenever Anthropic ships it.
+4. **catalogdna is the natural pilot project for this pattern.**
+   It already has a UI surface (worth understanding: does it
+   count as "creative work" per Hard Rule #1, or is it
+   correctness work on already-designed UI?) and Ray has
+   high-fidelity taste for what catalogdna should look like.
+   When Ray wants GeneralStaff to formally support catalogdna
+   UI work, path (a) + the hands_off drop-in pattern is the
+   first integration to ship. This is a Phase 5+ item; the
+   validation note is captured now so we don't re-derive the
+   answer later.
+
+**What this doesn't change.** The §7 recommendation is unchanged:
+don't pre-build (b) or (c), manual-relay is enough until a
+real UI workflow stresses it. This addendum just records that
+the empirical foundation for that recommendation is now real,
+not hypothetical.
