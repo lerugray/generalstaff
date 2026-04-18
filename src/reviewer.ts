@@ -184,19 +184,142 @@ async function spawnClaude(prompt: string, cwd: string): Promise<string> {
   });
 }
 
+// gs-187: per-provider concurrency semaphore for reviewer calls. When
+// the dispatcher runs cycles in parallel (gs-186 / max_parallel_slots
+// > 1), multiple cycles can hit the reviewer step simultaneously.
+// Without throttling, parallel OpenRouter free-tier calls immediately
+// 429-cascade; parallel Ollama calls saturate the local GPU. Each
+// provider gets its own semaphore, keyed by lowercased provider name.
+//
+// Defaults (chosen per DESIGN.md §v6 Q2):
+//   - claude      : unbounded (subscription auth; rate limits are
+//                   handled upstream by claude -p itself)
+//   - openrouter  : 2          (free-tier friendly; Ray's typical
+//                   config. Paid-tier users can raise via env.)
+//   - ollama      : 1          (local model, typically one-at-a-time)
+//
+// Override per provider via
+//   GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>=N
+// e.g. GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER=8 for a paid tier.
+
+class PromiseSemaphore {
+  private available: number;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(private readonly limit: number) {
+    this.available = limit;
+  }
+
+  isUnbounded(): boolean {
+    return !Number.isFinite(this.limit);
+  }
+
+  inFlight(): number {
+    if (this.isUnbounded()) return 0;
+    return this.limit - this.available;
+  }
+
+  waiters(): number {
+    return this.queue.length;
+  }
+
+  async acquire(): Promise<() => void> {
+    if (this.isUnbounded()) {
+      return () => { /* no-op release */ };
+    }
+    if (this.available > 0) {
+      this.available--;
+      return () => this.release();
+    }
+    return new Promise<() => void>((resolve) => {
+      this.queue.push(() => {
+        // The slot was pre-decremented in release() right before the
+        // dequeue, so we already "own" the token — just return the
+        // release closure.
+        resolve(() => this.release());
+      });
+    });
+  }
+
+  private release(): void {
+    if (this.isUnbounded()) return;
+    const next = this.queue.shift();
+    if (next) {
+      // Hand the slot straight to the next waiter (keep available
+      // decremented). Without this, a burst of waiters could race each
+      // other on available.
+      next();
+    } else {
+      this.available++;
+    }
+  }
+}
+
+const DEFAULT_REVIEWER_CONCURRENCY: Record<string, number> = {
+  claude: Infinity,
+  openrouter: 2,
+  ollama: 1,
+};
+
+const reviewerSemaphores = new Map<string, PromiseSemaphore>();
+
+export function reviewerConcurrencyLimit(provider: string): number {
+  const p = provider.toLowerCase();
+  const envKey = `GENERALSTAFF_REVIEWER_CONCURRENCY_${p.toUpperCase()}`;
+  const envVal = process.env[envKey];
+  if (envVal !== undefined) {
+    const n = parseInt(envVal, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_REVIEWER_CONCURRENCY[p] ?? Infinity;
+}
+
+function getReviewerSemaphore(provider: string): PromiseSemaphore {
+  const p = provider.toLowerCase();
+  const cached = reviewerSemaphores.get(p);
+  if (cached) return cached;
+  const sem = new PromiseSemaphore(reviewerConcurrencyLimit(p));
+  reviewerSemaphores.set(p, sem);
+  return sem;
+}
+
+// Test-only helper so a fixture can reset the semaphore map between
+// runs. Production code should NEVER need this — semaphores live for
+// the lifetime of the session process.
+export function _resetReviewerSemaphoresForTests(): void {
+  reviewerSemaphores.clear();
+}
+
+export async function withReviewerSemaphore<T>(
+  provider: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const sem = getReviewerSemaphore(provider);
+  const release = await sem.acquire();
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 // Dispatches a single reviewer call to the configured provider.
 // "claude" (default) uses spawnClaude; "openrouter" and "ollama" use
 // the HTTP-based invokers below. Unknown provider names fall back to
 // claude rather than erroring — the env var is user-facing.
+// gs-187 wraps every dispatch in withReviewerSemaphore so parallel
+// cycles (gs-186) serialize per-provider rather than stampeding.
 export async function invokeReviewerProvider(
   provider: string,
   prompt: string,
   cwd: string,
 ): Promise<string> {
   const p = provider.toLowerCase();
-  if (p === "openrouter") return invokeOpenRouterReviewer(prompt);
-  if (p === "ollama") return invokeOllamaReviewer(prompt);
-  return spawnClaude(prompt, cwd);
+  return withReviewerSemaphore(p, async () => {
+    if (p === "openrouter") return invokeOpenRouterReviewer(prompt);
+    if (p === "ollama") return invokeOllamaReviewer(prompt);
+    return spawnClaude(prompt, cwd);
+  });
 }
 
 // Runs the primary reviewer provider and, if the response begins with

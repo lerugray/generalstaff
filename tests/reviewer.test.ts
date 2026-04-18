@@ -4,6 +4,9 @@ import {
   invokeOpenRouterReviewer,
   invokeReviewerWithFallback,
   parseReviewerResponse,
+  reviewerConcurrencyLimit,
+  withReviewerSemaphore,
+  _resetReviewerSemaphoresForTests,
 } from "../src/reviewer";
 
 const VALID_RESPONSE = {
@@ -784,6 +787,212 @@ describe("invokeReviewerWithFallback", () => {
       "http://localhost:11434/api/chat",
       "https://openrouter.ai/api/v1/chat/completions",
     ]);
+  });
+});
+
+describe("reviewerConcurrencyLimit (gs-187)", () => {
+  const envKeys = [
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_CLAUDE",
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER",
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_OLLAMA",
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_FOO",
+  ];
+
+  beforeEach(() => {
+    for (const k of envKeys) delete process.env[k];
+    _resetReviewerSemaphoresForTests();
+  });
+
+  afterEach(() => {
+    for (const k of envKeys) delete process.env[k];
+    _resetReviewerSemaphoresForTests();
+  });
+
+  it("claude default is unbounded (Infinity — subscription auth handles limits upstream)", () => {
+    expect(reviewerConcurrencyLimit("claude")).toBe(Infinity);
+  });
+
+  it("openrouter default is 2 (free-tier friendly)", () => {
+    expect(reviewerConcurrencyLimit("openrouter")).toBe(2);
+  });
+
+  it("ollama default is 1 (local GPU, one model at a time)", () => {
+    expect(reviewerConcurrencyLimit("ollama")).toBe(1);
+  });
+
+  it("unknown provider defaults to unbounded (don't surprise-throttle a user)", () => {
+    expect(reviewerConcurrencyLimit("foo")).toBe(Infinity);
+  });
+
+  it("env var overrides the default", () => {
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER = "8";
+    expect(reviewerConcurrencyLimit("openrouter")).toBe(8);
+  });
+
+  it("invalid env values fall back to default (non-numeric)", () => {
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER = "not-a-number";
+    expect(reviewerConcurrencyLimit("openrouter")).toBe(2);
+  });
+
+  it("zero or negative env values fall back to default (guards against accidental stall)", () => {
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OLLAMA = "0";
+    expect(reviewerConcurrencyLimit("ollama")).toBe(1);
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OLLAMA = "-5";
+    expect(reviewerConcurrencyLimit("ollama")).toBe(1);
+  });
+
+  it("provider name is case-insensitive", () => {
+    expect(reviewerConcurrencyLimit("OLLAMA")).toBe(1);
+    expect(reviewerConcurrencyLimit("OpenRouter")).toBe(2);
+  });
+});
+
+describe("withReviewerSemaphore (gs-187)", () => {
+  const envKeys = [
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_OLLAMA",
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER",
+    "GENERALSTAFF_REVIEWER_CONCURRENCY_CLAUDE",
+  ];
+
+  beforeEach(() => {
+    for (const k of envKeys) delete process.env[k];
+    _resetReviewerSemaphoresForTests();
+  });
+
+  afterEach(() => {
+    for (const k of envKeys) delete process.env[k];
+    _resetReviewerSemaphoresForTests();
+  });
+
+  it("ollama (limit=1) serializes concurrent callers", async () => {
+    const log: string[] = [];
+    let inFlight = 0;
+    let peakInFlight = 0;
+
+    const task = async (id: number) => {
+      return withReviewerSemaphore("ollama", async () => {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        log.push(`start-${id}`);
+        await new Promise((r) => setTimeout(r, 20));
+        log.push(`end-${id}`);
+        inFlight--;
+        return id;
+      });
+    };
+
+    const results = await Promise.all([task(1), task(2), task(3)]);
+
+    expect(results).toEqual([1, 2, 3]);
+    expect(peakInFlight).toBe(1);
+    // Ends must come before the next start — strict serialization.
+    expect(log).toEqual([
+      "start-1", "end-1",
+      "start-2", "end-2",
+      "start-3", "end-3",
+    ]);
+  });
+
+  it("openrouter (limit=2) allows 2 concurrent, queues the rest", async () => {
+    let inFlight = 0;
+    let peakInFlight = 0;
+
+    const task = async (id: number) =>
+      withReviewerSemaphore("openrouter", async () => {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 20));
+        inFlight--;
+        return id;
+      });
+
+    await Promise.all([task(1), task(2), task(3), task(4), task(5)]);
+    expect(peakInFlight).toBe(2);
+  });
+
+  it("claude (unbounded) runs all concurrently", async () => {
+    let inFlight = 0;
+    let peakInFlight = 0;
+
+    const task = async (id: number) =>
+      withReviewerSemaphore("claude", async () => {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 20));
+        inFlight--;
+        return id;
+      });
+
+    await Promise.all([task(1), task(2), task(3), task(4), task(5)]);
+    expect(peakInFlight).toBe(5);
+  });
+
+  it("releases the slot even when the wrapped fn throws", async () => {
+    let peakInFlight = 0;
+    let inFlight = 0;
+
+    const flakyTask = async (fail: boolean) =>
+      withReviewerSemaphore("ollama", async () => {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        try {
+          await new Promise((r) => setTimeout(r, 10));
+          if (fail) throw new Error("boom");
+        } finally {
+          inFlight--;
+        }
+      });
+
+    // First call fails; second call must still be able to acquire.
+    await expect(flakyTask(true)).rejects.toThrow("boom");
+    await flakyTask(false);
+    expect(peakInFlight).toBe(1);
+  });
+
+  it("env override changes the active limit", async () => {
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER = "1";
+    let inFlight = 0;
+    let peakInFlight = 0;
+
+    const task = async () =>
+      withReviewerSemaphore("openrouter", async () => {
+        inFlight++;
+        peakInFlight = Math.max(peakInFlight, inFlight);
+        await new Promise((r) => setTimeout(r, 15));
+        inFlight--;
+      });
+
+    await Promise.all([task(), task(), task()]);
+    // With env override=1, even openrouter (default 2) is now serial.
+    expect(peakInFlight).toBe(1);
+  });
+
+  it("per-provider isolation: openrouter limit does NOT block ollama callers", async () => {
+    process.env.GENERALSTAFF_REVIEWER_CONCURRENCY_OPENROUTER = "1";
+    let openrouterInFlight = 0;
+    let peakOpenrouter = 0;
+    let ollamaInFlight = 0;
+    let peakOllama = 0;
+
+    const orTask = async () =>
+      withReviewerSemaphore("openrouter", async () => {
+        openrouterInFlight++;
+        peakOpenrouter = Math.max(peakOpenrouter, openrouterInFlight);
+        await new Promise((r) => setTimeout(r, 30));
+        openrouterInFlight--;
+      });
+    const ollamaTask = async () =>
+      withReviewerSemaphore("ollama", async () => {
+        ollamaInFlight++;
+        peakOllama = Math.max(peakOllama, ollamaInFlight);
+        await new Promise((r) => setTimeout(r, 10));
+        ollamaInFlight--;
+      });
+
+    await Promise.all([orTask(), orTask(), ollamaTask(), ollamaTask()]);
+    // openrouter was capped at 1; ollama was independent and capped at 1.
+    expect(peakOpenrouter).toBe(1);
+    expect(peakOllama).toBe(1);
   });
 });
 

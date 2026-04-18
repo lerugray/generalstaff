@@ -1134,7 +1134,7 @@
   {
     "id": "gs-187",
     "title": "Phase 4 step 3: per-provider concurrency semaphore in src/reviewer.ts keyed on provider name. Default unbounded for claude, default 2 for openrouter free tier (can tune; configurable). Reviewer calls acquire before sending the HTTP request, release on response. Tests: synthetic 8-cycle parallel session with the semaphore limiting OpenRouter to 2 concurrent calls correctly serializes the reviewer step without breaking cycle parallelism. See DESIGN.md §v6.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
