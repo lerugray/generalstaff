@@ -1086,7 +1086,7 @@
   {
     "id": "gs-181",
     "title": "Improve src/projects.ts parse error messages to cite line numbers and suggest fixes. Today's behavior: a malformed projects.yaml gives a generic YAML parse error pointing at the wrong line (the `yaml` library's column-counting is off-by-one in some cases per its own docs). Goal: when parsing fails, walk the parsed AST (or fall back to the raw error from `yaml`) and produce a message of the form: `projects.yaml line X: <specific issue>. Likely cause: <hint>. Fix: <suggested edit>.` Common cases to handle: missing required field (id, path, hands_off), hands_off list empty (Hard Rule #5 violation), hands_off path entry that doesn't look like a glob, project id with invalid chars, duplicate project id. At least 5 fixture-based tests covering these cases. Should pass under `bun test && bun x tsc --noEmit`.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
