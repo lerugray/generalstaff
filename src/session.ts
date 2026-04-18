@@ -27,7 +27,12 @@ import { checkOllamaReachable } from "./ollama";
 import { generateDigestNarrative } from "./digest_llm";
 import { loadProviderRegistry, getProviderForRole } from "./providers/registry";
 import type { LLMProvider } from "./providers/types";
-import type { SessionOptions, CycleResult, ProjectConfig } from "./types";
+import type {
+  SessionOptions,
+  CycleResult,
+  ProjectConfig,
+  ProjectsYaml,
+} from "./types";
 
 // Watchdog threshold multiplier. 2x the per-project cycle budget was picked as
 // a conservative "probably stuck, not just slow" signal — normal engineer
@@ -90,6 +95,42 @@ export function updateFailureStreak(
   };
 }
 
+// gs-191: hot-reload the projects list between cycles so projects
+// registered mid-session (e.g. raybrain registered ~30 min into a
+// running session 2026-04-18) are visible to the picker. Only the
+// projects list is hot-reloaded — dispatcher config (state paths,
+// cycle caps, digest dir) stays frozen at session start because
+// changing those mid-flight could corrupt in-flight cycle state.
+//
+// If loadProjectsYaml throws (yaml transiently invalid while the
+// operator edits the file), return the cached list and the error
+// so the session can warn + continue rather than crashing on a
+// typo.
+export interface HotReloadResult {
+  projects: ProjectConfig[];
+  added: string[];
+  removed: string[];
+  error?: string;
+}
+
+export async function hotReloadProjects(
+  cached: ProjectConfig[],
+  loader: () => Promise<ProjectsYaml> = loadProjectsYaml,
+): Promise<HotReloadResult> {
+  let yaml: ProjectsYaml;
+  try {
+    yaml = await loader();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { projects: cached, added: [], removed: [], error: msg };
+  }
+  const cachedIds = new Set(cached.map((p) => p.id));
+  const newIds = new Set(yaml.projects.map((p) => p.id));
+  const added = [...newIds].filter((id) => !cachedIds.has(id));
+  const removed = [...cachedIds].filter((id) => !newIds.has(id));
+  return { projects: yaml.projects, added, removed };
+}
+
 export function checkCycleWatchdog(
   durationSeconds: number,
   cycleBudgetMinutes: number,
@@ -148,7 +189,9 @@ export async function runSession(options: SessionOptions) {
   console.log(`Started: ${new Date().toISOString()}\n`);
 
   const yaml = await loadProjectsYaml();
-  const { projects } = yaml;
+  // gs-191: mutable so the main loop can swap in a fresh list between
+  // cycles when projects.yaml is edited mid-session.
+  let projects = yaml.projects;
   const config = yaml.dispatcher;
   const fleet = await loadFleetState(config);
 
@@ -297,6 +340,28 @@ export async function runSession(options: SessionOptions) {
 
     // Pick next project (or continue chaining)
     if (!currentProject) {
+      // gs-191: refresh projects.yaml so mid-session registrations are
+      // picked up. Warn on reload errors but don't crash — transient
+      // invalid-yaml during an operator edit shouldn't kill the session.
+      const reload = await hotReloadProjects(projects);
+      projects = reload.projects;
+      if (reload.error) {
+        console.warn(
+          `[projects.yaml] reload failed (using cached list): ${reload.error}`,
+        );
+      } else {
+        if (reload.added.length > 0) {
+          console.log(
+            `[projects.yaml] newly registered: ${reload.added.join(", ")}`,
+          );
+        }
+        if (reload.removed.length > 0) {
+          console.log(
+            `[projects.yaml] unregistered: ${reload.removed.join(", ")}`,
+          );
+        }
+      }
+
       const updatedFleet = await loadFleetState(config);
       const pick = await pickNextProject(
         projects,

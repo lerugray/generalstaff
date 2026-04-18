@@ -11,7 +11,9 @@ import {
   updateFailureStreak,
   DEFAULT_SOFT_SKIP_THRESHOLD,
   DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+  hotReloadProjects,
 } from "../src/session";
+import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
@@ -1304,5 +1306,106 @@ describe("updateFailureStreak (gs-193 fast-fail backoff)", () => {
     const u2 = updateFailureStreak(u1.streak, true, 70_000, 2, 60);
     expect(u2.streak.count).toBe(2);
     expect(u2.shouldSoftSkip).toBe(false);
+  });
+});
+
+describe("hotReloadProjects (gs-191)", () => {
+  function makeProject(id: string): ProjectConfig {
+    return {
+      id,
+      path: `/tmp/${id}`,
+      branch: "bot/work",
+      engineer_command: "noop",
+      verification_command: "noop",
+      cycle_budget_minutes: 10,
+      work_detection: "tasks_json",
+      concurrency_detection: "none",
+      priority: 1,
+      auto_merge: false,
+      hands_off: [],
+    };
+  }
+
+  function makeYaml(projects: ProjectConfig[]): ProjectsYaml {
+    const dispatcher: DispatcherConfig = {
+      state_dir: "state",
+      fleet_state_file: "state/fleet_state.json",
+      stop_file: "STOP",
+      override_file: "next_project.txt",
+      picker: "priority_staleness",
+      max_cycles_per_project_per_session: 5,
+      log_dir: "logs",
+      digest_dir: "digests",
+    };
+    return { projects, dispatcher };
+  }
+
+  it("reports no add/remove when the list is unchanged", async () => {
+    const cached = [makeProject("a"), makeProject("b")];
+    const updated = [makeProject("a"), makeProject("b")];
+    const result = await hotReloadProjects(cached, async () => makeYaml(updated));
+    expect(result.projects).toEqual(updated);
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.error).toBeUndefined();
+  });
+
+  it("detects a newly registered project (the motivating case)", async () => {
+    const cached = [makeProject("generalstaff"), makeProject("gamr")];
+    const updated = [
+      makeProject("generalstaff"),
+      makeProject("gamr"),
+      makeProject("raybrain"),
+    ];
+    const result = await hotReloadProjects(cached, async () => makeYaml(updated));
+    expect(result.projects.map((p) => p.id)).toEqual([
+      "generalstaff", "gamr", "raybrain",
+    ]);
+    expect(result.added).toEqual(["raybrain"]);
+    expect(result.removed).toEqual([]);
+  });
+
+  it("detects a removed project", async () => {
+    const cached = [makeProject("a"), makeProject("b")];
+    const updated = [makeProject("a")];
+    const result = await hotReloadProjects(cached, async () => makeYaml(updated));
+    expect(result.projects.map((p) => p.id)).toEqual(["a"]);
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual(["b"]);
+  });
+
+  it("detects simultaneous add and remove", async () => {
+    const cached = [makeProject("old"), makeProject("kept")];
+    const updated = [makeProject("kept"), makeProject("new")];
+    const result = await hotReloadProjects(cached, async () => makeYaml(updated));
+    expect(result.added).toEqual(["new"]);
+    expect(result.removed).toEqual(["old"]);
+  });
+
+  it("falls back to cached list when loader throws", async () => {
+    const cached = [makeProject("a")];
+    const result = await hotReloadProjects(cached, async () => {
+      throw new Error("invalid yaml: unexpected indent at line 7");
+    });
+    expect(result.projects).toEqual(cached);
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.error).toContain("invalid yaml");
+  });
+
+  it("starts from empty cache on first call", async () => {
+    const updated = [makeProject("a"), makeProject("b")];
+    const result = await hotReloadProjects([], async () => makeYaml(updated));
+    expect(result.added.sort()).toEqual(["a", "b"]);
+    expect(result.removed).toEqual([]);
+  });
+
+  it("returns config updates via the new projects list (e.g. new hands_off entries)", async () => {
+    const cached = [makeProject("a")];
+    const updatedProject = { ...makeProject("a"), hands_off: ["src/**"] };
+    const result = await hotReloadProjects(cached, async () => makeYaml([updatedProject]));
+    expect(result.added).toEqual([]);
+    expect(result.removed).toEqual([]);
+    expect(result.projects[0].hands_off).toEqual(["src/**"]);
   });
 });

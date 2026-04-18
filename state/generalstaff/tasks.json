@@ -1104,7 +1104,7 @@
   {
     "id": "gs-191",
     "title": "Make src/session.ts hot-reload projects.yaml between cycles. Surfaced 2026-04-18 raybrain registration: session 7 launched with only generalstaff+gamr; raybrain registered ~30 min into session 7; override file pointed at raybrain but picker fell through because raybrain wasn't in cached projects list. Fix: re-load loadProjects() between cycles. Tests: mutate fixture projects.yaml mid-loop and assert next pick sees the new project. Bot-doable.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
