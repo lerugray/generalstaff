@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task, no hands-off violations, and verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-216",
+      "evidence": "Six test helper files were modified to replace inline ProjectConfig/DispatcherConfig literals with calls to makeProjectConfig() and makeDispatcherConfig() from fixtures.ts, and the task status was updated to 'done' in tasks.json.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' returned exit code 0, confirming no regressions. All six target files were modified as specified in the task."
+}

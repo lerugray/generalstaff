@@ -1,0 +1,333 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index c2fbe0f..272f946 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1257,7 +1257,7 @@
+   {
+     "id": "gs-216",
+     "title": "Finish the test-fixture refactor started 2026-04-18 afternoon. CREATE ONLY: edit the six remaining subprocess helpers under `tests/helpers/` that still have inline `ProjectConfig` / `DispatcherConfig` literals, replacing them with calls to `makeProjectConfig(overrides)` + `makeDispatcherConfig(overrides)` from `tests/helpers/fixtures.ts` (the shared factory module that already exists). DO NOT CREATE: new files; do not touch src/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Targets: (1) `tests/helpers/verify_capped_projects_skipped.ts`, (2) `tests/helpers/verify_exclude_project.ts`, (3) `tests/helpers/verify_max_cycles.ts`, (4) `tests/helpers/verify_session_complete_event.ts`, (5) `tests/helpers/verify_ollama_preflight_warning.ts`, (6) `tests/helpers/verify_parallel_session.ts`. Pattern for each: add `import { makeProjectConfig, makeDispatcherConfig } from './fixtures'` near the top; replace the ProjectConfig literal with `makeProjectConfig({ path: ..., hands_off: ..., etc })` passing only the fields that specialize from defaults; replace the DispatcherConfig literal similarly. Preserve each helper's specific customizations — don't change test semantics. No removal of the `ProjectConfig`/`DispatcherConfig` type imports since some helpers still reference them for other local typing. Verify `bun test` still passes all helpers (no regression) and `bunx tsc --noEmit` is clean. Expected diff: ~100 lines net reduction across 6 files.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "tests/helpers/verify_capped_projects_skipped.ts",
+@@ -1266,7 +1266,8 @@
+       "tests/helpers/verify_session_complete_event.ts",
+       "tests/helpers/verify_ollama_preflight_warning.ts",
+       "tests/helpers/verify_parallel_session.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T21:41:24.984Z"
+   },
+   {
+     "id": "gs-217",
+diff --git a/tests/helpers/verify_capped_projects_skipped.ts b/tests/helpers/verify_capped_projects_skipped.ts
+index 129763e..7adec84 100644
+--- a/tests/helpers/verify_capped_projects_skipped.ts
++++ b/tests/helpers/verify_capped_projects_skipped.ts
+@@ -11,6 +11,7 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const TEST_DIR = join(import.meta.dir, "..", "fixtures", "session_cap_test");
+ const MAX_CYCLES = 2;
+@@ -19,33 +20,19 @@ let executeCycleCalls = 0;
+ let pickCalls = 0;
+ const pickSkipSnapshots: string[][] = [];
+ 
+-const project: ProjectConfig = {
+-  id: "test-proj",
++const project = makeProjectConfig({
+   path: TEST_DIR,
+-  priority: 1,
+-  engineer_command: "echo ok",
+   verification_command: "bun test",
+   cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-};
++});
+ 
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects: [project],
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+       max_cycles_per_project_per_session: MAX_CYCLES,
+-      log_dir: "logs",
+-      digest_dir: "digests",
+-    },
++    }),
+   }),
+ }));
+ 
+diff --git a/tests/helpers/verify_exclude_project.ts b/tests/helpers/verify_exclude_project.ts
+index f4d5811..5de7cfe 100644
+--- a/tests/helpers/verify_exclude_project.ts
++++ b/tests/helpers/verify_exclude_project.ts
+@@ -10,6 +10,7 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const scenario = process.argv[2];
+ if (!scenario) {
+@@ -24,19 +25,13 @@ const TEST_DIR = join(
+   `session_exclude_${scenario}_test`,
+ );
+ 
+-const makeProject = (id: string): ProjectConfig => ({
+-  id,
+-  path: TEST_DIR,
+-  priority: 1,
+-  engineer_command: "echo ok",
+-  verification_command: "bun test",
+-  cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-});
++const makeProject = (id: string): ProjectConfig =>
++  makeProjectConfig({
++    id,
++    path: TEST_DIR,
++    verification_command: "bun test",
++    cycle_budget_minutes: 1,
++  });
+ 
+ const projects: ProjectConfig[] = [
+   makeProject("alpha"),
+@@ -51,16 +46,10 @@ const pickedIds: string[] = [];
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects,
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+       max_cycles_per_project_per_session: 1,
+-      log_dir: "logs",
+-      digest_dir: "digests",
+-    },
++    }),
+   }),
+ }));
+ 
+diff --git a/tests/helpers/verify_max_cycles.ts b/tests/helpers/verify_max_cycles.ts
+index 23d5c5e..b25ea12 100644
+--- a/tests/helpers/verify_max_cycles.ts
++++ b/tests/helpers/verify_max_cycles.ts
+@@ -6,38 +6,25 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const TEST_DIR = join(import.meta.dir, "..", "fixtures", "session_maxcycles_test");
+ 
+ let executeCycleCalls = 0;
+ 
+-const project: ProjectConfig = {
+-  id: "test-proj",
++const project = makeProjectConfig({
+   path: TEST_DIR,
+-  priority: 1,
+-  engineer_command: "echo ok",
+   verification_command: "bun test",
+   cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-};
++});
+ 
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects: [project],
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+       max_cycles_per_project_per_session: 100,
+-      log_dir: "logs",
+-      digest_dir: "digests",
+-    },
++    }),
+   }),
+ }));
+ 
+diff --git a/tests/helpers/verify_ollama_preflight_warning.ts b/tests/helpers/verify_ollama_preflight_warning.ts
+index 3f514cf..2617dbd 100644
+--- a/tests/helpers/verify_ollama_preflight_warning.ts
++++ b/tests/helpers/verify_ollama_preflight_warning.ts
+@@ -10,6 +10,7 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const TEST_DIR = join(
+   import.meta.dir,
+@@ -26,33 +27,19 @@ mock.module("../../src/ollama", () => ({
+   }),
+ }));
+ 
+-const project: ProjectConfig = {
+-  id: "test-proj",
++const project = makeProjectConfig({
+   path: TEST_DIR,
+-  priority: 1,
+-  engineer_command: "echo ok",
+   verification_command: "bun test",
+   cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-};
++});
+ 
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects: [project],
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+       max_cycles_per_project_per_session: 1,
+-      log_dir: "logs",
+-      digest_dir: "digests",
+-    },
++    }),
+   }),
+ }));
+ 
+diff --git a/tests/helpers/verify_parallel_session.ts b/tests/helpers/verify_parallel_session.ts
+index 5b20422..74c6478 100644
+--- a/tests/helpers/verify_parallel_session.ts
++++ b/tests/helpers/verify_parallel_session.ts
+@@ -11,6 +11,7 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const TEST_DIR = join(import.meta.dir, "..", "fixtures", "parallel_session_test");
+ 
+@@ -20,35 +21,24 @@ let pickNextProjectsCalls = 0;
+ let pickNextProjectCalls = 0; // must stay 0 in parallel mode
+ let sessionCompleteEvent: Record<string, unknown> | null = null;
+ 
+-const projectA: ProjectConfig = {
++const projectA = makeProjectConfig({
+   id: "proj-a",
+   path: TEST_DIR,
+-  priority: 1,
+   engineer_command: "echo a",
+   verification_command: "echo",
+   cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-};
++});
+ const projectB: ProjectConfig = { ...projectA, id: "proj-b" };
+ 
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects: [projectA, projectB],
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+-      max_cycles_per_project_per_session: 1, // 1 cycle per project → session ends after one round
+-      log_dir: "logs",
+-      digest_dir: "digests",
++      // 1 cycle per project → session ends after one round
++      max_cycles_per_project_per_session: 1,
+       max_parallel_slots: 2,
+-    },
++    }),
+   }),
+ }));
+ 
+diff --git a/tests/helpers/verify_session_complete_event.ts b/tests/helpers/verify_session_complete_event.ts
+index 8970da1..b3645d6 100644
+--- a/tests/helpers/verify_session_complete_event.ts
++++ b/tests/helpers/verify_session_complete_event.ts
+@@ -6,6 +6,7 @@ import { mock } from "bun:test";
+ import { join } from "path";
+ import { mkdirSync, rmSync } from "fs";
+ import type { ProjectConfig, CycleResult } from "../../src/types";
++import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+ 
+ const TEST_DIR = join(
+   import.meta.dir,
+@@ -17,33 +18,19 @@ const TEST_DIR = join(
+ let pickCalls = 0;
+ let executeCycleCalls = 0;
+ 
+-const project: ProjectConfig = {
+-  id: "test-proj",
++const project = makeProjectConfig({
+   path: TEST_DIR,
+-  priority: 1,
+-  engineer_command: "echo ok",
+   verification_command: "bun test",
+   cycle_budget_minutes: 1,
+-  work_detection: "tasks_json",
+-  concurrency_detection: "none",
+-  branch: "bot/work",
+-  auto_merge: false,
+-  hands_off: [],
+-};
++});
+ 
+ mock.module("../../src/projects", () => ({
+   loadProjectsYaml: async () => ({
+     projects: [project],
+-    dispatcher: {
++    dispatcher: makeDispatcherConfig({
+       state_dir: join(TEST_DIR, "state"),
+-      fleet_state_file: "fleet_state.json",
+-      stop_file: "STOP",
+-      override_file: "OVERRIDE",
+-      picker: "priority_staleness",
+       max_cycles_per_project_per_session: 100,
+-      log_dir: "logs",
+-      digest_dir: "digests",
+-    },
++    }),
+   }),
+ }));
+ 
