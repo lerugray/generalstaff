@@ -1293,13 +1293,14 @@
   {
     "id": "gs-219",
     "title": "Add `state/_fleet/messages.jsonl` shared-inbox mechanism for cross-session/cross-agent communication. CREATE ONLY: a new exported module `src/fleet_messages.ts` with `appendFleetMessage(from: string, body: string, extra?: Record<string, unknown>): Promise<void>` and `readFleetMessagesSince(timestamp: string): Promise<FleetMessage[]>`; modify `src/session.ts` to read unread messages at session start and log each with a `[inbox]` prefix to console.log; append tests to `tests/fleet_messages.test.ts`. DO NOT CREATE: files outside src/fleet_messages.ts, tests/fleet_messages.test.ts, and minimal session.ts edits; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or design docs. Message format: `{timestamp, from, body, ...extra}` as JSONL. File: `<rootDir>/state/_fleet/messages.jsonl` (append-only). Motivation: 2026-04-18 raybrain interactive bot and GeneralStaff dispatcher session had to relay status via Ray copy-pasting between them; a shared-inbox pattern lets each session leave structured breadcrumbs for the other. This is NOT a replacement for human review — it's a lightweight handoff channel. Each session should only log messages from the session_start timestamp forward (so restarts don't re-log ancient history). Tests: (a) appendFleetMessage writes a well-formed JSONL line; (b) readFleetMessagesSince filters by timestamp correctly; (c) empty file / missing file returns []; (d) malformed line is skipped with a warning, not a crash. Expected diff: ~180 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/fleet_messages.ts",
       "src/session.ts",
       "tests/fleet_messages.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-18T21:24:12.238Z"
   },
   {
     "id": "gs-220",
