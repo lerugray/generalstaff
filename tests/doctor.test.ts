@@ -6,6 +6,7 @@ import {
   findStateDirIssues,
   findStaleWorktreeIssues,
   findOrphanedStopFileIssue,
+  findProjectPathProblems,
 } from "../src/doctor";
 import { setRootDir } from "../src/state";
 import type { ProjectConfig } from "../src/types";
@@ -152,6 +153,7 @@ describe("runDoctor --fix", () => {
       fix: true,
       assumeYes: true,
       loadProjects: async () => [p],
+      exitOnFailure: false,
     });
     expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(true);
   });
@@ -162,6 +164,7 @@ describe("runDoctor --fix", () => {
       fix: true,
       prompt: async () => false,
       loadProjects: async () => [p],
+      exitOnFailure: false,
     });
     expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(false);
   });
@@ -172,6 +175,7 @@ describe("runDoctor --fix", () => {
       fix: true,
       prompt: async () => true,
       loadProjects: async () => [p],
+      exitOnFailure: false,
     });
     expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(true);
   });
@@ -194,5 +198,67 @@ describe("runDoctor --fix", () => {
     });
     // No assertion beyond "did not throw" — the default-prompt path
     // would hang on real stdin; assumeYes skips it.
+  });
+});
+
+describe("findProjectPathProblems", () => {
+  beforeEach(() => {
+    mkdirSync(FIXTURE, { recursive: true });
+    setRootDir(FIXTURE);
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  it("returns no problems when path exists and .git is present", async () => {
+    const projectPath = join(FIXTURE, "real-repo");
+    mkdirSync(join(projectPath, ".git"), { recursive: true });
+    const p = makeProject("real", projectPath);
+    expect(await findProjectPathProblems([p])).toEqual([]);
+  });
+
+  it("flags missing project path with remediation hint", async () => {
+    const p = makeProject("ghost", join(FIXTURE, "does-not-exist"));
+    const problems = await findProjectPathProblems([p]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]!).toContain("ghost: path does not exist");
+    expect(problems[0]!).toContain("projects.yaml");
+  });
+
+  it("flags path that exists but is not a git repo", async () => {
+    const projectPath = join(FIXTURE, "not-git");
+    mkdirSync(projectPath, { recursive: true });
+    const p = makeProject("bare", projectPath);
+    const problems = await findProjectPathProblems([p]);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]!).toContain("bare: not a git repository");
+    expect(problems[0]!).toContain("git init");
+  });
+
+  it("accepts worktree-style .git file (not just directory)", async () => {
+    const projectPath = join(FIXTURE, "worktree-repo");
+    mkdirSync(projectPath, { recursive: true });
+    // Worktrees use a plain file .git pointing at the real gitdir.
+    writeFileSync(join(projectPath, ".git"), "gitdir: /fake/.git/worktrees/x\n");
+    const p = makeProject("wt", projectPath);
+    expect(await findProjectPathProblems([p])).toEqual([]);
+  });
+
+  it("collects problems for every affected project", async () => {
+    const ok = join(FIXTURE, "ok");
+    mkdirSync(join(ok, ".git"), { recursive: true });
+    const noPath = join(FIXTURE, "missing");
+    const noGit = join(FIXTURE, "notgit");
+    mkdirSync(noGit, { recursive: true });
+    const projects = [
+      makeProject("ok", ok),
+      makeProject("missing", noPath),
+      makeProject("notgit", noGit),
+    ];
+    const problems = await findProjectPathProblems(projects);
+    expect(problems).toHaveLength(2);
+    expect(problems.some((s) => s.startsWith("missing:"))).toBe(true);
+    expect(problems.some((s) => s.startsWith("notgit:"))).toBe(true);
   });
 });

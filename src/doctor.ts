@@ -13,6 +13,30 @@ interface CheckResult {
   name: string;
   found: boolean;
   version: string | null;
+  // Prereq-specific failure (e.g. installed but below minimum version).
+  // Distinct from `found: false`, which means not on PATH at all.
+  belowMinimum?: { parsed: string; required: string };
+}
+
+// gs-179: bun's parser supports features (e.g. stable Bun.spawn stderr
+// piping) and workspace semantics we rely on. 1.3.0 is the earliest
+// release we've exercised — older versions may silently misbehave.
+const MIN_BUN_VERSION = "1.3.0";
+
+function parseSemverPrefix(raw: string): [number, number, number] | null {
+  const m = raw.match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+function meetsMinimum(version: string, minimum: string): boolean {
+  const got = parseSemverPrefix(version);
+  const want = parseSemverPrefix(minimum);
+  if (!got || !want) return false;
+  for (let i = 0; i < 3; i++) {
+    if (got[i] !== want[i]) return got[i] > want[i];
+  }
+  return true;
 }
 
 // A fixable issue surfaced by a diagnostic check.
@@ -29,9 +53,17 @@ export interface DoctorOptions {
   // Optional override for listing registered projects — tests inject a
   // pre-loaded list so they don't have to stage a projects.yaml.
   loadProjects?: () => Promise<ProjectConfig[]>;
+  // When false, runDoctor still reports failures but does not call
+  // process.exit(1). Tests use this to run doctor in-process with
+  // synthetic project configs whose paths don't exist.
+  exitOnFailure?: boolean;
 }
 
-async function checkCommand(name: string, versionArg: string): Promise<CheckResult> {
+async function checkCommand(
+  name: string,
+  versionArg: string,
+  minVersion?: string,
+): Promise<CheckResult> {
   try {
     const proc = Bun.spawn([name, versionArg], {
       stdout: "pipe",
@@ -42,18 +74,54 @@ async function checkCommand(name: string, versionArg: string): Promise<CheckResu
     if (exitCode !== 0) {
       return { name, found: false, version: null };
     }
-    const version = stdout.trim().split("\n")[0];
-    return { name, found: true, version };
+    const version = stdout.trim().split("\n")[0] ?? "";
+    const result: CheckResult = { name, found: true, version };
+    if (minVersion && !meetsMinimum(version, minVersion)) {
+      result.belowMinimum = { parsed: version, required: minVersion };
+    }
+    return result;
   } catch {
     return { name, found: false, version: null };
   }
 }
 
-const PREREQUISITES: Array<{ name: string; versionArg: string }> = [
-  { name: "bun", versionArg: "--version" },
+const PREREQUISITES: Array<{
+  name: string;
+  versionArg: string;
+  minVersion?: string;
+}> = [
+  { name: "bun", versionArg: "--version", minVersion: MIN_BUN_VERSION },
   { name: "git", versionArg: "--version" },
   { name: "claude", versionArg: "--version" },
 ];
+
+// gs-179: flag projects whose path is missing or isn't a git repo.
+// Returns human-readable problem strings rather than DiagnosticIssues
+// because neither failure is auto-fixable — the user has to
+// re-clone/re-point the project themselves.
+export async function findProjectPathProblems(
+  projects: ProjectConfig[],
+): Promise<string[]> {
+  const problems: string[] = [];
+  for (const p of projects) {
+    if (!existsSync(p.path)) {
+      problems.push(
+        `${p.id}: path does not exist — ${p.path}. ` +
+          `Fix: update projects.yaml or re-clone the repo at that path.`,
+      );
+      continue;
+    }
+    // `.git` is a directory in a normal repo and a file in a worktree;
+    // existsSync matches both. Absence means not a git repo.
+    if (!existsSync(join(p.path, ".git"))) {
+      problems.push(
+        `${p.id}: not a git repository — ${p.path}. ` +
+          `Fix: run 'git init' there, or update projects.yaml to point at the correct directory.`,
+      );
+    }
+  }
+  return problems;
+}
 
 // Stale-worktree threshold. `isBotRunning` uses a 10-min freshness
 // window; we use the same cutoff so we only flag worktrees that are
@@ -142,22 +210,38 @@ async function defaultPrompt(question: string): Promise<boolean> {
 }
 
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+  const exitOnFailure = opts.exitOnFailure ?? true;
   console.log("GeneralStaff Doctor\n");
   console.log("Checking prerequisites...\n");
 
   const results: CheckResult[] = [];
   for (const prereq of PREREQUISITES) {
-    const result = await checkCommand(prereq.name, prereq.versionArg);
+    const result = await checkCommand(
+      prereq.name,
+      prereq.versionArg,
+      prereq.minVersion,
+    );
     results.push(result);
   }
 
   let prereqsPassed = true;
   for (const r of results) {
-    if (r.found) {
-      console.log(`  PASS  ${r.name} — ${r.version}`);
-    } else {
+    if (!r.found) {
       console.log(`  FAIL  ${r.name} — not found`);
+      if (r.name === "bun") {
+        console.log(`        Install from https://bun.sh`);
+      }
       prereqsPassed = false;
+    } else if (r.belowMinimum) {
+      console.log(
+        `  FAIL  ${r.name} — ${r.version} (need >=${r.belowMinimum.required})`,
+      );
+      if (r.name === "bun") {
+        console.log(`        Upgrade: bun upgrade`);
+      }
+      prereqsPassed = false;
+    } else {
+      console.log(`  PASS  ${r.name} — ${r.version}`);
     }
   }
 
@@ -176,9 +260,11 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   }
 
   const issues: DiagnosticIssue[] = [];
+  let projectPathProblems: string[] = [];
   if (projectsLoadError === null) {
     issues.push(...(await findStateDirIssues(projects)));
     issues.push(...(await findStaleWorktreeIssues(projects)));
+    projectPathProblems = await findProjectPathProblems(projects);
   }
   issues.push(...(await findOrphanedStopFileIssue()));
 
@@ -186,13 +272,17 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   if (projectsLoadError !== null) {
     console.log(`  SKIP  project-level checks (${projectsLoadError})`);
   }
-  if (issues.length === 0) {
+  for (const problem of projectPathProblems) {
+    console.log(`  FAIL  ${problem}`);
+  }
+  if (issues.length === 0 && projectPathProblems.length === 0) {
     console.log("  PASS  no fixable issues detected");
   } else {
     for (const issue of issues) {
       console.log(`  WARN  ${issue.description}`);
     }
   }
+  const projectHealthPassed = projectPathProblems.length === 0;
 
   if (!opts.fix) {
     console.log("");
@@ -203,7 +293,11 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     }
     if (!prereqsPassed) {
       console.log("Install missing prerequisites before using GeneralStaff.");
-      process.exit(1);
+      if (exitOnFailure) process.exit(1);
+    }
+    if (!projectHealthPassed) {
+      console.log("Fix project-path failures before using GeneralStaff.");
+      if (exitOnFailure) process.exit(1);
     }
     if (prereqsPassed && issues.length === 0) {
       console.log("All prerequisites satisfied.");
@@ -240,6 +334,10 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   );
   if (!prereqsPassed) {
     console.log("Install missing prerequisites before using GeneralStaff.");
-    process.exit(1);
+    if (exitOnFailure) process.exit(1);
+  }
+  if (!projectHealthPassed) {
+    console.log("Fix project-path failures before using GeneralStaff.");
+    if (exitOnFailure) process.exit(1);
   }
 }
