@@ -1002,6 +1002,32 @@ describe("runSession safeguards", () => {
     expect(result.has_preflight_warning).toBe(true);
   }, 30_000);
 
+  it("runs parallel cycles when max_parallel_slots > 1 (gs-186)", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_parallel_session.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    // Both mocked projects cycled; executeCycle fired twice.
+    expect(result.executeCycleCalls).toBe(2);
+    expect(result.resultCount).toBe(2);
+    expect(result.projectsCycled).toEqual(["proj-a", "proj-b"]);
+    // Parallel path uses pickNextProjects, NOT pickNextProject.
+    expect(result.pickNextProjectsCalls).toBeGreaterThan(0);
+    expect(result.pickNextProjectCalls).toBe(0);
+    // Promise.all siblings overlap in wall clock (defining feature of
+    // the parallel path — sequential would have startB >= endA).
+    expect(result.overlap).toBe(true);
+    // session_complete carries the parallel metrics.
+    const data = result.sessionComplete as Record<string, unknown>;
+    expect(data).toBeTruthy();
+    expect(data.parallel_rounds).toBe(1);
+    expect(data.max_parallel_slots).toBe(2);
+    expect(typeof data.slot_idle_seconds).toBe("number");
+    expect(data.slot_idle_seconds as number).toBeGreaterThanOrEqual(0);
+  }, 30_000);
+
   it("adds capped projects to the skip set", async () => {
     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
       "verify_capped_projects_skipped.ts",
@@ -1336,6 +1362,7 @@ describe("hotReloadProjects (gs-191)", () => {
       max_cycles_per_project_per_session: 5,
       log_dir: "logs",
       digest_dir: "digests",
+      max_parallel_slots: 1,
     };
     return { projects, dispatcher };
   }

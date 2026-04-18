@@ -87,6 +87,9 @@ mock.module("../../src/dispatcher", () => ({
     }
     return { project, reason: "test pick" };
   },
+  // gs-186: unused here (max_parallel_slots=1), but must be present
+  // because session.ts imports it at the module-load level.
+  pickNextProjects: async () => [],
   // Real shouldChain logic (without hasMoreWork side effect) — chain until cap
   shouldChain: async (
     _last: CycleResult,

@@ -155,6 +155,7 @@ async function run() {
       max_cycles_per_project_per_session: 3,
       log_dir: "logs",
       digest_dir: "digests",
+      max_parallel_slots: 1,
     };
 
     // (b) Pre-cycle: prove work_detection reads from project.path.

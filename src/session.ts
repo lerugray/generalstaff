@@ -16,7 +16,12 @@ import { join as pathJoin } from "path";
 import { executeCycle, countCommitsAhead } from "./cycle";
 import { killActiveEngineer } from "./active_engineer";
 import { startStopFileWatcher } from "./stop_watcher";
-import { pickNextProject, shouldChain, estimateSessionPlan } from "./dispatcher";
+import {
+  pickNextProject,
+  pickNextProjects,
+  shouldChain,
+  estimateSessionPlan,
+} from "./dispatcher";
 import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration, formatFileCount } from "./format";
 import { fetchCommitSubject } from "./git";
@@ -301,6 +306,14 @@ export async function runSession(options: SessionOptions) {
 
   let stopReason: "budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
 
+  // gs-186: total wall-clock minutes during which at least one parallel
+  // slot was waiting for a slower sibling cycle. Only non-zero when
+  // max_parallel_slots > 1; tracked so the user / DESIGN.md §v6
+  // open-question #3 can make the round-based-wait vs early-start
+  // decision from real data, not guesses.
+  let slotIdleTotalSeconds = 0;
+  let parallelRounds = 0;
+
   // gs-131: mid-cycle STOP file detection. isStopFilePresent() is only
   // checked at cycle boundaries; this fs.watch on the STOP path kills the
   // live engineer subprocess the moment the STOP file is created, so the
@@ -323,7 +336,204 @@ export async function runSession(options: SessionOptions) {
     /* watcher is optional; continue with the cycle-boundary check */
   }
 
-  while (remainingMinutes() > 0) {
+  const isParallelMode = config.max_parallel_slots > 1;
+  if (isParallelMode) {
+    console.log(
+      `Parallel mode: max_parallel_slots = ${config.max_parallel_slots} ` +
+        `(strict round-based wait; chaining disabled — each round picks ` +
+        `fresh projects).`,
+    );
+  }
+
+  // gs-186: parallel path. Round-based strict-wait — pick up to N
+  // eligible projects, Promise.all their cycles, then process each
+  // result sequentially (no races since single-threaded JS). Chaining
+  // is disabled in this mode; the simpler round-picker is DESIGN.md
+  // §v6 option (a). Slot idle time accumulates across rounds so the
+  // §v6 open question #3 can be answered from observed data.
+  if (isParallelMode) {
+    const MAX_ALL_EMPTY_ROUNDS = 3;
+    let consecutiveAllEmptyRounds = 0;
+
+    parallelLoop: while (remainingMinutes() > 0) {
+      if (maxCycles !== undefined && allResults.length >= maxCycles) {
+        console.log(`\nMax-cycles limit reached (${maxCycles}) — ending session.`);
+        stopReason = "max-cycles";
+        break;
+      }
+      if (await isStopFilePresent()) {
+        console.log("\nSTOP file detected — ending session.");
+        stopReason = "stop-file";
+        break;
+      }
+
+      // Hot-reload projects.yaml (gs-191) between rounds.
+      const reload = await hotReloadProjects(projects);
+      projects = reload.projects;
+      if (reload.error) {
+        console.warn(
+          `[projects.yaml] reload failed (using cached list): ${reload.error}`,
+        );
+      } else {
+        if (reload.added.length > 0) {
+          console.log(
+            `[projects.yaml] newly registered: ${reload.added.join(", ")}`,
+          );
+        }
+        if (reload.removed.length > 0) {
+          console.log(
+            `[projects.yaml] unregistered: ${reload.removed.join(", ")}`,
+          );
+        }
+      }
+
+      const updatedFleet = await loadFleetState(config);
+      const picks = await pickNextProjects(
+        projects,
+        config,
+        updatedFleet,
+        skippedProjects,
+        config.max_parallel_slots,
+      );
+      if (picks.length === 0) {
+        console.log("\nNo eligible project — ending session.");
+        stopReason = "no-project";
+        break;
+      }
+
+      // Per-slot budget check: exclude candidates whose cycle budget
+      // won't fit in the remaining wall clock. In parallel mode the
+      // slots share wall clock (Promise.all), so each is checked
+      // independently — we don't sum budgets.
+      const eligible = picks.filter(
+        (p) => remainingMinutes() >= p.project.cycle_budget_minutes + 5,
+      );
+      if (eligible.length === 0) {
+        console.log(
+          `\nInsufficient budget for any candidate — ending session.`,
+        );
+        stopReason = "insufficient-budget";
+        break;
+      }
+
+      parallelRounds++;
+      console.log(`\n=== Round ${parallelRounds}: ${eligible.length} parallel cycle(s) ===`);
+      for (const p of eligible) {
+        console.log(`  slot → ${p.project.id} (${p.reason})`);
+      }
+
+      const roundStartMs = Date.now();
+      const roundResults = await Promise.all(
+        eligible.map((p) => executeCycle(p.project, config, dryRun)),
+      );
+      const roundWallMs = Date.now() - roundStartMs;
+
+      // slot_idle accounting: per-slot idle is roundWall - cycleDuration;
+      // total idle across the round is the sum (an approximation of
+      // "compute we could have done in parallel but didn't").
+      for (const r of roundResults) {
+        const cycleMs =
+          new Date(r.ended_at).getTime() - new Date(r.started_at).getTime();
+        slotIdleTotalSeconds += Math.max(0, roundWallMs - cycleMs) / 1000;
+      }
+
+      // Process each result — same post-cycle logic as the sequential
+      // loop except for chaining (dropped in parallel mode).
+      let allEmptyThisRound = true;
+      for (let i = 0; i < eligible.length; i++) {
+        const project = eligible[i].project;
+        const result = roundResults[i];
+
+        allResults.push(result);
+        const count = (cyclesPerProject.get(project.id) ?? 0) + 1;
+        cyclesPerProject.set(project.id, count);
+
+        const cycleDurationSec = Math.max(
+          0,
+          (new Date(result.ended_at).getTime() -
+            new Date(result.started_at).getTime()) /
+            1000,
+        );
+        console.log(
+          `  Cycle ${allResults.length}: ${project.id} — ${result.final_outcome} ` +
+            `(took ${formatDuration(cycleDurationSec)})`,
+        );
+
+        const watchdogWarning = checkCycleWatchdog(
+          cycleDurationSec,
+          project.cycle_budget_minutes,
+        );
+        if (watchdogWarning) console.error(watchdogWarning);
+
+        if (result.final_outcome === "verification_failed") {
+          console.error(
+            `  [FAILED] ${project.id} cycle ${result.cycle_id.slice(0, 12)}: ${result.reason}`,
+          );
+        }
+
+        // Empty-round tracking (mirrors sequential consecutiveEmptyCycles).
+        // Only "verified_weak + empty diff" qualifies; cycle_skipped and
+        // anything failing is NOT counted as empty (those are signals
+        // with their own handling).
+        const isEmpty =
+          result.final_outcome === "verified_weak" &&
+          result.reason?.includes("empty diff");
+        if (!isEmpty) allEmptyThisRound = false;
+
+        if (result.final_outcome === "cycle_skipped") {
+          skippedProjects.add(project.id);
+          continue;
+        }
+
+        // gs-193 fast-fail applies per project, irrespective of parallelism.
+        const isFailure = result.final_outcome === "verification_failed";
+        const streakUpdate = updateFailureStreak(
+          failureStreaks.get(project.id),
+          isFailure,
+          Date.now(),
+        );
+        failureStreaks.set(project.id, streakUpdate.streak);
+        if (streakUpdate.shouldSoftSkip) {
+          const span = Math.round(streakUpdate.spanSeconds);
+          const reason =
+            `${streakUpdate.streak.count} consecutive failures in ${span}s ` +
+            `(threshold ${DEFAULT_SOFT_SKIP_THRESHOLD} / ${DEFAULT_SOFT_SKIP_WINDOW_SECONDS}s)`;
+          console.log(
+            `  [SOFT-SKIP] ${project.id}: ${reason} — dropping for rest of session.`,
+          );
+          skippedProjects.add(project.id);
+          await appendProgress(project.id, "project_soft_skipped", {
+            reason,
+            consecutive_failures: streakUpdate.streak.count,
+            span_seconds: span,
+            threshold_failures: DEFAULT_SOFT_SKIP_THRESHOLD,
+            threshold_seconds: DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
+          });
+          continue;
+        }
+
+        // Per-project cycle cap. Sequential mode handles this via
+        // shouldChain; in parallel mode we check directly so a hot
+        // project doesn't get re-picked endlessly.
+        if (count >= config.max_cycles_per_project_per_session) {
+          skippedProjects.add(project.id);
+        }
+      }
+
+      if (allEmptyThisRound) {
+        consecutiveAllEmptyRounds++;
+        if (consecutiveAllEmptyRounds >= MAX_ALL_EMPTY_ROUNDS) {
+          console.log(
+            `\n${MAX_ALL_EMPTY_ROUNDS} consecutive all-empty rounds — ending session.`,
+          );
+          stopReason = "empty-cycles";
+          break parallelLoop;
+        }
+      } else {
+        consecutiveAllEmptyRounds = 0;
+      }
+    }
+  } else while (remainingMinutes() > 0) {
     // Max-cycles cap — stops before running another cycle
     if (maxCycles !== undefined && allResults.length >= maxCycles) {
       console.log(`\nMax-cycles limit reached (${maxCycles}) — ending session.`);
@@ -603,6 +813,19 @@ export async function runSession(options: SessionOptions) {
   const reviewerLabel = reviewerModel
     ? `${reviewerProvider} (${reviewerModel})`
     : reviewerProvider;
+  // gs-186: parallel mode reports rounds + cumulative slot idle. Left
+  // unset in sequential mode so the event shape is unchanged for
+  // existing consumers. parallel_efficiency = 1 - idle / (rounds *
+  // slots * max-possible-round-wall); we don't compute it here because
+  // "max-possible" needs the budget distribution — leave that to the
+  // digest renderer or a later observability pass (gs-188).
+  const parallelMetrics = isParallelMode
+    ? {
+        parallel_rounds: parallelRounds,
+        max_parallel_slots: config.max_parallel_slots,
+        slot_idle_seconds: Math.round(slotIdleTotalSeconds),
+      }
+    : {};
   await appendProgress("_fleet", "session_complete", {
     duration_minutes: Math.round(elapsed),
     total_cycles: allResults.length,
@@ -610,6 +833,7 @@ export async function runSession(options: SessionOptions) {
     total_failed: fleetBuckets.failed.length,
     stop_reason: stopReason,
     reviewer: reviewerLabel,
+    ...parallelMetrics,
   });
 
   // End-of-session Telegram notification. Moved here from the .bat

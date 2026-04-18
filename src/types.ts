@@ -60,6 +60,11 @@ export interface DispatcherConfig {
   max_cycles_per_project_per_session: number;
   log_dir: string;
   digest_dir: string;
+  // gs-186: Phase 4 concurrency control. Default 1 keeps the sequential
+  // loop bit-for-bit identical to Phase 1-3 behaviour — no surprise
+  // doubling of reviewer API calls on upgrade (Hard Rule 8 / BYOK).
+  // Opt in per-fleet by setting this > 1 in projects.yaml.
+  max_parallel_slots: number;
 }
 
 export interface ProjectsYaml {

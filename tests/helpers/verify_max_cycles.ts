@@ -64,6 +64,7 @@ mock.module("../../src/cycle", () => ({
 
 mock.module("../../src/dispatcher", () => ({
   pickNextProject: async () => ({ project, reason: "test pick" }),
+  pickNextProjects: async () => [],
   shouldChain: async () => ({ chain: true, reason: "more work" }),
   estimateSessionPlan: () => ({
     picks: [],

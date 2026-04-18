@@ -75,6 +75,7 @@ mock.module("../../src/dispatcher", () => ({
     if (pickCalls === 1) return { project, reason: "test pick" };
     return null;
   },
+  pickNextProjects: async () => [],
   shouldChain: async () => ({ chain: false, reason: "stop after one" }),
   estimateSessionPlan: () => ({
     picks: [],

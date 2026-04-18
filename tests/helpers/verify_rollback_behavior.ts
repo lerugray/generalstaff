@@ -163,6 +163,7 @@ async function run() {
       max_cycles_per_project_per_session: 3,
       log_dir: "logs",
       digest_dir: "digests",
+      max_parallel_slots: 1,
     };
 
     const result = await executeCycle(project, config);

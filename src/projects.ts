@@ -45,6 +45,9 @@ const DISPATCHER_DEFAULTS: DispatcherConfig = {
   max_cycles_per_project_per_session: 3,
   log_dir: "./logs",
   digest_dir: "./digests",
+  // gs-186: Phase 4 default is sequential (1 slot). Opt into parallel
+  // cycles by setting dispatcher.max_parallel_slots: N in projects.yaml.
+  max_parallel_slots: 1,
 };
 
 export class ProjectValidationError extends Error {
@@ -695,7 +698,20 @@ function validateDispatcher(
       DISPATCHER_DEFAULTS.max_cycles_per_project_per_session,
     log_dir: (raw.log_dir as string) ?? DISPATCHER_DEFAULTS.log_dir,
     digest_dir: (raw.digest_dir as string) ?? DISPATCHER_DEFAULTS.digest_dir,
+    max_parallel_slots: normalizeParallelSlots(raw.max_parallel_slots),
   };
+}
+
+// gs-186: accept numeric input, clamp to >=1. Invalid / missing values
+// fall back to the default (sequential). Large values are kept as-is —
+// the operator is BYOK-paying for their own spend and knows their
+// compute; we don't second-guess the ceiling.
+function normalizeParallelSlots(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return DISPATCHER_DEFAULTS.max_parallel_slots;
+  }
+  const n = Math.floor(raw);
+  return n < 1 ? 1 : n;
 }
 
 function isGitRepo(dirPath: string): boolean {

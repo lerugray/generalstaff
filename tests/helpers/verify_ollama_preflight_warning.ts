@@ -80,6 +80,7 @@ mock.module("../../src/dispatcher", () => ({
   // Returning null immediately ends the session right after the
   // pre-flight check — we only need the warning to fire once.
   pickNextProject: async () => null,
+  pickNextProjects: async () => [],
   shouldChain: async () => ({ chain: false, reason: "no" }),
   estimateSessionPlan: () => ({
     picks: [],

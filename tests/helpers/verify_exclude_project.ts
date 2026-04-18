@@ -100,6 +100,9 @@ mock.module("../../src/dispatcher", () => ({
     pickedIds.push(pick.id);
     return { project: pick, reason: "test pick" };
   },
+  // gs-186: unused here (max_parallel_slots=1), but must be present
+  // because session.ts imports it at the module-load level.
+  pickNextProjects: async () => [],
   // Return cap-reached so session.ts adds the current project to the skip
   // set after each cycle (the loop would otherwise keep re-picking the same
   // project since our stubbed executeCycle returns "verified", not "skipped").

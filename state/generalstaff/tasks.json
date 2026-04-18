@@ -1128,7 +1128,7 @@
   {
     "id": "gs-186",
     "title": "Phase 4 step 2: session.ts runs N cycles in parallel. Add dispatcher.max_parallel_slots config field (default 1 — preserves sequential). The session loop calls pickNextProjects(N - alreadyRunning) and Promise.all over the resulting cycles. Each cycle still calls executeCycle unmodified (atomicity per cycle is preserved). STOP file polling is already per-cycle so each parallel cycle sees STOP independently. Tests: two-project fixture session asserting both cycles run and produce verified outcomes within the wall-clock budget. See DESIGN.md §v6. Priority 1 once gs-185 lands (which it now has).",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
