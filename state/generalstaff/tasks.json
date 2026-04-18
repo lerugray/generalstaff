@@ -1019,7 +1019,7 @@
   {
     "id": "gs-170",
     "title": "Add a `generalstaff register <project-id>` CLI subcommand that reads state/<id>/tasks.json + a generated hands_off.yaml + project metadata and appends the project to projects.yaml. Prompts for confirmation (y/N) before editing; rejects if project id already registered. Error messages reference the bootstrap staging dir (`.generalstaff-proposal/`) if the project hasn't been bootstrapped yet. Tests covering: add new project, reject duplicate id, reject without confirmation, reject if state/<id>/ doesn't exist. Note: this modifies projects.yaml which is in hands_off — add an explicit exception for this command (it's the tool's own write path to its own config, equivalent to `init`). Document the exception in the command's help text. Depends on gs-166, gs-167.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]

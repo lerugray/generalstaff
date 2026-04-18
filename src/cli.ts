@@ -102,6 +102,14 @@ Usage:
     # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-poetry, go-mod
     # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
 
+  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]
+                                                          Append a bootstrapped project to projects.yaml (after review)
+    Example: generalstaff register gamr --path=../gamr
+    Example: generalstaff register gamr --path=../gamr --priority=3 --yes
+    # Reads state/<id>/tasks.json + hands_off.yaml (from project root or .generalstaff-proposal/).
+    # Rejects duplicates; prompts y/N before editing. projects.yaml IS in hands_off for the bot,
+    # but 'register' is the tool's own write path to its own config — equivalent to 'init'.
+
   generalstaff stop [--force] | [--status|--check]        Create STOP file (halt dispatcher)
     Example: generalstaff stop                          # halt before next cycle
     Example: generalstaff stop --force                  # also kill the running session process
@@ -1426,6 +1434,60 @@ switch (command) {
     const resolvedPath = resolve(projectPath);
     const projectId = initValues.id ?? basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     await initProject(projectId, resolvedPath, { priority: initPriority });
+    break;
+  }
+
+  case "register": {
+    const { values: regValues, positionals: regPositionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        path: { type: "string" },
+        priority: { type: "string" },
+        yes: { type: "boolean", short: "y", default: false },
+      },
+      allowPositionals: true,
+    });
+    const regProjectId = regPositionals[0];
+    if (!regProjectId) {
+      console.error(
+        "Error: project-id is required\n" +
+          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]",
+      );
+      process.exit(1);
+    }
+    if (!regValues.path) {
+      console.error("Error: --path=<target-dir> is required");
+      process.exit(1);
+    }
+    let regPriority: number | undefined;
+    if (regValues.priority !== undefined) {
+      const parsed = parseInt(regValues.priority, 10);
+      if (
+        isNaN(parsed) ||
+        parsed < 1 ||
+        String(parsed) !== regValues.priority.trim()
+      ) {
+        console.error("Error: --priority must be a positive integer");
+        process.exit(1);
+      }
+      regPriority = parsed;
+    }
+    const { runRegister } = await import("./register");
+    const regResult = await runRegister({
+      projectId: regProjectId,
+      projectPath: regValues.path,
+      assumeYes: Boolean(regValues.yes),
+      priority: regPriority,
+    });
+    if (!regResult.ok) {
+      console.error(`Error: ${regResult.reason}`);
+      process.exit(1);
+    }
+    console.log(
+      `Registered "${regProjectId}" in ${regResult.projectsYamlPath}.`,
+    );
+    console.log("Appended:\n");
+    console.log(regResult.appendedYaml);
     break;
   }
 
