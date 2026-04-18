@@ -73,12 +73,14 @@ function printUsage() {
 
 Usage:
   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
-                       [--exclude-project=<id>[,<id>...]] [--verbose] [--chain=<n>]
+                       [--exclude-project=<id>[,<id>...]] [--project=<id>[,<id>...]]
+                       [--verbose] [--chain=<n>]
                                                           Run a session (multiple cycles)
     Example: generalstaff session --budget=480          # overnight 8-hour run
     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
     Example: generalstaff session --dry-run             # preview without committing
     Example: generalstaff session --exclude-project=catalogdna,retrogaze
+    Example: generalstaff session --project=raybrain    # run only the listed project(s); sugar for --exclude-project=<everything-else>
     Example: generalstaff session --verbose             # stream PROGRESS.jsonl events to stdout
     Example: generalstaff session --chain=3             # run 3 back-to-back sessions with the same options
 
@@ -244,6 +246,7 @@ switch (command) {
         "max-cycles": { type: "string" },
         "dry-run": { type: "boolean", default: false },
         "exclude-project": { type: "string" },
+        project: { type: "string" },
         verbose: { type: "boolean", default: false },
         chain: { type: "string" },
       },
@@ -263,12 +266,38 @@ switch (command) {
       }
       maxCycles = parsed;
     }
+    // gs-214: --project=<id>[,<id>] is the inverse of --exclude-project —
+    // sugar for "run only these projects, exclude the rest". The translation
+    // happens here so runSession keeps a single code path.
+    if (values.project !== undefined && values["exclude-project"] !== undefined) {
+      console.error("Error: --project cannot be combined with --exclude-project");
+      process.exit(1);
+    }
     let excludeProjects: string[] | undefined;
     if (values["exclude-project"] !== undefined) {
       excludeProjects = values["exclude-project"]
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
+    }
+    if (values.project !== undefined) {
+      const requested = values.project
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      const all = await loadProjects();
+      const known = new Set(all.map((p) => p.id));
+      const resolved = new Set<string>();
+      for (const id of requested) {
+        if (!known.has(id)) {
+          console.warn(
+            `Warning: --project="${id}" does not match any registered project (ignored)`,
+          );
+          continue;
+        }
+        resolved.add(id);
+      }
+      excludeProjects = all.map((p) => p.id).filter((id) => !resolved.has(id));
     }
     let chain = 1;
     if (values.chain !== undefined) {
