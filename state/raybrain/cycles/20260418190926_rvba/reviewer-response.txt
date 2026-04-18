@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task rayb-010, no hands-off violations, and the diff provides strong evidence for completing the task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "rayb-010",
+      "evidence": "The diff includes all required files for the query engine: src/raybrain/query/__init__.py, src/raybrain/query/embedder.py, src/raybrain/query/retriever.py, src/raybrain/query/engine.py, and tests/unit/test_query_engine.py. It also updates pyproject.toml to add lancedb dependency and marks the task as done in tasks.json.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming that all tests related to the query engine are working correctly."
+}

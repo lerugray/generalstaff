@@ -1,0 +1,789 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index c694fb3..897c248 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -11,6 +11,7 @@ dependencies = [
+     "python-frontmatter>=1.1",
+     "ragas>=0.2",
+     "httpx>=0.27",
++    "lancedb>=0.30.2",
+ ]
+ 
+ [project.scripts]
+diff --git a/src/raybrain/query/__init__.py b/src/raybrain/query/__init__.py
+new file mode 100644
+index 0000000..f8edeec
+--- /dev/null
++++ b/src/raybrain/query/__init__.py
+@@ -0,0 +1,21 @@
++"""Query engine — retrieval over wiki + raw corpus.
++
++Per CLAUDE.md §2.4 + §3.2, the query path is retrieval-only. No
++module in this package imports a generative LLM client; the
++per-AST boundary guard lands in a later task
++(``src/raybrain/policy/query_gate.py``).
++"""
++
++from __future__ import annotations
++
++from raybrain.query.embedder import DEFAULT_EMBED_MODEL, OllamaEmbedder
++from raybrain.query.engine import run_query
++from raybrain.query.retriever import LanceDBRetriever, RetrievalHit
++
++__all__ = [
++    "DEFAULT_EMBED_MODEL",
++    "LanceDBRetriever",
++    "OllamaEmbedder",
++    "RetrievalHit",
++    "run_query",
++]
+diff --git a/src/raybrain/query/embedder.py b/src/raybrain/query/embedder.py
+new file mode 100644
+index 0000000..9d7f0fd
+--- /dev/null
++++ b/src/raybrain/query/embedder.py
+@@ -0,0 +1,62 @@
++"""Ollama embeddings client — local-only retrieval egress.
++
++Thin wrapper around Ollama's ``/api/embeddings`` endpoint. Every
++call passes through
++:func:`raybrain.privacy.network_guard.assert_local` before
++dispatch. Base URL reads from ``OLLAMA_HOST``; default embed
++model reads from ``RAYBRAIN_EMBED_MODEL`` (falling back to
++``nomic-embed-text``).
++
++This module is non-generative — it only returns vectors, never
++text. It is importable from ``src/raybrain/query/`` without
++violating the CLAUDE.md §2.4 generation-boundary rule.
++"""
++
++from __future__ import annotations
++
++import os
++
++import httpx
++
++from raybrain.privacy.network_guard import assert_local
++
++__all__ = ["DEFAULT_EMBED_MODEL", "OllamaEmbedder"]
++
++DEFAULT_BASE_URL = "http://localhost:11434"
++DEFAULT_EMBED_MODEL = "nomic-embed-text"
++
++
++class OllamaEmbedder:
++    def __init__(self, base_url: str | None = None, timeout: float = 120.0) -> None:
++        self.base_url = (
++            base_url or os.environ.get("OLLAMA_HOST", DEFAULT_BASE_URL)
++        ).rstrip("/")
++        self.timeout = timeout
++
++    def embed(
++        self,
++        texts: list[str],
++        model: str | None = None,
++    ) -> list[list[float]]:
++        """Embed each text in *texts* and return their vectors.
++
++        Ollama's ``/api/embeddings`` accepts one prompt at a time, so
++        this method loops. ``assert_local`` fires on every request so
++        a mid-run config flip cannot sneak egress past the guard.
++        """
++        url = f"{self.base_url}/api/embeddings"
++        chosen_model = model or os.environ.get(
++            "RAYBRAIN_EMBED_MODEL", DEFAULT_EMBED_MODEL
++        )
++        vectors: list[list[float]] = []
++        for text in texts:
++            assert_local(url)
++            response = httpx.post(
++                url,
++                json={"model": chosen_model, "prompt": text},
++                timeout=self.timeout,
++            )
++            response.raise_for_status()
++            payload = response.json()
++            vectors.append(list(payload["embedding"]))
++        return vectors
+diff --git a/src/raybrain/query/engine.py b/src/raybrain/query/engine.py
+new file mode 100644
+index 0000000..4c47aac
+--- /dev/null
++++ b/src/raybrain/query/engine.py
+@@ -0,0 +1,105 @@
++"""Query entry point — returns :class:`QueryResult`, never generates text.
++
++The public ``run_query`` function combines retrieval hits into
++the co-visibility-preserving :class:`QueryResult` shape required
++by CLAUDE.md §2.4:
++
++* If the top-1 hit is a wiki hit whose cosine similarity meets
++  ``wiki_threshold``, return that page plus the citations it
++  carries.
++* Otherwise return ``None`` plus the raw-passage citations from
++  the hit list.
++
++The wiki-threshold default is deliberately permissive (0.0) —
++Ray tunes the value through the ``wiki_threshold`` argument or
++wraps this function with his own gating policy. Threshold
++*semantics* (cosine similarity, higher-is-better) are fixed by
++CLAUDE.md's "top-1 hit exceeds a threshold" phrasing; the
++*value* is a hyperparameter, not an algorithmic choice.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++from raybrain.query.embedder import OllamaEmbedder
++from raybrain.query.retriever import Embedder, LanceDBRetriever, RetrievalHit
++from raybrain.schema import (
++    Citation,
++    LineRangeLocator,
++    PageLocator,
++    ParaAnchorLocator,
++    QueryResult,
++    SourceId,
++    TimestampLocator,
++)
++from raybrain.schema.citation import Locator
++from raybrain.wiki.store import read_page
++
++__all__ = ["DEFAULT_WIKI_THRESHOLD", "run_query"]
++
++DEFAULT_WIKI_THRESHOLD = 0.0
++
++
++def _parse_locator(s: str) -> Locator:
++    if s.startswith("lines="):
++        start_s, end_s = s[len("lines="):].split("-", 1)
++        return LineRangeLocator(start=int(start_s), end=int(end_s))
++    if s.startswith("page="):
++        return PageLocator(page=int(s[len("page="):]))
++    if s.startswith("timestamp="):
++        rest = s[len("timestamp="):]
++        return TimestampLocator(start=rest[:8], end=rest[9:17])
++    if s.startswith("para="):
++        return ParaAnchorLocator(anchor=s[len("para="):])
++    raise ValueError(f"unknown locator format: {s!r}")
++
++
++def _hit_to_citation(hit: RetrievalHit) -> Citation:
++    return Citation(
++        source_id=SourceId(hit.source_id),
++        locator=_parse_locator(hit.locator),
++        excerpt=hit.excerpt,
++    )
++
++
++def run_query(
++    query_text: str,
++    vault_root: Path,
++    corpus_root: Path,
++    *,
++    embedder: Embedder | None = None,
++    retriever: LanceDBRetriever | None = None,
++    top_k: int = 10,
++    wiki_threshold: float = DEFAULT_WIKI_THRESHOLD,
++    db_path: Path | None = None,
++) -> QueryResult:
++    """Retrieve wiki + raw hits and assemble a :class:`QueryResult`."""
++
++    if retriever is None:
++        used_embedder = embedder if embedder is not None else OllamaEmbedder()
++        effective_db_path = db_path or (vault_root / ".raybrain-index")
++        retriever = LanceDBRetriever(used_embedder, db_path=effective_db_path)
++
++    if not retriever.is_built():
++        retriever.build_index(vault_root, corpus_root)
++
++    hits = retriever.query(query_text, top_k=top_k)
++    if not hits:
++        return QueryResult(synthesized_page=None, raw_citations=[])
++
++    raw_citations = [_hit_to_citation(h) for h in hits if h.kind == "raw"]
++
++    top = hits[0]
++    if top.kind == "wiki" and top.score >= wiki_threshold and top.wiki_page_slug:
++        page = read_page(top.wiki_page_slug, vault_root)
++        if page is not None:
++            page_citations = [
++                c for para in page.paragraphs for c in para.citations
++            ]
++            if page_citations:
++                return QueryResult(
++                    synthesized_page=page, raw_citations=page_citations
++                )
++
++    return QueryResult(synthesized_page=None, raw_citations=raw_citations)
+diff --git a/src/raybrain/query/retriever.py b/src/raybrain/query/retriever.py
+new file mode 100644
+index 0000000..9f97ba2
+--- /dev/null
++++ b/src/raybrain/query/retriever.py
+@@ -0,0 +1,208 @@
++"""LanceDB retriever over the wiki layer + raw plain-markdown corpus.
++
++Builds a single vector index over two candidate-hit shapes:
++
++* **wiki** — one row per (paragraph, citation) pair inside each
++  ``<vault_root>/wiki/*.md`` page. The paragraph text is the
++  embedding input; the citation supplies the source_id / locator
++  / excerpt. Each row also carries the wiki page's slug so the
++  engine can fetch the full page when a wiki hit wins.
++* **raw** — one row per paragraph-chunk of each
++  ``<corpus_root>/plain-md/**/*.md`` file, chunked on blank-line
++  boundaries. The source_id follows CLAUDE.md §1 convention
++  (corpus-relative path, ``/`` → ``-``, extension stripped).
++
++``query`` returns :class:`RetrievalHit` items sorted best-first
++by cosine similarity (``score = 1 - cosine_distance``).
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Literal, Protocol
++
++import lancedb
++import pyarrow as pa
++
++from raybrain.wiki.store import read_page
++
++__all__ = ["Embedder", "LanceDBRetriever", "RetrievalHit"]
++
++
++HitKind = Literal["wiki", "raw"]
++
++
++@dataclass(frozen=True)
++class RetrievalHit:
++    source_id: str
++    locator: str
++    excerpt: str
++    score: float
++    kind: HitKind
++    wiki_page_slug: str = ""
++
++
++class Embedder(Protocol):
++    def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
++        ...
++
++
++def _corpus_source_id(path: Path, corpus_root: Path) -> str:
++    rel = path.resolve().relative_to(corpus_root.resolve())
++    stem = rel.with_suffix("")
++    return str(stem).replace("\\", "/").replace("/", "-").lower()
++
++
++def _split_paragraphs(text: str) -> list[tuple[int, int, str]]:
++    """Split *text* on blank-line boundaries.
++
++    Returns a list of ``(start_line, end_line, chunk)`` tuples,
++    1-indexed inclusive. Empty or whitespace-only blocks are
++    skipped. Matches the granularity of CLAUDE.md's paragraph
++    concept and keeps the locator grammar ``lines=N-M`` honest.
++    """
++    lines = text.splitlines()
++    chunks: list[tuple[int, int, str]] = []
++    i = 0
++    n = len(lines)
++    while i < n:
++        while i < n and lines[i].strip() == "":
++            i += 1
++        if i >= n:
++            break
++        start = i + 1
++        block: list[str] = []
++        while i < n and lines[i].strip() != "":
++            block.append(lines[i])
++            i += 1
++        end = i
++        chunk = "\n".join(block).strip()
++        if chunk:
++            chunks.append((start, end, chunk))
++    return chunks
++
++
++class LanceDBRetriever:
++    """Build and query a LanceDB vector index over wiki + raw passages."""
++
++    def __init__(
++        self,
++        embedder: Embedder,
++        db_path: Path,
++        table_name: str = "raybrain_index",
++    ) -> None:
++        self.embedder = embedder
++        self.db_path = Path(db_path)
++        self.table_name = table_name
++        self._table = None
++
++    def is_built(self) -> bool:
++        return self._table is not None
++
++    def build_index(self, vault_root: Path, corpus_root: Path) -> None:
++        rows = self._collect_rows(vault_root, corpus_root)
++        if not rows:
++            self._table = None
++            return
++
++        texts = [r["text"] for r in rows]
++        vectors = self.embedder.embed(texts)
++        if len(vectors) != len(rows):
++            raise ValueError(
++                f"embedder returned {len(vectors)} vectors for {len(rows)} texts"
++            )
++        dim = len(vectors[0])
++        for row, vec in zip(rows, vectors, strict=True):
++            if len(vec) != dim:
++                raise ValueError(
++                    f"embedding dim mismatch: expected {dim}, got {len(vec)}"
++                )
++            row["vector"] = vec
++
++        schema = pa.schema(
++            [
++                ("text", pa.string()),
++                ("source_id", pa.string()),
++                ("locator", pa.string()),
++                ("excerpt", pa.string()),
++                ("kind", pa.string()),
++                ("wiki_page_slug", pa.string()),
++                ("vector", pa.list_(pa.float32(), dim)),
++            ]
++        )
++
++        self.db_path.mkdir(parents=True, exist_ok=True)
++        db = lancedb.connect(str(self.db_path))
++        if self.table_name in db.list_tables():
++            db.drop_table(self.table_name)
++        self._table = db.create_table(self.table_name, data=rows, schema=schema)
++
++    def query(self, text: str, top_k: int = 10) -> list[RetrievalHit]:
++        if self._table is None:
++            return []
++        vec = self.embedder.embed([text])[0]
++        results = (
++            self._table.search(vec).metric("cosine").limit(top_k).to_list()
++        )
++        hits: list[RetrievalHit] = []
++        for row in results:
++            distance = float(row.get("_distance", 1.0))
++            hits.append(
++                RetrievalHit(
++                    source_id=row["source_id"],
++                    locator=row["locator"],
++                    excerpt=row["excerpt"],
++                    score=1.0 - distance,
++                    kind=row["kind"],
++                    wiki_page_slug=row.get("wiki_page_slug", ""),
++                )
++            )
++        return hits
++
++    def _collect_rows(
++        self, vault_root: Path, corpus_root: Path
++    ) -> list[dict[str, object]]:
++        rows: list[dict[str, object]] = []
++
++        wiki_dir = vault_root / "wiki"
++        if wiki_dir.is_dir():
++            for md_file in sorted(wiki_dir.glob("*.md")):
++                page = read_page(md_file.stem, vault_root)
++                if page is None:
++                    continue
++                for para in page.paragraphs:
++                    if para.text.strip() == "":
++                        continue
++                    for cite in para.citations:
++                        rows.append(
++                            {
++                                "text": para.text,
++                                "source_id": str(cite.source_id),
++                                "locator": cite.locator.format(),
++                                "excerpt": cite.excerpt,
++                                "kind": "wiki",
++                                "wiki_page_slug": md_file.stem,
++                            }
++                        )
++
++        plain_md_root = corpus_root / "plain-md"
++        if plain_md_root.is_dir():
++            for md_file in sorted(plain_md_root.rglob("*.md")):
++                if not md_file.is_file():
++                    continue
++                text = md_file.read_text(encoding="utf-8")
++                source_id = _corpus_source_id(md_file, corpus_root)
++                for start, end, chunk in _split_paragraphs(text):
++                    rows.append(
++                        {
++                            "text": chunk,
++                            "source_id": source_id,
++                            "locator": f"lines={start}-{end}",
++                            "excerpt": chunk if len(chunk) <= 240 else chunk[:237] + "...",
++                            "kind": "raw",
++                            "wiki_page_slug": "",
++                        }
++                    )
++
++        return rows
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index 5a35f98..ccc990e 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -56,7 +56,7 @@
+   {
+     "id": "rayb-010",
+     "title": "Query engine — embedding retrieval over wiki + raw (depends on rayb-006 + rayb-007 + rayb-009). CREATE ONLY: src/raybrain/query/__init__.py; src/raybrain/query/embedder.py with OllamaEmbedder class exposing embed(texts: list[str], model: str = 'nomic-embed-text') -> list[list[float]] via HTTP POST to http://localhost:11434/api/embeddings — calls privacy.network_guard.assert_local() before every call; reads base URL from OLLAMA_HOST; src/raybrain/query/retriever.py with LanceDBRetriever class that builds and queries a LanceDB vector index over (wiki pages from vault/wiki/ + raw markdown chunks from corpus/plain-md/), methods: build_index(vault_root, corpus_root), query(text, top_k=10) -> list[RetrievalHit] where RetrievalHit = @dataclass(source_id, locator, excerpt, score, kind: Literal['wiki','raw']); src/raybrain/query/engine.py with run_query(query_text: str, vault_root: Path, corpus_root: Path) -> QueryResult that combines retriever results into (synthesized_page: Optional[WikiPage], raw_citations: list[Citation]) — if top-1 wiki hit exceeds a threshold, return its WikiPage + the raw_citations linked from its paragraphs; otherwise return (None, raw_citations_directly_retrieved); DO NOT import any generative LLM client in query/*.py — this module is retrieval-only; update pyproject.toml to add lancedb dependency; tests/unit/test_query_engine.py with synthetic wiki + corpus fixtures (tmp_path) and a mock OllamaEmbedder returning fixed vectors, covering: wiki hit above threshold returns synthesized_page + citations, wiki hit below threshold returns None + raw citations, empty corpus returns (None, []), co-visibility invariant enforced by QueryResult model. DO NOT CREATE: src/raybrain/policy/ (the AST guard that enforces the no-generative-import rule is a later task); vault/; corpus/; eval/golden/. If total diff exceeds 380 lines, STOP and split into retriever-build / retriever-query / engine as separate follow-on tasks. Expected diff: ~300-380 lines (hard cap).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/unit/test_query_engine.py b/tests/unit/test_query_engine.py
+new file mode 100644
+index 0000000..69654f7
+--- /dev/null
++++ b/tests/unit/test_query_engine.py
+@@ -0,0 +1,243 @@
++"""Tests for the query engine (rayb-010).
++
++Mock embedder returns fixed vectors keyed by substring, so the
++retriever + engine can be exercised end-to-end without a live
++Ollama or network access.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from raybrain.query.engine import run_query
++from raybrain.query.retriever import LanceDBRetriever, _split_paragraphs
++from raybrain.schema import (
++    Citation,
++    LineRangeLocator,
++    Paragraph,
++    SourceId,
++    WikiPage,
++)
++from raybrain.schema.query_result import CoVisibilityViolation, QueryResult
++from raybrain.wiki.store import write_page
++
++# ---------------------------------------------------------------------------
++# Fixtures
++
++
++class FixedVectorEmbedder:
++    """Return a hand-picked vector for each text based on substring match.
++
++    Each text is scored against a list of ``(needle, vector)`` pairs in
++    declaration order; the first matching needle wins. A default
++    vector is returned for misses. This keeps the cosine-similarity
++    geometry of the tests explicit.
++    """
++
++    def __init__(self, mapping: list[tuple[str, list[float]]], default: list[float]) -> None:
++        self.mapping = mapping
++        self.default = default
++        self.call_count = 0
++
++    def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
++        self.call_count += 1
++        out: list[list[float]] = []
++        for text in texts:
++            picked = self.default
++            for needle, vec in self.mapping:
++                if needle in text:
++                    picked = vec
++                    break
++            out.append(list(picked))
++        return out
++
++
++def _seed_wiki(vault_root: Path, slug_title: str, paragraph_text: str, source_id: str) -> WikiPage:
++    page = WikiPage(
++        title=slug_title,
++        source_ids=[SourceId(source_id)],
++        paragraphs=[
++            Paragraph(
++                text=paragraph_text,
++                citations=[
++                    Citation(
++                        source_id=SourceId(source_id),
++                        locator=LineRangeLocator(start=1, end=5),
++                        excerpt="seeded excerpt",
++                    )
++                ],
++            )
++        ],
++    )
++    write_page(page, vault_root)
++    return page
++
++
++def _seed_corpus(corpus_root: Path, name: str, body: str) -> Path:
++    pm = corpus_root / "plain-md"
++    pm.mkdir(parents=True, exist_ok=True)
++    path = pm / f"{name}.md"
++    path.write_text(body, encoding="utf-8")
++    return path
++
++
++# ---------------------------------------------------------------------------
++# _split_paragraphs
++
++
++def test_split_paragraphs_basic() -> None:
++    text = "alpha line one\nalpha line two\n\nbeta only\n\n\ngamma last\n"
++    chunks = _split_paragraphs(text)
++    assert chunks == [
++        (1, 2, "alpha line one\nalpha line two"),
++        (4, 4, "beta only"),
++        (7, 7, "gamma last"),
++    ]
++
++
++def test_split_paragraphs_empty() -> None:
++    assert _split_paragraphs("") == []
++    assert _split_paragraphs("   \n  \n") == []
++
++
++# ---------------------------------------------------------------------------
++# Wiki hit above threshold
++
++
++def test_wiki_hit_returns_synthesized_page(tmp_path: Path) -> None:
++    vault = tmp_path / "vault"
++    corpus = tmp_path / "corpus"
++    corpus.mkdir()
++
++    _seed_wiki(
++        vault,
++        slug_title="Asymmetric Objectives",
++        paragraph_text="A wiki paragraph about asymmetric objectives.",
++        source_id="plain-md-journal-2016-09",
++    )
++    _seed_corpus(corpus, "raw-note", "Raw corpus content about scoring.\n")
++
++    embedder = FixedVectorEmbedder(
++        mapping=[
++            ("wiki paragraph", [1.0, 0.0]),
++            ("Raw corpus", [0.0, 1.0]),
++            ("asymmetric", [1.0, 0.0]),
++        ],
++        default=[0.5, 0.5],
++    )
++    retriever = LanceDBRetriever(embedder, db_path=tmp_path / "lancedb")
++    result = run_query(
++        "asymmetric",
++        vault,
++        corpus,
++        retriever=retriever,
++        wiki_threshold=0.5,
++    )
++
++    assert isinstance(result, QueryResult)
++    assert result.synthesized_page is not None
++    assert result.synthesized_page.title == "Asymmetric Objectives"
++    assert len(result.raw_citations) >= 1
++
++
++# ---------------------------------------------------------------------------
++# Wiki hit below threshold falls through to raw citations
++
++
++def test_wiki_hit_below_threshold_returns_raw(tmp_path: Path) -> None:
++    vault = tmp_path / "vault"
++    corpus = tmp_path / "corpus"
++    corpus.mkdir()
++
++    _seed_wiki(
++        vault,
++        slug_title="Unrelated Page",
++        paragraph_text="Content about something different.",
++        source_id="plain-md-other",
++    )
++    _seed_corpus(corpus, "raw-note", "Raw scoring notes and tactics.\n")
++
++    embedder = FixedVectorEmbedder(
++        mapping=[
++            ("scoring", [1.0, 0.0]),
++            ("something different", [0.0, 1.0]),
++        ],
++        default=[0.0, 1.0],
++    )
++    retriever = LanceDBRetriever(embedder, db_path=tmp_path / "lancedb")
++    result = run_query(
++        "scoring",
++        vault,
++        corpus,
++        retriever=retriever,
++        wiki_threshold=0.99,
++    )
++
++    assert result.synthesized_page is None
++    assert len(result.raw_citations) >= 1
++    assert all(str(c.source_id) == "plain-md-raw-note" for c in result.raw_citations)
++
++
++# ---------------------------------------------------------------------------
++# Empty vault + corpus
++
++
++def test_empty_returns_empty_query_result(tmp_path: Path) -> None:
++    vault = tmp_path / "vault"
++    corpus = tmp_path / "corpus"
++    vault.mkdir()
++    corpus.mkdir()
++
++    embedder = FixedVectorEmbedder(mapping=[], default=[0.1, 0.2])
++    retriever = LanceDBRetriever(embedder, db_path=tmp_path / "lancedb")
++    result = run_query(
++        "anything",
++        vault,
++        corpus,
++        retriever=retriever,
++    )
++    assert result.synthesized_page is None
++    assert result.raw_citations == []
++
++
++# ---------------------------------------------------------------------------
++# Co-visibility invariant enforced at QueryResult level
++
++
++def test_co_visibility_violation_rejected() -> None:
++    page = WikiPage(
++        title="X",
++        source_ids=[SourceId("src-a")],
++        paragraphs=[
++            Paragraph(
++                text="T",
++                citations=[
++                    Citation(
++                        source_id=SourceId("src-a"),
++                        locator=LineRangeLocator(start=1, end=1),
++                        excerpt="e",
++                    )
++                ],
++            )
++        ],
++    )
++    with pytest.raises(CoVisibilityViolation):
++        QueryResult(synthesized_page=page, raw_citations=[])
++
++
++# ---------------------------------------------------------------------------
++# Module boundary: query/ does not import a generative LLM client
++
++
++def test_query_package_no_generative_import() -> None:
++    import raybrain.query as qpkg
++
++    for attr in dir(qpkg):
++        if attr.startswith("_"):
++            continue
++        obj = getattr(qpkg, attr)
++        mod_name = getattr(obj, "__module__", "") or ""
++        assert "ingest.ollama_client" not in mod_name
++        assert "ingest.pipeline" not in mod_name
+diff --git a/uv.lock b/uv.lock
+index b69a368..1cd98cb 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -363,6 +363,18 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/84/d0/205d54408c08b13550c733c4b85429e7ead111c7f0014309637425520a9a/deprecated-1.3.1-py2.py3-none-any.whl", hash = "sha256:597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f", size = 11298, upload-time = "2025-10-30T08:19:00.758Z" },
+ ]
+ 
++[[package]]
++name = "deprecation"
++version = "2.1.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "packaging" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788, upload-time = "2020-04-20T14:23:38.738Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/02/c3/253a89ee03fc9b9682f1541728eb66db7db22148cd94f89ab22528cd1e1b/deprecation-2.1.0-py2.py3-none-any.whl", hash = "sha256:a10811591210e1fb0e768a8c25517cabeabcba6f0bf96564f8ff45189f90b14a", size = 11178, upload-time = "2020-04-20T14:23:36.581Z" },
++]
++
+ [[package]]
+ name = "dill"
+ version = "0.4.1"
+@@ -859,6 +871,55 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/9e/6a/a83720e953b1682d2d109d3c2dbb0bc9bf28cc1cbc205be4ef4be5da709d/jsonpointer-3.1.1-py3-none-any.whl", hash = "sha256:8ff8b95779d071ba472cf5bc913028df06031797532f08a7d5b602d8b2a488ca", size = 7659, upload-time = "2026-03-23T22:32:31.568Z" },
+ ]
+ 
++[[package]]
++name = "lance-namespace"
++version = "0.6.1"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "lance-namespace-urllib3-client" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/28/9f/7906ba4117df8d965510285eaf07264a77de2fd283b9d44ec7fc63a4a57a/lance_namespace-0.6.1.tar.gz", hash = "sha256:f0deea442bd3f1056a8e2fed056ae2778e3356517ec2e680db049058b824d131", size = 10666, upload-time = "2026-03-17T17:55:44.977Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/d1/91/aee1c0a04d17f2810173bd304bd444eb78332045df1b0c1b07cebd01f530/lance_namespace-0.6.1-py3-none-any.whl", hash = "sha256:9699c9e3f12236e5e08ea979cc4e036a8e3c67ed2f37ae6f25c5353ab908e1be", size = 12498, upload-time = "2026-03-17T17:55:44.062Z" },
++]
++
++[[package]]
++name = "lance-namespace-urllib3-client"
++version = "0.6.1"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "pydantic" },
++    { name = "python-dateutil" },
++    { name = "typing-extensions" },
++    { name = "urllib3" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/63/a1/8706a2be25bd184acccc411e48f1a42a4cbf3b6556cba15b9fcf4c15cfcc/lance_namespace_urllib3_client-0.6.1.tar.gz", hash = "sha256:31fbd058ce1ea0bf49045cdeaa756360ece0bc61e9e10276f41af6d217debe87", size = 182567, upload-time = "2026-03-17T17:55:46.87Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/cd/c7/cb9580602dec25f0fdd6005c1c9ba1d4c8c0c3dc8d543107e5a9f248bba8/lance_namespace_urllib3_client-0.6.1-py3-none-any.whl", hash = "sha256:b9c103e1377ad46d2bd70eec894bfec0b1e2133dae0964d7e4de543c6e16293b", size = 317111, upload-time = "2026-03-17T17:55:45.546Z" },
++]
++
++[[package]]
++name = "lancedb"
++version = "0.30.2"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "deprecation" },
++    { name = "lance-namespace" },
++    { name = "numpy" },
++    { name = "packaging" },
++    { name = "pyarrow" },
++    { name = "pydantic" },
++    { name = "tqdm" },
++]
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/7f/87/67b23006663be175c396ae8f7c6ac98bfa4728de5b5583016b8b8c54eb14/lancedb-0.30.2-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:3dd8cb9e2e25efb32c088b24b3fbc57f3f24a636f4b8ad4b287b1eb52f6b5075", size = 41720461, upload-time = "2026-03-31T22:42:32.853Z" },
++    { url = "https://files.pythonhosted.org/packages/78/68/b3b5f638f8de91de75751414114690cae9c294dc79d9ab2602f4562ed9df/lancedb-0.30.2-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f083d50b257f645bd5c4b295d693648ffb37640ce1e9d72f55041b1382f0dbd6", size = 43626135, upload-time = "2026-03-31T22:50:28.577Z" },
++    { url = "https://files.pythonhosted.org/packages/ef/d1/ea8b74a8b56dd4925cc9cb9cc23c7d9675708a7f6b33d22136dc7bb34dbc/lancedb-0.30.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3aef5538db9cd82af79c90831035b4d67e9aa182ef73095a1b919caddf9bb7a5", size = 46619289, upload-time = "2026-03-31T22:55:02.242Z" },
++    { url = "https://files.pythonhosted.org/packages/74/4b/5bfeacf948cfc3452b286a792dcbbfaf04649ef0820e1d3790d47bf5527e/lancedb-0.30.2-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:8b161cb1da04ae6ad45afe10093cfe4107821d93e7712b50200c435d6f4c8a20", size = 43641193, upload-time = "2026-03-31T22:51:13.63Z" },
++    { url = "https://files.pythonhosted.org/packages/28/4c/a51af0ce1d18fd86afa3e8538a81abf5523d24632abe7665ce6795b8009d/lancedb-0.30.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:7fabc0f57944fd79ddef62ed8cf4df770654b172b1ad1019a999304fed3169f3", size = 46665361, upload-time = "2026-03-31T22:54:20.282Z" },
++    { url = "https://files.pythonhosted.org/packages/88/d0/7e44e8143ac2dae8979ba882cc33d4af7b8da4741fb0361497e69b4a4379/lancedb-0.30.2-cp39-abi3-win_amd64.whl", hash = "sha256:531da53002c1c6fda829afccc8ced3056ef58eb036f09ddb2b94a06877ecc66c", size = 50940681, upload-time = "2026-03-31T23:25:52.35Z" },
++]
++
+ [[package]]
+ name = "langchain"
+ version = "1.2.15"
+@@ -2076,6 +2137,7 @@ version = "0.1.0"
+ source = { editable = "." }
+ dependencies = [
+     { name = "httpx" },
++    { name = "lancedb" },
+     { name = "llama-index-core" },
+     { name = "llama-index-readers-file" },
+     { name = "pydantic" },
+@@ -2093,6 +2155,7 @@ dev = [
+ [package.metadata]
+ requires-dist = [
+     { name = "httpx", specifier = ">=0.27" },
++    { name = "lancedb", specifier = ">=0.30.2" },
+     { name = "llama-index-core", specifier = ">=0.12" },
+     { name = "llama-index-readers-file", specifier = ">=0.4" },
+     { name = "pydantic", specifier = ">=2" },
