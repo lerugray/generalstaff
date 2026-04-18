@@ -18,6 +18,8 @@ import {
   markTaskPending,
   removeTask,
   countTasks,
+  isTaskBotPickable,
+  botPickableTasks,
   TasksLoadError,
   TaskValidationError,
 } from "../src/tasks";
@@ -1022,5 +1024,126 @@ describe("CLI cycle-redo command", () => {
   it("is listed in --help output", async () => {
     const result = await runCli(["--help"]);
     expect(result.stdout).toContain("generalstaff cycle-redo");
+  });
+});
+
+describe("isTaskBotPickable + botPickableTasks (gs-195)", () => {
+  function task(overrides: Partial<GreenfieldTask> = {}): GreenfieldTask {
+    return {
+      id: "gs-001",
+      title: "sample task",
+      status: "pending",
+      priority: 1,
+      ...overrides,
+    };
+  }
+
+  it("a plain pending task with no extra fields is pickable", () => {
+    const result = isTaskBotPickable(task(), ["src/schema/**"]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("done tasks are not pickable", () => {
+    const result = isTaskBotPickable(task({ status: "done" }), []);
+    expect(result).toEqual({ ok: false, reason: "not_pending" });
+  });
+
+  it("skipped tasks are not pickable", () => {
+    const result = isTaskBotPickable(task({ status: "skipped" }), []);
+    expect(result).toEqual({ ok: false, reason: "not_pending" });
+  });
+
+  it("in_progress tasks are pickable (matches pendingTasks semantic)", () => {
+    // pendingTasks() treats in_progress as active work — if a cycle
+    // crashed mid-task, the next bot cycle should be free to pick it
+    // back up. Bot-pickability mirrors that.
+    const result = isTaskBotPickable(task({ status: "in_progress" }), []);
+    expect(result.ok).toBe(true);
+  });
+
+  it("interactive_only=true is not pickable even when pending", () => {
+    const result = isTaskBotPickable(
+      task({ interactive_only: true }),
+      [],
+    );
+    expect(result).toEqual({ ok: false, reason: "interactive_only" });
+  });
+
+  it("expected_touches intersecting hands_off flags the conflict", () => {
+    const t = task({
+      expected_touches: ["src/raybrain/schema/models.py"],
+    });
+    const result = isTaskBotPickable(t, ["src/*/schema/**"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.reason === "hands_off_intersect") {
+      expect(result.conflict.pattern).toBe("src/*/schema/**");
+      expect(result.conflict.touch).toBe("src/raybrain/schema/models.py");
+    } else {
+      throw new Error("expected hands_off_intersect");
+    }
+  });
+
+  it("expected_touches entirely outside hands_off passes", () => {
+    const t = task({
+      expected_touches: ["src/raybrain/cli.py", "tests/unit/test_cli.py"],
+    });
+    const result = isTaskBotPickable(t, [
+      "src/*/schema/**",
+      "vault/**",
+      "eval/golden/**",
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("only the first conflicting touch is reported (deterministic order)", () => {
+    const t = task({
+      expected_touches: [
+        "src/ok.ts",
+        "src/raybrain/schema/a.py",
+        "src/raybrain/privacy/b.py",
+      ],
+    });
+    const result = isTaskBotPickable(t, [
+      "src/*/schema/**",
+      "src/*/privacy/**",
+    ]);
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.reason === "hands_off_intersect") {
+      expect(result.conflict.touch).toBe("src/raybrain/schema/a.py");
+    }
+  });
+
+  it("empty expected_touches array is treated as 'unknown scope' and still picks", () => {
+    const t = task({ expected_touches: [] });
+    const result = isTaskBotPickable(t, ["src/schema/**"]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("botPickableTasks filters a mixed list down to the safe, pending ones", () => {
+    const tasks: GreenfieldTask[] = [
+      task({ id: "a", status: "done" }),
+      task({ id: "b", interactive_only: true }),
+      task({ id: "c", expected_touches: ["src/schema/x.ts"] }),
+      task({ id: "d", expected_touches: ["src/cli.ts"] }),
+      task({ id: "e" }),
+    ];
+    const picked = botPickableTasks(tasks, ["src/schema/**"]);
+    expect(picked.map((t) => t.id)).toEqual(["d", "e"]);
+  });
+
+  it("empty hands_off means expected_touches cannot block", () => {
+    const t = task({
+      expected_touches: ["src/anything/at/all.py"],
+    });
+    expect(isTaskBotPickable(t, []).ok).toBe(true);
+  });
+
+  it("interactive_only takes precedence over expected_touches (ordering)", () => {
+    const t = task({
+      interactive_only: true,
+      expected_touches: ["src/schema/x.py"],
+    });
+    const result = isTaskBotPickable(t, ["src/schema/**"]);
+    expect(result).toEqual({ ok: false, reason: "interactive_only" });
   });
 });

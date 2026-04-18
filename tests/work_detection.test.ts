@@ -272,6 +272,68 @@ describe("greenfieldCountRemaining", () => {
     expect(await greenfieldCountRemaining(projectPath, "gamr")).toBe(2);
     expect(await greenfieldHasMoreWork(projectPath, "gamr")).toBe(true);
   });
+
+  // gs-195: hands_off-aware filtering. Tasks that collide with the
+  // project's hands_off list or are marked interactive_only should
+  // not contribute to the "bot has work left to do" signal.
+  it("skips interactive_only tasks when counting bot work", async () => {
+    writeFixture(
+      "state/gs-195-io/tasks.json",
+      JSON.stringify([
+        { id: "1", title: "t1", status: "pending", priority: 1 },
+        {
+          id: "2",
+          title: "t2",
+          status: "pending",
+          priority: 1,
+          interactive_only: true,
+        },
+      ]),
+    );
+    // interactive_only is filtered regardless of hands_off.
+    expect(await greenfieldCountRemaining(FIXTURES, "gs-195-io")).toBe(1);
+    expect(await greenfieldCountRemaining(FIXTURES, "gs-195-io", [])).toBe(1);
+    expect(
+      await greenfieldCountRemaining(FIXTURES, "gs-195-io", ["unrelated/**"]),
+    ).toBe(1);
+  });
+
+  it("skips tasks whose expected_touches collide with hands_off", async () => {
+    writeFixture(
+      "state/gs-195-ho/tasks.json",
+      JSON.stringify([
+        {
+          id: "ok",
+          title: "safe",
+          status: "pending",
+          priority: 1,
+          expected_touches: ["src/cli.ts", "tests/unit/test_cli.ts"],
+        },
+        {
+          id: "bad",
+          title: "touches hands_off",
+          status: "pending",
+          priority: 1,
+          expected_touches: ["src/raybrain/schema/models.py"],
+        },
+      ]),
+    );
+    // No hands_off: both pick.
+    expect(await greenfieldCountRemaining(FIXTURES, "gs-195-ho", [])).toBe(2);
+    // With hands_off: 'bad' is filtered out.
+    expect(
+      await greenfieldCountRemaining(FIXTURES, "gs-195-ho", [
+        "src/*/schema/**",
+      ]),
+    ).toBe(1);
+    expect(
+      await greenfieldHasMoreWork(FIXTURES, "gs-195-ho", [
+        "src/cli.ts",
+        "tests/**",
+        "src/*/schema/**",
+      ]),
+    ).toBe(false);
+  });
 });
 
 function git(cwd: string, args: string[]) {

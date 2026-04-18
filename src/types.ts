@@ -173,6 +173,16 @@ export interface GreenfieldTask {
   title: string;
   status: "pending" | "in_progress" | "done" | "skipped";
   priority: number;
+  // gs-195: optional bot-pickability guards. When a task's engineer
+  // scope will touch files under the project's hands_off patterns, the
+  // queuer should either:
+  //   - set `interactive_only: true` (bot picker will skip entirely), or
+  //   - list the paths in `expected_touches`; the picker will skip the
+  //     task if any of those paths matches a hands_off pattern.
+  // Legacy tasks without either field are bot-pickable by default
+  // (same behaviour as before gs-195).
+  expected_touches?: string[];
+  interactive_only?: boolean;
 }
 
 // --- Concurrency detection ---

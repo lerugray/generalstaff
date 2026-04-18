@@ -5,14 +5,18 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import type { ProjectConfig } from "./types";
+import { botPickableTasks } from "./tasks";
+import type { ProjectConfig, GreenfieldTask } from "./types";
 
 export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
   switch (project.work_detection) {
     case "catalogdna_bot_tasks":
       return catalogdnaHasMoreWork(project.path);
     case "tasks_json":
-      return greenfieldHasMoreWork(project.path, project.id);
+      // gs-195: pass hands_off so tasks with conflicting
+      // expected_touches (or interactive_only=true) are filtered out
+      // before the dispatcher decides to chain.
+      return greenfieldHasMoreWork(project.path, project.id, project.hands_off);
     case "git_issues":
       return gitIssuesHasMoreWork(project.path);
     case "git_unmerged":
@@ -29,7 +33,11 @@ export async function countRemainingWork(
     case "catalogdna_bot_tasks":
       return catalogdnaCountRemaining(project.path);
     case "tasks_json":
-      return greenfieldCountRemaining(project.path, project.id);
+      return greenfieldCountRemaining(
+        project.path,
+        project.id,
+        project.hands_off,
+      );
     case "git_issues":
       return gitIssuesCountRemaining(project.path);
     case "git_unmerged":
@@ -67,16 +75,19 @@ export async function catalogdnaCountRemaining(
 export async function greenfieldCountRemaining(
   projectPath: string,
   projectId: string,
+  handsOff: string[] = [],
 ): Promise<number> {
   const tasksPath = join(projectPath, "state", projectId, "tasks.json");
   if (!existsSync(tasksPath)) return 0;
 
   try {
     const raw = await readFile(tasksPath, "utf8");
-    const tasks = JSON.parse(raw) as Array<{ status: string }>;
-    return tasks.filter(
-      (t) => t.status !== "done" && t.status !== "skipped",
-    ).length;
+    const tasks = JSON.parse(raw) as GreenfieldTask[];
+    // gs-195: count only tasks the bot can actually pick up. Tasks
+    // marked interactive_only or whose expected_touches would collide
+    // with hands_off don't contribute to "work the bot has left to
+    // do" and so shouldn't gate chaining or session pickers.
+    return botPickableTasks(tasks, handsOff).length;
   } catch {
     return 0;
   }
@@ -116,16 +127,18 @@ export async function catalogdnaHasMoreWork(
 export async function greenfieldHasMoreWork(
   projectPath: string,
   projectId: string,
+  handsOff: string[] = [],
 ): Promise<boolean> {
   const tasksPath = join(projectPath, "state", projectId, "tasks.json");
   if (!existsSync(tasksPath)) return false;
 
   try {
     const raw = await readFile(tasksPath, "utf8");
-    const tasks = JSON.parse(raw) as Array<{ status: string }>;
-    return tasks.some(
-      (t) => t.status !== "done" && t.status !== "skipped",
-    );
+    const tasks = JSON.parse(raw) as GreenfieldTask[];
+    // gs-195: "more work" is bot-pickable work — skip interactive-
+    // only tasks and tasks whose expected_touches collide with
+    // hands_off.
+    return botPickableTasks(tasks, handsOff).length > 0;
   } catch {
     return false; // malformed: fail-safe
   }

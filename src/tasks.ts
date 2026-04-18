@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { getRootDir } from "./state";
+import { matchesHandsOff } from "./safety";
 import type { GreenfieldTask } from "./types";
 
 function tasksPath(projectId: string): string {
@@ -51,6 +52,61 @@ export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
 
 export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {
   return tasks.filter((t) => t.status !== "done" && t.status !== "skipped");
+}
+
+// gs-195: decide whether a bot cycle can pick this task. A task is
+// bot-pickable when it is (1) pending, (2) not flagged
+// interactive_only, and (3) its expected_touches (if any) don't
+// intersect the project's hands_off patterns. Tasks without either
+// new field remain pickable by default so legacy tasks.json files
+// keep working.
+//
+// The returned reason on skip is structured so the caller can log
+// the specific conflict for queuer feedback (which expected_touch
+// matched which hands_off pattern).
+export type TaskPickabilityReason =
+  | { ok: true }
+  | { ok: false; reason: "not_pending" }
+  | { ok: false; reason: "interactive_only" }
+  | {
+      ok: false;
+      reason: "hands_off_intersect";
+      conflict: { pattern: string; touch: string };
+    };
+
+export function isTaskBotPickable(
+  task: GreenfieldTask,
+  handsOff: string[],
+): TaskPickabilityReason {
+  // Mirror pendingTasks() semantic: bot-pickable starts from the same
+  // "not-done-and-not-skipped" filter (so in_progress tasks remain
+  // pickable by the bot's next cycle). The new gates layer on top.
+  if (task.status === "done" || task.status === "skipped") {
+    return { ok: false, reason: "not_pending" };
+  }
+  if (task.interactive_only) {
+    return { ok: false, reason: "interactive_only" };
+  }
+  if (task.expected_touches && task.expected_touches.length > 0) {
+    for (const touch of task.expected_touches) {
+      const pattern = matchesHandsOff(touch, handsOff);
+      if (pattern) {
+        return {
+          ok: false,
+          reason: "hands_off_intersect",
+          conflict: { pattern, touch },
+        };
+      }
+    }
+  }
+  return { ok: true };
+}
+
+export function botPickableTasks(
+  tasks: GreenfieldTask[],
+  handsOff: string[],
+): GreenfieldTask[] {
+  return tasks.filter((t) => isTaskBotPickable(t, handsOff).ok);
 }
 
 export interface TaskCounts {

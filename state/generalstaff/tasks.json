@@ -1116,7 +1116,7 @@
   {
     "id": "gs-195",
     "title": "Add a task-queueing convention check + CLAUDE.md documentation: when queueing a bot task whose expected diff touches files under the project's hands_off.yaml patterns, the task must either (a) be marked interactive_only=true in the task schema OR (b) have its expected-diff narrowed to exclude those paths. Surfaced 2026-04-18 afternoon during rayb-001's hands_off scope collision (5 failed cycles, ~$0.15 OpenRouter spend wasted, bot creating files under src/**/policy/**, src/**/privacy/**, src/**/schema/**, and vault/ which are all in raybrain's hands_off.yaml). This complements the existing \"Hands-off-aware task queueing\" CLAUDE.md convention added earlier 2026-04-18 — that rule caught hands-off touches at queue-time for the project under which the task is being worked on; this extends to catching task-scope vs hands-off conflicts that only surface when the engineer expands 'scaffold dirs' or 'add tests' into specific paths the queueing session didn't enumerate. Mechanism options: (a) add an optional expected_touches array to the task schema; bot picker rejects tasks where expected_touches intersects hands_off; (b) have the bot's engineer prompt include 'before committing, check your diff does not touch hands_off patterns and abort if it does'; (c) both. (b) alone is cheap; (a) is more robust. Bot-doable for the schema work + prompt update.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   }
 ]

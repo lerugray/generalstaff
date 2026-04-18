@@ -217,10 +217,29 @@ explicitly, don't proactively write.
   unrunnable for exactly this reason. The hands-off design is
   load-bearing; don't paper over it with per-task exceptions.
   The right move is to recognize at queue time that some tasks
-  are interactive and route them accordingly. A `bot_safe: true`
-  / `interactive_only: true` field in the task schema would
-  formalize this; until that ships, just check the file targets
-  by inspection before queueing.
+  are interactive and route them accordingly.
+
+  **As of gs-195, `tasks.json` carries two optional fields that
+  formalize this (see `src/types.ts` `GreenfieldTask`):**
+
+  - `interactive_only: true` — bot picker skips the task entirely.
+    Use for tasks whose scope is inherently interactive (touches
+    `src/prompts/`, `projects.yaml`, the reviewer infrastructure,
+    docs that need human voice, etc.).
+  - `expected_touches: string[]` — declared paths the task will
+    edit. If any element matches a hands_off pattern, the bot
+    picker skips the task with a `hands_off_intersect` reason.
+    Use for tasks whose scope is bot-safe but whose expected
+    diff borders on hands_off territory (narrows the claim so
+    the picker can verify statically).
+
+  The filter is applied inside `greenfieldHasMoreWork` /
+  `greenfieldCountRemaining` via `isTaskBotPickable` — so a
+  project with only interactive-only work left correctly reports
+  "0 bot-pickable tasks remaining" to the dispatcher and the
+  session moves on rather than trying and failing. Legacy tasks
+  without either field remain bot-pickable by default (matches
+  pre-gs-195 behaviour).
 
 ### Reviewer provider configuration
 
