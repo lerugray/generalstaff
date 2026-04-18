@@ -1203,7 +1203,7 @@
   {
     "id": "gs-204",
     "title": "Emit `cycle_watchdog` audit event when a cycle exceeds 2× its budget. CREATE ONLY: modify `src/session.ts` (call `appendProgress(project.id, 'cycle_watchdog', {...}, cycleId)` alongside the existing console.error in BOTH the sequential loop and the parallel round's per-result block whenever `checkCycleWatchdog` returns non-null); add `\"cycle_watchdog\"` to the ProgressEventType union in `src/types.ts` AND to the VALID_EVENTS array; append tests to `tests/session.test.ts` covering emission. DO NOT CREATE: new files; do not touch anything outside src/session.ts, src/types.ts, tests/session.test.ts. Today the watchdog surfaces slow cycles only via console.error — downstream consumers (digest, status views, eventual UI) can't correlate which specific cycles ran long. Event data shape: `{cycle_id, project_id, duration_seconds: number, budget_minutes: number, threshold_seconds: number, multiplier: 2}`. Tests: (a) a fast cycle emits no cycle_watchdog event; (b) a cycle taking > 2× budget emits exactly one event with correct data; (c) the parallel-mode path also emits per-slow-result (set up via a mocked session or direct unit test of the emission logic). Expected diff: ~80 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/session.ts",

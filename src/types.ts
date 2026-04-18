@@ -143,6 +143,7 @@ export type ProgressEventType =
   | "provider_invoked"
   | "provider_fallback"
   | "cycle_end"
+  | "cycle_watchdog"
   | "project_soft_skipped"
   | "session_start"
   | "session_end"
@@ -207,7 +208,7 @@ const VALID_EVENTS: readonly string[] = [
   "reviewer_fallback", "reviewer_hallucination",
   "worktree_preflight", "cycle_rollback",
   "provider_invoked", "provider_fallback",
-  "cycle_end", "project_soft_skipped",
+  "cycle_end", "cycle_watchdog", "project_soft_skipped",
   "session_start", "session_end", "session_complete",
 ];
 

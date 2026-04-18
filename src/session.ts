@@ -187,6 +187,32 @@ export function checkCycleWatchdog(
   );
 }
 
+// Structured payload for the `cycle_watchdog` audit event. Returns null
+// under the same conditions as checkCycleWatchdog (fast cycle / zero or
+// negative budget) so callers can guard emission on a single truthiness
+// check. The string warning and this event are emitted as a pair — the
+// warning stays for human operators watching the console, the event
+// lets downstream consumers (digest, status views, eventual UI)
+// correlate which specific cycles ran long.
+export function buildCycleWatchdogEvent(
+  projectId: string,
+  cycleId: string,
+  durationSeconds: number,
+  cycleBudgetMinutes: number,
+): Record<string, unknown> | null {
+  if (cycleBudgetMinutes <= 0) return null;
+  const thresholdSeconds = cycleBudgetMinutes * 60 * WATCHDOG_MULTIPLIER;
+  if (durationSeconds <= thresholdSeconds) return null;
+  return {
+    cycle_id: cycleId,
+    project_id: projectId,
+    duration_seconds: durationSeconds,
+    budget_minutes: cycleBudgetMinutes,
+    threshold_seconds: thresholdSeconds,
+    multiplier: WATCHDOG_MULTIPLIER,
+  };
+}
+
 export function formatSessionPlanPreview(plan: SessionPlanEstimate): string {
   const lines: string[] = [];
   lines.push("=== Session Plan Preview ===");
@@ -506,7 +532,23 @@ export async function runSession(options: SessionOptions) {
           cycleDurationSec,
           project.cycle_budget_minutes,
         );
-        if (watchdogWarning) console.error(watchdogWarning);
+        if (watchdogWarning) {
+          console.error(watchdogWarning);
+          const wdData = buildCycleWatchdogEvent(
+            project.id,
+            result.cycle_id,
+            cycleDurationSec,
+            project.cycle_budget_minutes,
+          );
+          if (wdData) {
+            await appendProgress(
+              project.id,
+              "cycle_watchdog",
+              wdData,
+              result.cycle_id,
+            );
+          }
+        }
 
         if (result.final_outcome === "verification_failed") {
           console.error(
@@ -690,6 +732,20 @@ export async function runSession(options: SessionOptions) {
     );
     if (watchdogWarning) {
       console.error(watchdogWarning);
+      const wdData = buildCycleWatchdogEvent(
+        currentProject.id,
+        result.cycle_id,
+        cycleDurationSec,
+        currentProject.cycle_budget_minutes,
+      );
+      if (wdData) {
+        await appendProgress(
+          currentProject.id,
+          "cycle_watchdog",
+          wdData,
+          result.cycle_id,
+        );
+      }
     }
 
     // Guard against runaway empty cycles
