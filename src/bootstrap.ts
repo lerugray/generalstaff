@@ -48,10 +48,126 @@ export interface BootstrapResult {
 
 const PROPOSAL_DIR = ".generalstaff-proposal";
 
-// Default engineer command. Mirrors the pattern GeneralStaff's
-// own scripts/run_bot.sh uses. The proposed project can edit
-// before registering.
-const DEFAULT_ENGINEER_COMMAND = "claude -p --dangerously-skip-permissions";
+// Default engineer-command invocation the user registers in
+// GeneralStaff's projects.yaml. Points at the generated
+// engineer_command.sh (which handles worktree management +
+// prompting claude). The ${cycle_budget_minutes} placeholder is
+// substituted by the dispatcher at invocation time.
+const DEFAULT_ENGINEER_COMMAND = "bash engineer_command.sh ${cycle_budget_minutes}";
+
+// Generate the body of the proposal's engineer_command.sh. Mirrors
+// the pattern in gamr/engineer_command.sh (the first manually-
+// patched instance during Phase 3): create .bot-worktree on
+// bot/work, install deps, invoke claude -p with a full prompt
+// scoped to this project's tasks.json + hands_off + verify
+// command + budget. Without this, a newly-bootstrapped project's
+// first bot cycle would run a promptless `claude -p` on the main
+// working tree — clobbering the user's interactive work.
+function engineerCommandScript(
+  projectId: string,
+  verifyCommand: string,
+): string {
+  return `#!/usr/bin/env bash
+# ${projectId} — autonomous engineering bot launcher
+#
+# Usage: bash engineer_command.sh [budget_minutes]
+#
+# Invoked by GeneralStaff's dispatcher per the engineer_command field
+# in GeneralStaff's projects.yaml. Creates a git worktree at
+# .bot-worktree on branch bot/work, runs claude -p inside it, exits.
+# Cleanup is the dispatcher's responsibility (see GeneralStaff's
+# src/cycle.ts — verification runs IN the worktree, then it's removed).
+
+set -euo pipefail
+
+BUDGET_MINUTES="\${1:-30}"
+SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+PROJECT_ROOT="\$SCRIPT_DIR"
+WORKTREE_DIR="\$PROJECT_ROOT/.bot-worktree"
+BRANCH="bot/work"
+
+echo "=== ${projectId} Bot Launcher ==="
+echo "Budget: \${BUDGET_MINUTES} min"
+echo "Project root: \$PROJECT_ROOT"
+echo "Worktree: \$WORKTREE_DIR"
+echo "Branch: \$BRANCH"
+echo "Started: \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "================================="
+
+# --- Ensure bot/work branch exists ---
+if ! git -C "\$PROJECT_ROOT" rev-parse --verify "\$BRANCH" >/dev/null 2>&1; then
+  echo "Creating branch \$BRANCH from master..."
+  git -C "\$PROJECT_ROOT" branch "\$BRANCH" master
+fi
+
+# --- Create worktree ---
+git -C "\$PROJECT_ROOT" worktree prune 2>/dev/null || true
+
+if [ -d "\$WORKTREE_DIR" ]; then
+  echo "Stale worktree found — removing..."
+  git -C "\$PROJECT_ROOT" worktree remove "\$WORKTREE_DIR" --force 2>/dev/null || true
+  rm -rf "\$WORKTREE_DIR" 2>/dev/null || true
+fi
+
+echo "Creating worktree at \$WORKTREE_DIR on \$BRANCH..."
+git -C "\$PROJECT_ROOT" worktree add "\$WORKTREE_DIR" "\$BRANCH"
+
+# --- Install dependencies in worktree ---
+echo "Installing dependencies in worktree..."
+cd "\$WORKTREE_DIR"
+bun install --frozen-lockfile 2>/dev/null || bun install
+
+# --- Run autonomous bot ---
+echo ""
+echo "Launching autonomous claude -p in worktree..."
+echo ""
+
+claude -p "You are an autonomous engineering bot working on the ${projectId} project.
+
+## Your environment
+You are in a git worktree on the bot/work branch. The main working tree
+is on master and may be in use by a human. Do NOT touch the main working
+tree — work only in this directory.
+
+## Your task
+Read state/${projectId}/tasks.json and pick the highest-priority unfinished task
+(status: 'pending', lowest priority number first; among same-priority
+tasks, lowest id first). Work on exactly that task — no scope creep.
+
+## What you can do
+- Add, modify, or delete files at the paths the task explicitly names.
+- Add test files that support the claimed work.
+- Run \\\`bun install\\\` if needed (lockfile must already be committed).
+- Run \\\`${verifyCommand}\\\` to verify your changes.
+- Commit with a message describing the task you completed.
+- Update the task's status to 'done' in state/${projectId}/tasks.json after
+  committing.
+
+## What you must NOT do
+- Modify any file matching a pattern in hands_off.yaml.
+- Touch CLAUDE-AUTONOMOUS.md, idea.md, README.md, or hands_off.yaml.
+- Invent product features, write user-facing copy, or make UX decisions.
+- Pick algorithms — those are reserved for the human. If a task asks for
+  something that requires an algorithmic decision, abandon the task and
+  write a short note explaining why.
+
+## Verification gate
+Tests must pass under \\\`${verifyCommand}\\\` before commit.
+If they don't pass, fix or abandon — never commit failing tests.
+
+## Budget
+You have \${BUDGET_MINUTES} minutes total. Stop before the budget runs out.
+After committing one task, do NOT pick another in the same invocation —
+the dispatcher will start a fresh cycle for the next task.
+" \\
+  --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \\
+  --output-format text
+
+echo ""
+echo "Bot finished. Exit code: \$?"
+echo "Ended: \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+`;
+}
 
 function stackDefaults(kind: StackKind): DetectedStack {
   switch (kind) {
@@ -542,7 +658,7 @@ function generateProposal(
   );
   writeFileSync(
     join(proposalDir, "engineer_command.sh"),
-    `#!/usr/bin/env bash\nset -euo pipefail\n${stack.engineerCommand}\n`,
+    engineerCommandScript(projectId, stack.verifyCommand),
   );
   writeFileSync(join(proposalDir, "idea.md"), `# Raw idea\n\n${idea}\n`);
   writeFileSync(
