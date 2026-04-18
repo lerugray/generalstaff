@@ -95,6 +95,13 @@ Usage:
     Example: generalstaff init ../other-repo --id=other
     Example: generalstaff init ./lowprio --priority=3   # seed template task at priority 3
 
+  generalstaff bootstrap <target-dir> "<idea>" [--stack=<stack>] [--id=<id>] [--force]
+                                                          Propose scaffolding for a new project (propose-don't-impose)
+    Example: generalstaff bootstrap ../gamr "Tinder for gamers, strictly platonic" --stack=bun-next
+    Example: generalstaff bootstrap ./util "utility library" --stack=bun-plain --id=util
+    # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-poetry, go-mod
+    # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
+
   generalstaff stop [--force] | [--status|--check]        Create STOP file (halt dispatcher)
     Example: generalstaff stop                          # halt before next cycle
     Example: generalstaff stop --force                  # also kill the running session process
@@ -1419,6 +1426,68 @@ switch (command) {
     const resolvedPath = resolve(projectPath);
     const projectId = initValues.id ?? basename(resolvedPath).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     await initProject(projectId, resolvedPath, { priority: initPriority });
+    break;
+  }
+
+  case "bootstrap": {
+    const { values: bsValues, positionals: bsPositionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        stack: { type: "string" },
+        id: { type: "string" },
+        force: { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    const bsTarget = bsPositionals[0];
+    const bsIdea = bsPositionals[1];
+    if (!bsTarget || !bsIdea) {
+      console.error(
+        'Error: target-dir and idea are required\n  Usage: generalstaff bootstrap <target-dir> "<idea>" [--stack=<stack>] [--id=<id>] [--force]',
+      );
+      process.exit(1);
+    }
+    const VALID_STACKS = [
+      "bun-next",
+      "bun-plain",
+      "node-next",
+      "rust-cargo",
+      "python-poetry",
+      "go-mod",
+    ] as const;
+    if (
+      bsValues.stack !== undefined &&
+      !VALID_STACKS.includes(bsValues.stack as (typeof VALID_STACKS)[number])
+    ) {
+      console.error(
+        `Error: --stack must be one of: ${VALID_STACKS.join(", ")}`,
+      );
+      process.exit(1);
+    }
+    const { runBootstrap } = await import("./bootstrap");
+    const resolvedTarget = resolve(bsTarget);
+    const result = await runBootstrap({
+      targetDir: resolvedTarget,
+      idea: bsIdea,
+      stack: bsValues.stack as (typeof VALID_STACKS)[number] | undefined,
+      projectId: bsValues.id,
+      force: Boolean(bsValues.force),
+    });
+    if (!result.ok) {
+      console.error(`Error: ${result.reason}`);
+      process.exit(1);
+    }
+    console.log(`Bootstrap complete for project "${result.projectId}".`);
+    console.log(`  Target:    ${resolvedTarget}`);
+    console.log(`  Stack:     ${result.detectedStack?.kind}`);
+    console.log(`  Proposal:  ${result.proposalPath}`);
+    if (result.createdScaffold) {
+      console.log(`  Scaffold:  wrote minimum-viable package.json/tsconfig.json/.gitignore/README.md`);
+    }
+    console.log(`\nNext steps:`);
+    console.log(`  1. Review ${result.proposalPath}/README-PROPOSAL.md`);
+    console.log(`  2. Fill in <FILL IN> sections of CLAUDE-AUTONOMOUS.md`);
+    console.log(`  3. Move files into place + register in projects.yaml`);
     break;
   }
 
