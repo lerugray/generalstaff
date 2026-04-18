@@ -1,0 +1,318 @@
+diff --git a/src/raybrain/privacy/__init__.py b/src/raybrain/privacy/__init__.py
+new file mode 100644
+index 0000000..26a1205
+--- /dev/null
++++ b/src/raybrain/privacy/__init__.py
+@@ -0,0 +1,25 @@
++"""Privacy guards — network egress + filesystem containment.
++
++Mechanical encoding of the privacy rules described in CLAUDE.md §5
++("Policy surface"). Callers invoke these guards before any network
++call or filesystem read that involves user-supplied paths.
++
++- `network_guard.assert_local` rejects any URL whose host is not
++  localhost (or explicitly allowlisted). This backstops the
++  "local-only LLM" posture of the ingest layer.
++- `path_guard.assert_under_corpus` rejects any path that resolves
++  outside the corpus root. This backstops the "user data never
++  leaves the corpus tree" posture of the loader layer.
++"""
++
++from __future__ import annotations
++
++from raybrain.privacy.network_guard import NetworkEgressViolation, assert_local
++from raybrain.privacy.path_guard import PathEscapeViolation, assert_under_corpus
++
++__all__ = [
++    "NetworkEgressViolation",
++    "PathEscapeViolation",
++    "assert_local",
++    "assert_under_corpus",
++]
+diff --git a/src/raybrain/privacy/network_guard.py b/src/raybrain/privacy/network_guard.py
+new file mode 100644
+index 0000000..3dd16d2
+--- /dev/null
++++ b/src/raybrain/privacy/network_guard.py
+@@ -0,0 +1,84 @@
++"""Network egress guard.
++
++`assert_local(url, allowlist=None)` raises `NetworkEgressViolation`
++if the URL's host is not one of the loopback identifiers
++(`127.0.0.1`, `localhost`, `::1`) or explicitly allowlisted.
++
++The guard parses the URL, extracts the hostname, and (when the
++hostname is not an IP literal) resolves it to an IP address to
++catch cases like a custom `/etc/hosts` entry pointing `evil.test`
++at a loopback address — we check the resolved IP AND the
++textual hostname, and both must clear.
++"""
++
++from __future__ import annotations
++
++import ipaddress
++import socket
++from urllib.parse import urlparse
++
++__all__ = ["NetworkEgressViolation", "assert_local"]
++
++
++_LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1"})
++
++
++class NetworkEgressViolation(Exception):
++    """A URL points at a non-local host and is not in the allowlist."""
++
++
++def _is_loopback_ip(host: str) -> bool:
++    try:
++        return ipaddress.ip_address(host).is_loopback
++    except ValueError:
++        return False
++
++
++def assert_local(url: str, allowlist: list[str] | None = None) -> None:
++    """Raise `NetworkEgressViolation` if `url` is not a local address.
++
++    A URL clears the guard when either its textual host is in the
++    loopback set or the allowlist, OR its host resolves to a
++    loopback IP. Hostnames that fail DNS resolution are rejected
++    rather than silently accepted.
++    """
++
++    allowed = frozenset(allowlist or ())
++
++    parsed = urlparse(url)
++    host = parsed.hostname
++    if host is None:
++        raise NetworkEgressViolation(f"URL has no host component: {url!r}")
++
++    host_lower = host.lower()
++    if host_lower in _LOOPBACK_HOSTS or host_lower in allowed:
++        return
++
++    if _is_loopback_ip(host):
++        return
++
++    try:
++        ipaddress.ip_address(host)
++        is_ip_literal = True
++    except ValueError:
++        is_ip_literal = False
++
++    if is_ip_literal:
++        raise NetworkEgressViolation(
++            f"URL host {host!r} is not loopback and not in allowlist: {url!r}"
++        )
++
++    try:
++        resolved = socket.gethostbyname(host)
++    except OSError as exc:
++        raise NetworkEgressViolation(
++            f"URL host {host!r} failed to resolve: {exc}"
++        ) from exc
++
++    if _is_loopback_ip(resolved):
++        return
++
++    raise NetworkEgressViolation(
++        f"URL host {host!r} resolved to {resolved!r}, which is not loopback "
++        f"and not in allowlist: {url!r}"
++    )
+diff --git a/src/raybrain/privacy/path_guard.py b/src/raybrain/privacy/path_guard.py
+new file mode 100644
+index 0000000..a034941
+--- /dev/null
++++ b/src/raybrain/privacy/path_guard.py
+@@ -0,0 +1,39 @@
++"""Filesystem containment guard.
++
++`assert_under_corpus(path, corpus_root)` raises
++`PathEscapeViolation` if the resolved path is not under the
++resolved corpus root. `Path.resolve()` follows symlinks, so a
++symlink pointing outside the corpus root is caught.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++__all__ = ["PathEscapeViolation", "assert_under_corpus"]
++
++
++class PathEscapeViolation(Exception):
++    """A path resolves outside the permitted corpus root."""
++
++
++def assert_under_corpus(path: Path, corpus_root: Path) -> None:
++    """Raise `PathEscapeViolation` if `path` is not inside `corpus_root`.
++
++    Both arguments are resolved (symlinks followed, `..` collapsed)
++    before comparison. `path == corpus_root` is accepted (the root
++    itself is considered "under" itself).
++    """
++
++    resolved_path = Path(path).resolve()
++    resolved_root = Path(corpus_root).resolve()
++
++    if resolved_path == resolved_root:
++        return
++
++    try:
++        resolved_path.relative_to(resolved_root)
++    except ValueError as exc:
++        raise PathEscapeViolation(
++            f"Path {resolved_path!s} is not under corpus root {resolved_root!s}"
++        ) from exc
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index 0b113ae..ed34f0c 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -38,7 +38,7 @@
+   {
+     "id": "rayb-007",
+     "title": "Privacy guards — network egress and path containment (flipped to bot-owned 2026-04-18 per hands_off.yaml commit 5003012). CREATE ONLY: src/raybrain/privacy/__init__.py; src/raybrain/privacy/network_guard.py with assert_local(url: str, allowlist: list[str] | None = None) -> None that parses the URL, resolves the hostname to an IP if needed, and raises NetworkEgressViolation if the host is NOT 127.0.0.1, localhost, ::1, or explicitly in allowlist (allowlist defaults to None = empty); src/raybrain/privacy/path_guard.py with assert_under_corpus(path: Path, corpus_root: Path) -> None that resolves the path (follow symlinks via Path.resolve()) and raises PathEscapeViolation if the resolved path is not under corpus_root.resolve(); both modules expose their exception types for callers to catch; tests/unit/test_privacy_guards.py covering: localhost:11434 ok, http://127.0.0.1/ ok, http://example.com/ raises, http://8.8.8.8/ raises, allowlist override works, path inside corpus_root ok, path traversal `../../etc/passwd` raises, symlink escaping corpus_root raises (use tmp_path + os.symlink), absolute path outside corpus_root raises. DO NOT CREATE OR MODIFY: src/raybrain/policy/ (still hands-off); eval/golden/; vault/; corpus/; any network code that actually fetches (this task creates guards; callers use them — see rayb-008). Expected diff: ~160-220 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/unit/test_privacy_guards.py b/tests/unit/test_privacy_guards.py
+new file mode 100644
+index 0000000..da35796
+--- /dev/null
++++ b/tests/unit/test_privacy_guards.py
+@@ -0,0 +1,133 @@
++"""Tests for privacy guards — network egress + path containment."""
++
++from __future__ import annotations
++
++import os
++import sys
++from pathlib import Path
++
++import pytest
++
++from raybrain.privacy import (
++    NetworkEgressViolation,
++    PathEscapeViolation,
++    assert_local,
++    assert_under_corpus,
++)
++
++
++class TestAssertLocal:
++    def test_ollama_default_url_passes(self) -> None:
++        assert_local("http://localhost:11434")
++
++    def test_localhost_with_path_passes(self) -> None:
++        assert_local("http://localhost:11434/api/generate")
++
++    def test_127_0_0_1_passes(self) -> None:
++        assert_local("http://127.0.0.1/")
++
++    def test_127_0_0_1_with_port_passes(self) -> None:
++        assert_local("http://127.0.0.1:8080/api")
++
++    def test_ipv6_loopback_passes(self) -> None:
++        assert_local("http://[::1]:11434/api/generate")
++
++    def test_public_domain_raises(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("http://example.com/")
++
++    def test_public_ip_raises(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("http://8.8.8.8/")
++
++    def test_https_public_raises(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("https://api.openai.com/v1/chat")
++
++    def test_private_rfc1918_raises(self) -> None:
++        # 10.0.0.0/8 is private but not loopback — we guard against egress
++        # off the local machine, so non-loopback private ranges still raise.
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("http://10.0.0.1/")
++
++    def test_allowlist_override_works(self) -> None:
++        assert_local("http://example.com/", allowlist=["example.com"])
++
++    def test_allowlist_does_not_affect_unrelated_hosts(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("http://evil.com/", allowlist=["example.com"])
++
++    def test_missing_host_raises(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            assert_local("not-a-url")
++
++    def test_unresolvable_host_raises(self) -> None:
++        with pytest.raises(NetworkEgressViolation):
++            # .invalid is RFC 2606 reserved — guaranteed not to resolve.
++            assert_local("http://nonexistent.invalid/")
++
++
++class TestAssertUnderCorpus:
++    def test_file_inside_corpus_passes(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        inner = corpus / "note.md"
++        inner.write_text("x")
++        assert_under_corpus(inner, corpus)
++
++    def test_nested_file_inside_corpus_passes(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        (corpus / "a" / "b").mkdir(parents=True)
++        inner = corpus / "a" / "b" / "note.md"
++        inner.write_text("x")
++        assert_under_corpus(inner, corpus)
++
++    def test_root_itself_is_allowed(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        assert_under_corpus(corpus, corpus)
++
++    def test_traversal_raises(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        outside = corpus / ".." / ".." / "etc" / "passwd"
++        with pytest.raises(PathEscapeViolation):
++            assert_under_corpus(outside, corpus)
++
++    def test_absolute_outside_raises(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        elsewhere = tmp_path / "elsewhere"
++        elsewhere.mkdir()
++        with pytest.raises(PathEscapeViolation):
++            assert_under_corpus(elsewhere / "x.md", corpus)
++
++    @pytest.mark.skipif(
++        sys.platform == "win32" and not hasattr(os, "symlink"),
++        reason="symlink test requires symlink support",
++    )
++    def test_symlink_escape_raises(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        secret_target = tmp_path / "secrets"
++        secret_target.mkdir()
++        (secret_target / "leak.txt").write_text("ssh-key")
++        link = corpus / "leak"
++        try:
++            os.symlink(secret_target, link, target_is_directory=True)
++        except (OSError, NotImplementedError) as exc:
++            pytest.skip(f"symlink creation unsupported: {exc}")
++        with pytest.raises(PathEscapeViolation):
++            assert_under_corpus(link / "leak.txt", corpus)
++
++    def test_sibling_directory_raises(self, tmp_path: Path) -> None:
++        corpus = tmp_path / "corpus"
++        corpus.mkdir()
++        sibling = tmp_path / "corpus-sneaky"
++        sibling.mkdir()
++        (sibling / "x.md").write_text("x")
++        # Prefix-match false positive: "corpus-sneaky" starts with
++        # "corpus" textually but is NOT under it. `relative_to`
++        # catches this correctly.
++        with pytest.raises(PathEscapeViolation):
++            assert_under_corpus(sibling / "x.md", corpus)

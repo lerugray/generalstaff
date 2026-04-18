@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task, no hands-off violations, and the diff provides strong evidence for task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "rayb-007",
+      "evidence": "The diff creates src/raybrain/privacy/__init__.py, src/raybrain/privacy/network_guard.py, and src/raybrain/privacy/path_guard.py as specified in the task, and also includes tests/unit/test_privacy_guards.py which covers the required test cases.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming all tests are green."
+}

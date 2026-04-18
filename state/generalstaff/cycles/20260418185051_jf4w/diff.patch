@@ -1,0 +1,309 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 876f400..d3cc6c2 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -6,7 +6,7 @@ import { basename, join, resolve } from "path";
+ import { runSession, runSessionChain } from "./session";
+ import { runSingleCycle, countCommitsAhead } from "./cycle";
+ import { $ } from "bun";
+-import { loadFleetState, getProjectSummary, getRootDir } from "./state";
++import { loadFleetState, getProjectSummary, getRootDir, cycleDir } from "./state";
+ import {
+   loadProjects,
+   loadProjectsYaml,
+@@ -219,6 +219,10 @@ Usage:
+     Example: generalstaff bot-status                    # all projects
+     Example: generalstaff bot-status --project=myapp    # single project
+ 
++  generalstaff diff <project-id> <cycle-id> [--stat]      Show a past cycle's diff
++    Example: generalstaff diff myapp 20260416125750_8w9n
++    Example: generalstaff diff myapp 20260416125750_8w9n --stat
++
+   generalstaff --version                                  Show version
+   generalstaff --help                                     Show this help`);
+ }
+@@ -1537,6 +1541,100 @@ switch (command) {
+     break;
+   }
+ 
++  case "diff": {
++    const { values: diffValues, positionals: diffPositionals } = parseArgs({
++      args: args.slice(1),
++      options: {
++        stat: { type: "boolean", default: false },
++      },
++      allowPositionals: true,
++    });
++    const diffProjectId = diffPositionals[0];
++    const diffCycleId = diffPositionals[1];
++    if (!diffProjectId || !diffCycleId) {
++      console.error(
++        "Error: project-id and cycle-id are required\n  Usage: generalstaff diff <project-id> <cycle-id> [--stat]",
++      );
++      process.exit(1);
++    }
++    const allDiffProjects = await loadProjects();
++    const diffProject = allDiffProjects.find((p) => p.id === diffProjectId);
++    if (!diffProject) {
++      const registered = allDiffProjects.map((p) => p.id).join(", ");
++      console.error(
++        `Error: project '${diffProjectId}' not found. Registered: ${registered}`,
++      );
++      process.exit(1);
++    }
++    const diffDispatcher = await loadDispatcherConfig();
++    const diffDir = cycleDir(diffProjectId, diffCycleId, diffDispatcher);
++    if (!existsSync(diffDir)) {
++      const cyclesRoot = join(
++        getRootDir(),
++        diffDispatcher.state_dir,
++        diffProjectId,
++        "cycles",
++      );
++      let recentIds: string[] = [];
++      if (existsSync(cyclesRoot)) {
++        recentIds = readdirSync(cyclesRoot).sort().reverse().slice(0, 5);
++      }
++      const recentLabel =
++        recentIds.length > 0 ? recentIds.join(", ") : "(none)";
++      console.error(
++        `Error: cycle '${diffCycleId}' not found under project '${diffProjectId}'. Recent cycle ids: ${recentLabel}`,
++      );
++      process.exit(1);
++    }
++    const patchPath = join(diffDir, "diff.patch");
++    let patchContent = "";
++    if (existsSync(patchPath)) {
++      patchContent = readFileSync(patchPath, "utf8");
++    }
++    if (patchContent.trim().length === 0) {
++      console.log("(no diff captured for this cycle)");
++      break;
++    }
++    if (diffValues.stat) {
++      const lines = patchContent.split("\n");
++      const files: Array<{
++        path: string;
++        insertions: number;
++        deletions: number;
++      }> = [];
++      let current: { path: string; insertions: number; deletions: number } | null = null;
++      for (const line of lines) {
++        const gitMatch = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
++        if (gitMatch) {
++          if (current) files.push(current);
++          current = { path: gitMatch[2], insertions: 0, deletions: 0 };
++          continue;
++        }
++        if (!current) continue;
++        if (line.startsWith("+++") || line.startsWith("---")) continue;
++        if (line.startsWith("+")) current.insertions++;
++        else if (line.startsWith("-")) current.deletions++;
++      }
++      if (current) files.push(current);
++      const pad = files.reduce((m, f) => Math.max(m, f.path.length), 0);
++      let totalIns = 0;
++      let totalDel = 0;
++      for (const f of files) {
++        totalIns += f.insertions;
++        totalDel += f.deletions;
++        const total = f.insertions + f.deletions;
++        const bar = "+".repeat(f.insertions) + "-".repeat(f.deletions);
++        console.log(` ${f.path.padEnd(pad)} | ${String(total).padStart(4)} ${bar}`);
++      }
++      console.log(
++        ` ${files.length} file${files.length === 1 ? "" : "s"} changed, ${totalIns} insertion${totalIns === 1 ? "" : "s"}(+), ${totalDel} deletion${totalDel === 1 ? "" : "s"}(-)`,
++      );
++    } else {
++      process.stdout.write(patchContent);
++    }
++    break;
++  }
++
+   case "init": {
+     const { values: initValues, positionals: initPositionals } = parseArgs({
+       args: args.slice(1),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 6fcd586..ec10b43 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1214,7 +1214,7 @@
+   {
+     "id": "gs-207",
+     "title": "Add `generalstaff diff <project-id> <cycle-id> [--stat]` subcommand to show a past cycle's diff. CREATE ONLY: add a `case 'diff'` block to `src/cli.ts`'s top-level switch; put any small helper logic inline in cli.ts or reuse existing helpers from `src/state.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Behaviour: reads `state/<project-id>/cycles/<cycle-id>/diff.patch` (path derivable from existing state helpers). Without --stat prints the full patch to stdout; with --stat prints a summary (can shell out to `git diff --stat` by piping the patch, or a simpler own-parser that counts insertions/deletions per file via regex on the `diff --git` and `+/-` lines — either works, pick the cleaner). Error handling: (a) project not found → stderr `Error: project '<id>' not found. Registered: <comma-separated-list>` + exit 1; (b) cycle-dir not present for project → stderr `Error: cycle '<cycle-id>' not found under project '<pid>'. Recent cycle ids: <last-5 sorted desc>` + exit 1; (c) cycle dir exists but diff.patch absent or empty → print `(no diff captured for this cycle)` and exit 0. Add to --help output. Tests: happy path (fixture state dir with a real patch file), each error path, --stat flag output shape. Expected diff: ~140 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 23e3e8b..0509ee7 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -2060,4 +2060,166 @@ dispatcher:
+       );
+     });
+   });
++
++  describe("diff subcommand (gs-207)", () => {
++    const DIFF_TEST_DIR = join(import.meta.dir, "fixtures", "diff_cmd_test");
++
++    const PROJECTS_YAML = `
++projects:
++  - id: alpha
++    path: /tmp/generalstaff_test_diff_alpha_nonexistent
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    const SAMPLE_PATCH = `diff --git a/src/foo.ts b/src/foo.ts
++index abc..def 100644
++--- a/src/foo.ts
+++++ b/src/foo.ts
++@@ -1,3 +1,4 @@
++ line1
++-old line
+++new line
+++added line
++ line3
++diff --git a/src/bar.ts b/src/bar.ts
++index 111..222 100644
++--- a/src/bar.ts
+++++ b/src/bar.ts
++@@ -1,2 +1,1 @@
++-removed
++ kept
++`;
++
++    beforeEach(() => {
++      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-001"), {
++        recursive: true,
++      });
++      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-002"), {
++        recursive: true,
++      });
++      mkdirSync(join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-003"), {
++        recursive: true,
++      });
++      writeFileSync(join(DIFF_TEST_DIR, "projects.yaml"), PROJECTS_YAML);
++      writeFileSync(
++        join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-001", "diff.patch"),
++        SAMPLE_PATCH,
++      );
++      // cyc-002 has an empty diff.patch
++      writeFileSync(
++        join(DIFF_TEST_DIR, "state", "alpha", "cycles", "cyc-002", "diff.patch"),
++        "",
++      );
++      // cyc-003 has no diff.patch at all
++    });
++
++    afterEach(() => {
++      rmSync(DIFF_TEST_DIR, { recursive: true, force: true });
++    });
++
++    it("prints the full patch to stdout without --stat", async () => {
++      const result = await runCli(
++        ["diff", "alpha", "cyc-001"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("diff --git a/src/foo.ts b/src/foo.ts");
++      expect(result.stdout).toContain("+new line");
++      expect(result.stdout).toContain("-old line");
++      expect(result.stdout).toContain("diff --git a/src/bar.ts b/src/bar.ts");
++    });
++
++    it("prints a --stat summary", async () => {
++      const result = await runCli(
++        ["diff", "alpha", "cyc-001", "--stat"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("src/foo.ts");
++      expect(result.stdout).toContain("src/bar.ts");
++      // foo.ts: 2 insertions, 1 deletion
++      expect(result.stdout).toMatch(/src\/foo\.ts\s*\|\s*3\s*\+\++-/);
++      // bar.ts: 0 insertions, 1 deletion
++      expect(result.stdout).toMatch(/src\/bar\.ts\s*\|\s*1\s*-/);
++      // totals line
++      expect(result.stdout).toContain(
++        "2 files changed, 2 insertions(+), 2 deletions(-)",
++      );
++      // raw diff headers absent
++      expect(result.stdout).not.toContain("@@");
++    });
++
++    it("errors with registered-projects hint when project is unknown", async () => {
++      const result = await runCli(
++        ["diff", "bogus", "cyc-001"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("Error: project 'bogus' not found");
++      expect(result.stderr).toContain("Registered: alpha");
++    });
++
++    it("errors with recent cycle ids when cycle dir is missing", async () => {
++      const result = await runCli(
++        ["diff", "alpha", "cyc-missing"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "Error: cycle 'cyc-missing' not found under project 'alpha'",
++      );
++      expect(result.stderr).toContain("Recent cycle ids:");
++      expect(result.stderr).toContain("cyc-003");
++      expect(result.stderr).toContain("cyc-002");
++      expect(result.stderr).toContain("cyc-001");
++    });
++
++    it("prints a friendly message when diff.patch is absent", async () => {
++      const result = await runCli(
++        ["diff", "alpha", "cyc-003"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("(no diff captured for this cycle)");
++    });
++
++    it("prints a friendly message when diff.patch is empty", async () => {
++      const result = await runCli(
++        ["diff", "alpha", "cyc-002"],
++        DIFF_TEST_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("(no diff captured for this cycle)");
++    });
++
++    it("errors when positional args are missing", async () => {
++      const result = await runCli(["diff", "alpha"], DIFF_TEST_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "project-id and cycle-id are required",
++      );
++    });
++
++    it("is listed in --help output", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain(
++        "generalstaff diff <project-id> <cycle-id>",
++      );
++    });
++  });
+ });
