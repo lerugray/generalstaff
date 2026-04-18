@@ -1055,7 +1055,7 @@
   {
     "id": "gs-176",
     "title": "Fix `src/bootstrap.ts` engineer_command.sh template: the bootstrap-generated script for new (non-dogfood) projects is just `claude -p --dangerously-skip-permissions` with NO PROMPT and NO WORKTREE MANAGEMENT — when invoked by the dispatcher, claude has no instructions and the bot would write to the main working tree (clobbering Ray's interactive work). Surfaced 2026-04-18 during gs-173: had to manually patch gamr/engineer_command.sh to (1) create/manage `.bot-worktree` on `bot/work` branch, (2) bun install in worktree, (3) invoke `claude -p` with a full prompt scoped to the project's tasks.json + hands_off + verify command + budget. Use the manually-patched gamr/engineer_command.sh as the template — parameterize project_id, hands-off path, verify command. Add a test using a temp-dir bootstrap that verifies the generated script contains both the worktree-add line and a non-empty prompt arg to claude. Without this, every newly-bootstrapped project's first bot cycle fails immediately.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {

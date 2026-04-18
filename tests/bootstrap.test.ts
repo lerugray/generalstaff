@@ -91,7 +91,7 @@ describe("detectStack", () => {
 
   it("includes expected verify + engineer commands per stack", () => {
     expect(detectStack("/nope", "bun-next").verifyCommand).toContain("bun test");
-    expect(detectStack("/nope", "bun-next").engineerCommand).toContain("claude -p");
+    expect(detectStack("/nope", "bun-next").engineerCommand).toContain("engineer_command.sh");
     expect(detectStack("/nope", "rust-cargo").verifyCommand).toContain("cargo test");
     expect(detectStack("/nope", "python-poetry").verifyCommand).toContain("pytest");
     expect(detectStack("/nope", "go-mod").verifyCommand).toContain("go test");
@@ -347,6 +347,46 @@ describe("runBootstrap", () => {
     expect(pkg.name).toBe("existing");
     const readme = readFileSync(join(dir, "README.md"), "utf8");
     expect(readme).toContain("Pre-existing content.");
+  });
+
+  it("generates engineer_command.sh with worktree management + non-empty claude prompt (gs-176)", async () => {
+    const dir = freshDir("rb-engineer-cmd");
+    const r = await runBootstrap({
+      targetDir: dir,
+      idea: "something useful",
+      stack: "bun-next",
+      projectId: "demoapp",
+    });
+    expect(r.ok).toBe(true);
+
+    const script = readFileSync(
+      join(dir, ".generalstaff-proposal", "engineer_command.sh"),
+      "utf8",
+    );
+
+    // Worktree management — without this, the bot would write to
+    // the main working tree and clobber the user's interactive work.
+    expect(script).toContain("git -C");
+    expect(script).toContain("worktree add");
+    expect(script).toContain(".bot-worktree");
+    expect(script).toContain("bot/work");
+
+    // Dependency install step runs inside the worktree.
+    expect(script).toContain("bun install");
+
+    // claude -p is invoked with a non-empty prompt arg. The prompt
+    // must name the project's tasks.json + verify command + hands_off
+    // so the bot has actual instructions (not a bare `claude -p`).
+    expect(script).toContain("claude -p");
+    expect(script).toContain("state/demoapp/tasks.json");
+    expect(script).toContain("bun test && bun x tsc --noEmit");
+    expect(script).toContain("hands_off.yaml");
+    expect(script).toContain("--allowedTools");
+
+    // Regression guard: the old template was a bare `claude -p
+    // --dangerously-skip-permissions` with no prompt body. Make sure
+    // the body is long enough to carry real instructions.
+    expect(script.length).toBeGreaterThan(1000);
   });
 
   it("defaults project id to basename of targetDir", async () => {
