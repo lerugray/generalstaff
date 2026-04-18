@@ -1186,5 +1186,48 @@
       "tests/cli.test.ts",
       "tests/sessions.test.ts"
     ]
+  },
+  {
+    "id": "gs-202",
+    "title": "Add `generalstaff status --totals` subview. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --totals flag handler; add exported `computeSessionTotals(sessions: SessionSummary[]): SessionTotals` helper + `SessionTotals` interface in `src/sessions.ts` alongside formatSessionsTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output is a multi-line summary: total sessions recorded, total cycles, total verified, total failed, total duration in hours, count of parallel vs sequential sessions, weighted-average parallel_efficiency across parallel sessions (weight = session duration), first-seen timestamp, last-seen timestamp. `--json` flag emits the same data as structured JSON. Mutually exclusive with --sessions, --summary, --backlog, --watch — print an error like `Error: --totals cannot be combined with --sessions/--summary/--backlog/--watch` and exit code 1 if combined. Tests: (a) fixture with 3 sessions (1 parallel efficiency=0.8 duration=60min, 2 sequential duration=30min each) asserting totals math + weighted avg efficiency; (b) --json output shape; (c) mutex error exit code 1 on combined flags; (d) empty history → zero totals. Expected diff: ~120 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/sessions.ts",
+      "tests/sessions.test.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-204",
+    "title": "Emit `cycle_watchdog` audit event when a cycle exceeds 2× its budget. CREATE ONLY: modify `src/session.ts` (call `appendProgress(project.id, 'cycle_watchdog', {...}, cycleId)` alongside the existing console.error in BOTH the sequential loop and the parallel round's per-result block whenever `checkCycleWatchdog` returns non-null); add `\"cycle_watchdog\"` to the ProgressEventType union in `src/types.ts` AND to the VALID_EVENTS array; append tests to `tests/session.test.ts` covering emission. DO NOT CREATE: new files; do not touch anything outside src/session.ts, src/types.ts, tests/session.test.ts. Today the watchdog surfaces slow cycles only via console.error — downstream consumers (digest, status views, eventual UI) can't correlate which specific cycles ran long. Event data shape: `{cycle_id, project_id, duration_seconds: number, budget_minutes: number, threshold_seconds: number, multiplier: 2}`. Tests: (a) a fast cycle emits no cycle_watchdog event; (b) a cycle taking > 2× budget emits exactly one event with correct data; (c) the parallel-mode path also emits per-slow-result (set up via a mocked session or direct unit test of the emission logic). Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/session.ts",
+      "src/types.ts",
+      "tests/session.test.ts"
+    ]
+  },
+  {
+    "id": "gs-207",
+    "title": "Add `generalstaff diff <project-id> <cycle-id> [--stat]` subcommand to show a past cycle's diff. CREATE ONLY: add a `case 'diff'` block to `src/cli.ts`'s top-level switch; put any small helper logic inline in cli.ts or reuse existing helpers from `src/state.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Behaviour: reads `state/<project-id>/cycles/<cycle-id>/diff.patch` (path derivable from existing state helpers). Without --stat prints the full patch to stdout; with --stat prints a summary (can shell out to `git diff --stat` by piping the patch, or a simpler own-parser that counts insertions/deletions per file via regex on the `diff --git` and `+/-` lines — either works, pick the cleaner). Error handling: (a) project not found → stderr `Error: project '<id>' not found. Registered: <comma-separated-list>` + exit 1; (b) cycle-dir not present for project → stderr `Error: cycle '<cycle-id>' not found under project '<pid>'. Recent cycle ids: <last-5 sorted desc>` + exit 1; (c) cycle dir exists but diff.patch absent or empty → print `(no diff captured for this cycle)` and exit 0. Add to --help output. Tests: happy path (fixture state dir with a real patch file), each error path, --stat flag output shape. Expected diff: ~140 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-211",
+    "title": "Digest adds a rough reviewer-spend estimate for openrouter sessions. CREATE ONLY: modify `src/session.ts` writeDigest (add an optional rendered line under the Reviewer header) + add helper `estimateReviewerSpendUSD(results: CycleResult[], provider: string, model?: string): number | null` alongside writeDigest; append tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch src/reviewer.ts, src/prompts/, src/safety.ts, scripts/, or any hands_off path. Motivation: today the digest shows `**Reviewer:** openrouter` but no cost signal — Ray wants a rough running total. When provider.toLowerCase() === 'openrouter', render a line like `**Est. reviewer spend:** ~$0.012 (6 cycles × ~2000 in/500 out tokens @ qwen3-coder-30b rates)`. Rate table keyed on known models: `qwen/qwen3-coder-30b-a3b-instruct` (default per src/reviewer.ts) = $0.07 input / $0.27 output per M tokens; `qwen/qwen3-coder-flash` = $0.195 / $0.975; `qwen/qwen3-coder-plus` = $0.65 / $3.25. Token-count heuristic: 2000 input + 500 output per cycle that actually ran the reviewer (outcome === 'verified' || outcome === 'verification_failed' — skip verified_weak empty-diff and cycle_skipped). Non-openrouter providers: return null / omit the line. Unknown model: return null. Tests: (a) openrouter + 3 reviewer-firing cycles → estimate line with > $0 figure; (b) claude reviewer → no line; (c) openrouter + unknown model → no line; (d) mixed outcomes correctly counts only reviewer-firing cycles. Expected diff: ~140 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/session.ts",
+      "tests/session.test.ts"
+    ]
   }
 ]
