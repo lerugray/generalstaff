@@ -26,6 +26,7 @@ import type { SessionPlanEstimate } from "./dispatcher";
 import { formatDuration, formatFileCount } from "./format";
 import { fetchCommitSubject } from "./git";
 import { notifySessionEnd } from "./notify";
+import { readFleetMessagesSince } from "./fleet_messages";
 import { countRemainingWork } from "./work_detection";
 import { categorizeResults } from "./results";
 import { checkOllamaReachable } from "./ollama";
@@ -254,7 +255,20 @@ export async function runSession(options: SessionOptions) {
     console.log(`Max cycles: ${maxCycles}`);
   }
   console.log(`Dry run: ${dryRun}`);
-  console.log(`Started: ${new Date().toISOString()}\n`);
+  const sessionStartIso = new Date(sessionStart).toISOString();
+  console.log(`Started: ${sessionStartIso}\n`);
+
+  // gs-219: shared-inbox handoff channel. Pick up messages other sessions
+  // left since this one came online; the sessionStart cutoff prevents a
+  // restart from re-replaying ancient history.
+  try {
+    const inbox = await readFleetMessagesSince(sessionStartIso);
+    for (const msg of inbox) {
+      console.log(`[inbox] ${msg.timestamp} ${msg.from}: ${msg.body}`);
+    }
+  } catch (err) {
+    console.warn(`[inbox] failed to read fleet messages: ${(err as Error).message}`);
+  }
 
   const yaml = await loadProjectsYaml();
   // gs-191: mutable so the main loop can swap in a fresh list between
