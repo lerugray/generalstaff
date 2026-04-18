@@ -1,0 +1,272 @@
+diff --git a/src/raybrain/ingest/idempotence.py b/src/raybrain/ingest/idempotence.py
+new file mode 100644
+index 0000000..e4f9d3a
+--- /dev/null
++++ b/src/raybrain/ingest/idempotence.py
+@@ -0,0 +1,118 @@
++"""Idempotent-regen manifest plumbing (CLAUDE.md §2.2 foundation).
++
++Running ``raybrain ingest`` twice over the same ``(corpus + config +
++user-edit overlay)`` must produce byte-identical ``vault/`` output.
++This module is the hash-plumbing layer: given the hashes of the
++inputs that feed a wiki page, produce a deterministic manifest whose
++``manifest_hash`` is sufficient to decide "regenerate or skip" at
++step 2 of the ingest pipeline (CLAUDE.md §3.1).
++
++The full §2.2 test (run ingest twice, diff outputs) requires Ray's
++schema models plus the ingest pipeline that uses them; both land
++later. This module is the pure hashing primitive that pipeline will
++call.
++
++Canonical JSON rules:
++  * UTF-8 encoded.
++  * Keys sorted at every level (dicts-of-dicts are sorted recursively
++    by ``json.dumps(sort_keys=True)``).
++  * ``separators=(",", ":")`` — no insignificant whitespace.
++  * No trailing newline.
++
++``manifest_hash`` is ``sha256`` over the canonical JSON bytes.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from dataclasses import dataclass
++from pathlib import Path
++
++__all__ = [
++    "IngestManifest",
++    "compute_ingest_manifest",
++    "write_manifest_sidecar",
++]
++
++
++@dataclass(frozen=True)
++class IngestManifest:
++    """A deterministic fingerprint of the inputs feeding one wiki page.
++
++    ``component_hashes`` is the canonical dict that was hashed — kept
++    alongside the hash so a caller can inspect which component changed
++    between two manifests without re-deriving.
++    """
++
++    manifest_hash: str
++    canonical_json: bytes
++    component_hashes: dict[str, dict[str, str] | str]
++
++
++def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
++    """Serialize *payload* to canonical JSON bytes.
++
++    ``sort_keys=True`` recurses into nested dicts; ``separators``
++    removes insignificant whitespace; ``ensure_ascii=False`` keeps the
++    output UTF-8 rather than escaping non-ASCII runes into ``\\uXXXX``
++    (escaping would still be deterministic but wastes bytes).
++    """
++    return json.dumps(
++        payload,
++        sort_keys=True,
++        separators=(",", ":"),
++        ensure_ascii=False,
++    ).encode("utf-8")
++
++
++def compute_ingest_manifest(
++    source_hashes: dict[str, str],
++    loader_versions: dict[str, str],
++    config_digest: str,
++    overlay_hashes: dict[str, str],
++) -> IngestManifest:
++    """Compute a deterministic ingest manifest.
++
++    Parameters
++    ----------
++    source_hashes
++        Mapping of ``source_id`` → content hash of the raw-corpus file.
++    loader_versions
++        Mapping of ``source_type`` → loader version string.
++    config_digest
++        A digest of the active raybrain config (caller computes).
++    overlay_hashes
++        Mapping of wiki-page path → hash of its ``*.user-edits.md``
++        overlay file, if any.
++
++    Returns
++    -------
++    IngestManifest
++        Frozen dataclass with ``manifest_hash``, the canonical JSON
++        bytes that were hashed, and the component-hashes dict.
++    """
++    component_hashes: dict[str, dict[str, str] | str] = {
++        "source_hashes": dict(source_hashes),
++        "loader_versions": dict(loader_versions),
++        "config_digest": config_digest,
++        "overlay_hashes": dict(overlay_hashes),
++    }
++    canonical = _canonical_json_bytes(component_hashes)
++    manifest_hash = hashlib.sha256(canonical).hexdigest()
++    return IngestManifest(
++        manifest_hash=manifest_hash,
++        canonical_json=canonical,
++        component_hashes=component_hashes,
++    )
++
++
++def write_manifest_sidecar(manifest: IngestManifest, sidecar_path: Path) -> None:
++    """Write the canonical JSON of *manifest* to *sidecar_path*.
++
++    The caller decides where the sidecar lives — this function does
++    not assume ``vault/<page>.manifest.json``; that wiring is a later
++    task.
++    """
++    sidecar_path.parent.mkdir(parents=True, exist_ok=True)
++    sidecar_path.write_bytes(manifest.canonical_json)
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index d87a138..a0cf434 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -26,7 +26,7 @@
+   {
+     "id": "rayb-005",
+     "title": "Idempotent-regen manifest plumbing (§6-2 foundation). CREATE ONLY: src/raybrain/ingest/idempotence.py (src/raybrain/ingest/__init__.py already landed via rayb-002) with compute_ingest_manifest(source_hashes: dict[str, str], loader_versions: dict[str, str], config_digest: str, overlay_hashes: dict[str, str]) -> IngestManifest (@dataclass with fields: manifest_hash, canonical_json, component_hashes). Canonical JSON = sorted-keys, utf-8, no trailing whitespace; manifest_hash = sha256 over canonical JSON bytes. Add helper write_manifest_sidecar(manifest: IngestManifest, sidecar_path: Path) that writes the canonical JSON to the provided path — the CALLER supplies the path, so this task does NOT decide that vault/<page>.manifest.json is the location (that wiring is a later task); tests/unit/test_idempotent_regen.py using pytest tmp_path for any filesystem fixtures — DO NOT write to real vault/, corpus/, or any hands-off path. Assertions: manifest bytes identical across 100 runs over same inputs; key-order permutation of input dicts yields same hash; any input change yields different hash. The full 'run ingest twice, diff outputs' §6-2 test requires Ray's schema models + the ingest pipeline that uses them (lands later); this task is the hash-plumbing layer only. DO NOT CREATE OR MODIFY: src/raybrain/schema/, privacy/, policy/ or anything beneath (hands-off); vault/, corpus/, eval/golden/ or anything beneath (hands-off); the pydantic schema models. Expected diff: ~100-160 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]
+diff --git a/tests/unit/test_idempotent_regen.py b/tests/unit/test_idempotent_regen.py
+new file mode 100644
+index 0000000..7e3ac72
+--- /dev/null
++++ b/tests/unit/test_idempotent_regen.py
+@@ -0,0 +1,129 @@
++"""Tests for the idempotent-regen manifest plumbing (CLAUDE.md §2.2)."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from raybrain.ingest.idempotence import (
++    IngestManifest,
++    compute_ingest_manifest,
++    write_manifest_sidecar,
++)
++
++
++def _sample_inputs() -> dict[str, object]:
++    return {
++        "source_hashes": {
++            "plain-md-journal-2016-09": "a" * 64,
++            "plain-md-notes-2018-rambling": "b" * 64,
++        },
++        "loader_versions": {"plain_markdown": "0.1.0"},
++        "config_digest": "c" * 64,
++        "overlay_hashes": {"vault/wiki/asymmetric-objectives.md": "d" * 64},
++    }
++
++
++def test_manifest_hash_stable_across_runs() -> None:
++    """Running the computation 100 times over the same inputs yields
++    byte-identical manifest bytes and identical hashes."""
++    inputs = _sample_inputs()
++    first = compute_ingest_manifest(**inputs)  # type: ignore[arg-type]
++    for _ in range(100):
++        again = compute_ingest_manifest(**inputs)  # type: ignore[arg-type]
++        assert again.manifest_hash == first.manifest_hash
++        assert again.canonical_json == first.canonical_json
++
++
++def test_manifest_hash_invariant_under_key_permutation() -> None:
++    """Input dicts are logically unordered — feeding them in a
++    different insertion order must not change the manifest hash."""
++    inputs = _sample_inputs()
++    reference = compute_ingest_manifest(**inputs)  # type: ignore[arg-type]
++
++    permuted = {
++        "source_hashes": {
++            "plain-md-notes-2018-rambling": "b" * 64,
++            "plain-md-journal-2016-09": "a" * 64,
++        },
++        "loader_versions": {"plain_markdown": "0.1.0"},
++        "config_digest": "c" * 64,
++        "overlay_hashes": {"vault/wiki/asymmetric-objectives.md": "d" * 64},
++    }
++    result = compute_ingest_manifest(**permuted)  # type: ignore[arg-type]
++    assert result.manifest_hash == reference.manifest_hash
++
++
++@pytest.mark.parametrize(
++    "mutation",
++    [
++        {"source_hashes": {"plain-md-journal-2016-09": "z" * 64}},
++        {"loader_versions": {"plain_markdown": "0.2.0"}},
++        {"config_digest": "e" * 64},
++        {"overlay_hashes": {"vault/wiki/asymmetric-objectives.md": "f" * 64}},
++        {"source_hashes": {
++            "plain-md-journal-2016-09": "a" * 64,
++            "plain-md-notes-2018-rambling": "b" * 64,
++            "plain-md-newthing": "9" * 64,
++        }},
++        {"overlay_hashes": {}},
++    ],
++)
++def test_any_input_change_changes_hash(mutation: dict[str, object]) -> None:
++    """Any change to any input component must produce a different hash."""
++    base = _sample_inputs()
++    baseline = compute_ingest_manifest(**base)  # type: ignore[arg-type]
++
++    mutated = {**base, **mutation}
++    result = compute_ingest_manifest(**mutated)  # type: ignore[arg-type]
++    assert result.manifest_hash != baseline.manifest_hash
++
++
++def test_canonical_json_has_no_insignificant_whitespace() -> None:
++    """Canonical JSON uses compact separators — no ``, `` or ``: ``."""
++    manifest = compute_ingest_manifest(**_sample_inputs())  # type: ignore[arg-type]
++    raw = manifest.canonical_json
++    assert b", " not in raw
++    assert b": " not in raw
++    assert not raw.endswith(b"\n")
++
++
++def test_canonical_json_keys_sorted_top_level() -> None:
++    """Top-level keys appear in sorted order in the canonical bytes."""
++    manifest = compute_ingest_manifest(**_sample_inputs())  # type: ignore[arg-type]
++    text = manifest.canonical_json.decode("utf-8")
++    expected_order = [
++        '"config_digest"',
++        '"loader_versions"',
++        '"overlay_hashes"',
++        '"source_hashes"',
++    ]
++    positions = [text.index(k) for k in expected_order]
++    assert positions == sorted(positions)
++
++
++def test_write_manifest_sidecar_round_trip(tmp_path: Path) -> None:
++    """Sidecar file contains exactly the canonical JSON bytes."""
++    manifest = compute_ingest_manifest(**_sample_inputs())  # type: ignore[arg-type]
++    sidecar = tmp_path / "some" / "nested" / "page.manifest.json"
++    write_manifest_sidecar(manifest, sidecar)
++    assert sidecar.read_bytes() == manifest.canonical_json
++
++
++def test_write_manifest_sidecar_caller_picks_path(tmp_path: Path) -> None:
++    """The function must not hard-code a ``vault/<page>.manifest.json``
++    location — any caller-supplied path works."""
++    manifest = compute_ingest_manifest(**_sample_inputs())  # type: ignore[arg-type]
++    elsewhere = tmp_path / "anywhere-else.bin"
++    write_manifest_sidecar(manifest, elsewhere)
++    assert elsewhere.exists()
++    assert elsewhere.read_bytes() == manifest.canonical_json
++
++
++def test_manifest_is_frozen_dataclass() -> None:
++    """IngestManifest is immutable — attempts to mutate raise."""
++    manifest = compute_ingest_manifest(**_sample_inputs())  # type: ignore[arg-type]
++    assert isinstance(manifest, IngestManifest)
++    with pytest.raises(Exception):
++        manifest.manifest_hash = "tampered"  # type: ignore[misc]
