@@ -507,6 +507,87 @@ provider routing stabilizes in Phase 2). README dogfooding
 could happen any time — it's a single bot task with a bounded
 output.
 
+### Wiki-layer reconcile (added 2026-04-18)
+
+A parallel claude session bootstrapped Ray's first concrete
+vault project (private, named `raybrain`) and surfaced a real
+design tension that this section's original 2026-04-17 capture
+didn't address: **Karpathy's three-layer LLM-wiki pattern has
+the LLM write synthesized pages at ingest time**, which bumps
+against this section's "plugin never writes" invariant.
+
+The reconcile: **never writes in the query path; ingest-time
+compile is allowed.** Query-time generation remains forbidden
+(that's the slop floor). Ingest-time synthesis — building
+human-readable wiki pages over the raw corpus — is permitted
+provided four constraints hold, all of which keep the
+synthesis layer subordinate to the user rather than
+substitutive:
+
+1. **Citation floor.** Every paragraph in a wiki page links
+   back to specific raw-corpus passages. No claim without an
+   anchor. The wiki page is a *view* of the corpus, not a
+   *replacement* for it. A page that "summarizes" without
+   citing is a hallucination by definition.
+2. **Idempotent regeneration.** Pages are reproducible from
+   the raw corpus. Deleting a page and re-running ingest
+   produces the same (or documented-as-different) page. No
+   hidden state in the synthesis layer; the raw corpus
+   remains the single source of truth.
+3. **User-editable, user-rejectable.** Pages live in plain
+   markdown the user can edit by hand. If the user edits a
+   page, the next ingest respects the edit (does not
+   clobber). The user is still the source of truth on
+   synthesis quality.
+4. **Visible at query time alongside raw sources.** Retrieval
+   surfaces both the wiki-page synthesis AND the raw passages
+   it links to, so the user sees the synthesis layer working
+   alongside the citations rather than instead of them. A
+   query that returns *only* a synthesized page is a query
+   that should also have returned its citation set; if it
+   didn't, the wiki page itself is suspect.
+
+With those four constraints, ingest-time synthesis stays
+inside Hard Rule #1's "creative work stays with the user"
+spirit — the user can always see, edit, or discard what the
+LLM compiled. The synthesis layer is an index over the
+corpus that happens to be human-readable text, not a
+parallel creative output.
+
+**Why this matters as architecture, not just policy.** The
+four constraints are testable invariants the vault plugin
+can enforce structurally:
+- Citation floor → schema requirement on wiki page format
+  (every paragraph must contain at least one `[ref:...]`
+  marker; ingest fails if the LLM emits a paragraph without
+  one).
+- Idempotent regeneration → ingest is a pure function of
+  raw corpus + config + page-edit overlay; ingest tests can
+  assert byte-for-byte stability across runs (modulo the
+  edit overlay).
+- User-editable → page edits captured as a separate
+  `<page>.user-edits.md` overlay that ingest reads but
+  doesn't modify.
+- Query-time co-visibility → query API always returns
+  `(synthesized_page?, raw_citations[])` as a tuple; no
+  endpoint returns one without the other.
+
+Because the constraints are testable, they can land as part
+of the vault plugin's verification gate. A plugin run that
+violates any of them fails verification just like a code
+change that breaks tests — which lets gs-style autonomous
+correctness work apply to the vault's ingest pipeline
+itself.
+
+**Cross-reference.** This addendum was triggered by the
+2026-04-18 morning bootstrap of `raybrain` (Ray's private
+second-brain project — corpus includes music, Facebook
+exports, pre-AI-era wargame manuals). The raybrain repo's
+own design docs reference back to this section for the
+architectural rationale; the project-specific design choices
+(corpus loaders, eval golden set, raybrain-specific schema
+extensions) live in raybrain's repo and stay private.
+
 **Open questions.**
 
 - Does "retrieval only" survive contact with real usage? Users
