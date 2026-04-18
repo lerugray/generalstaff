@@ -9,6 +9,8 @@ import {
   formatSessionsTable,
   formatBacklogTable,
   computeBacklogTotals,
+  computeSessionTotals,
+  formatSessionTotals,
   type SessionSummary,
   type BacklogRow,
 } from "../src/sessions";
@@ -316,6 +318,150 @@ describe("formatSessionsTable", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("computeSessionTotals (gs-202)", () => {
+  it("returns zero totals for an empty history", () => {
+    const totals = computeSessionTotals([]);
+    expect(totals).toEqual({
+      total_sessions: 0,
+      total_cycles: 0,
+      total_verified: 0,
+      total_failed: 0,
+      total_duration_hours: 0,
+      parallel_sessions: 0,
+      sequential_sessions: 0,
+      weighted_avg_parallel_efficiency: null,
+      first_seen: null,
+      last_seen: null,
+    });
+  });
+
+  it("aggregates counts, duration, and weighted efficiency across a mixed fixture", () => {
+    const sessions: SessionSummary[] = [
+      {
+        started_at: "2026-04-17T10:00:00.000Z",
+        duration_minutes: 60,
+        total_cycles: 8,
+        total_verified: 7,
+        total_failed: 1,
+        stop_reason: "budget",
+        reviewer: "openrouter",
+        max_parallel_slots: 2,
+        parallel_rounds: 3,
+        slot_idle_seconds: 30,
+        parallel_efficiency: 0.8,
+      },
+      {
+        started_at: "2026-04-17T12:00:00.000Z",
+        duration_minutes: 30,
+        total_cycles: 3,
+        total_verified: 3,
+        total_failed: 0,
+        stop_reason: "budget",
+        reviewer: "claude",
+      },
+      {
+        started_at: "2026-04-17T14:00:00.000Z",
+        duration_minutes: 30,
+        total_cycles: 2,
+        total_verified: 1,
+        total_failed: 1,
+        stop_reason: "max-cycles",
+        reviewer: "claude",
+      },
+    ];
+    const totals = computeSessionTotals(sessions);
+    expect(totals.total_sessions).toBe(3);
+    expect(totals.total_cycles).toBe(13);
+    expect(totals.total_verified).toBe(11);
+    expect(totals.total_failed).toBe(2);
+    expect(totals.total_duration_hours).toBeCloseTo(2.0, 6);
+    expect(totals.parallel_sessions).toBe(1);
+    expect(totals.sequential_sessions).toBe(2);
+    // Only one parallel session so the duration-weighted avg equals its own efficiency.
+    expect(totals.weighted_avg_parallel_efficiency).toBeCloseTo(0.8, 6);
+    expect(totals.first_seen).toBe("2026-04-17T10:00:00.000Z");
+    expect(totals.last_seen).toBe("2026-04-17T14:00:00.000Z");
+  });
+
+  it("weighted-average efficiency is duration-weighted across multiple parallel sessions", () => {
+    const sessions: SessionSummary[] = [
+      {
+        started_at: "2026-04-17T10:00:00.000Z",
+        duration_minutes: 60,
+        total_cycles: 10,
+        total_verified: 10,
+        total_failed: 0,
+        stop_reason: "budget",
+        reviewer: "openrouter",
+        max_parallel_slots: 2,
+        parallel_efficiency: 1.0,
+      },
+      {
+        started_at: "2026-04-17T12:00:00.000Z",
+        duration_minutes: 20,
+        total_cycles: 4,
+        total_verified: 4,
+        total_failed: 0,
+        stop_reason: "budget",
+        reviewer: "openrouter",
+        max_parallel_slots: 2,
+        parallel_efficiency: 0.5,
+      },
+    ];
+    const totals = computeSessionTotals(sessions);
+    // (1.0 * 60 + 0.5 * 20) / (60 + 20) = 70 / 80 = 0.875
+    expect(totals.weighted_avg_parallel_efficiency).toBeCloseTo(0.875, 6);
+  });
+
+  it("leaves weighted-avg null when no session ran in parallel mode", () => {
+    const sessions: SessionSummary[] = [
+      {
+        started_at: "2026-04-17T10:00:00.000Z",
+        duration_minutes: 30,
+        total_cycles: 5,
+        total_verified: 5,
+        total_failed: 0,
+        stop_reason: "budget",
+        reviewer: "claude",
+      },
+    ];
+    expect(
+      computeSessionTotals(sessions).weighted_avg_parallel_efficiency,
+    ).toBeNull();
+  });
+});
+
+describe("formatSessionTotals (gs-202)", () => {
+  it("renders a placeholder when no sessions exist", () => {
+    expect(formatSessionTotals(computeSessionTotals([]))).toBe(
+      "No sessions recorded yet.",
+    );
+  });
+
+  it("renders every field on a populated fixture", () => {
+    const sessions: SessionSummary[] = [
+      {
+        started_at: "2026-04-17T10:00:00.000Z",
+        duration_minutes: 60,
+        total_cycles: 8,
+        total_verified: 7,
+        total_failed: 1,
+        stop_reason: "budget",
+        reviewer: "openrouter",
+        max_parallel_slots: 2,
+        parallel_efficiency: 0.8,
+      },
+    ];
+    const out = formatSessionTotals(computeSessionTotals(sessions));
+    expect(out).toContain("Total sessions:");
+    expect(out).toContain("Total cycles:");
+    expect(out).toContain("Parallel sessions:");
+    expect(out).toContain("Weighted-avg parallel efficiency: 80.0%");
+    expect(out).toContain("First seen:");
+    expect(out).toContain("Last seen:");
   });
 });
 
