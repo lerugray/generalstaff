@@ -1306,3 +1306,95 @@ articulate it better.
 **Next step:** Let the rest of these sit. Revisit in Phase 2+
   once the Phase 1 MVP is actually running. Premature scoping
   is its own form of slop.
+
+---
+
+## 7. Claude Design integration for UI work (Phase 5+)
+
+**Captured:** 2026-04-18 mid-morning, after Ray flagged this
+during the raybrain shakedown wait. Anthropic launched Claude
+Design 2026-04-17 (the day before — see research-notes.md
+§"2026-04-17 — Claude Design launched"). Ray runs Claude
+Max ($200/mo subscription), so Claude Design is included
+quota — opportunity cost of not using it for UI work is real.
+
+**The problem Claude Design solves.** Generating
+production-quality UIs is taste-heavy, slop-prone, and the
+canonical example of "creative work the bot will confidently
+get wrong" per Hard Rule #1. Today the bot is structurally
+prevented from doing UI work because there's no way to verify
+the output — `bun test && bun x tsc --noEmit` doesn't catch
+"this looks bad". Claude Design changes that ratio: it
+generates substantively better UI than a generic LLM,
+constrained by visual design conventions Anthropic has
+encoded into the tool, and the user can iterate by previewing
++ tweaking rather than reading raw TSX.
+
+**Where this fits the GeneralStaff arc.**
+
+- **Phase 5+ (local UI for GeneralStaff itself).** UI-VISION-
+  2026-04-15.md sketches a kriegspiel/command-room dashboard
+  for the dispatcher. Generating that UI via Claude Design
+  rather than hand-rolling TSX could ship a Phase 5 polished
+  enough to be portfolio-worthy in days instead of weeks.
+- **Plugin: `generalstaff design <project>` for managed
+  projects.** A registered project that needs UI work could
+  request a Claude Design session — the dispatcher routes to
+  Claude Design, captures the generated artifact in the
+  project's repo, and the verification gate becomes "does the
+  TSX type-check + the snapshot tests pass" rather than "is
+  the UI good" (taste stays with the user).
+- **raybrain Phase 3+ (query UI).** raybrain will eventually
+  need a query interface — rendering wiki pages alongside
+  raw citations per §6's invariant (4). Claude Design is the
+  obvious tool to draft that interface; the four invariants
+  remain enforceable post-render.
+
+**Three integration paths to consider when the time comes.**
+
+- **(a) Manual relay (cheap, Phase 5 starter).** User opens
+  Claude Design in browser, generates UI, pastes the output
+  into the project repo. Bot does no Claude Design work —
+  GeneralStaff just needs to make it cheap to drop generated
+  artifacts into a managed project's worktree without
+  tripping hands-off rules.
+- **(b) Claude-in-Chrome via Playwright (medium complexity).**
+  Anthropic ships a Claude browser extension; combined with
+  Playwright (which catalogdna already uses per
+  research-notes.md §"2026-04-17 — Playwright + Chrome
+  extension Claude precedent"), the dispatcher could
+  programmatically drive a Claude Design session and capture
+  the output. Powerful but fragile — DOM-driven automation
+  is brittle and breaks on UI updates from Anthropic.
+- **(c) Direct API integration (when/if Claude Design gets a
+  programmable API).** Cleanest path. Today Claude Design is
+  UI-only as far as we know; if Anthropic ships an API
+  endpoint (likely eventually, given the pattern with their
+  other features), GeneralStaff can call it the same way it
+  calls the reviewer.
+
+**Strong recommendation: don't pre-build (b) or (c).** The
+manual-relay path (a) is cheap to support today (just
+hands-off rules that allow drop-ins to specific paths like
+`src/ui/generated/`), and (b)/(c) become evaluable only when
+there's an actual UI workflow to integrate against. Don't
+design the integration before the workflow exists.
+
+**Why this is captured now rather than later.** Two reasons:
+(1) Ray pays for Claude Max — the cost of NOT using Claude
+Design for UI work is real, and we should explicitly route
+toward it when UI tasks come up rather than have the bot
+attempt UI generation on its own and produce slop. (2) The
+Claude Design tool is new (2026-04-17) so the integration
+landscape is unsettled — capturing the design intent now
+prevents future sessions from defaulting to "have the bot
+write TSX" out of habit when Claude Design is the better
+tool.
+
+**Connection to Hard Rule #1.** Claude Design doesn't violate
+Rule 1 because the user is still the one making taste decisions
+— they preview the generated UI, accept or iterate, and the
+bot's role is just routing the request and committing the
+artifact. The bot's industriousness is bounded by the
+user's preview-and-approve loop, not turned loose on
+"design something good".
