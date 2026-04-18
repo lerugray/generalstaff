@@ -176,16 +176,20 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
   (Ollama + OpenRouter + Claude), digest narrative, provider
   registry + ping subcommands. 11 core Phase 2 tasks delivered
   in a 3.5h chain=3 session window.
-- **Phase 3 (current):** Dispatcher generality — surfacing and
-  closing gaps that only appear on non-dogfood projects.
-  Kicked off 2026-04-17 evening by attempting to register
-  `gamr` as first non-dogfood project. First architectural
-  finding (inconsistent tasks.json path handling) closed by
-  the overnight 2026-04-18 run (gs-166..gs-170 all verified).
-  Next: harden reviewer JSON parser (gs-171, 10 observed
-  false-negative rollbacks in 24h — see DESIGN.md §v4 + the
-  reviewer-JSON entry in research-notes.md), then actually
-  register gamr and run first non-dogfood cycle.
+- **Phase 3:** ✓ COMPLETE (2026-04-18). See
+  [[PHASE-3-COMPLETE-2026-04-18]]. Dispatcher generality test
+  run on `gamr` (first non-dogfood managed project). 9 tasks
+  landed (gs-166..174), 3 consecutive verified gamr cycles
+  reached the closure criterion gs-174 specified, 5 generality
+  gaps surfaced and catalogued (gs-175..178 + implicit picker
+  tiebreak) for follow-up rather than inline patching per the
+  Phase 3 discipline. gs-171 was the load-bearing fix:
+  hardened the reviewer JSON parser against the
+  false-negative-rollback failure mode (10 cycles in 24h pre-fix,
+  zero in the 3-cycle gamr sample post-fix).
+- **Phase 3 closure tail (next):** Address the 5 generality
+  gaps catalogued in PHASE-3-COMPLETE-2026-04-18.md before
+  opening Phase 4. gs-175..178 are all P1.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it

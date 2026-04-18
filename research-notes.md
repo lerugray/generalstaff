@@ -786,3 +786,105 @@ under any plausible token limit. The failure mode is
 inner-content escaping, not response truncation. Future
 sessions digging into reviewer reliability should skip
 the truncation theory and look at escape-consistency.
+
+## 2026-04-18 — Phase 3 closure: gamr cycles + the 5 generality gaps
+
+**Source:** Interactive session 2026-04-18 morning. Phase 3
+target per gs-174: *three consecutive verified cycles against
+gamr (first non-dogfood managed project) without dispatcher-level
+changes between them.* Closure achieved by 11:35 UTC. Full
+write-up in `PHASE-3-COMPLETE-2026-04-18.md`; this entry is the
+research-notes-side capture of what we *learned* (gaps, surprises,
+falsifications) rather than what we *did* (cycles, commits).
+
+### The five generality gaps surfaced
+
+Each one was invisible on dogfood and landed on gamr the moment
+we tried to do anything real. Phase 3 wasn't about closing them
+— it was about catalogue-then-batch-fix per gs-174's discipline.
+
+1. **`src/register.ts` state-path drift (gs-175).** `register.ts`
+   reads `${getRootDir()}/state/<id>/tasks.json` while
+   `work_detection.ts` post-gs-166 reads
+   `${project.path}/state/<id>/tasks.json`. For dogfood
+   `getRootDir()` and `project.path` coincide. For gamr they
+   diverge and the register CLI cannot find tasks.json even when
+   it exists in the correct (new) place. **Bypassed for gs-173
+   today** — wrote projects.yaml manually.
+2. **Bootstrap engineer_command.sh template (gs-176).**
+   `bootstrap.ts` generates `engineer_command.sh` containing
+   only `claude -p --dangerously-skip-permissions` — no prompt,
+   no worktree management. The bot would either fail immediately
+   (claude has no instructions) or write to the main working tree
+   (clobbering interactive work). **Patched manually for gamr** —
+   the patched file becomes the next bootstrap template.
+3. **`auto_merge=false` chained-cycles ceiling (gs-177).** With
+   auto_merge=false (default per Hard Rule #4), the dispatcher
+   correctly refuses cycle N+1 because resetting bot/work would
+   destroy cycle N's unmerged work. Caps every project at one
+   cycle per session, AND creates a chicken-and-egg with Hard
+   Rule #4 (5 clean cycles before opt-in, but 1 per session
+   means 5 sessions). **Worked around today** by manually
+   merging bot/work → master between each gamr cycle.
+4. **Audit-log writes dirty the GS tree mid-session (gs-178).**
+   `audit.ts:21` writes `state/<id>/PROGRESS.jsonl` into GS's
+   tracked working tree. The next cycle's clean-tree safety
+   check then refuses to run *any* project — including the
+   project that wasn't being audited. Cross-project chaining
+   blocked within a session until those PROGRESS.jsonl writes
+   get committed. **Worked around today** by manually committing
+   between cycles.
+5. **Implicit — task picker has no defined tiebreak.** The bot's
+   within-project task picker reads `tasks.json` and picks "the
+   highest-priority unfinished task" with no defined tiebreak
+   between same-priority entries. **Worked around today** by
+   temporarily demoting gs-173 to P2 so gs-171 was uniquely P1;
+   restored after gs-171 landed. Structural fix deferred — Ray
+   and I agreed to leave for post-Phase-3.
+
+The pattern across all five: **dogfood is a degenerate test
+case** because GeneralStaff-managing-GeneralStaff makes many
+distinct dimensions collapse to the same value (paths,
+permissions, branch policies, repo identities). The Phase 3
+discipline of catalogue-then-batch-fix is what kept the surface
+area of today's interactive work bounded — without it, each gap
+would have grown into an inline architecture rewrite.
+
+### Falsification of the "Qwen always fails on big diffs" hypothesis
+
+The 2026-04-18 morning research-note speculated that Qwen JSON
+parse failures might correlate with response size. Today's three
+gamr cycles all produced reviewer responses in the 578-610 byte
+range — well below the historical failure-mode response sizes
+(950-984 bytes for the rolled-back gs-170 attempts). Cannot
+falsify the hypothesis from this sample (small responses on a
+hardened parser don't tell us anything about big-response
+behavior); but cannot confirm it either.
+
+A definitive measurement needs a longer post-gs-171 sample with
+mixed response sizes. The pre-fix base rate was ~10/100 cycles
+(10%); a 100-cycle post-fix sample with ≤1 rollback would
+demonstrate the parser fix held; ≥5 rollbacks would say the fix
+addresses one failure mode but not all. Worth setting up that
+measurement once Phase 3 closure tail (gs-175..178) lands and
+the bot is doing more cycles per session.
+
+### Cost of the bot-vs-interactive boundary, made concrete
+
+Today's morning bot session attempted gs-171 and produced a
+high-quality 393-insertion implementation with 7 fixture-driven
+regression tests in ~8.5 minutes of engineer time. The
+verification gate correctly rolled it back: `src/reviewer.ts` is
+on the hands-off list precisely so an autonomous agent cannot
+modify its own oversight. We then applied the bot's diff
+verbatim in the interactive session — bot did the engineering,
+human did the privileged write. The audit log preserved the
+work-product across the rollback (Hard Rule #9 paying off again).
+
+The lesson — captured into `CLAUDE.md` §Ray's workflow conventions
+as "Hands-off-aware task queueing" — is to mark these tasks
+interactive-only at queue time rather than discovering the
+conflict at cycle time. The morning batch (gs-171..gs-173) had
+3 of 4 tasks structurally unrunnable for exactly this reason;
+recognizing it before queueing would have saved one bot cycle
+and one false-start verification.

@@ -1042,8 +1042,8 @@
   },
   {
     "id": "gs-174",
-    "title": "Run the first bot cycle against `gamr` after gs-173 registers it. One-shot `generalstaff cycle gamr` (or natural pick via dispatcher if gamr is the staler project at the time). Target: produce any valid greenfield task completion against the gamr scaffold, exercise the full engineer → verification → reviewer → commit-merge pipeline end-to-end on a non-dogfood codebase. Expected to surface further generality gaps — document each in research-notes.md under the gamr registration entry and queue follow-up tasks (do NOT patch inline; Phase 3's whole point is cataloguing these before batch-fixing). Success criterion for Phase 3 closure: three consecutive gamr cycles land `verified` without dispatcher-level changes between them. Depends on gs-173.",
-    "status": "pending",
+    "title": "Run the first bot cycle against `gamr` after gs-173 registers it. One-shot `generalstaff cycle gamr` (or natural pick via dispatcher if gamr is the staler project at the time). Target: produce any valid greenfield task completion against the gamr scaffold, exercise the full engineer → verification → reviewer → commit-merge pipeline end-to-end on a non-dogfood codebase. Expected to surface further generality gaps — document each in research-notes.md under the gamr registration entry and queue follow-up tasks (do NOT patch inline; Phase 3's whole point is cataloguing these before batch-fixing). Success criterion for Phase 3 closure: three consecutive gamr cycles land `verified` without dispatcher-level changes between them. Depends on gs-173. CLOSED 2026-04-18T11:35 UTC: 3/3 verified cycles (gamr-001 sanity, gamr-002 layout, gamr-003 page), zero rollbacks, OpenRouter reviewer, average wall ~96s. Closure operationally fragile to manual-merge-between-cycles workaround until gs-177/gs-178 land. Full write-up: PHASE-3-COMPLETE-2026-04-18.md.",
+    "status": "done",
     "priority": 2
   },
   {

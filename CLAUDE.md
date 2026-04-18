@@ -202,6 +202,25 @@ explicitly, don't proactively write.
   in a time range, every commit touching a file, every state
   transition) rather than reading the last N lines. Structural
   queries scale; tail-reads lie.
+- **Hands-off-aware task queueing.** When queueing tasks for the
+  bot, check whether the task's expected file touches the
+  hands-off list in `projects.yaml` (`src/safety.ts`,
+  `src/reviewer.ts`, `src/prompts/`, `projects.yaml`,
+  `scripts/`, design docs, etc.). If yes, mark the task
+  **interactive-only at queue time** rather than discovering
+  the conflict at cycle time. The bot will dutifully attempt
+  the task, write good code, and then have its own verification
+  gate roll the work back as a hands-off violation —
+  burning a full engineer cycle (~6-13 min wall clock) for no
+  net progress. Rationale captured 2026-04-18 after the morning
+  bot batch (gs-171..gs-173) had 3 of 4 tasks structurally
+  unrunnable for exactly this reason. The hands-off design is
+  load-bearing; don't paper over it with per-task exceptions.
+  The right move is to recognize at queue time that some tasks
+  are interactive and route them accordingly. A `bot_safe: true`
+  / `interactive_only: true` field in the task schema would
+  formalize this; until that ships, just check the file targets
+  by inspection before queueing.
 
 ### Reviewer provider configuration
 
