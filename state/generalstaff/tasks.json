@@ -995,7 +995,7 @@
   {
     "id": "gs-166",
     "title": "(PHASE 3 BLOCKER) Align tasks.json path handling between src/work_detection.ts and src/cycle.ts. Currently src/work_detection.ts:71 and :119 (greenfieldCountRemaining + greenfieldHasMoreWork) read from `${getRootDir()}/state/<projectId>/tasks.json` (inside GeneralStaff's repo), while src/cycle.ts:326 (detectMarkedDoneTasks) reads diff from `${project.path}/state/<projectId>/tasks.json` (inside the managed project's repo). For dogfood (project.path == getRootDir()) they coincide; for any non-dogfood project (like gamr) they diverge and the dispatcher cannot function. Fix: change greenfieldCountRemaining and greenfieldHasMoreWork signatures to accept a ProjectConfig (or projectPath + projectId) instead of just projectId, and read from `${project.path}/state/<projectId>/tasks.json`. Update all callers (likely src/session.ts, src/summary.ts, src/work_detection.ts internal dispatch, anywhere else grep finds). Add a test in tests/work_detection.test.ts specifically using a project.path that differs from getRootDir() to prove the fix. The dogfood case still works because generalstaff's project.path IS the GeneralStaff repo root. Background: discovered 2026-04-17 evening during first gamr bootstrap setup — see research-notes.md '2026-04-17 — Phase 3 state-path architectural finding' for full context. This fix unblocks Phase 3 entirely.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
