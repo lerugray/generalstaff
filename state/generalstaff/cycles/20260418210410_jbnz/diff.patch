@@ -1,0 +1,483 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index d3cc6c2..1e44079 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -54,9 +54,11 @@ import {
+   computeBacklogTotals,
+   computeSessionTotals,
+   formatSessionTotals,
++  formatFleetTable,
+   parseSessionsFlag,
+   stripSessionsArgs,
+   type BacklogRow,
++  type FleetRow,
+ } from "./sessions";
+ import { countRemainingWorkDetailed } from "./work_detection";
+ import {
+@@ -88,7 +90,7 @@ Usage:
+     Example: generalstaff cycle --project=myapp
+     Example: generalstaff cycle --project=myapp --dry-run
+ 
+-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals]
++  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet]
+                                                           Show fleet state
+     Example: generalstaff status
+     Example: generalstaff status --json                 # machine-readable output
+@@ -102,6 +104,8 @@ Usage:
+     Example: generalstaff status --backlog --json       # same, as JSON
+     Example: generalstaff status --totals               # all-time aggregate session metrics
+     Example: generalstaff status --totals --json        # same, as JSON
++    Example: generalstaff status --fleet                # one-row-per-project fleet snapshot
++    Example: generalstaff status --fleet --json         # same, as JSON
+ 
+   generalstaff projects                                   List registered projects
+     Example: generalstaff projects
+@@ -375,6 +379,7 @@ switch (command) {
+         summary: { type: "boolean", default: false },
+         backlog: { type: "boolean", default: false },
+         totals: { type: "boolean", default: false },
++        fleet: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -407,7 +412,80 @@ switch (command) {
+       process.exit(1);
+     }
+ 
++    // gs-217: --fleet renders a one-row-per-project snapshot; mutually
++    // exclusive with every other status subview.
++    if (
++      statusValues.fleet &&
++      (sessionsFlag.enabled ||
++        statusValues.summary ||
++        statusValues.backlog ||
++        statusValues.totals ||
++        watch.enabled)
++    ) {
++      console.error(
++        "Error: --fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
++      );
++      process.exit(1);
++    }
++
+     const renderStatus = async () => {
++      if (statusValues.fleet) {
++        const projects = await loadProjects();
++        const fleet = await loadFleetState();
++        const rows: FleetRow[] = [];
++        for (const p of projects) {
++          const state = fleet.projects[p.id] ?? null;
++          const breakdown = await countRemainingWorkDetailed(p);
++          rows.push({
++            project_id: p.id,
++            last_cycle_at: state?.last_cycle_at ?? null,
++            total_cycles: state?.total_cycles ?? 0,
++            total_verified: state?.total_verified ?? 0,
++            total_failed: state?.total_failed ?? 0,
++            bot_pickable: breakdown.pending_bot_pickable,
++            auto_merge: p.auto_merge,
++            branch: p.branch,
++          });
++        }
++        if (statusValues.json) {
++          const totals = rows.reduce(
++            (a, r) => ({
++              total_cycles: a.total_cycles + r.total_cycles,
++              total_verified: a.total_verified + r.total_verified,
++              total_failed: a.total_failed + r.total_failed,
++              bot_pickable: a.bot_pickable + r.bot_pickable,
++            }),
++            {
++              total_cycles: 0,
++              total_verified: 0,
++              total_failed: 0,
++              bot_pickable: 0,
++            },
++          );
++          console.log(
++            JSON.stringify(
++              {
++                projects: rows.map((r) => ({
++                  id: r.project_id,
++                  last_cycle_at: r.last_cycle_at,
++                  total_cycles: r.total_cycles,
++                  total_verified: r.total_verified,
++                  total_failed: r.total_failed,
++                  bot_pickable: r.bot_pickable,
++                  auto_merge: r.auto_merge,
++                  branch: r.branch,
++                })),
++                totals,
++              },
++              null,
++              2,
++            ),
++          );
++        } else {
++          console.log(formatFleetTable(rows));
++        }
++        return;
++      }
+       if (statusValues.totals) {
+         const sessions = await loadRecentSessions(Number.MAX_SAFE_INTEGER);
+         const totals = computeSessionTotals(sessions);
+diff --git a/src/sessions.ts b/src/sessions.ts
+index 6b8cd14..aaf4d96 100644
+--- a/src/sessions.ts
++++ b/src/sessions.ts
+@@ -293,6 +293,79 @@ export function formatSessionTotals(t: SessionTotals): string {
+   return lines.join("\n");
+ }
+ 
++// gs-217: fleet subview. One row per registered project summarising
++// the bits that come up repeatedly in "what's the fleet doing today"
++// questions — last activity, cycle throughput, remaining bot-pickable
++// backlog, and whether auto-merge is armed. Data is assembled by the
++// CLI from projects.yaml + fleet_state.json + countRemainingWorkDetailed;
++// this module only owns the rendering.
++export interface FleetRow {
++  project_id: string;
++  last_cycle_at: string | null;
++  total_cycles: number;
++  total_verified: number;
++  total_failed: number;
++  bot_pickable: number;
++  auto_merge: boolean;
++  branch: string;
++}
++
++export function formatFleetTable(
++  rows: FleetRow[],
++  now: Date = new Date(),
++): string {
++  if (rows.length === 0) {
++    return "No projects registered.";
++  }
++  const header = [
++    "Project",
++    "Last cycle",
++    "Total cycles",
++    "Verified",
++    "Failed",
++    "Bot-pickable",
++    "Auto-merge",
++    "Branch",
++  ];
++  const body: string[][] = rows.map((r) => [
++    r.project_id,
++    r.last_cycle_at ? formatRelativeTime(r.last_cycle_at, now) : "never",
++    String(r.total_cycles),
++    String(r.total_verified),
++    String(r.total_failed),
++    String(r.bot_pickable),
++    r.auto_merge ? "on" : "off",
++    r.branch,
++  ]);
++  const totals = rows.reduce(
++    (a, r) => ({
++      total_cycles: a.total_cycles + r.total_cycles,
++      total_verified: a.total_verified + r.total_verified,
++      total_failed: a.total_failed + r.total_failed,
++      bot_pickable: a.bot_pickable + r.bot_pickable,
++    }),
++    { total_cycles: 0, total_verified: 0, total_failed: 0, bot_pickable: 0 },
++  );
++  body.push([
++    "TOTAL",
++    "-",
++    String(totals.total_cycles),
++    String(totals.total_verified),
++    String(totals.total_failed),
++    String(totals.bot_pickable),
++    "-",
++    "-",
++  ]);
++  const widths = header.map((h, i) =>
++    Math.max(h.length, ...body.map((r) => r[i]!.length)),
++  );
++  const pad = (cells: string[]) =>
++    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
++  const lines = [pad(header), widths.map((w) => "-".repeat(w)).join("  ")];
++  for (const r of body) lines.push(pad(r));
++  return lines.join("\n");
++}
++
+ export function formatSessionsTable(
+   sessions: SessionSummary[],
+   now: Date = new Date(),
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index b34fc39..9afde12 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1271,7 +1271,7 @@
+   {
+     "id": "gs-217",
+     "title": "Add `generalstaff status --fleet` subview showing a one-row-per-project snapshot. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --fleet flag handler; add exported `formatFleetTable(rows: FleetRow[]): string` + `FleetRow` interface in `src/sessions.ts` alongside formatSessionsTable / formatBacklogTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output columns (one row per registered project, plus a TOTAL row): `Project | Last cycle (relative) | Total cycles | Verified | Failed | Bot-pickable (pending) | Auto-merge | Branch`. Last-cycle relative time uses formatRelativeTime (already imported); bot-pickable uses countRemainingWorkDetailed (gs-200). Pulls from: projects.yaml via loadProjects(), fleet_state.json via loadFleetState(), per-project state dirs via countRemainingWorkDetailed(). `--json` flag emits structured data. Mutually exclusive with --sessions, --summary, --backlog, --totals, --watch (error + exit 1 on combined flags). Tests: (a) 2-project fleet renders 2 rows + TOTAL; (b) --json output shape; (c) empty fleet edge case; (d) mutex error. Expected diff: ~150 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 0509ee7..1a5a3bf 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -2061,6 +2061,181 @@ dispatcher:
+     });
+   });
+ 
++  describe("status --fleet (gs-217)", () => {
++    const FLEET_DIR = join(import.meta.dir, "fixtures", "status_fleet_test");
++    const ALPHA_DIR = join(FLEET_DIR, "alpha");
++    const BETA_DIR = join(FLEET_DIR, "beta");
++
++    const PROJECTS_YAML = () => `
++projects:
++  - id: alpha
++    path: ${ALPHA_DIR.replace(/\\/g, "/")}
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    branch: bot/work
++    auto_merge: true
++    hands_off:
++      - src/reviewer.ts
++  - id: beta
++    path: ${BETA_DIR.replace(/\\/g, "/")}
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    branch: main
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
++      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
++      writeFileSync(join(FLEET_DIR, "projects.yaml"), PROJECTS_YAML());
++      // alpha: 2 bot-pickable tasks
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
++        JSON.stringify([
++          { id: "a-1", title: "t1", status: "pending", priority: 1 },
++          { id: "a-2", title: "t2", status: "pending", priority: 2 },
++        ]),
++      );
++      // beta: 1 bot-pickable task
++      writeFileSync(
++        join(BETA_DIR, "state", "beta", "tasks.json"),
++        JSON.stringify([
++          { id: "b-1", title: "t1", status: "pending", priority: 1 },
++        ]),
++      );
++      // Fleet state with activity on alpha only
++      writeFileSync(
++        join(FLEET_DIR, "fleet_state.json"),
++        JSON.stringify({
++          version: 1,
++          updated_at: "2026-04-18T12:00:00.000Z",
++          projects: {
++            alpha: {
++              last_cycle_at: "2026-04-18T11:30:00.000Z",
++              last_cycle_outcome: "verified",
++              total_cycles: 4,
++              total_verified: 3,
++              total_failed: 1,
++              accumulated_minutes: 25,
++            },
++          },
++        }),
++      );
++    });
++
++    afterEach(() => {
++      rmSync(FLEET_DIR, { recursive: true, force: true });
++    });
++
++    it("renders 2 rows + TOTAL in the text table", async () => {
++      const result = await runCli(["status", "--fleet"], FLEET_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("alpha");
++      expect(result.stdout).toContain("beta");
++      expect(result.stdout).toContain("TOTAL");
++      expect(result.stdout).toContain("bot/work");
++      expect(result.stdout).toContain("main");
++      expect(result.stdout).toContain("never"); // beta has no state
++    });
++
++    it("--json emits projects + totals in the expected shape", async () => {
++      const result = await runCli(["status", "--fleet", "--json"], FLEET_DIR);
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed).toHaveProperty("projects");
++      expect(parsed).toHaveProperty("totals");
++      expect(parsed.projects).toHaveLength(2);
++      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
++      expect(alpha).toEqual({
++        id: "alpha",
++        last_cycle_at: "2026-04-18T11:30:00.000Z",
++        total_cycles: 4,
++        total_verified: 3,
++        total_failed: 1,
++        bot_pickable: 2,
++        auto_merge: true,
++        branch: "bot/work",
++      });
++      const beta = parsed.projects.find((p: { id: string }) => p.id === "beta");
++      expect(beta).toEqual({
++        id: "beta",
++        last_cycle_at: null,
++        total_cycles: 0,
++        total_verified: 0,
++        total_failed: 0,
++        bot_pickable: 1,
++        auto_merge: false,
++        branch: "main",
++      });
++      expect(parsed.totals).toEqual({
++        total_cycles: 4,
++        total_verified: 3,
++        total_failed: 1,
++        bot_pickable: 3,
++      });
++    });
++
++    it("rejects --fleet combined with --sessions", async () => {
++      const result = await runCli(
++        ["status", "--fleet", "--sessions"],
++        FLEET_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
++      );
++    });
++
++    it("rejects --fleet combined with --summary", async () => {
++      const result = await runCli(
++        ["status", "--fleet", "--summary"],
++        FLEET_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
++      );
++    });
++
++    it("rejects --fleet combined with --backlog", async () => {
++      const result = await runCli(
++        ["status", "--fleet", "--backlog"],
++        FLEET_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
++      );
++    });
++
++    it("rejects --fleet combined with --totals", async () => {
++      const result = await runCli(
++        ["status", "--fleet", "--totals"],
++        FLEET_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--fleet cannot be combined with --sessions/--summary/--backlog/--totals/--watch",
++      );
++    });
++  });
++
+   describe("diff subcommand (gs-207)", () => {
+     const DIFF_TEST_DIR = join(import.meta.dir, "fixtures", "diff_cmd_test");
+ 
+diff --git a/tests/sessions.test.ts b/tests/sessions.test.ts
+index 51343e5..5a12b0a 100644
+--- a/tests/sessions.test.ts
++++ b/tests/sessions.test.ts
+@@ -11,8 +11,10 @@ import {
+   computeBacklogTotals,
+   computeSessionTotals,
+   formatSessionTotals,
++  formatFleetTable,
+   type SessionSummary,
+   type BacklogRow,
++  type FleetRow,
+ } from "../src/sessions";
+ 
+ describe("parseSessionsFlag", () => {
+@@ -533,3 +535,61 @@ describe("formatBacklogTable (gs-199)", () => {
+     });
+   });
+ });
++
++describe("formatFleetTable (gs-217)", () => {
++  const NOW = new Date("2026-04-18T12:00:00.000Z");
++
++  it("returns placeholder when there are no projects", () => {
++    expect(formatFleetTable([])).toBe("No projects registered.");
++  });
++
++  it("renders header, one row per project, and a TOTAL row", () => {
++    const rows: FleetRow[] = [
++      {
++        project_id: "alpha",
++        last_cycle_at: "2026-04-18T11:30:00.000Z",
++        total_cycles: 10,
++        total_verified: 8,
++        total_failed: 2,
++        bot_pickable: 3,
++        auto_merge: true,
++        branch: "bot/work",
++      },
++      {
++        project_id: "beta",
++        last_cycle_at: null,
++        total_cycles: 0,
++        total_verified: 0,
++        total_failed: 0,
++        bot_pickable: 4,
++        auto_merge: false,
++        branch: "main",
++      },
++    ];
++    const out = formatFleetTable(rows, NOW);
++    const lines = out.split("\n");
++    expect(lines[0]!.trim()).toMatch(
++      /^Project\s+Last cycle\s+Total cycles\s+Verified\s+Failed\s+Bot-pickable\s+Auto-merge\s+Branch$/,
++    );
++    expect(lines[1]!.trim()).toMatch(/^-+\s+-+\s+-+\s+-+\s+-+\s+-+\s+-+\s+-+$/);
++    expect(out).toContain("alpha");
++    expect(out).toContain("beta");
++    expect(out).toContain("never"); // beta has no last_cycle
++    expect(out).toContain("on"); // alpha auto_merge=true
++    expect(out).toContain("off"); // beta auto_merge=false
++    expect(out).toContain("bot/work");
++    expect(out).toContain("main");
++    const totalLine = lines[lines.length - 1]!;
++    expect(totalLine).toContain("TOTAL");
++    const totalCells = totalLine.trim().split(/\s{2,}/);
++    // Project | Last cycle | Total cycles | Verified | Failed | Bot-pickable | Auto-merge | Branch
++    expect(totalCells[0]).toBe("TOTAL");
++    expect(totalCells[1]).toBe("-");
++    expect(totalCells[2]).toBe("10"); // total_cycles sum
++    expect(totalCells[3]).toBe("8"); // total_verified sum
++    expect(totalCells[4]).toBe("2"); // total_failed sum
++    expect(totalCells[5]).toBe("7"); // bot_pickable sum 3+4
++    expect(totalCells[6]).toBe("-");
++    expect(totalCells[7]).toBe("-");
++  });
++});
