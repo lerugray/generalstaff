@@ -115,6 +115,162 @@ describe("tasks module", () => {
       expect(tasks).toHaveLength(2);
       expect(tasks[0]!.id).toBe("gs-001");
     });
+
+    // gs-218: schema validation happy path + per-field rejection.
+    it("accepts valid tasks with all four required fields", async () => {
+      const data = [
+        { id: "gs-001", title: "first", status: "pending", priority: 1 },
+        { id: "gs-002", title: "second", status: "in_progress", priority: 2 },
+        { id: "gs-003", title: "third", status: "done", priority: 3 },
+        { id: "gs-004", title: "fourth", status: "skipped", priority: 4 },
+      ];
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify(data),
+      );
+      const tasks = await loadTasks("myproj");
+      expect(tasks).toHaveLength(4);
+    });
+
+    it("accepts an empty array as valid", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        "[]",
+      );
+      const tasks = await loadTasks("myproj");
+      expect(tasks).toEqual([]);
+    });
+
+    it("throws TaskValidationError when a task is missing id", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "first", status: "pending", priority: 1 },
+          { title: "no id here", status: "pending", priority: 1 },
+        ]),
+      );
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TaskValidationError);
+      const err = caught as TaskValidationError;
+      expect(err.message).toContain("tasks.json[1]");
+      expect(err.message).toContain("'id'");
+    });
+
+    it("throws TaskValidationError when a task has a wrong status enum", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "first", status: "blocked", priority: 1 },
+        ]),
+      );
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TaskValidationError);
+      const err = caught as TaskValidationError;
+      expect(err.message).toContain("tasks.json[0]");
+      expect(err.message).toContain("'status'");
+      expect(err.message).toContain("blocked");
+    });
+
+    it("throws TaskValidationError when priority is negative", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "a", status: "pending", priority: -2 },
+        ]),
+      );
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TaskValidationError);
+      const err = caught as TaskValidationError;
+      expect(err.message).toContain("tasks.json[0]");
+      expect(err.message).toContain("'priority'");
+      expect(err.message).toContain("positive");
+    });
+
+    it("throws TaskValidationError when priority is a non-numeric string", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "a", status: "pending", priority: "high" },
+        ]),
+      );
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TaskValidationError);
+      const err = caught as TaskValidationError;
+      expect(err.message).toContain("'priority'");
+      expect(err.message).toContain("high");
+    });
+
+    it("passes through unknown fields silently for forward-compat", async () => {
+      // Engineers have been known to append `completed_at`, gs-195's
+      // `expected_touches` / `interactive_only`, etc. Those must NOT
+      // break parsing — they're allowed and preserved.
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          {
+            id: "gs-001",
+            title: "a",
+            status: "done",
+            priority: 1,
+            completed_at: "2026-04-18T12:00:00Z",
+            expected_touches: ["src/foo.ts"],
+            interactive_only: false,
+            future_unknown_field: { nested: true },
+          },
+        ]),
+      );
+      const warned: string[] = [];
+      const tasks = await loadTasks("myproj", (m) => warned.push(m));
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.id).toBe("gs-001");
+      // Unknown fields are silently preserved in the parsed object.
+      expect(
+        (tasks[0] as unknown as { completed_at: string }).completed_at,
+      ).toBe("2026-04-18T12:00:00Z");
+      expect(warned).toEqual([]);
+    });
+
+    it("error messages identify the entry index and specific failing field", async () => {
+      writeFileSync(
+        join(TEST_DIR, "state", "myproj", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+          { id: "gs-002", title: "ok", status: "pending", priority: 1 },
+          { id: "gs-003", title: "ok", status: "pending", priority: 1 },
+          { id: "gs-004", title: 42, status: "pending", priority: 1 },
+        ]),
+      );
+      let caught: unknown;
+      try {
+        await loadTasks("myproj");
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(TaskValidationError);
+      const err = caught as TaskValidationError;
+      expect(err.message).toContain("tasks.json[3]");
+      expect(err.message).toContain("'title'");
+    });
   });
 
   describe("pendingTasks", () => {

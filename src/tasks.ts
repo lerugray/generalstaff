@@ -29,7 +29,83 @@ export class TaskValidationError extends Error {
   }
 }
 
-export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
+const VALID_TASK_STATUSES: readonly GreenfieldTask["status"][] = [
+  "pending",
+  "in_progress",
+  "done",
+  "skipped",
+];
+
+// gs-218: structural validation for each tasks.json entry. Unknown
+// fields pass through silently so engineer-added bookkeeping
+// (e.g. `completed_at`, gs-195's `expected_touches` /
+// `interactive_only`) stays forward-compatible. The `fileLabel`
+// argument is the filename portion used in error messages ("tasks.json")
+// so callers can customize it if tasks ever land in a non-standard path.
+function validateTaskEntry(
+  entry: unknown,
+  index: number,
+  fileLabel: string,
+): GreenfieldTask {
+  const loc = `${fileLabel}[${index}]`;
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new TaskValidationError(
+      `${loc}: expected an object, got ${entry === null ? "null" : Array.isArray(entry) ? "array" : typeof entry}`,
+    );
+  }
+  const rec = entry as Record<string, unknown>;
+
+  if (!("id" in rec)) {
+    throw new TaskValidationError(`${loc}: missing required field 'id'`);
+  }
+  if (typeof rec.id !== "string" || rec.id.length === 0) {
+    throw new TaskValidationError(
+      `${loc}: 'id' must be a non-empty string, got ${JSON.stringify(rec.id)}`,
+    );
+  }
+
+  if (!("title" in rec)) {
+    throw new TaskValidationError(`${loc}: missing required field 'title'`);
+  }
+  if (typeof rec.title !== "string") {
+    throw new TaskValidationError(
+      `${loc}: 'title' must be a string, got ${typeof rec.title}`,
+    );
+  }
+
+  if (!("status" in rec)) {
+    throw new TaskValidationError(`${loc}: missing required field 'status'`);
+  }
+  if (
+    typeof rec.status !== "string" ||
+    !VALID_TASK_STATUSES.includes(rec.status as GreenfieldTask["status"])
+  ) {
+    throw new TaskValidationError(
+      `${loc}: 'status' must be one of ${VALID_TASK_STATUSES.join(", ")}, got ${JSON.stringify(rec.status)}`,
+    );
+  }
+
+  if (!("priority" in rec)) {
+    throw new TaskValidationError(`${loc}: missing required field 'priority'`);
+  }
+  if (
+    typeof rec.priority !== "number" ||
+    !Number.isFinite(rec.priority) ||
+    !Number.isInteger(rec.priority) ||
+    rec.priority <= 0
+  ) {
+    throw new TaskValidationError(
+      `${loc}: 'priority' must be a positive integer, got ${JSON.stringify(rec.priority)}`,
+    );
+  }
+
+  return rec as unknown as GreenfieldTask;
+}
+
+export async function loadTasks(
+  projectId: string,
+  warn: (msg: string) => void = console.warn,
+): Promise<GreenfieldTask[]> {
   const path = tasksPath(projectId);
   if (!existsSync(path)) return [];
   const raw = await readFile(path, "utf8");
@@ -47,7 +123,15 @@ export async function loadTasks(projectId: string): Promise<GreenfieldTask[]> {
       `expected a JSON array, got ${parsed === null ? "null" : typeof parsed}`,
     );
   }
-  return parsed as GreenfieldTask[];
+  const validated: GreenfieldTask[] = [];
+  for (let i = 0; i < parsed.length; i++) {
+    validated.push(validateTaskEntry(parsed[i], i, "tasks.json"));
+  }
+  // `warn` is plumbed in for future soft-diagnostic use (e.g. deprecated
+  // field shapes) without forcing callers to change their call sites.
+  // Present tense: unused here, but keeps the signature stable.
+  void warn;
+  return validated;
 }
 
 export function pendingTasks(tasks: GreenfieldTask[]): GreenfieldTask[] {

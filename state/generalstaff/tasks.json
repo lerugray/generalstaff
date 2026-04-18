@@ -1283,7 +1283,7 @@
   {
     "id": "gs-218",
     "title": "Add schema validation to tasks.json loader. CREATE ONLY: modify `src/tasks.ts` loadTasks to validate each task has the required `GreenfieldTask` fields (id: non-empty string; title: string; status: valid enum value; priority: positive number) and correct types; on malformed entries, throw `TaskValidationError` with a clear message including the offending entry's index and the specific field that failed (e.g. `tasks.json[3]: missing required field 'id'` or `tasks.json[7]: priority must be a positive integer, got 'high'`). Add an optional `warn: (msg: string) => void` parameter with default `console.warn` so tests can capture warnings. Unknown fields (e.g. `completed_at` added by bot engineers, gs-195's `expected_touches`, gs-195's `interactive_only`) should NOT error — pass through silently for forward-compatibility. Append tests to `tests/tasks.test.ts` covering: (a) happy path; (b) missing id; (c) wrong status enum; (d) negative priority; (e) unknown field passes through; (f) empty array is valid; (g) error message includes entry index + field name. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Expected diff: ~150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/tasks.ts",
