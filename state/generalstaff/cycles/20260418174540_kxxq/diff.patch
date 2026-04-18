@@ -1,0 +1,239 @@
+diff --git a/src/session.ts b/src/session.ts
+index 0f6f066..1ca09d7 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -313,6 +313,11 @@ export async function runSession(options: SessionOptions) {
+   // decision from real data, not guesses.
+   let slotIdleTotalSeconds = 0;
+   let parallelRounds = 0;
++  // gs-196: per-round cycle arrays, accumulated only in parallel mode so
++  // writeDigest can group the `## Details` section under `### Round N`
++  // headers. Left empty in sequential mode — the digest falls back to the
++  // flat rendering unchanged.
++  const cycleRoundsAccumulator: CycleResult[][] = [];
+ 
+   // gs-131: mid-cycle STOP file detection. isStopFilePresent() is only
+   // checked at cycle boundaries; this fs.watch on the STOP path kills the
+@@ -427,6 +432,7 @@ export async function runSession(options: SessionOptions) {
+         eligible.map((p) => executeCycle(p.project, config, dryRun)),
+       );
+       const roundWallMs = Date.now() - roundStartMs;
++      cycleRoundsAccumulator.push([...roundResults]);
+ 
+       // slot_idle accounting: per-slot idle is roundWall - cycleDuration;
+       // total idle across the round is the sum (an approximation of
+@@ -808,6 +814,7 @@ export async function runSession(options: SessionOptions) {
+     reviewer_provider: process.env.GENERALSTAFF_REVIEWER_PROVIDER,
+     reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
+     parallel_metrics: parallelMetricsForDigest,
++    cycle_rounds: isParallelMode ? cycleRoundsAccumulator : undefined,
+   });
+ 
+   // Log session end for each project
+@@ -1007,6 +1014,12 @@ export async function writeDigest(
+     reviewer_provider?: string;
+     reviewer_model?: string;
+     parallel_metrics?: DigestParallelMetrics;
++    // gs-196: when supplied with at least one round of size > 1, the
++    // `## Details` section is grouped under per-round `### Round N`
++    // headers so parallel-mode digests don't interleave cycles
++    // confusingly. Absent or all-size-1 → flat rendering (no regression
++    // for sequential sessions).
++    cycle_rounds?: CycleResult[][];
+   },
+   deps?: WriteDigestDeps,
+ ) {
+@@ -1104,18 +1117,45 @@ export async function writeDigest(
+     content += `_Per-cycle technical detail (SHAs, reviewer verdicts) below._\n\n`;
+   }
+ 
+-  for (const r of results) {
+-    content += `## ${r.project_id} — ${r.cycle_id}\n\n`;
+-    content += `- **Outcome:** ${r.final_outcome}\n`;
+-    content += `- **Reason:** ${r.reason}\n`;
+-    content += `- **SHA:** ${r.cycle_start_sha.slice(0, 8)} → ${r.cycle_end_sha.slice(0, 8)}\n`;
++  // gs-196: group by round if any round has >1 cycle. Otherwise use flat
++  // rendering (matches sequential sessions, no regression).
++  const useRoundHeaders =
++    !!config.cycle_rounds && config.cycle_rounds.some((rd) => rd.length > 1);
++
++  const renderCycleBlock = (r: CycleResult) => {
++    let block = `## ${r.project_id} — ${r.cycle_id}\n\n`;
++    block += `- **Outcome:** ${r.final_outcome}\n`;
++    block += `- **Reason:** ${r.reason}\n`;
++    block += `- **SHA:** ${r.cycle_start_sha.slice(0, 8)} → ${r.cycle_end_sha.slice(0, 8)}\n`;
+     if (r.diff_stats) {
+       const s = r.diff_stats;
+-      content += `- **Diff:** ${s.files_changed} file(s), +${s.insertions}/-${s.deletions}\n`;
++      block += `- **Diff:** ${s.files_changed} file(s), +${s.insertions}/-${s.deletions}\n`;
++    }
++    block += `- **Engineer exit:** ${r.engineer_exit_code}\n`;
++    block += `- **Verification:** ${r.verification_outcome}\n`;
++    block += `- **Reviewer:** ${r.reviewer_verdict}\n\n`;
++    return block;
++  };
++
++  if (useRoundHeaders && config.cycle_rounds) {
++    config.cycle_rounds.forEach((round, idx) => {
++      const maxCycleMs = round.reduce((acc, r) => {
++        const d =
++          new Date(r.ended_at).getTime() - new Date(r.started_at).getTime();
++        return d > acc ? d : acc;
++      }, 0);
++      const roundWallSec = Math.max(0, Math.round(maxCycleMs / 1000));
++      content +=
++        `### Round ${idx + 1} (${formatDuration(roundWallSec)} wall, ` +
++        `${round.length} cycle(s))\n\n`;
++      for (const r of round) {
++        content += renderCycleBlock(r);
++      }
++    });
++  } else {
++    for (const r of results) {
++      content += renderCycleBlock(r);
+     }
+-    content += `- **Engineer exit:** ${r.engineer_exit_code}\n`;
+-    content += `- **Verification:** ${r.verification_outcome}\n`;
+-    content += `- **Reviewer:** ${r.reviewer_verdict}\n\n`;
+   }
+ 
+   await writeFile(digestPath, content, "utf8");
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 192b16c..23dcc6c 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1156,7 +1156,7 @@
+   {
+     "id": "gs-196",
+     "title": "Parallel-mode digest: group cycle-detail sections by round. CREATE ONLY: modify `src/session.ts` writeDigest + the session_complete call path that invokes it (wire the cycle-rounds data through); append new tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch any file outside src/session.ts and tests/session.test.ts; do not touch design docs, prompts, safety modules, scripts, or any hands_off path. Today the `## Details` section lists cycles flatly; in parallel mode the cycles interleave and make the rendering look jumbled. Fix: (1) extend the `writeDigest` config param to accept an optional `cycle_rounds: CycleResult[][]` — array of per-round cycle arrays, populated by runSession in parallel mode; (2) when `cycle_rounds` is supplied with at least one round of size > 1, render `### Round N (Ns wall, X cycle(s))` headers before each round's cycles, with `## <project> — <cycle>` sub-sections nested under each round header; (3) when `cycle_rounds` is absent or every round has size 1, fall back to the existing flat rendering — no regression for sequential sessions. Round wall = max cycle duration within that round (take max of ended_at - started_at). Tests: (a) sequential writeDigest call (no cycle_rounds) has NO `### Round` headers; (b) parallel writeDigest with 2 rounds of 2 cycles each has exactly 2 `### Round` headers; (c) round-wall text is formatted via formatDuration. Expected diff: ~180 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/session.ts",
+diff --git a/tests/session.test.ts b/tests/session.test.ts
+index 64b0dcc..8812658 100644
+--- a/tests/session.test.ts
++++ b/tests/session.test.ts
+@@ -366,6 +366,121 @@ describe("writeDigest", () => {
+     const content = readFileSync(join(digestDir, files[0]), "utf8");
+     expect(content).toContain("**Reviewer:** mycustomprovider\n");
+   });
++
++  // gs-196: per-round grouping in the Details section.
++  it("renders flat Details (no ### Round headers) when cycle_rounds is absent", async () => {
++    const results = [
++      makeCycleResult({ cycle_id: "c-1", project_id: "pa" }),
++      makeCycleResult({ cycle_id: "c-2", project_id: "pb" }),
++    ];
++    await writeDigest(results, 3, { digest_dir: "digests" });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).not.toContain("### Round");
++    expect(content).toContain("## pa — c-1");
++    expect(content).toContain("## pb — c-2");
++  });
++
++  it("renders flat Details when every round is size 1 (gs-196 fallback)", async () => {
++    const r1 = makeCycleResult({ cycle_id: "c-1", project_id: "pa" });
++    const r2 = makeCycleResult({ cycle_id: "c-2", project_id: "pb" });
++    await writeDigest([r1, r2], 3, {
++      digest_dir: "digests",
++      cycle_rounds: [[r1], [r2]],
++    });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).not.toContain("### Round");
++    expect(content).toContain("## pa — c-1");
++    expect(content).toContain("## pb — c-2");
++  });
++
++  it("renders exactly 2 ### Round headers for 2 rounds of 2 cycles (gs-196)", async () => {
++    // Round 1: 30s and 60s (max = 60s = 1m).
++    // Round 2: 90s and 45s (max = 90s = 1m30s).
++    const r1a = makeCycleResult({
++      cycle_id: "c-1a",
++      project_id: "pa",
++      started_at: "2026-04-18T10:00:00.000Z",
++      ended_at: "2026-04-18T10:00:30.000Z",
++    });
++    const r1b = makeCycleResult({
++      cycle_id: "c-1b",
++      project_id: "pb",
++      started_at: "2026-04-18T10:00:00.000Z",
++      ended_at: "2026-04-18T10:01:00.000Z",
++    });
++    const r2a = makeCycleResult({
++      cycle_id: "c-2a",
++      project_id: "pa",
++      started_at: "2026-04-18T10:02:00.000Z",
++      ended_at: "2026-04-18T10:03:30.000Z",
++    });
++    const r2b = makeCycleResult({
++      cycle_id: "c-2b",
++      project_id: "pb",
++      started_at: "2026-04-18T10:02:00.000Z",
++      ended_at: "2026-04-18T10:02:45.000Z",
++    });
++    await writeDigest([r1a, r1b, r2a, r2b], 5, {
++      digest_dir: "digests",
++      cycle_rounds: [
++        [r1a, r1b],
++        [r2a, r2b],
++      ],
++    });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++
++    const roundHeaders = content.match(/^### Round \d+ /gm) ?? [];
++    expect(roundHeaders).toHaveLength(2);
++    expect(content).toContain("### Round 1 (1m wall, 2 cycle(s))");
++    expect(content).toContain("### Round 2 (1m30s wall, 2 cycle(s))");
++
++    // Round 1 block precedes Round 2 block, and each cycle sits under
++    // its round header.
++    const r1Idx = content.indexOf("### Round 1");
++    const r2Idx = content.indexOf("### Round 2");
++    expect(r1Idx).toBeGreaterThan(-1);
++    expect(r2Idx).toBeGreaterThan(r1Idx);
++    expect(content.indexOf("## pa — c-1a")).toBeGreaterThan(r1Idx);
++    expect(content.indexOf("## pb — c-1b")).toBeGreaterThan(r1Idx);
++    expect(content.indexOf("## pa — c-1a")).toBeLessThan(r2Idx);
++    expect(content.indexOf("## pa — c-2a")).toBeGreaterThan(r2Idx);
++    expect(content.indexOf("## pb — c-2b")).toBeGreaterThan(r2Idx);
++  });
++
++  it("formats round wall via formatDuration (seconds granularity, gs-196)", async () => {
++    // Single round of 2 cycles, max duration 45s — exercises the <1min
++    // path of formatDuration.
++    const ra = makeCycleResult({
++      cycle_id: "c-a",
++      project_id: "p",
++      started_at: "2026-04-18T10:00:00.000Z",
++      ended_at: "2026-04-18T10:00:20.000Z",
++    });
++    const rb = makeCycleResult({
++      cycle_id: "c-b",
++      project_id: "p",
++      started_at: "2026-04-18T10:00:00.000Z",
++      ended_at: "2026-04-18T10:00:45.000Z",
++    });
++    await writeDigest([ra, rb], 1, {
++      digest_dir: "digests",
++      cycle_rounds: [[ra, rb]],
++    });
++
++    const digestDir = join(TEST_DIR, "digests");
++    const files = readdirSync(digestDir);
++    const content = readFileSync(join(digestDir, files[0]), "utf8");
++    expect(content).toContain("### Round 1 (45s wall, 2 cycle(s))");
++  });
+ });
+ 
+ describe("writeDigest narrative (gs-158)", () => {
