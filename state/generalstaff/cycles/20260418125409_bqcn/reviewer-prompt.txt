@@ -1,0 +1,1107 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/projects.ts b/src/projects.ts
+index 0c318d1..8b76b0f 100644
+--- a/src/projects.ts
++++ b/src/projects.ts
+@@ -4,7 +4,15 @@ import { existsSync } from "fs";
+ import { readFile } from "fs/promises";
+ import { join } from "path";
+ import { spawnSync } from "child_process";
+-import { parse as parseYaml } from "yaml";
++import {
++  parseDocument,
++  LineCounter,
++  YAMLParseError,
++  isMap,
++  isSeq,
++  isScalar,
++  type Document,
++} from "yaml";
+ import { getRootDir } from "./state";
+ import { matchesHandsOff } from "./safety";
+ import type {
+@@ -191,11 +199,91 @@ export interface ConfigValidationResult {
+   errors: string[];
+ }
+ 
++// Source information passed alongside a parsed config so error messages can
++// cite the exact `projects.yaml line X:` where each issue originates and
++// offer a concrete "Likely cause / Fix" hint. Optional — the raw-JS call
++// path (validateConfig with no source) still works for callers that already
++// hold a plain object.
++export interface ConfigSource {
++  doc: Document;
++  lineCounter: LineCounter;
++}
++
++// Project id char set — lowercase alphanumeric plus hyphen/underscore.
++// Must start with an alphanumeric so ids can be used as filesystem
++// fragments (state/<id>/) without shell-escape surprises.
++const VALID_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
++
++function locateProjectLine(
++  source: ConfigSource | undefined,
++  index: number,
++): number | undefined {
++  if (!source) return undefined;
++  const contents = source.doc.contents;
++  if (!contents || !isMap(contents)) return undefined;
++  const projectsPair = contents.items.find(
++    (p) => isScalar(p.key) && p.key.value === "projects",
++  );
++  if (!projectsPair || !projectsPair.value || !isSeq(projectsPair.value)) {
++    return undefined;
++  }
++  const item = projectsPair.value.items[index];
++  const range = (item as { range?: [number, number, number] } | undefined)?.range;
++  if (!range) return undefined;
++  return source.lineCounter.linePos(range[0]).line;
++}
++
++function locateFieldLine(
++  source: ConfigSource | undefined,
++  projectIndex: number,
++  field: string,
++): number | undefined {
++  if (!source) return undefined;
++  const contents = source.doc.contents;
++  if (!contents || !isMap(contents)) return undefined;
++  const projectsPair = contents.items.find(
++    (p) => isScalar(p.key) && p.key.value === "projects",
++  );
++  if (!projectsPair || !projectsPair.value || !isSeq(projectsPair.value)) {
++    return undefined;
++  }
++  const project = projectsPair.value.items[projectIndex];
++  if (!project || !isMap(project)) return undefined;
++  const pair = project.items.find(
++    (p) => isScalar(p.key) && p.key.value === field,
++  );
++  if (!pair) return undefined;
++  const node = (pair.value ?? pair.key) as
++    | { range?: [number, number, number] }
++    | undefined;
++  if (!node?.range) return undefined;
++  return source.lineCounter.linePos(node.range[0]).line;
++}
++
++function formatLine(
++  line: number | undefined,
++  body: string,
++  hint?: string,
++  fix?: string,
++): string {
++  const parts: string[] = [];
++  if (line !== undefined) parts.push(`projects.yaml line ${line}:`);
++  parts.push(body);
++  if (hint) parts.push(`Likely cause: ${hint}.`);
++  if (fix) parts.push(`Fix: ${fix}.`);
++  return parts.join(" ");
++}
++
+ // validateConfig collects ALL configuration errors rather than failing on the
+ // first one. Errors are formatted with a project-id prefix so the user can
+ // fix every issue in one pass rather than running the loader repeatedly.
+ // Path-existence is NOT checked here (machine-specific; use warnProjectPaths).
+-export function validateConfig(raw: unknown): ConfigValidationResult {
++// When a ConfigSource is supplied, error messages additionally cite the
++// source line number and include a "Likely cause / Fix" suggestion.
++export function validateConfig(
++  raw: unknown,
++  source?: ConfigSource,
++): ConfigValidationResult {
+   const errors: string[] = [];
+ 
+   if (!raw || typeof raw !== "object") {
+@@ -216,8 +304,16 @@ export function validateConfig(raw: unknown): ConfigValidationResult {
+   const seenIds = new Set<string>();
+   for (let i = 0; i < rawProjects.length; i++) {
+     const p = rawProjects[i];
++    const projectLine = locateProjectLine(source, i);
+     if (!p || typeof p !== "object") {
+-      errors.push(`project[${i}]: must be an object`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `project[${i}]: must be an object`,
++          "entry is a scalar or null",
++          "replace with a YAML mapping of project fields",
++        ),
++      );
+       continue;
+     }
+     const pr = p as Record<string, unknown>;
+@@ -227,86 +323,290 @@ export function validateConfig(raw: unknown): ConfigValidationResult {
+         : `(unknown-index-${i})`;
+     const prefix = `project "${id}"`;
+ 
++    const idLine = locateFieldLine(source, i, "id") ?? projectLine;
+     if (pr.id === undefined || pr.id === null) {
+-      errors.push(`project[${i}]: id — is required but missing`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `project[${i}]: id — is required but missing`,
++          "project entry has no id: field",
++          'add an id: line as the first field, e.g. `id: my-project`',
++        ),
++      );
+     } else if (typeof pr.id !== "string") {
+-      errors.push(`project[${i}]: id — must be a string, got ${typeof pr.id}`);
++      errors.push(
++        formatLine(
++          idLine,
++          `project[${i}]: id — must be a string, got ${typeof pr.id}`,
++          "id was given as a non-string scalar",
++          "quote the id or use a plain string like `id: my-project`",
++        ),
++      );
+     } else if (pr.id === "") {
+-      errors.push(`project[${i}]: id — must not be empty`);
++      errors.push(
++        formatLine(
++          idLine,
++          `project[${i}]: id — must not be empty`,
++          "id field is present but the value is blank",
++          "pick a short lowercase id, e.g. `id: my-project`",
++        ),
++      );
++    } else if (!VALID_ID_RE.test(pr.id)) {
++      errors.push(
++        formatLine(
++          idLine,
++          `project[${i}]: id — "${pr.id}" has invalid chars (must match [a-z0-9][a-z0-9_-]*)`,
++          "id contains uppercase, spaces, punctuation, or starts with a non-alphanumeric",
++          "rename to lowercase ASCII letters/digits with `-` or `_`, e.g. `my-project`",
++        ),
++      );
+     } else if (seenIds.has(pr.id)) {
+-      errors.push(`Duplicate project id: "${pr.id}"`);
++      errors.push(
++        formatLine(
++          idLine,
++          `Duplicate project id: "${pr.id}"`,
++          "the same id appears on two project entries",
++          "rename one entry — ids must be unique across projects:",
++        ),
++      );
+     } else {
+       seenIds.add(pr.id);
+     }
+ 
++    const pathLine = locateFieldLine(source, i, "path") ?? projectLine;
+     if (pr.path === undefined || pr.path === null) {
+-      errors.push(`${prefix}: path — is required but missing`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `${prefix}: path — is required but missing`,
++          "project has no path: field",
++          "add `path: /absolute/path/to/project` pointing at the managed repo",
++        ),
++      );
+     } else if (typeof pr.path !== "string") {
+-      errors.push(`${prefix}: path — must be a string, got ${typeof pr.path}`);
++      errors.push(
++        formatLine(
++          pathLine,
++          `${prefix}: path — must be a string, got ${typeof pr.path}`,
++          "path was given as a list or mapping",
++          "replace with a single absolute path string",
++        ),
++      );
+     } else if (pr.path === "") {
+-      errors.push(`${prefix}: path — must not be empty`);
++      errors.push(
++        formatLine(
++          pathLine,
++          `${prefix}: path — must not be empty`,
++          "path: field is present but blank",
++          "fill in an absolute path to the project root",
++        ),
++      );
+     }
+ 
++    const engLine = locateFieldLine(source, i, "engineer_command") ?? projectLine;
+     if (pr.engineer_command === undefined || pr.engineer_command === null) {
+-      errors.push(`${prefix}: engineer_command — is required but missing`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `${prefix}: engineer_command — is required but missing`,
++          "project has no engineer_command: field",
++          "add `engineer_command: \"bash run_bot.sh ${cycle_budget_minutes}\"` or similar",
++        ),
++      );
+     } else if (typeof pr.engineer_command !== "string") {
+       errors.push(
+-        `${prefix}: engineer_command — must be a string, got ${typeof pr.engineer_command}`,
++        formatLine(
++          engLine,
++          `${prefix}: engineer_command — must be a string, got ${typeof pr.engineer_command}`,
++          "engineer_command was a list/map, not a shell-command string",
++          "replace with a single-line quoted string",
++        ),
+       );
+     } else if (pr.engineer_command === "") {
+-      errors.push(`${prefix}: engineer_command — must not be empty`);
++      errors.push(
++        formatLine(
++          engLine,
++          `${prefix}: engineer_command — must not be empty`,
++          "engineer_command: is blank",
++          "supply the command the dispatcher should run each cycle",
++        ),
++      );
+     }
+ 
++    const verLine =
++      locateFieldLine(source, i, "verification_command") ?? projectLine;
+     if (
+       pr.verification_command === undefined ||
+       pr.verification_command === null
+     ) {
+-      errors.push(`${prefix}: verification_command — is required but missing`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `${prefix}: verification_command — is required but missing`,
++          "project has no verification_command: field",
++          "add a test command, e.g. `verification_command: \"bun test && bun x tsc --noEmit\"`",
++        ),
++      );
+     } else if (typeof pr.verification_command !== "string") {
+       errors.push(
+-        `${prefix}: verification_command — must be a string, got ${typeof pr.verification_command}`,
++        formatLine(
++          verLine,
++          `${prefix}: verification_command — must be a string, got ${typeof pr.verification_command}`,
++          "verification_command was given as a list/map",
++          "replace with a single-line quoted shell command",
++        ),
+       );
+     } else if (pr.verification_command === "") {
+-      errors.push(`${prefix}: verification_command — must not be empty`);
++      errors.push(
++        formatLine(
++          verLine,
++          `${prefix}: verification_command — must not be empty`,
++          "verification_command: is blank",
++          "supply the command that runs the test suite and typechecker",
++        ),
++      );
+     }
+ 
++    const cbLine =
++      locateFieldLine(source, i, "cycle_budget_minutes") ?? projectLine;
+     if (pr.cycle_budget_minutes === undefined || pr.cycle_budget_minutes === null) {
+-      errors.push(`${prefix}: cycle_budget_minutes — is required but missing`);
++      errors.push(
++        formatLine(
++          projectLine,
++          `${prefix}: cycle_budget_minutes — is required but missing`,
++          "project has no cycle_budget_minutes: field",
++          "add `cycle_budget_minutes: 30` (a positive integer)",
++        ),
++      );
+     } else if (typeof pr.cycle_budget_minutes !== "number") {
+       errors.push(
+-        `${prefix}: cycle_budget_minutes — must be a number, got ${typeof pr.cycle_budget_minutes}`,
++        formatLine(
++          cbLine,
++          `${prefix}: cycle_budget_minutes — must be a number, got ${typeof pr.cycle_budget_minutes}`,
++          "value was quoted or given as a non-number",
++          "remove quotes — YAML treats `30` as a number, `\"30\"` as a string",
++        ),
+       );
+     } else if (!Number.isInteger(pr.cycle_budget_minutes)) {
+       errors.push(
+-        `${prefix}: cycle_budget_minutes — must be an integer, got ${pr.cycle_budget_minutes}`,
++        formatLine(
++          cbLine,
++          `${prefix}: cycle_budget_minutes — must be an integer, got ${pr.cycle_budget_minutes}`,
++          "fractional minutes aren't meaningful for cycle budgets",
++          "round to a whole number of minutes",
++        ),
+       );
+     } else if (pr.cycle_budget_minutes <= 0) {
+       errors.push(
+-        `${prefix}: cycle_budget_minutes — must be > 0, got ${pr.cycle_budget_minutes}`,
++        formatLine(
++          cbLine,
++          `${prefix}: cycle_budget_minutes — must be > 0, got ${pr.cycle_budget_minutes}`,
++          "zero or negative cycle budget leaves the bot no time to work",
++          "set a positive integer (typical: 15–45 minutes)",
++        ),
+       );
+     }
+ 
++    const hoLine = locateFieldLine(source, i, "hands_off") ?? projectLine;
+     if (pr.hands_off === undefined || pr.hands_off === null) {
+       errors.push(
+-        `${prefix}: hands_off — is required but missing — Hard Rule #5 requires a non-empty hands-off list`,
++        formatLine(
++          projectLine,
++          `${prefix}: hands_off — is required but missing — Hard Rule #5 requires a non-empty hands-off list`,
++          "project declared without any hands-off protection",
++          "add a `hands_off:` list naming paths the bot must never touch (CLAUDE.md, design docs, secrets)",
++        ),
+       );
+     } else if (!Array.isArray(pr.hands_off)) {
+       errors.push(
+-        `${prefix}: hands_off — must be an array, got ${typeof pr.hands_off}`,
++        formatLine(
++          hoLine,
++          `${prefix}: hands_off — must be an array, got ${typeof pr.hands_off}`,
++          "hands_off was given as a scalar/map instead of a list",
++          "use YAML list form: `hands_off:\\n  - secret/\\n  - CLAUDE.md`",
++        ),
+       );
+     } else if (pr.hands_off.length === 0) {
+       errors.push(
+-        `${prefix}: hands_off — must not be empty — Hard Rule #5 requires at least one entry`,
++        formatLine(
++          hoLine,
++          `${prefix}: hands_off — must not be empty — Hard Rule #5 requires at least one entry`,
++          "hands_off was set to [] which defeats the protection",
++          "add at least one glob pattern like `CLAUDE.md` or `src/safety.ts`",
++        ),
+       );
++    } else {
++      // Per-entry sanity checks. An entry that isn't a string, is empty, is
++      // an absolute path, or contains a `..` traversal is almost certainly a
++      // typo — matchesHandsOff globbing will silently fail to match at
++      // cycle time, which is exactly the kind of bug Hard Rule #5 exists to
++      // prevent.
++      for (let j = 0; j < pr.hands_off.length; j++) {
++        const entry = pr.hands_off[j];
++        const entryLine = hoLine; // list items share the outer field's line
++        if (typeof entry !== "string") {
++          errors.push(
++            formatLine(
++              entryLine,
++              `${prefix}: hands_off[${j}] — must be a string, got ${typeof entry}`,
++              "list contains a non-string entry (null, number, or map)",
++              "replace with a glob pattern string",
++            ),
++          );
++        } else if (entry === "" || entry.trim() === "") {
++          errors.push(
++            formatLine(
++              entryLine,
++              `${prefix}: hands_off[${j}] — entry must not be empty or whitespace`,
++              "an empty string matches nothing",
++              "remove the empty entry or replace it with a real glob pattern",
++            ),
++          );
++        } else if (
++          entry.startsWith("/") ||
++          /^[A-Za-z]:[\\/]/.test(entry)
++        ) {
++          errors.push(
++            formatLine(
++              entryLine,
++              `${prefix}: hands_off[${j}] — "${entry}" looks like an absolute path, expected a repo-relative glob`,
++              "hands-off patterns are matched against repo-relative paths",
++              "drop the leading slash or drive letter, e.g. use `src/safety.ts` not `/src/safety.ts`",
++            ),
++          );
++        } else if (entry.includes("..")) {
++          errors.push(
++            formatLine(
++              entryLine,
++              `${prefix}: hands_off[${j}] — "${entry}" contains \`..\` traversal`,
++              "parent-directory traversals don't make sense for repo-scoped patterns",
++              "remove the `..` — hands-off paths are already repo-root-relative",
++            ),
++          );
++        }
++      }
+     }
+ 
++    const brLine = locateFieldLine(source, i, "branch") ?? projectLine;
+     if (pr.branch !== undefined && pr.branch !== null) {
+       if (typeof pr.branch !== "string") {
+         errors.push(
+-          `${prefix}: branch — must be a string, got ${typeof pr.branch}`,
++          formatLine(
++            brLine,
++            `${prefix}: branch — must be a string, got ${typeof pr.branch}`,
++            "branch was given as a non-string value",
++            "set `branch: bot/work` or omit the field to use the default",
++          ),
+         );
+       } else if (pr.branch.trim() === "") {
+-        errors.push(`${prefix}: branch — must be a non-empty string if specified`);
++        errors.push(
++          formatLine(
++            brLine,
++            `${prefix}: branch — must be a non-empty string if specified`,
++            "branch: is present but blank",
++            "remove the line to accept the `bot/work` default, or name a real branch",
++          ),
++        );
+       }
+     }
+   }
+@@ -318,8 +618,8 @@ export function validateConfig(raw: unknown): ConfigValidationResult {
+ // one per line, with a project-id prefix. Intended for pre-flight
+ // validation before a session starts so the operator sees every problem
+ // at once rather than iterating on a fail-first loader.
+-export function assertValidConfig(raw: unknown): void {
+-  const { errors } = validateConfig(raw);
++export function assertValidConfig(raw: unknown, source?: ConfigSource): void {
++  const { errors } = validateConfig(raw, source);
+   if (errors.length === 0) return;
+   const header =
+     errors.length === 1
+@@ -329,6 +629,54 @@ export function assertValidConfig(raw: unknown): void {
+   throw new Error([header, ...lines].join("\n"));
+ }
+ 
++// Convert a YAMLParseError (from `yaml`'s Document.errors) into a single
++// operator-friendly message in our standard "projects.yaml line X:" format.
++// Message picks a hint tailored to the error code when we have one, and
++// falls back to a generic indentation/colons hint otherwise.
++function formatParseError(err: YAMLParseError): string {
++  const line = err.linePos?.[0]?.line;
++  // YAML's own message often includes a "at line X, column Y" suffix —
++  // strip it so our "projects.yaml line X:" prefix doesn't duplicate.
++  const core = err.message
++    .replace(/\s*at line \d+, column \d+:?[\s\S]*$/i, "")
++    .trim();
++  const hints: Record<string, { hint: string; fix: string }> = {
++    BAD_INDENT: {
++      hint: "indentation is inconsistent with the surrounding block",
++      fix: "use the same number of leading spaces as sibling keys (no tabs)",
++    },
++    TAB_AS_INDENT: {
++      hint: "YAML forbids tabs as indentation",
++      fix: "replace the leading tab(s) with spaces",
++    },
++    MISSING_CHAR: {
++      hint: "a required character (usually `:` or `-`) is missing",
++      fix: "add the missing colon after a mapping key, or `-` before a list item",
++    },
++    UNEXPECTED_TOKEN: {
++      hint: "an unexpected character or token appeared where a key or value was expected",
++      fix: "check for stray quotes, misplaced `-`, or a missing blank line",
++    },
++    BAD_SCALAR_START: {
++      hint: "value starts with a reserved YAML character (`@`, `` ` ``, etc.)",
++      fix: "quote the value, e.g. `field: \"@something\"`",
++    },
++    DUPLICATE_KEY: {
++      hint: "the same key appears twice in the same mapping",
++      fix: "remove the duplicate or rename one of the keys",
++    },
++    BLOCK_AS_IMPLICIT_KEY: {
++      hint: "a block-style value was used where a single-line key is required",
++      fix: "put the value on the same line as the key, or quote the whole key",
++    },
++  };
++  const h = hints[err.code] ?? {
++    hint: `YAML syntax error (${err.code})`,
++    fix: "check indentation, missing colons, and unquoted special characters around this line",
++  };
++  return formatLine(line, core, h.hint, h.fix);
++}
++
+ function validateDispatcher(
+   raw: Record<string, unknown> | undefined,
+ ): DispatcherConfig {
+@@ -431,11 +779,27 @@ export async function loadProjectsYaml(
+   }
+ 
+   const raw = await readFile(filePath, "utf8");
+-  const parsed = parseYaml(raw) as Record<string, unknown>;
++
++  // parseDocument + LineCounter gives us per-node source positions so
++  // validation errors can cite `projects.yaml line X:`. Parse errors
++  // themselves are collected on `doc.errors` rather than thrown, so we
++  // can batch-reformat them in our standard format before surfacing.
++  const lineCounter = new LineCounter();
++  const doc = parseDocument(raw, { lineCounter });
++  if (doc.errors.length > 0) {
++    const messages = doc.errors.map((e) => formatParseError(e));
++    const header =
++      messages.length === 1
++        ? "Invalid projects.yaml:"
++        : `Invalid projects.yaml (${messages.length} errors):`;
++    const lines = messages.map((m) => `  - ${m}`);
++    throw new Error([header, ...lines].join("\n"));
++  }
++  const parsed = doc.toJS() as Record<string, unknown>;
+ 
+   // Collect ALL config errors first so the operator sees every issue at
+   // once rather than iterating on a fail-first loader.
+-  assertValidConfig(parsed);
++  assertValidConfig(parsed, { doc, lineCounter });
+ 
+   const rawProjects = parsed.projects as Record<string, unknown>[];
+   const projects = rawProjects.map(validateProject);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ddbd332..43660c8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1086,7 +1086,7 @@
+   {
+     "id": "gs-181",
+     "title": "Improve src/projects.ts parse error messages to cite line numbers and suggest fixes. Today's behavior: a malformed projects.yaml gives a generic YAML parse error pointing at the wrong line (the `yaml` library's column-counting is off-by-one in some cases per its own docs). Goal: when parsing fails, walk the parsed AST (or fall back to the raw error from `yaml`) and produce a message of the form: `projects.yaml line X: <specific issue>. Likely cause: <hint>. Fix: <suggested edit>.` Common cases to handle: missing required field (id, path, hands_off), hands_off list empty (Hard Rule #5 violation), hands_off path entry that doesn't look like a glob, project id with invalid chars, duplicate project id. At least 5 fixture-based tests covering these cases. Should pass under `bun test && bun x tsc --noEmit`.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   },
+   {
+diff --git a/tests/projects.test.ts b/tests/projects.test.ts
+index b69f63d..d035591 100644
+--- a/tests/projects.test.ts
++++ b/tests/projects.test.ts
+@@ -636,3 +636,189 @@ describe("getProject", () => {
+   });
+ });
+ 
++// Fixture-based tests for the per-line / per-cause / per-fix error format
++// added for gs-181. Each case exercises a common misconfiguration and asserts
++// the message cites the right source line plus a concrete remediation hint.
++describe("projects.yaml parse-error diagnostics (line + cause + fix)", () => {
++  it("missing hands_off cites its project line and suggests adding a list", async () => {
++    const path = writeYaml(
++      "diag-missing-handsoff.yaml",
++      `projects:
++  - id: missing-ho
++    path: /tmp/test
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 2:/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/hands_off/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Likely cause:/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:/);
++    cleanup();
++  });
++
++  it("empty hands_off cites the hands_off line (not the project line)", async () => {
++    const path = writeYaml(
++      "diag-empty-handsoff.yaml",
++      `projects:
++  - id: empty-ho
++    path: /tmp/test
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: []
++`,
++    );
++    // hands_off is on line 8 (1-indexed, counting the `projects:` line).
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 8:/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/must not be empty/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(
++      /Fix: add at least one glob/,
++    );
++    cleanup();
++  });
++
++  it("missing id cites the project line and suggests adding id:", async () => {
++    const path = writeYaml(
++      "diag-missing-id.yaml",
++      `projects:
++  - path: /tmp/no-id
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [x]
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 2:/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/id — is required but missing/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix: add an id:/);
++    cleanup();
++  });
++
++  it("invalid id chars name the offending id and suggest a rename", async () => {
++    const path = writeYaml(
++      "diag-bad-id.yaml",
++      `projects:
++  - id: My Project!
++    path: /tmp/bad-id
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [x]
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/"My Project!"/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/invalid chars/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/[a-z0-9_-]/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:.*rename/i);
++    cleanup();
++  });
++
++  it("duplicate project id is flagged with hint + fix", async () => {
++    const path = writeYaml(
++      "diag-dup.yaml",
++      `projects:
++  - id: twice
++    path: /a
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [x]
++  - id: twice
++    path: /b
++    priority: 2
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [y]
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Duplicate project id: "twice"/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:.*rename/i);
++    // The duplicate's line is where the second `id: twice` appears (line 9 —
++    // yaml's scalar range points at the value position, which lines up with
++    // the `id:` key line on the second project entry).
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 9:/);
++    cleanup();
++  });
++
++  it("non-glob hands_off entries (absolute path, `..`, empty, non-string) are flagged", async () => {
++    const path = writeYaml(
++      "diag-nonglob-ho.yaml",
++      `projects:
++  - id: bad-globs
++    path: /tmp/bad-globs
++    priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off:
++      - /etc/passwd
++      - "../escape"
++      - ""
++      - 42
++`,
++    );
++    const result = loadProjectsYaml(path).catch((e) => (e as Error).message);
++    const msg = await result;
++    expect(msg).toContain("absolute path");
++    expect(msg).toContain("/etc/passwd");
++    expect(msg).toContain("traversal");
++    expect(msg).toContain("empty or whitespace");
++    expect(msg).toContain("must be a string");
++    // Each entry-level error cites the hands_off list's source line (the
++    // list starts on line 9 where its first item appears).
++    expect(msg).toMatch(/projects\.yaml line 9:/);
++    cleanup();
++  });
++
++  it("YAML syntax error (bad indent) is reformatted with line + hint + fix", async () => {
++    // Mixing indents inside a single mapping triggers BAD_INDENT.
++    const path = writeYaml(
++      "diag-bad-indent.yaml",
++      `projects:
++  - id: bad-yaml
++    path: /tmp/x
++   priority: 1
++    engineer_command: "echo"
++    verification_command: "echo"
++    cycle_budget_minutes: 30
++    hands_off: [x]
++`,
++    );
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Invalid projects\.yaml/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line \d+:/);
++    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:/);
++    cleanup();
++  });
++
++  it("validateConfig without source produces plain (no-line) messages", () => {
++    // Back-compat check: callers that don't hand in a ConfigSource still
++    // get readable errors, just without the `projects.yaml line X:` prefix.
++    const { errors } = validateConfig({
++      projects: [
++        {
++          id: "no-source",
++          path: "/tmp",
++          priority: 1,
++          engineer_command: "echo",
++          verification_command: "echo",
++          cycle_budget_minutes: 30,
++          hands_off: [],
++        },
++      ],
++    });
++    expect(errors.length).toBeGreaterThanOrEqual(1);
++    expect(errors[0]).not.toContain("projects.yaml line");
++    expect(errors[0]).toContain("hands_off");
++    expect(errors[0]).toContain("Hard Rule #5");
++  });
++});
++
+
+
+Diff summary: src/projects.ts               | 422 +++++++++++++++++++++++++++++++++++++++---
+ state/generalstaff/tasks.json |   2 +-
+ tests/projects.test.ts        | 186 +++++++++++++++++++
+ 3 files changed, 580 insertions(+), 30 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-18T13:05:25.440Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260418_130613.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130613.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_130614.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
