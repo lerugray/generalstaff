@@ -636,3 +636,189 @@ describe("getProject", () => {
   });
 });
 
+// Fixture-based tests for the per-line / per-cause / per-fix error format
+// added for gs-181. Each case exercises a common misconfiguration and asserts
+// the message cites the right source line plus a concrete remediation hint.
+describe("projects.yaml parse-error diagnostics (line + cause + fix)", () => {
+  it("missing hands_off cites its project line and suggests adding a list", async () => {
+    const path = writeYaml(
+      "diag-missing-handsoff.yaml",
+      `projects:
+  - id: missing-ho
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 2:/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/hands_off/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Hard Rule #5/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Likely cause:/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:/);
+    cleanup();
+  });
+
+  it("empty hands_off cites the hands_off line (not the project line)", async () => {
+    const path = writeYaml(
+      "diag-empty-handsoff.yaml",
+      `projects:
+  - id: empty-ho
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: []
+`,
+    );
+    // hands_off is on line 8 (1-indexed, counting the `projects:` line).
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 8:/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/must not be empty/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /Fix: add at least one glob/,
+    );
+    cleanup();
+  });
+
+  it("missing id cites the project line and suggests adding id:", async () => {
+    const path = writeYaml(
+      "diag-missing-id.yaml",
+      `projects:
+  - path: /tmp/no-id
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 2:/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/id — is required but missing/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix: add an id:/);
+    cleanup();
+  });
+
+  it("invalid id chars name the offending id and suggest a rename", async () => {
+    const path = writeYaml(
+      "diag-bad-id.yaml",
+      `projects:
+  - id: My Project!
+    path: /tmp/bad-id
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"My Project!"/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/invalid chars/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/[a-z0-9_-]/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:.*rename/i);
+    cleanup();
+  });
+
+  it("duplicate project id is flagged with hint + fix", async () => {
+    const path = writeYaml(
+      "diag-dup.yaml",
+      `projects:
+  - id: twice
+    path: /a
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+  - id: twice
+    path: /b
+    priority: 2
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [y]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Duplicate project id: "twice"/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:.*rename/i);
+    // The duplicate's line is where the second `id: twice` appears (line 9 —
+    // yaml's scalar range points at the value position, which lines up with
+    // the `id:` key line on the second project entry).
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line 9:/);
+    cleanup();
+  });
+
+  it("non-glob hands_off entries (absolute path, `..`, empty, non-string) are flagged", async () => {
+    const path = writeYaml(
+      "diag-nonglob-ho.yaml",
+      `projects:
+  - id: bad-globs
+    path: /tmp/bad-globs
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - /etc/passwd
+      - "../escape"
+      - ""
+      - 42
+`,
+    );
+    const result = loadProjectsYaml(path).catch((e) => (e as Error).message);
+    const msg = await result;
+    expect(msg).toContain("absolute path");
+    expect(msg).toContain("/etc/passwd");
+    expect(msg).toContain("traversal");
+    expect(msg).toContain("empty or whitespace");
+    expect(msg).toContain("must be a string");
+    // Each entry-level error cites the hands_off list's source line (the
+    // list starts on line 9 where its first item appears).
+    expect(msg).toMatch(/projects\.yaml line 9:/);
+    cleanup();
+  });
+
+  it("YAML syntax error (bad indent) is reformatted with line + hint + fix", async () => {
+    // Mixing indents inside a single mapping triggers BAD_INDENT.
+    const path = writeYaml(
+      "diag-bad-indent.yaml",
+      `projects:
+  - id: bad-yaml
+    path: /tmp/x
+   priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off: [x]
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Invalid projects\.yaml/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/projects\.yaml line \d+:/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/Fix:/);
+    cleanup();
+  });
+
+  it("validateConfig without source produces plain (no-line) messages", () => {
+    // Back-compat check: callers that don't hand in a ConfigSource still
+    // get readable errors, just without the `projects.yaml line X:` prefix.
+    const { errors } = validateConfig({
+      projects: [
+        {
+          id: "no-source",
+          path: "/tmp",
+          priority: 1,
+          engineer_command: "echo",
+          verification_command: "echo",
+          cycle_budget_minutes: 30,
+          hands_off: [],
+        },
+      ],
+    });
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors[0]).not.toContain("projects.yaml line");
+    expect(errors[0]).toContain("hands_off");
+    expect(errors[0]).toContain("Hard Rule #5");
+  });
+});
+
