@@ -1,0 +1,531 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the raybrain project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/raybrain/loaders/__init__.py b/src/raybrain/loaders/__init__.py
+new file mode 100644
+index 0000000..27ff6bd
+--- /dev/null
++++ b/src/raybrain/loaders/__init__.py
+@@ -0,0 +1,11 @@
++"""Source-type adapters (skeleton.md §3).
++
++Each loader implements :class:`SourceLoader` for a specific raw-source
++shape (plain markdown, PDF, mbox, etc.). Phase 1 ships only the
++plain-markdown loader as the proof-shape.
++"""
++
++from raybrain.loaders.base import SourceDocument, SourceLoader
++from raybrain.loaders.plain_markdown import PlainMarkdownLoader
++
++__all__ = ["PlainMarkdownLoader", "SourceDocument", "SourceLoader"]
+diff --git a/src/raybrain/loaders/base.py b/src/raybrain/loaders/base.py
+new file mode 100644
+index 0000000..d1fd103
+--- /dev/null
++++ b/src/raybrain/loaders/base.py
+@@ -0,0 +1,56 @@
++"""Abstract loader interface (skeleton.md §3).
++
++Every source type implements :class:`SourceLoader` so the ingest
++pipeline is uniform across raw-source shapes. Concrete loaders
++(plain markdown, PDF, mbox, ...) land per phase.
++
++:class:`SourceDocument` is the canonical parsed shape returned by
++``load()``. It is a plain ``@dataclass`` — not a pydantic model —
++because ``src/raybrain/schema/`` is hands-off policy surface that
++Ray authors separately.
++"""
++
++from __future__ import annotations
++
++from abc import ABC, abstractmethod
++from collections.abc import Iterable
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Any
++
++__all__ = ["SourceDocument", "SourceLoader"]
++
++
++@dataclass
++class SourceDocument:
++    title: str
++    body: str
++    frontmatter: dict[str, Any]
++    line_count: int
++    content_hash: str
++    source_path: Path
++    source_type: str = ""
++    loader_version: str = ""
++    extras: dict[str, Any] = field(default_factory=dict)
++
++
++class SourceLoader(ABC):
++    source_type: str
++    supported_extensions: list[str]
++    version: str
++
++    @abstractmethod
++    def discover(self, corpus_root: Path) -> Iterable[Path]:
++        """Walk *corpus_root* and yield candidate files for this source type."""
++
++    @abstractmethod
++    def load(self, path: Path) -> SourceDocument:
++        """Parse *path* into a canonical :class:`SourceDocument`."""
++
++    @abstractmethod
++    def content_hash(self, raw: bytes) -> str:
++        """Stable hash of *raw* bytes — anchors citation IDs across regens."""
++
++    @abstractmethod
++    def locator_for(self, span: tuple[int, int]) -> str:
++        """Render a span into the ``locator`` half of a ``[ref:<source>:<locator>]``."""
+diff --git a/src/raybrain/loaders/plain_markdown.py b/src/raybrain/loaders/plain_markdown.py
+new file mode 100644
+index 0000000..fbb1389
+--- /dev/null
++++ b/src/raybrain/loaders/plain_markdown.py
+@@ -0,0 +1,87 @@
++"""Plain-markdown loader — Phase 1 proof-shape (skeleton.md §3, CLAUDE.md §4).
++
++Globs ``*.md`` under a corpus root, parses YAML frontmatter via
++``python-frontmatter``, hashes raw bytes for stable citation anchors,
++and infers a title + optional date from frontmatter/filename.
++
++Per CLAUDE.md §3.1, this is the first loader because plain markdown
++is the easiest source shape to prove the full ingest → wiki → query
++pipeline against before fragile formats (PDF, mbox, FB export) land.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import re
++from collections.abc import Iterable
++from pathlib import Path
++
++import frontmatter
++
++from raybrain.loaders.base import SourceDocument, SourceLoader
++
++__all__ = ["PlainMarkdownLoader"]
++
++_FILENAME_YYYY_MM = re.compile(r"(?P<year>\d{4})-(?P<month>\d{2})(?!\d)")
++_H1 = re.compile(r"^\s{0,3}#\s+(?P<title>.+?)\s*#*\s*$", re.MULTILINE)
++
++
++class PlainMarkdownLoader(SourceLoader):
++    source_type = "plain_markdown"
++    supported_extensions = [".md"]
++    version = "1.0"
++
++    def discover(self, corpus_root: Path) -> Iterable[Path]:
++        return sorted(p for p in corpus_root.rglob("*.md") if p.is_file())
++
++    def load(self, path: Path) -> SourceDocument:
++        raw = path.read_bytes()
++        post = frontmatter.loads(raw.decode("utf-8"))
++        body = post.content
++        meta = dict(post.metadata)
++
++        title = self._infer_title(meta, body, path)
++        inferred_date = self._infer_date(meta, path)
++        if inferred_date is not None and "date" not in meta:
++            meta["date"] = inferred_date
++
++        line_count = len(body.splitlines())
++
++        return SourceDocument(
++            title=title,
++            body=body,
++            frontmatter=meta,
++            line_count=line_count,
++            content_hash=self.content_hash(raw),
++            source_path=path,
++            source_type=self.source_type,
++            loader_version=self.version,
++        )
++
++    def content_hash(self, raw: bytes) -> str:
++        return hashlib.sha256(raw).hexdigest()
++
++    def locator_for(self, span: tuple[int, int]) -> str:
++        start, end = span
++        if start < 1 or end < start:
++            raise ValueError(f"invalid span {span!r}: require 1 <= start <= end")
++        return f"lines={start}-{end}"
++
++    @staticmethod
++    def _infer_title(meta: dict, body: str, path: Path) -> str:
++        fm_title = meta.get("title")
++        if isinstance(fm_title, str) and fm_title.strip():
++            return fm_title.strip()
++        m = _H1.search(body)
++        if m:
++            return m.group("title").strip()
++        return path.stem
++
++    @staticmethod
++    def _infer_date(meta: dict, path: Path) -> str | None:
++        if "date" in meta:
++            return None
++        m = _FILENAME_YYYY_MM.search(path.stem)
++        if m:
++            return f"{m.group('year')}-{m.group('month')}"
++        return None
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index 62e58b8..5244cf4 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -14,7 +14,7 @@
+   {
+     "id": "rayb-003",
+     "title": "Plain-markdown loader (Phase 1 proof-shape source). CREATE ONLY: src/raybrain/loaders/__init__.py (if not present); src/raybrain/loaders/base.py with abstract SourceLoader class (methods: discover, load, content_hash, locator_for; fields: source_type, supported_extensions, version) per skeleton.md §3; src/raybrain/loaders/plain_markdown.py implementing SourceLoader for *.md files under a given corpus_root: parse YAML frontmatter via python-frontmatter; infer title from frontmatter.title or first H1 or filename stem; infer date from frontmatter.date or filename pattern YYYY-MM; compute content_hash = sha256(raw bytes); locator_for accepts (start_line, end_line) and returns 'lines=N-M'. Return a plain @dataclass SourceDocument (title, body, frontmatter, line_count, content_hash, source_path) — NOT a pydantic schema model (schema/ is hands-off; Ray authors schema models separately). Add tests/integration/__init__.py (if not present); tests/integration/fixtures/mini-corpus/plain-md/*.md with 3 fixture markdown files (SYNTHETIC or PUBLIC DOMAIN content only — never real user corpus); tests/unit/test_plain_markdown_loader.py asserting discovery count, title inference from each source, hash stability. DO NOT CREATE OR MODIFY: src/raybrain/schema/, src/raybrain/privacy/, src/raybrain/policy/ or anything beneath (hands-off); vault/, corpus/, eval/golden/ or anything beneath (hands-off — tests/integration/fixtures/ is fine, it is NOT corpus/); the pydantic schema models (Ray authors those). Expected diff: ~150-200 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/integration/__init__.py b/tests/integration/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/tests/integration/fixtures/mini-corpus/plain-md/fixture-h1-title-2020-03.md b/tests/integration/fixtures/mini-corpus/plain-md/fixture-h1-title-2020-03.md
+new file mode 100644
+index 0000000..c952c6c
+--- /dev/null
++++ b/tests/integration/fixtures/mini-corpus/plain-md/fixture-h1-title-2020-03.md
+@@ -0,0 +1,7 @@
++# H1 Title Wins When No Frontmatter Title
++
++This fixture has no frontmatter, so the first H1 provides the
++title. The filename ``fixture-h1-title-2020-03`` contributes
++``2020-03`` as the inferred date.
++
++Content here is synthetic and carries no real meaning.
+diff --git a/tests/integration/fixtures/mini-corpus/plain-md/fixture-stem-title.md b/tests/integration/fixtures/mini-corpus/plain-md/fixture-stem-title.md
+new file mode 100644
+index 0000000..fd7b404
+--- /dev/null
++++ b/tests/integration/fixtures/mini-corpus/plain-md/fixture-stem-title.md
+@@ -0,0 +1,4 @@
++This fixture has no frontmatter and no H1 heading, so the title
++must fall back to the filename stem: ``fixture-stem-title``.
++
++All text here is synthetic.
+diff --git a/tests/integration/fixtures/mini-corpus/plain-md/fixture-with-frontmatter-title-2019-07.md b/tests/integration/fixtures/mini-corpus/plain-md/fixture-with-frontmatter-title-2019-07.md
+new file mode 100644
+index 0000000..ce86b61
+--- /dev/null
++++ b/tests/integration/fixtures/mini-corpus/plain-md/fixture-with-frontmatter-title-2019-07.md
+@@ -0,0 +1,10 @@
++---
++title: Synthetic Fixture — Frontmatter Title Wins
++date: 2019-07-04
++tags: [synthetic, fixture]
++---
++
++# This H1 Should Be Ignored
++
++This is synthetic fixture content. Any resemblance to real
++journal entries is incidental.
+diff --git a/tests/unit/test_plain_markdown_loader.py b/tests/unit/test_plain_markdown_loader.py
+new file mode 100644
+index 0000000..27d10e2
+--- /dev/null
++++ b/tests/unit/test_plain_markdown_loader.py
+@@ -0,0 +1,103 @@
++"""Tests for :class:`raybrain.loaders.plain_markdown.PlainMarkdownLoader`.
++
++Covers Phase 1 (rayb-003) acceptance shape:
++  * discovery count over the mini-corpus fixture
++  * title inference from frontmatter / H1 / filename stem
++  * content-hash stability across repeated loads
++  * locator rendering to the ``lines=N-M`` grammar
++  * date inference from filename ``YYYY-MM`` pattern
++"""
++
++from __future__ import annotations
++
++import hashlib
++from pathlib import Path
++
++import pytest
++
++from raybrain.loaders import PlainMarkdownLoader, SourceDocument
++
++FIXTURES = (
++    Path(__file__).resolve().parent.parent
++    / "integration"
++    / "fixtures"
++    / "mini-corpus"
++    / "plain-md"
++)
++
++
++@pytest.fixture
++def loader() -> PlainMarkdownLoader:
++    return PlainMarkdownLoader()
++
++
++def _load_by_stem(loader: PlainMarkdownLoader, stem: str) -> SourceDocument:
++    path = FIXTURES / f"{stem}.md"
++    return loader.load(path)
++
++
++def test_discover_finds_three_fixtures(loader: PlainMarkdownLoader) -> None:
++    found = list(loader.discover(FIXTURES))
++    assert len(found) == 3
++    assert all(p.suffix == ".md" for p in found)
++
++
++def test_title_from_frontmatter_wins(loader: PlainMarkdownLoader) -> None:
++    doc = _load_by_stem(loader, "fixture-with-frontmatter-title-2019-07")
++    assert doc.title == "Synthetic Fixture — Frontmatter Title Wins"
++
++
++def test_title_from_first_h1(loader: PlainMarkdownLoader) -> None:
++    doc = _load_by_stem(loader, "fixture-h1-title-2020-03")
++    assert doc.title == "H1 Title Wins When No Frontmatter Title"
++
++
++def test_title_falls_back_to_stem(loader: PlainMarkdownLoader) -> None:
++    doc = _load_by_stem(loader, "fixture-stem-title")
++    assert doc.title == "fixture-stem-title"
++
++
++def test_content_hash_is_sha256_of_raw_bytes(loader: PlainMarkdownLoader) -> None:
++    path = FIXTURES / "fixture-stem-title.md"
++    expected = hashlib.sha256(path.read_bytes()).hexdigest()
++    doc = loader.load(path)
++    assert doc.content_hash == expected
++
++
++def test_content_hash_stable_across_loads(loader: PlainMarkdownLoader) -> None:
++    path = FIXTURES / "fixture-h1-title-2020-03.md"
++    assert loader.load(path).content_hash == loader.load(path).content_hash
++
++
++def test_date_inferred_from_filename_when_frontmatter_lacks_it(
++    loader: PlainMarkdownLoader,
++) -> None:
++    doc = _load_by_stem(loader, "fixture-h1-title-2020-03")
++    assert doc.frontmatter.get("date") == "2020-03"
++
++
++def test_frontmatter_date_not_overwritten(loader: PlainMarkdownLoader) -> None:
++    doc = _load_by_stem(loader, "fixture-with-frontmatter-title-2019-07")
++    assert str(doc.frontmatter["date"]) == "2019-07-04"
++
++
++def test_line_count_matches_body(loader: PlainMarkdownLoader) -> None:
++    doc = _load_by_stem(loader, "fixture-stem-title")
++    assert doc.line_count == len(doc.body.splitlines())
++
++
++def test_locator_for_renders_line_range(loader: PlainMarkdownLoader) -> None:
++    assert loader.locator_for((3, 12)) == "lines=3-12"
++
++
++def test_locator_for_rejects_invalid_span(loader: PlainMarkdownLoader) -> None:
++    with pytest.raises(ValueError):
++        loader.locator_for((0, 5))
++    with pytest.raises(ValueError):
++        loader.locator_for((10, 5))
++
++
++def test_loader_identity_fields(loader: PlainMarkdownLoader) -> None:
++    assert loader.source_type == "plain_markdown"
++    assert ".md" in loader.supported_extensions
++    assert loader.version
+
+
+Diff summary: src/raybrain/loaders/__init__.py                   |  11 +++
+ src/raybrain/loaders/base.py                       |  56 +++++++++++
+ src/raybrain/loaders/plain_markdown.py             |  87 +++++++++++++++++
+ state/raybrain/tasks.json                          |   2 +-
+ tests/integration/__init__.py                      |   0
+ .../plain-md/fixture-h1-title-2020-03.md           |   7 ++
+ .../mini-corpus/plain-md/fixture-stem-title.md     |   4 +
+ .../fixture-with-frontmatter-title-2019-07.md      |  10 ++
+ tests/unit/test_plain_markdown_loader.py           | 103 +++++++++++++++++++++
+ 9 files changed, 279 insertions(+), 1 deletion(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bash verify_command.sh`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bash verify_command.sh
+CWD: C:\Users\rweis\OneDrive\Documents\raybrain\.bot-worktree
+Started: 2026-04-18T15:25:14.685Z
+========================================
+
+All checks passed!
+.................................                                        [100%]
+33 passed in 0.09s
+
+========================================
+Exit code: 0
+Duration: 1.4s
+Ended: 2026-04-18T15:25:16.044Z
+
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `idea.md`
+- `research.md`
+- `hands_off.yaml`
+- `CLAUDE.md`
+- `CLAUDE-AUTONOMOUS.md`
+- `AGENTS.md`
+- `README.md`
+- `.generalstaff-proposal/`
+- `vault/`
+- `raw/`
+- `wiki/`
+- `index.md`
+- `log.md`
+- `*.mbox`
+- `*.mbox.gz`
+- `facebook-export-*/`
+- `music-library.json`
+- `.env`
+- `.env.local`
+- `embeddings.db`
+- `embeddings/`
+- `*.sqlite`
+- `*.duckdb`
+- `src/**/policy/**`
+- `src/**/schema/**`
+- `src/**/privacy/**`
+- `eval/golden/**`
+- `node_modules/`
+- `dist/`
+- `build/`
+- `.venv/`
+- `__pycache__/`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task, no hands-off violations, and the verification command passed with full test coverage.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "rayb-003",
+      "evidence": "The diff includes creation of src/raybrain/loaders/__init__.py, src/raybrain/loaders/base.py, and src/raybrain/loaders/plain_markdown.py which implement the abstract SourceLoader interface and the PlainMarkdownLoader as specified in the task. It also includes test files and fixtures that verify the loader's behavior.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command ran successfully and all tests passed, confirming the implementation meets the task requirements."
+}
