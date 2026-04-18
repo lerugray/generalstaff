@@ -92,6 +92,117 @@ describe("CLI", () => {
     });
   });
 
+  describe("session --project (gs-214)", () => {
+    const PROJECT_FLAG_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "session_project_flag_test",
+    );
+
+    const PROJECT_FLAG_YAML = `
+projects:
+  - id: alpha
+    path: /tmp/generalstaff_test_nonexistent_alpha_xyz
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md
+  - id: beta
+    path: /tmp/generalstaff_test_nonexistent_beta_xyz
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md
+  - id: gamma
+    path: /tmp/generalstaff_test_nonexistent_gamma_xyz
+    priority: 3
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(PROJECT_FLAG_DIR, { recursive: true });
+      writeFileSync(
+        join(PROJECT_FLAG_DIR, "projects.yaml"),
+        PROJECT_FLAG_YAML,
+      );
+    });
+
+    afterEach(() => {
+      rmSync(PROJECT_FLAG_DIR, { recursive: true, force: true });
+    });
+
+    it("--project=X resolves to excludeProjects covering the complement", async () => {
+      const result = await runCli(
+        ["session", "--project=alpha", "--dry-run", "--budget=1"],
+        PROJECT_FLAG_DIR,
+      );
+      expect(result.stdout).toContain("Excluding: beta, gamma");
+      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
+    });
+
+    it("multi-id --project=a,b excludes the rest", async () => {
+      const result = await runCli(
+        ["session", "--project=alpha,gamma", "--dry-run", "--budget=1"],
+        PROJECT_FLAG_DIR,
+      );
+      expect(result.stdout).toContain("Excluding: beta");
+      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
+      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\bgamma\b/);
+    });
+
+    it("--project combined with --exclude-project is a mutex error", async () => {
+      const result = await runCli(
+        ["session", "--project=alpha", "--exclude-project=beta"],
+        PROJECT_FLAG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--project cannot be combined with --exclude-project",
+      );
+    });
+
+    it("unknown id in --project list warns but does not abort", async () => {
+      const result = await runCli(
+        [
+          "session",
+          "--project=alpha,nonexistent_xyz",
+          "--dry-run",
+          "--budget=1",
+        ],
+        PROJECT_FLAG_DIR,
+      );
+      expect(result.stderr).toContain("nonexistent_xyz");
+      expect(result.stderr).toContain(
+        "does not match any registered project",
+      );
+      // alpha was resolved, so only beta + gamma get excluded
+      expect(result.stdout).toContain("Excluding: beta, gamma");
+    });
+
+    it("--help documents --project", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("--project=<id>");
+    });
+  });
+
   describe("no arguments", () => {
     it("prints usage and exits 0", async () => {
       const result = await runCli([]);

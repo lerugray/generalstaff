@@ -1234,11 +1234,12 @@
   {
     "id": "gs-214",
     "title": "Add `--project=<id>[,<id>...]` inverse of --exclude-project. CREATE ONLY: extend `case 'session'` in `src/cli.ts` (add --project option to parseArgs; translate `--project=a,b` into `excludeProjects = all_registered - {a,b}` at session-startup time before runSession is called); extend `--help` output to document the new flag; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/session.ts (the translation happens before runSession); do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Semantic: `--project=a,b` is sugar for `--exclude-project=<all-ids-except-a-and-b>`. Mutually exclusive with --exclude-project — print error `Error: --project cannot be combined with --exclude-project` and exit code 1 if both supplied. Unknown project ids in --project list should warn (don't abort) — mirrors --exclude-project's existing behavior. Motivation: the raybrain bot's handoff message suggested `--project=raybrain` ergonomically (2026-04-18 evening). Currently the only way to run a dedicated single-project session is `--exclude-project=<comma-list-of-everything-else>` which is tedious and error-prone when the registry grows. Tests: (a) --project=X resolves to excludeProjects covering the complement; (b) multi-id --project=a,b; (c) --project+--exclude-project mutex error; (d) unknown id warns; (e) --help shows the new flag. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-18T18:43:00.655Z"
   }
 ]
