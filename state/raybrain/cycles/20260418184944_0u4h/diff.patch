@@ -1,0 +1,549 @@
+diff --git a/src/raybrain/schema/__init__.py b/src/raybrain/schema/__init__.py
+new file mode 100644
+index 0000000..06c83b7
+--- /dev/null
++++ b/src/raybrain/schema/__init__.py
+@@ -0,0 +1,36 @@
++"""Pydantic schema models — mechanical encoding of CLAUDE.md §1-2.
++
++Per CLAUDE.md, every wiki page carries citation anchors and the
++query API enforces co-visibility between synthesized pages and
++their raw citations. These models translate that prose spec into
++runtime-validated Python types.
++"""
++
++from __future__ import annotations
++
++from raybrain.schema.citation import (
++    Citation,
++    LineRangeLocator,
++    Locator,
++    PageLocator,
++    ParaAnchorLocator,
++    TimestampLocator,
++)
++from raybrain.schema.query_result import CoVisibilityViolation, QueryResult
++from raybrain.schema.source_id import SourceId, SourceIdViolation
++from raybrain.schema.wiki_page import Paragraph, WikiPage
++
++__all__ = [
++    "Citation",
++    "CoVisibilityViolation",
++    "LineRangeLocator",
++    "Locator",
++    "PageLocator",
++    "ParaAnchorLocator",
++    "Paragraph",
++    "QueryResult",
++    "SourceId",
++    "SourceIdViolation",
++    "TimestampLocator",
++    "WikiPage",
++]
+diff --git a/src/raybrain/schema/citation.py b/src/raybrain/schema/citation.py
+new file mode 100644
+index 0000000..ebdc8b5
+--- /dev/null
++++ b/src/raybrain/schema/citation.py
+@@ -0,0 +1,112 @@
++"""Citation models — Locator discriminated union + Citation.
++
++CLAUDE.md §1 locator grammar:
++  - ``lines=N-M`` → :class:`LineRangeLocator`
++  - ``page=N`` → :class:`PageLocator`
++  - ``timestamp=HH:MM:SS-HH:MM:SS`` → :class:`TimestampLocator`
++  - ``para=<anchor>`` → :class:`ParaAnchorLocator`
++"""
++
++from __future__ import annotations
++
++import re
++from typing import Annotated, Literal
++
++from pydantic import BaseModel, ConfigDict, Field, field_validator
++
++from raybrain.schema.source_id import SourceId
++
++__all__ = [
++    "Citation",
++    "LineRangeLocator",
++    "Locator",
++    "PageLocator",
++    "ParaAnchorLocator",
++    "TimestampLocator",
++]
++
++
++_TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}$")
++_PARA_ANCHOR_RE = re.compile(r"^[^\]\s]+$")
++
++
++class _LocatorBase(BaseModel):
++    model_config = ConfigDict(frozen=True, extra="forbid")
++
++
++class LineRangeLocator(_LocatorBase):
++    kind: Literal["lines"] = "lines"
++    start: int = Field(ge=1)
++    end: int = Field(ge=1)
++
++    @field_validator("end")
++    @classmethod
++    def _end_ge_start(cls, v: int, info) -> int:
++        start = info.data.get("start")
++        if start is not None and v < start:
++            raise ValueError(f"line range end ({v}) must be >= start ({start})")
++        return v
++
++    def format(self) -> str:
++        return f"lines={self.start}-{self.end}"
++
++
++class PageLocator(_LocatorBase):
++    kind: Literal["page"] = "page"
++    page: int = Field(ge=1)
++
++    def format(self) -> str:
++        return f"page={self.page}"
++
++
++class TimestampLocator(_LocatorBase):
++    kind: Literal["timestamp"] = "timestamp"
++    start: str
++    end: str
++
++    @field_validator("start", "end")
++    @classmethod
++    def _hms(cls, v: str) -> str:
++        if not _TIMESTAMP_RE.fullmatch(v):
++            raise ValueError(f"timestamp {v!r} must match HH:MM:SS")
++        return v
++
++    def format(self) -> str:
++        return f"timestamp={self.start}-{self.end}"
++
++
++class ParaAnchorLocator(_LocatorBase):
++    kind: Literal["para"] = "para"
++    anchor: str
++
++    @field_validator("anchor")
++    @classmethod
++    def _anchor_grammar(cls, v: str) -> str:
++        if not _PARA_ANCHOR_RE.fullmatch(v):
++            raise ValueError(
++                f"para anchor {v!r} must not contain whitespace or `]`"
++            )
++        return v
++
++    def format(self) -> str:
++        return f"para={self.anchor}"
++
++
++Locator = Annotated[
++    LineRangeLocator | PageLocator | TimestampLocator | ParaAnchorLocator,
++    Field(discriminator="kind"),
++]
++
++
++class Citation(BaseModel):
++    """A single citation anchor: source_id + locator + raw excerpt."""
++
++    model_config = ConfigDict(frozen=True, extra="forbid")
++
++    source_id: SourceId
++    locator: Locator
++    excerpt: str
++
++    def render(self) -> str:
++        """Return the inline ``[ref:<source_id>:<locator>]`` form."""
++        return f"[ref:{self.source_id}:{self.locator.format()}]"
+diff --git a/src/raybrain/schema/query_result.py b/src/raybrain/schema/query_result.py
+new file mode 100644
+index 0000000..02741e4
+--- /dev/null
++++ b/src/raybrain/schema/query_result.py
+@@ -0,0 +1,50 @@
++"""QueryResult — pydantic encoding of CLAUDE.md §2.4.
++
++Co-visibility invariant: a query that surfaces a synthesized wiki
++page MUST also surface the raw citations supporting it. A
++``QueryResult`` with ``synthesized_page is not None`` and
++``raw_citations == []`` is rejected at construction time.
++"""
++
++from __future__ import annotations
++
++from pydantic import BaseModel, ConfigDict, model_validator
++
++from raybrain.schema.citation import Citation
++from raybrain.schema.wiki_page import WikiPage
++
++__all__ = ["CoVisibilityViolation", "QueryResult"]
++
++
++class CoVisibilityViolation(Exception):
++    """A QueryResult contains a synthesized page but no raw citations.
++
++    Plain :class:`Exception` (not :class:`ValueError`) so pydantic's
++    ``model_validator`` lets it propagate verbatim instead of wrapping
++    it in :class:`pydantic.ValidationError`.
++    """
++
++
++class QueryResult(BaseModel):
++    """The only return type from the public query entry point.
++
++    Either:
++      * ``synthesized_page`` is None — pure raw-passage hits (or no
++        hits, in which case ``raw_citations`` may also be empty), OR
++      * ``synthesized_page`` is a :class:`WikiPage` AND
++        ``raw_citations`` is non-empty.
++    """
++
++    model_config = ConfigDict(frozen=True, extra="forbid")
++
++    synthesized_page: WikiPage | None
++    raw_citations: list[Citation]
++
++    @model_validator(mode="after")
++    def _enforce_co_visibility(self) -> QueryResult:
++        if self.synthesized_page is not None and len(self.raw_citations) == 0:
++            raise CoVisibilityViolation(
++                "QueryResult has a synthesized_page but raw_citations is empty; "
++                "co-visibility (§2.4) requires citations alongside the page"
++            )
++        return self
+diff --git a/src/raybrain/schema/source_id.py b/src/raybrain/schema/source_id.py
+new file mode 100644
+index 0000000..b6d4338
+--- /dev/null
++++ b/src/raybrain/schema/source_id.py
+@@ -0,0 +1,57 @@
++"""SourceId — the `source_id` half of every citation marker.
++
++CLAUDE.md §1 grammar: ``source_id = [a-z0-9_-]+``. By convention
++the value is the corpus-relative path with ``/`` replaced by ``-``
++and the extension stripped.
++"""
++
++from __future__ import annotations
++
++import re
++from typing import Any
++
++from pydantic import GetCoreSchemaHandler
++from pydantic_core import CoreSchema, core_schema
++
++__all__ = ["SourceId", "SourceIdViolation"]
++
++
++_SOURCE_ID_RE = re.compile(r"^[a-z0-9_-]+$")
++
++
++class SourceIdViolation(ValueError):
++    """Raised when a value does not match the §1 source_id grammar."""
++
++
++class SourceId(str):
++    """A validated source identifier matching ``[a-z0-9_-]+``.
++
++    Subclasses :class:`str` so existing code that joins / formats /
++    compares the value works unchanged; pydantic validation is
++    wired via ``__get_pydantic_core_schema__``.
++    """
++
++    def __new__(cls, value: str) -> SourceId:
++        if not isinstance(value, str):
++            raise SourceIdViolation(
++                f"source_id must be a string, got {type(value).__name__}"
++            )
++        if not _SOURCE_ID_RE.fullmatch(value):
++            raise SourceIdViolation(
++                f"source_id {value!r} does not match grammar [a-z0-9_-]+"
++            )
++        return super().__new__(cls, value)
++
++    @classmethod
++    def __get_pydantic_core_schema__(
++        cls, source_type: Any, handler: GetCoreSchemaHandler
++    ) -> CoreSchema:
++        def _validate(value: Any) -> SourceId:
++            if isinstance(value, cls):
++                return value
++            return cls(value)
++
++        return core_schema.no_info_plain_validator_function(
++            _validate,
++            serialization=core_schema.plain_serializer_function_ser_schema(str),
++        )
+diff --git a/src/raybrain/schema/wiki_page.py b/src/raybrain/schema/wiki_page.py
+new file mode 100644
+index 0000000..5e934ce
+--- /dev/null
++++ b/src/raybrain/schema/wiki_page.py
+@@ -0,0 +1,50 @@
++"""WikiPage + Paragraph — pydantic encoding of CLAUDE.md §2.1.
++
++A :class:`Paragraph` represents a prose block in a wiki page. The
++§2.1 citation-floor invariant: any non-empty prose paragraph must
++carry at least one citation. Headings and code blocks are not
++modeled as Paragraphs — they are exempt by construction.
++"""
++
++from __future__ import annotations
++
++from pydantic import BaseModel, ConfigDict, model_validator
++
++from raybrain.ingest.citation_floor import CitationFloorViolation
++from raybrain.schema.citation import Citation
++from raybrain.schema.source_id import SourceId
++
++__all__ = ["Paragraph", "WikiPage"]
++
++
++class Paragraph(BaseModel):
++    """A prose paragraph in a wiki page.
++
++    Per CLAUDE.md §2.1, any non-empty paragraph must carry at least
++    one citation. Construction with ``text.strip() != ""`` and an
++    empty ``citations`` list raises :class:`CitationFloorViolation`.
++    """
++
++    model_config = ConfigDict(frozen=True, extra="forbid")
++
++    text: str
++    citations: list[Citation]
++
++    @model_validator(mode="after")
++    def _enforce_citation_floor(self) -> Paragraph:
++        if self.text.strip() != "" and len(self.citations) == 0:
++            preview = self.text if len(self.text) <= 120 else self.text[:117] + "..."
++            raise CitationFloorViolation(
++                f"Paragraph has non-empty text but zero citations: {preview!r}"
++            )
++        return self
++
++
++class WikiPage(BaseModel):
++    """A synthesized wiki page composed of cited paragraphs."""
++
++    model_config = ConfigDict(frozen=True, extra="forbid")
++
++    title: str
++    source_ids: list[SourceId]
++    paragraphs: list[Paragraph]
+diff --git a/state/raybrain/tasks.json b/state/raybrain/tasks.json
+index 2faf18d..0b113ae 100644
+--- a/state/raybrain/tasks.json
++++ b/state/raybrain/tasks.json
+@@ -32,7 +32,7 @@
+   {
+     "id": "rayb-006",
+     "title": "Schema models — pydantic encoding of CLAUDE.md rules (flipped to bot-owned 2026-04-18 per hands_off.yaml commit 5003012). CREATE ONLY: src/raybrain/schema/__init__.py; src/raybrain/schema/source_id.py with SourceId pydantic model (string field matching grammar [a-z0-9_-]+ per CLAUDE.md §1 — validator raises on violation); src/raybrain/schema/citation.py with Locator as a discriminated union over `lines=N-M` (LineRangeLocator), `page=N` (PageLocator), `timestamp=HH:MM:SS-HH:MM:SS` (TimestampLocator), `para=<anchor>` (ParaAnchorLocator), plus Citation model (source_id: SourceId, locator: Locator, excerpt: str); src/raybrain/schema/wiki_page.py with Paragraph (text: str, citations: list[Citation]) + validator that raises CitationFloorViolation if `len(citations) == 0` AND text.strip() != '' AND not a heading/code-block, and WikiPage (title, source_ids: list[SourceId], paragraphs: list[Paragraph]); src/raybrain/schema/query_result.py with QueryResult (synthesized_page: Optional[WikiPage], raw_citations: list[Citation]) + validator that raises if synthesized_page is not None AND raw_citations == [] (the §6-4 co-visibility invariant); tests/unit/test_schema_models.py covering: SourceId grammar valid/invalid, each Locator variant parses, Citation roundtrips, citation-floor validator raises on empty citations, co-visibility validator raises on non-None page with empty citations. DO NOT CREATE OR MODIFY: src/raybrain/policy/ (still hands-off); eval/golden/; vault/; corpus/. Do NOT extend the schema beyond what CLAUDE.md §1-2 already specifies — this task encodes the existing prose spec, does not add new fields or invariants. Expected diff: ~200-280 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/unit/test_schema_models.py b/tests/unit/test_schema_models.py
+new file mode 100644
+index 0000000..7c0e379
+--- /dev/null
++++ b/tests/unit/test_schema_models.py
+@@ -0,0 +1,195 @@
++"""Tests for the §1-2 pydantic schema models."""
++
++from __future__ import annotations
++
++import pytest
++from pydantic import ValidationError
++
++from raybrain.ingest.citation_floor import CitationFloorViolation
++from raybrain.schema import (
++    Citation,
++    CoVisibilityViolation,
++    LineRangeLocator,
++    PageLocator,
++    ParaAnchorLocator,
++    Paragraph,
++    QueryResult,
++    SourceId,
++    SourceIdViolation,
++    TimestampLocator,
++    WikiPage,
++)
++
++# ---------------------------------------------------------------------------
++# SourceId — grammar [a-z0-9_-]+
++
++
++@pytest.mark.parametrize(
++    "value",
++    ["plain-md-journal-2016-09", "abc", "a_b-c-1", "0", "x-y-z_42"],
++)
++def test_source_id_valid(value: str) -> None:
++    sid = SourceId(value)
++    assert sid == value
++    assert isinstance(sid, str)
++
++
++@pytest.mark.parametrize(
++    "value",
++    ["", "BadCaps", "has space", "has/slash", "has.dot", "exclaim!"],
++)
++def test_source_id_invalid_raises(value: str) -> None:
++    with pytest.raises(SourceIdViolation):
++        SourceId(value)
++
++
++# ---------------------------------------------------------------------------
++# Locator variants
++
++
++def test_line_range_locator_format() -> None:
++    loc = LineRangeLocator(start=45, end=52)
++    assert loc.format() == "lines=45-52"
++
++
++def test_line_range_locator_end_before_start_raises() -> None:
++    with pytest.raises(ValidationError):
++        LineRangeLocator(start=10, end=5)
++
++
++def test_page_locator_format() -> None:
++    assert PageLocator(page=7).format() == "page=7"
++
++
++def test_page_locator_zero_raises() -> None:
++    with pytest.raises(ValidationError):
++        PageLocator(page=0)
++
++
++def test_timestamp_locator_format() -> None:
++    loc = TimestampLocator(start="00:01:30", end="00:02:45")
++    assert loc.format() == "timestamp=00:01:30-00:02:45"
++
++
++def test_timestamp_locator_bad_format_raises() -> None:
++    with pytest.raises(ValidationError):
++        TimestampLocator(start="1:30", end="2:45")
++
++
++def test_para_anchor_locator_format() -> None:
++    assert ParaAnchorLocator(anchor="msg-id-1234").format() == "para=msg-id-1234"
++
++
++def test_para_anchor_locator_whitespace_raises() -> None:
++    with pytest.raises(ValidationError):
++        ParaAnchorLocator(anchor="has space")
++
++
++# ---------------------------------------------------------------------------
++# Citation roundtrip via render()
++
++
++def test_citation_render_lines() -> None:
++    c = Citation(
++        source_id=SourceId("plain-md-journal-2016-09"),
++        locator=LineRangeLocator(start=45, end=52),
++        excerpt="a third way between victory conditions and scoring",
++    )
++    assert c.render() == "[ref:plain-md-journal-2016-09:lines=45-52]"
++
++
++def test_citation_render_para() -> None:
++    c = Citation(
++        source_id=SourceId("fb-post-archive"),
++        locator=ParaAnchorLocator(anchor="post-987654321"),
++        excerpt="excerpt body",
++    )
++    assert c.render() == "[ref:fb-post-archive:para=post-987654321]"
++
++
++def test_citation_discriminated_union_dispatches_by_kind() -> None:
++    payload = {
++        "source_id": "abc",
++        "locator": {"kind": "page", "page": 3},
++        "excerpt": "x",
++    }
++    c = Citation.model_validate(payload)
++    assert isinstance(c.locator, PageLocator)
++    assert c.locator.page == 3
++
++
++# ---------------------------------------------------------------------------
++# Paragraph citation-floor validator (§2.1)
++
++
++def _cite() -> Citation:
++    return Citation(
++        source_id=SourceId("src-x"),
++        locator=LineRangeLocator(start=1, end=3),
++        excerpt="ex",
++    )
++
++
++def test_paragraph_with_text_and_citation_ok() -> None:
++    p = Paragraph(text="A claim.", citations=[_cite()])
++    assert p.text == "A claim."
++
++
++def test_paragraph_with_text_no_citations_raises_citation_floor() -> None:
++    with pytest.raises(CitationFloorViolation):
++        Paragraph(text="A claim with no anchor.", citations=[])
++
++
++def test_paragraph_blank_text_no_citations_ok() -> None:
++    Paragraph(text="", citations=[])
++    Paragraph(text="   \n  ", citations=[])
++
++
++# ---------------------------------------------------------------------------
++# WikiPage composition
++
++
++def test_wiki_page_composes() -> None:
++    page = WikiPage(
++        title="Asymmetric Objectives",
++        source_ids=[SourceId("plain-md-journal-2016-09")],
++        paragraphs=[Paragraph(text="A claim.", citations=[_cite()])],
++    )
++    assert page.title == "Asymmetric Objectives"
++    assert len(page.paragraphs) == 1
++
++
++# ---------------------------------------------------------------------------
++# QueryResult co-visibility (§2.4)
++
++
++def test_query_result_none_page_empty_citations_ok() -> None:
++    qr = QueryResult(synthesized_page=None, raw_citations=[])
++    assert qr.synthesized_page is None
++    assert qr.raw_citations == []
++
++
++def test_query_result_none_page_with_citations_ok() -> None:
++    qr = QueryResult(synthesized_page=None, raw_citations=[_cite()])
++    assert qr.synthesized_page is None
++    assert len(qr.raw_citations) == 1
++
++
++def test_query_result_page_with_citations_ok() -> None:
++    page = WikiPage(
++        title="t",
++        source_ids=[SourceId("src-x")],
++        paragraphs=[Paragraph(text="A claim.", citations=[_cite()])],
++    )
++    qr = QueryResult(synthesized_page=page, raw_citations=[_cite()])
++    assert qr.synthesized_page is page
++
++
++def test_query_result_page_without_citations_raises_co_visibility() -> None:
++    page = WikiPage(
++        title="t",
++        source_ids=[SourceId("src-x")],
++        paragraphs=[Paragraph(text="A claim.", citations=[_cite()])],
++    )
++    with pytest.raises(CoVisibilityViolation):
++        QueryResult(synthesized_page=page, raw_citations=[])

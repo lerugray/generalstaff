@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task, no hands-off violations, verification command passed, and the diff provides strong evidence for task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "rayb-006",
+      "evidence": "The diff creates all required schema files (source_id.py, citation.py, wiki_page.py, query_result.py) and the init file, along with the test file test_schema_models.py, implementing the full schema as specified in CLAUDE.md §1-2.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming all tests are green. The diff fully implements the schema models as described in the task."
+}
