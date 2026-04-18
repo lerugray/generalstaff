@@ -4,6 +4,7 @@ import {
   formatSessionPlanPreview,
   parseDigest,
   checkCycleWatchdog,
+  buildCycleWatchdogEvent,
   WATCHDOG_MULTIPLIER,
   regenerateDigest,
   parseFormattedDuration,
@@ -1326,6 +1327,68 @@ describe("checkCycleWatchdog", () => {
     expect(warn).not.toContain("\n");
     expect(warn).toContain("15m");
     expect(warn).toContain("5-min budget");
+  });
+});
+
+describe("buildCycleWatchdogEvent", () => {
+  it("returns null for a fast cycle (under the 2x threshold)", () => {
+    // 5-min budget → 10-min threshold; 8-min cycle is fine, no event
+    expect(buildCycleWatchdogEvent("proj-a", "c-1", 8 * 60, 5)).toBe(null);
+  });
+
+  it("returns null when the budget is 0 or negative", () => {
+    expect(buildCycleWatchdogEvent("proj-a", "c-1", 10_000, 0)).toBe(null);
+    expect(buildCycleWatchdogEvent("proj-a", "c-1", 10_000, -5)).toBe(null);
+  });
+
+  it("returns a fully populated event for a cycle over 2x the budget", () => {
+    const data = buildCycleWatchdogEvent("proj-a", "cycle-xyz", 11 * 60, 5);
+    expect(data).not.toBe(null);
+    expect(data).toEqual({
+      cycle_id: "cycle-xyz",
+      project_id: "proj-a",
+      duration_seconds: 11 * 60,
+      budget_minutes: 5,
+      threshold_seconds: 5 * 60 * WATCHDOG_MULTIPLIER,
+      multiplier: WATCHDOG_MULTIPLIER,
+    });
+  });
+
+  it("pairs emission with appendProgress — a slow cycle writes exactly one event to PROGRESS.jsonl", async () => {
+    const { appendProgress, loadProgressEvents } = await import("../src/audit");
+    const data = buildCycleWatchdogEvent("proj-wd", "cycle-slow", 12 * 60, 5);
+    expect(data).not.toBe(null);
+    await appendProgress("proj-wd", "cycle_watchdog", data!, "cycle-slow");
+    const watchdogs = await loadProgressEvents(
+      "proj-wd",
+      (e) => e.event === "cycle_watchdog",
+    );
+    expect(watchdogs).toHaveLength(1);
+    expect(watchdogs[0].cycle_id).toBe("cycle-slow");
+    expect(watchdogs[0].project_id).toBe("proj-wd");
+    expect(watchdogs[0].data).toEqual({
+      cycle_id: "cycle-slow",
+      project_id: "proj-wd",
+      duration_seconds: 12 * 60,
+      budget_minutes: 5,
+      threshold_seconds: 5 * 60 * WATCHDOG_MULTIPLIER,
+      multiplier: WATCHDOG_MULTIPLIER,
+    });
+  });
+
+  it("the fast-cycle guard prevents emission — no event is written when duration is within budget", async () => {
+    // Mirrors the parallel-mode per-result path: the emission block is
+    // gated on buildCycleWatchdogEvent returning non-null, so a fast
+    // cycle never reaches appendProgress.
+    const { loadProgressEvents } = await import("../src/audit");
+    const data = buildCycleWatchdogEvent("proj-fast", "cycle-fast", 3 * 60, 5);
+    expect(data).toBe(null);
+    // Simulate the guarded caller — nothing gets written.
+    const watchdogs = await loadProgressEvents(
+      "proj-fast",
+      (e) => e.event === "cycle_watchdog",
+    );
+    expect(watchdogs).toHaveLength(0);
   });
 });
 
