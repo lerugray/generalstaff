@@ -1166,7 +1166,7 @@
   {
     "id": "gs-201",
     "title": "JSDoc pass on six Phase 4 exports. CREATE ONLY: add JSDoc comment blocks immediately above the six named functions/interfaces listed below. Do not modify their bodies or signatures. DO NOT CREATE: new files; do not refactor; do not touch design docs, safety modules, prompts, scripts, or any hands_off path. Targets and their files: (1) `updateFailureStreak` in `src/session.ts` (document params prev/isFailure/nowMs/maxFailures/windowSeconds + returned shape); (2) `hotReloadProjects` in `src/session.ts` (params cached/loader + return shape including the error field semantics); (3) `computeParallelEfficiency` in `src/session.ts` (params slotIdleSeconds/elapsedSeconds/maxParallelSlots + clamping); (4) `pickNextProjects` in `src/dispatcher.ts` (params projects/config/fleet/skipProjectIds/maxCount + override-file semantics for slot 0); (5) `isTaskBotPickable` in `src/tasks.ts` (params task/handsOff + the tagged-union return); (6) `withReviewerSemaphore` in `src/reviewer.ts` (type param T, params provider/fn, release-on-throw behaviour). Each JSDoc block should be concise — one-line summary + @param + @returns only where non-trivial. No @example unless the call shape is non-obvious. No test changes — JSDoc is doc-only. Verify with `bun x tsc --noEmit` still clean + full `bun test` still green. Expected diff: ~80 lines, all additions.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/session.ts",
