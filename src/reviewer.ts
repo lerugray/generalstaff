@@ -373,38 +373,35 @@ export function parseReviewerResponse(raw: string): {
   const trimmed = stripThinkTags(raw).trim();
 
   // Try direct parse first
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (isReviewerResponse(parsed)) {
-      return { verdict: parsed.verdict, response: parsed, parseError: null };
-    }
-  } catch {
-    // Try extracting JSON from markdown fences
-  }
+  const direct = tryStrictParse(trimmed);
+  if (direct) return { verdict: direct.verdict, response: direct, parseError: null };
 
   // Try extracting from ```json ... ``` or ``` ... ```
   const fenceMatch = trimmed.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) {
-    try {
-      const parsed = JSON.parse(fenceMatch[1]);
-      if (isReviewerResponse(parsed)) {
-        return { verdict: parsed.verdict, response: parsed, parseError: null };
-      }
-    } catch {
-      // Fall through
-    }
+    const fenced = tryStrictParse(fenceMatch[1]);
+    if (fenced) return { verdict: fenced.verdict, response: fenced, parseError: null };
   }
 
   // Try finding first { ... } block
   const braceMatch = trimmed.match(/\{[\s\S]*\}/);
   if (braceMatch) {
-    try {
-      const parsed = JSON.parse(braceMatch[0]);
-      if (isReviewerResponse(parsed)) {
-        return { verdict: parsed.verdict, response: parsed, parseError: null };
-      }
-    } catch {
-      // Fall through
+    const braced = tryStrictParse(braceMatch[0]);
+    if (braced) return { verdict: braced.verdict, response: braced, parseError: null };
+
+    // Permissive fallback (gs-171): across 2026-04-17→18 Qwen emitted
+    // responses where an inner task_evidence item looked like
+    // `"task": "status": "done"` (unescaped colon in a string value).
+    // That single malformed inner field failed the strict parse for
+    // the whole response — silently rolling back cycles that were
+    // actually verified. The decision-critical fields (verdict,
+    // reason, scope_drift_files, hands_off_violations, silent_failures)
+    // are strict; task_evidence and notes are observational and may be
+    // dropped or permissively recovered so the whole response isn't
+    // lost.
+    const permissive = tryPermissiveParse(braceMatch[0]);
+    if (permissive) {
+      return { verdict: permissive.verdict, response: permissive, parseError: null };
     }
   }
 
@@ -414,5 +411,202 @@ export function parseReviewerResponse(raw: string): {
     response: DEFAULT_FAILED_RESPONSE,
     parseError: `Could not parse reviewer response as JSON. Raw response starts with: ${trimmed.slice(0, 200)}`,
   };
+}
+
+function tryStrictParse(s: string): ReviewerResponse | null {
+  try {
+    const parsed = JSON.parse(s);
+    if (isReviewerResponse(parsed)) return parsed;
+  } catch {
+    // Ignore — caller handles fallback
+  }
+  return null;
+}
+
+// Permissive fallback for the reviewer response. Replaces the observational
+// task_evidence (array) and notes (string) field values with safe defaults
+// and re-attempts a strict parse. If the decision-critical fields are
+// well-formed, the response is recovered; after recovery we also try to
+// salvage individual task_evidence items (drop malformed ones). Returns
+// null if verdict still can't be extracted.
+function tryPermissiveParse(src: string): ReviewerResponse | null {
+  // Try progressive relaxation: task_evidence first, then notes.
+  let working = replaceTopLevelValue(src, "task_evidence", "[]");
+  let parsed = working ? tryStrictParse(working) : null;
+  if (!parsed) {
+    const both = replaceTopLevelValue(working ?? src, "notes", '""');
+    parsed = both ? tryStrictParse(both) : null;
+  }
+  if (!parsed) return null;
+
+  // Best-effort recovery of individual task_evidence items.
+  const teSpan = findTopLevelValueSpan(src, "task_evidence");
+  if (teSpan) {
+    const arraySrc = src.slice(teSpan.start, teSpan.end);
+    const items = recoverTaskEvidenceItems(arraySrc);
+    if (items.length > 0) parsed.task_evidence = items;
+  }
+
+  return parsed;
+}
+
+// Walks a string value and returns the index of the character immediately
+// after its closing quote. Caller must pass startIdx pointing at the
+// opening '"'. Handles escape sequences.
+function scanStringEnd(src: string, startIdx: number): number {
+  let i = startIdx + 1;
+  while (i < src.length) {
+    if (src[i] === "\\" && i + 1 < src.length) {
+      i += 2;
+      continue;
+    }
+    if (src[i] === '"') return i + 1;
+    i++;
+  }
+  return -1;
+}
+
+// Scans from a '[' '{' or '"' at startIdx and returns the index immediately
+// after the matching close. String literals are skipped so bracket chars
+// inside strings don't confuse the depth counter. Returns -1 on failure.
+function scanValueEnd(src: string, startIdx: number): number {
+  const open = src[startIdx];
+  if (open === '"') return scanStringEnd(src, startIdx);
+  if (open !== "[" && open !== "{") return -1;
+  const close = open === "[" ? "]" : "}";
+  let depth = 1;
+  let i = startIdx + 1;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    if (ch === '"') {
+      const end = scanStringEnd(src, i);
+      if (end < 0) return -1;
+      i = end;
+      continue;
+    }
+    if (ch === open) depth++;
+    else if (ch === close) depth--;
+    i++;
+  }
+  return depth === 0 ? i : -1;
+}
+
+// Finds the span of a top-level object key's value. The key is matched at
+// depth 1 of the root object only — preceded by '{' or ',' with optional
+// whitespace — so keys appearing inside string values are not mistaken
+// for top-level keys. Returns null if not found or value can't be bounded.
+export function findTopLevelValueSpan(
+  src: string,
+  keyName: string,
+): { start: number; end: number } | null {
+  const escaped = keyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`[{,]\\s*"${escaped}"\\s*:\\s*`, "g");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(src)) !== null) {
+    const valueStart = match.index + match[0].length;
+    if (valueStart >= src.length) return null;
+    const firstCh = src[valueStart];
+    let valueEnd: number;
+    if (firstCh === '"' || firstCh === "[" || firstCh === "{") {
+      valueEnd = scanValueEnd(src, valueStart);
+      if (valueEnd < 0) continue;
+    } else {
+      // Scalar (number/bool/null) — scan until , or }
+      let j = valueStart;
+      while (j < src.length && src[j] !== "," && src[j] !== "}") j++;
+      valueEnd = j;
+    }
+    return { start: valueStart, end: valueEnd };
+  }
+  return null;
+}
+
+// Replaces the value of the named top-level key with `replacement`.
+// Returns null if the key isn't found (caller can fall back to the
+// original source).
+function replaceTopLevelValue(
+  src: string,
+  keyName: string,
+  replacement: string,
+): string | null {
+  const span = findTopLevelValueSpan(src, keyName);
+  if (!span) return null;
+  return src.slice(0, span.start) + replacement + src.slice(span.end);
+}
+
+// Given the raw source of a task_evidence array (including outer []),
+// recover as many individual items as possible. Well-formed items are
+// kept; malformed ones are dropped. Returns [] if nothing can be
+// recovered.
+function recoverTaskEvidenceItems(
+  arraySrc: string,
+): ReviewerResponse["task_evidence"] {
+  const result: ReviewerResponse["task_evidence"] = [];
+  // Locate each top-level '{' inside the array and attempt to parse it.
+  let i = 0;
+  while (i < arraySrc.length) {
+    const ch = arraySrc[i];
+    if (ch === "{") {
+      const end = scanValueEnd(arraySrc, i);
+      if (end < 0) break;
+      const itemSrc = arraySrc.slice(i, end);
+      const item = parseTaskEvidenceItem(itemSrc);
+      if (item) result.push(item);
+      i = end;
+      continue;
+    }
+    if (ch === '"') {
+      // Skip stray strings if any
+      const end = scanStringEnd(arraySrc, i);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+    i++;
+  }
+  return result;
+}
+
+function parseTaskEvidenceItem(
+  itemSrc: string,
+): ReviewerResponse["task_evidence"][number] | null {
+  try {
+    const parsed = JSON.parse(itemSrc);
+    if (isTaskEvidenceItem(parsed)) return parsed;
+  } catch {
+    // Fall through to sanitization
+  }
+  // Sanitize the known bad pattern: `"k": "a": "b"` → `"k": "a: b"`.
+  // This matches the 2026-04-17/18 Qwen failure mode where `"task":
+  // "status": "done"` appeared instead of a bare identifier.
+  const sanitized = itemSrc.replace(
+    /"([A-Za-z_][A-Za-z0-9_]*)"\s*:\s*"([^"\\]*)"\s*:\s*"([^"\\]*)"/,
+    (_m, k: string, a: string, b: string) =>
+      `"${k}": "${a}: ${b}"`,
+  );
+  if (sanitized !== itemSrc) {
+    try {
+      const parsed = JSON.parse(sanitized);
+      if (isTaskEvidenceItem(parsed)) return parsed;
+    } catch {
+      // Give up
+    }
+  }
+  return null;
+}
+
+function isTaskEvidenceItem(
+  v: unknown,
+): v is ReviewerResponse["task_evidence"][number] {
+  if (v == null || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.task === "string" &&
+    typeof o.evidence === "string" &&
+    typeof o.confidence === "string" &&
+    (o.confidence === "high" ||
+      o.confidence === "medium" ||
+      o.confidence === "low")
+  );
 }
 

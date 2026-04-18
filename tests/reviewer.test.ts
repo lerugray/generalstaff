@@ -130,6 +130,181 @@ describe("parseReviewerResponse", () => {
     expect(result.response?.reason).toBe("All tasks completed correctly");
     expect(result.parseError).toBeNull();
   });
+
+  // gs-171: regression tests for the 2026-04-17/18 Qwen failure mode
+  // where `"task": "status": "done"` (unescaped colon) in a
+  // task_evidence item failed the strict parse, silently rolling back
+  // cycles that were actually verified. The decision-critical fields
+  // must still be extracted; task_evidence is observational and may
+  // drop malformed items.
+  describe("permissive recovery for malformed task_evidence (gs-171)", () => {
+    // Verbatim-shaped fixture from
+    // state/generalstaff/cycles/20260417011019_86ct/reviewer-response.txt
+    const FIXTURE_86CT = `{
+  "verdict": "verified",
+  "reason": "All changes are scoped to the claimed task of improving error handling in tasks loading, with no hands-off violations and full evidence of task completion.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "status": "done",
+      "evidence": "The diff shows the addition of TasksLoadError class in tasks.ts, enhanced error handling in loadTasks function to throw typed errors, updated CLI commands to catch and handle TasksLoadError, and new tests covering malformed JSON and non-array JSON structures.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command ran successfully (exit code 0) and all changes are directly related to the claimed task of improving error handling in tasks loading. The tests added cover the specific error cases mentioned in the task."
+}`;
+
+    // Verbatim-shaped fixture from
+    // state/generalstaff/cycles/20260418005225_tzrd/reviewer-response.txt
+    const FIXTURE_TZRD = `{
+  "verdict": "verified",
+  "reason": "All changes in the diff are directly related to implementing the 'generalstaff register' CLI command, with no scope drift or hands-off violations, and the verification command passed successfully.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "status": "done",
+      "evidence": "The diff implements the register command including CLI parsing, validation, file operations, and tests.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command returned exit code 0."
+}`;
+
+    it("recovers verdict=verified from 20260417011019_86ct fixture", () => {
+      const result = parseReviewerResponse(FIXTURE_86CT);
+      expect(result.verdict).toBe("verified");
+      expect(result.response?.verdict).toBe("verified");
+      expect(result.response?.reason).toContain("improving error handling");
+      expect(result.response?.scope_drift_files).toEqual([]);
+      expect(result.response?.hands_off_violations).toEqual([]);
+      expect(result.response?.silent_failures).toEqual([]);
+      expect(result.parseError).toBeNull();
+    });
+
+    it("recovers verdict=verified from 20260418005225_tzrd fixture", () => {
+      const result = parseReviewerResponse(FIXTURE_TZRD);
+      expect(result.verdict).toBe("verified");
+      expect(result.response?.verdict).toBe("verified");
+      expect(result.response?.reason).toContain("register");
+      expect(result.response?.scope_drift_files).toEqual([]);
+      expect(result.response?.hands_off_violations).toEqual([]);
+      expect(result.parseError).toBeNull();
+    });
+
+    it("salvages malformed task_evidence via known-pattern sanitization", () => {
+      // The fixture's malformed `"task": "status": "done"` should be
+      // recovered as `task: "status: done"` so the audit log is not lost.
+      const result = parseReviewerResponse(FIXTURE_86CT);
+      expect(result.response?.task_evidence.length).toBe(1);
+      const item = result.response?.task_evidence[0];
+      expect(item?.task).toBe("status: done");
+      expect(item?.confidence).toBe("high");
+    });
+
+    it("preserves decision-critical fields even when both task_evidence and notes are malformed", () => {
+      // Edge case: task_evidence is malformed AND notes contains a raw
+      // newline that strict JSON would reject. Permissive fallback
+      // should still extract verdict etc.
+      const raw = `{
+  "verdict": "verification_failed",
+  "reason": "Tests failed on the new code path",
+  "scope_drift_files": ["src/unrelated.ts"],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "status": "done",
+      "evidence": "nope",
+      "confidence": "low"
+    }
+  ],
+  "silent_failures": ["tsc exit 1"],
+  "notes": "notes with
+raw newline which breaks strict JSON"
+}`;
+      const result = parseReviewerResponse(raw);
+      expect(result.verdict).toBe("verification_failed");
+      expect(result.response?.verdict).toBe("verification_failed");
+      expect(result.response?.reason).toContain("Tests failed");
+      expect(result.response?.scope_drift_files).toEqual(["src/unrelated.ts"]);
+      expect(result.response?.silent_failures).toEqual(["tsc exit 1"]);
+      expect(result.parseError).toBeNull();
+    });
+
+    it("drops unrecoverable task_evidence items but keeps well-formed siblings", () => {
+      const raw = `{
+  "verdict": "verified",
+  "reason": "ok",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-001",
+      "evidence": "looks good",
+      "confidence": "high"
+    },
+    {
+      "task": "status": "done",
+      "evidence": "broken inner",
+      "confidence": "medium"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "clean"
+}`;
+      const result = parseReviewerResponse(raw);
+      expect(result.verdict).toBe("verified");
+      expect(result.response?.task_evidence.length).toBe(2);
+      expect(result.response?.task_evidence[0].task).toBe("gs-001");
+      // Second item was sanitized
+      expect(result.response?.task_evidence[1].task).toBe("status: done");
+      expect(result.parseError).toBeNull();
+    });
+
+    it("still fails loudly when verdict itself cannot be recovered", () => {
+      // A response where verdict is malformed (not one of the 3 valid
+      // values) must still fail — permissive recovery is not a license
+      // to fabricate a verdict.
+      const raw = `{
+  "verdict": "looks_good_to_me",
+  "reason": "ok",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [],
+  "silent_failures": [],
+  "notes": "x"
+}`;
+      const result = parseReviewerResponse(raw);
+      expect(result.verdict).toBe("verification_failed");
+      expect(result.parseError).not.toBeNull();
+    });
+
+    it("does not weaken scope_drift_files strictness (must remain array-of-string)", () => {
+      // If scope_drift_files is malformed as a non-array, permissive
+      // recovery must NOT succeed — this is a decision-critical field.
+      const raw = `{
+  "verdict": "verified",
+  "reason": "ok",
+  "scope_drift_files": "src/foo.ts",
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "status": "done",
+      "evidence": "ok",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "x"
+}`;
+      const result = parseReviewerResponse(raw);
+      expect(result.verdict).toBe("verification_failed");
+      expect(result.parseError).not.toBeNull();
+    });
+  });
 });
 
 describe("invokeOpenRouterReviewer", () => {

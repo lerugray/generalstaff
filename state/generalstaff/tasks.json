@@ -1025,7 +1025,7 @@
   {
     "id": "gs-171",
     "title": "Harden `src/reviewer.ts` JSON parser to tolerate unescaped inner content in `task_evidence[]` without false-negative rollback. Context: across 2026-04-17→18 (24h window) ten cycles rolled back with `reason: \"reviewer response was not valid JSON\"` — every sampled failure was a `verdict: \"verified\"` response where Qwen emitted `\"task\": \"status\": \"done\"` (unescaped inner colon). The verification gate's five decision-critical fields (`verdict`, `scope_drift_files`, `hands_off_violations`, `silent_failures`, and a usable `reason`) must be extracted strictly; the observational `task_evidence[]` and `notes` fields must be extracted permissively (drop malformed items, don't fail the whole response). Fail LOUD only if `verdict` itself cannot be recovered. Add tests with fixtures drawn from the archived failing responses under state/generalstaff/cycles/20260417011019_86ct/ and 20260418005225_tzrd/ — the parser must produce `verified` on these inputs. Do NOT weaken scope-drift / hands-off strictness. See DESIGN.md §v4 and research-notes.md §2026-04-18 for full rationale.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
