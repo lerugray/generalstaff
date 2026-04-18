@@ -1,5 +1,11 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { scoreProjects, shouldChain, pickNextProject, estimateSessionPlan } from "../src/dispatcher";
+import {
+  scoreProjects,
+  shouldChain,
+  pickNextProject,
+  pickNextProjects,
+  estimateSessionPlan,
+} from "../src/dispatcher";
 import { setRootDir } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
@@ -282,6 +288,144 @@ describe("pickNextProject", () => {
     expect(result).not.toBeNull();
     expect(result!.project.id).toBe("proj-a");
     expect(result!.reason).toContain("picker");
+  });
+});
+
+describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
+  beforeEach(() => {
+    mkdirSync(TEST_DIR, { recursive: true });
+    setRootDir(TEST_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  });
+
+  it("maxCount=0 returns an empty array", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "a", priority: 1 }),
+      makeProject({ id: "b", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 0);
+    expect(picks).toEqual([]);
+  });
+
+  it("maxCount=1 matches pickNextProject (back-compat for sequential dispatch)", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "low-pri", priority: 5 }),
+      makeProject({ id: "high-pri", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 1);
+    expect(picks.length).toBe(1);
+    expect(picks[0].project.id).toBe("high-pri");
+    expect(picks[0].reason).toContain("picker");
+  });
+
+  it("maxCount=N returns up to N distinct picks in score order", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "a", priority: 1 }),
+      makeProject({ id: "b", priority: 2 }),
+      makeProject({ id: "c", priority: 3 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 3);
+    expect(picks.length).toBe(3);
+    expect(picks.map((p) => p.project.id)).toEqual(["a", "b", "c"]);
+    // No duplicates.
+    const ids = new Set(picks.map((p) => p.project.id));
+    expect(ids.size).toBe(3);
+  });
+
+  it("returns fewer than maxCount when fewer projects are eligible", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "a", priority: 1 }),
+      makeProject({ id: "b", priority: 2 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 5);
+    expect(picks.length).toBe(2);
+  });
+
+  it("respects skipProjectIds when filling multiple slots", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "skipped", priority: 1 }),
+      makeProject({ id: "a", priority: 2 }),
+      makeProject({ id: "b", priority: 3 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(
+      projects,
+      config,
+      fleet,
+      new Set(["skipped"]),
+      3,
+    );
+    expect(picks.map((p) => p.project.id)).toEqual(["a", "b"]);
+  });
+
+  it("override file claims the first slot, picker fills the remaining slots", async () => {
+    const config = makeConfig();
+    writeFileSync(join(TEST_DIR, "next_project.txt"), "lo\n", "utf8");
+    const projects = [
+      makeProject({ id: "hi", priority: 1 }),
+      makeProject({ id: "lo", priority: 5 }),
+      makeProject({ id: "med", priority: 3 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 3);
+    expect(picks.length).toBe(3);
+    expect(picks[0].project.id).toBe("lo");
+    expect(picks[0].reason).toContain("override");
+    // remaining slots come from priority × staleness: hi (1) then med (3)
+    expect(picks[1].project.id).toBe("hi");
+    expect(picks[1].reason).toContain("picker");
+    expect(picks[2].project.id).toBe("med");
+    expect(picks[2].reason).toContain("picker");
+  });
+
+  it("never returns the override project twice when it would also rank first", async () => {
+    const config = makeConfig();
+    writeFileSync(join(TEST_DIR, "next_project.txt"), "hi\n", "utf8");
+    const projects = [
+      makeProject({ id: "hi", priority: 1 }),
+      makeProject({ id: "lo", priority: 5 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
+    expect(picks.length).toBe(2);
+    expect(picks.map((p) => p.project.id)).toEqual(["hi", "lo"]);
+    expect(picks[0].reason).toContain("override");
+    expect(picks[1].reason).toContain("picker");
+  });
+
+  it("empty project list returns []", async () => {
+    const config = makeConfig();
+    const picks = await pickNextProjects([], config, makeFleet(), new Set(), 3);
+    expect(picks).toEqual([]);
+  });
+
+  it("all projects skipped returns []", async () => {
+    const config = makeConfig();
+    const projects = [
+      makeProject({ id: "a", priority: 1 }),
+      makeProject({ id: "b", priority: 1 }),
+    ];
+    const fleet = makeFleet();
+    const picks = await pickNextProjects(
+      projects,
+      config,
+      fleet,
+      new Set(["a", "b"]),
+      5,
+    );
+    expect(picks).toEqual([]);
   });
 });
 

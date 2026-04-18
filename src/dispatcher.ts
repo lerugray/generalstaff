@@ -75,36 +75,74 @@ async function readOverrideFile(
 
 // --- Pick next project ---
 
+// gs-185 (Phase 4 step 1): return up to `maxCount` eligible projects in
+// picker-preferred order. The override file claims the first slot if
+// present; subsequent slots are filled from priority × staleness scoring.
+// Every returned project is distinct, not in skipProjectIds, and not
+// currently running (isBotRunning=false). `pickNextProject` below is a
+// back-compat wrapper that requests maxCount=1 — preserves the Phase 1-3
+// sequential dispatcher behaviour while `session.ts` (gs-186) layers on
+// parallelism separately. See DESIGN.md §v6 for the full phased plan.
+export async function pickNextProjects(
+  projects: ProjectConfig[],
+  config: DispatcherConfig,
+  fleet: FleetState,
+  skipProjectIds: Set<string> = new Set(),
+  maxCount: number = 1,
+): Promise<Array<{ project: ProjectConfig; reason: string }>> {
+  if (maxCount <= 0) return [];
+
+  const results: Array<{ project: ProjectConfig; reason: string }> = [];
+  // claimed = already-excluded ids + ids already selected in this call
+  // (so the same project can't fill multiple slots).
+  const claimed = new Set<string>(skipProjectIds);
+
+  // Override file gets the first slot when the pointed-at project is
+  // eligible. With maxCount > 1, the remaining slots still come from
+  // the scorer — so the override acts as a "prefer this one first"
+  // hint in the parallel case, not an exclusive claim.
+  const override = await readOverrideFile(config);
+  if (override) {
+    const project = projects.find((p) => p.id === override);
+    if (project && !claimed.has(project.id) && !isBotRunning(project).running) {
+      results.push({
+        project,
+        reason: `override: next_project.txt = "${override}"`,
+      });
+      claimed.add(project.id);
+    }
+  }
+
+  if (results.length < maxCount) {
+    const scored = scoreProjects(
+      projects.filter((p) => !claimed.has(p.id)),
+      fleet,
+    );
+    for (const { project, reason } of scored) {
+      if (results.length >= maxCount) break;
+      if (isBotRunning(project).running) continue;
+      results.push({ project, reason: `picker: ${reason}` });
+      claimed.add(project.id);
+    }
+  }
+
+  return results;
+}
+
 export async function pickNextProject(
   projects: ProjectConfig[],
   config: DispatcherConfig,
   fleet: FleetState,
   skipProjectIds: Set<string> = new Set(),
 ): Promise<{ project: ProjectConfig; reason: string } | null> {
-  // Check override file first
-  const override = await readOverrideFile(config);
-  if (override) {
-    const project = projects.find((p) => p.id === override);
-    if (project && !skipProjectIds.has(project.id)) {
-      return { project, reason: `override: next_project.txt = "${override}"` };
-    }
-  }
-
-  // Score and pick
-  const scored = scoreProjects(
-    projects.filter((p) => !skipProjectIds.has(p.id)),
+  const picks = await pickNextProjects(
+    projects,
+    config,
     fleet,
+    skipProjectIds,
+    1,
   );
-
-  for (const { project, reason } of scored) {
-    // Skip if bot already running
-    const running = isBotRunning(project);
-    if (running.running) continue;
-
-    return { project, reason: `picker: ${reason}` };
-  }
-
-  return null; // no eligible project
+  return picks[0] ?? null;
 }
 
 // --- Session plan estimate (preview) ---

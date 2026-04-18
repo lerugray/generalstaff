@@ -1118,5 +1118,29 @@
     "title": "Add a task-queueing convention check + CLAUDE.md documentation: when queueing a bot task whose expected diff touches files under the project's hands_off.yaml patterns, the task must either (a) be marked interactive_only=true in the task schema OR (b) have its expected-diff narrowed to exclude those paths. Surfaced 2026-04-18 afternoon during rayb-001's hands_off scope collision (5 failed cycles, ~$0.15 OpenRouter spend wasted, bot creating files under src/**/policy/**, src/**/privacy/**, src/**/schema/**, and vault/ which are all in raybrain's hands_off.yaml). This complements the existing \"Hands-off-aware task queueing\" CLAUDE.md convention added earlier 2026-04-18 — that rule caught hands-off touches at queue-time for the project under which the task is being worked on; this extends to catching task-scope vs hands-off conflicts that only surface when the engineer expands 'scaffold dirs' or 'add tests' into specific paths the queueing session didn't enumerate. Mechanism options: (a) add an optional expected_touches array to the task schema; bot picker rejects tasks where expected_touches intersects hands_off; (b) have the bot's engineer prompt include 'before committing, check your diff does not touch hands_off patterns and abort if it does'; (c) both. (b) alone is cheap; (a) is more robust. Bot-doable for the schema work + prompt update.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-185",
+    "title": "Phase 4 step 1: extend the picker to return N candidates. Modify pickNextProject in src/dispatcher.ts to take a max_count param (default 1, preserving current behavior). Return up to N highest-scored projects, excluding the skipProjectIds set. Add tests using existing fleet fixtures + the new param. No session.ts changes yet. See DESIGN.md §v6 for the full phased plan.",
+    "status": "done",
+    "priority": 2
+  },
+  {
+    "id": "gs-186",
+    "title": "Phase 4 step 2: session.ts runs N cycles in parallel. Add dispatcher.max_parallel_slots config field (default 1 — preserves sequential). The session loop calls pickNextProjects(N - alreadyRunning) and Promise.all over the resulting cycles. Each cycle still calls executeCycle unmodified (atomicity per cycle is preserved). STOP file polling is already per-cycle so each parallel cycle sees STOP independently. Tests: two-project fixture session asserting both cycles run and produce verified outcomes within the wall-clock budget. See DESIGN.md §v6. Priority 1 once gs-185 lands (which it now has).",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-187",
+    "title": "Phase 4 step 3: per-provider concurrency semaphore in src/reviewer.ts keyed on provider name. Default unbounded for claude, default 2 for openrouter free tier (can tune; configurable). Reviewer calls acquire before sending the HTTP request, release on response. Tests: synthetic 8-cycle parallel session with the semaphore limiting OpenRouter to 2 concurrent calls correctly serializes the reviewer step without breaking cycle parallelism. See DESIGN.md §v6.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-188",
+    "title": "Phase 4 step 4: observability for parallel sessions. The existing session_complete event aggregates across cycles. With parallel cycles, the aggregation needs to capture effective wall-clock parallelism — e.g. {cycles: 12, slots_used: 3, parallel_efficiency: 0.92}. The status command and digest format need light updates to not present parallel cycles as a flat sequential list (they will look weird in git log order if interleaved). Also emit slot_idle_time so we can measure whether the round-based wait pattern is painful enough to warrant the (b) upgrade in DESIGN.md §v6.",
+    "status": "pending",
+    "priority": 2
   }
 ]
