@@ -1036,9 +1036,9 @@
   },
   {
     "id": "gs-173",
-    "title": "Register `gamr` as the first non-dogfood managed project using the new `generalstaff register` CLI subcommand (gs-170). Pre-conditions: gs-166 + gs-167 have landed (state-path alignment — tasks.json inside gamr's own repo); gs-171 ideally landed first so the reviewer parser doesn't eat productive gamr work. Bootstrap scaffold already exists at C:\\Users\\rweis\\OneDrive\\Documents\\gamr\\. Concrete steps: generate hands_off.yaml for gamr (small, open scaffold — low risk surface), commit the bootstrap scaffold in the gamr repo, run `generalstaff register gamr`, verify projects.yaml was updated correctly and state/gamr/ was NOT recreated in GeneralStaff's root. Capture outcome in research-notes.md under a new `## 2026-04-XX — gamr registration, first non-dogfood register`. If registration surfaces any additional generality gaps, queue follow-up tasks rather than patching inline. See CLAUDE.md §Test-project constraints for why gamr specifically (and why NOT catalogdna).",
+    "title": "[temporarily demoted to P2 — restore to P1 after gs-171 lands; demoted because the bot's task picker has no defined tiebreak between same-priority tasks and we need gs-171 to land first to avoid false-negative rollback of productive gamr work] Register `gamr` as the first non-dogfood managed project using the new `generalstaff register` CLI subcommand (gs-170). Pre-conditions: gs-166 + gs-167 have landed (state-path alignment — tasks.json inside gamr's own repo); gs-171 ideally landed first so the reviewer parser doesn't eat productive gamr work. Bootstrap scaffold already exists at C:\\Users\\rweis\\OneDrive\\Documents\\gamr\\. Concrete steps: generate hands_off.yaml for gamr (small, open scaffold — low risk surface), commit the bootstrap scaffold in the gamr repo, run `generalstaff register gamr`, verify projects.yaml was updated correctly and state/gamr/ was NOT recreated in GeneralStaff's root. Capture outcome in research-notes.md under a new `## 2026-04-XX — gamr registration, first non-dogfood register`. If registration surfaces any additional generality gaps, queue follow-up tasks rather than patching inline. See CLAUDE.md §Test-project constraints for why gamr specifically (and why NOT catalogdna).",
     "status": "pending",
-    "priority": 1
+    "priority": 2
   },
   {
     "id": "gs-174",
