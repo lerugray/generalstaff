@@ -1094,5 +1094,23 @@
     "title": "[INTERACTIVE-ONLY — touches scripts/run_bot.sh which is hands-off; bot will roll back if it tries] Add a within-project task-picker tiebreak rule to scripts/run_bot.sh's claude-p prompt. Today: the prompt says \"pick the highest-priority unfinished task\" with no defined tiebreak between same-priority entries, and the LLM picks unpredictably (potentially the last task in the JSON, the most recently mentioned, or random). On 2026-04-18 morning we worked around this by demoting gs-173 from P1 to P2 so gs-171 was uniquely P1. Structural fix: add one prompt line — `If multiple tasks have the same priority, pick the lowest gs-NNN (numeric suffix) first.` — to scripts/run_bot.sh AND to the bootstrap-template prompt in src/bootstrap.ts (so newly-bootstrapped projects inherit it). Test: regression for the bootstrap template's emitted prompt containing this line. Workaround-fine for now — only worth doing when same-priority collisions become routine.",
     "status": "pending",
     "priority": 3
+  },
+  {
+    "id": "gs-190",
+    "title": "Extend src/bootstrap.ts:detectStack to recognize Python projects (sniff for pyproject.toml, requirements.txt, setup.py, setup.cfg, .python-version) AND handle the chicken-and-egg where stack-signal files don't exist at register-time. Solutions: accept --stack=<python|node|bun|...> arg to bootstrap/register, OR sniff existing engineer_command.sh content for uv/python/pip patterns. Surfaced 2026-04-18 raybrain bootstrap: gs-176 template generated Bun-first commands for a Python project, other Claude session manually patched. Bot-doable.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-191",
+    "title": "Make src/session.ts hot-reload projects.yaml between cycles. Surfaced 2026-04-18 raybrain registration: session 7 launched with only generalstaff+gamr; raybrain registered ~30 min into session 7; override file pointed at raybrain but picker fell through because raybrain wasn't in cached projects list. Fix: re-load loadProjects() between cycles. Tests: mutate fixture projects.yaml mid-loop and assert next pick sees the new project. Bot-doable.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-193",
+    "title": "Add fast-fail backoff to dispatcher: if N consecutive cycles on same project end with engineer_exit_code != 0 in less than M seconds wall, soft-skip that project for rest of session and log a warning. Surfaced 2026-04-18 raybrain shakedown: broken engineer_command.sh exited code 2 in 1 second per cycle, dispatcher spun retrying at ~1/sec producing 82 failed cycles in 2 minutes before STOP fired. Defaults: N=3, M=60s. Add ProgressEventType project_soft_skipped. Bot-doable.",
+    "status": "pending",
+    "priority": 1
   }
 ]
