@@ -1,0 +1,150 @@
+diff --git a/src/bootstrap.ts b/src/bootstrap.ts
+index 5225815..d30dc8e 100644
+--- a/src/bootstrap.ts
++++ b/src/bootstrap.ts
+@@ -454,7 +454,6 @@ place and register the project.
+ | File | What it is | Your action |
+ | --- | --- | --- |
+ | \`CLAUDE-AUTONOMOUS.md\` | Autobot contract draft | Edit the \`<FILL IN>\` sections. Move to repo root. |
+-| \`tasks.json\` | Seeded scaffolding backlog | Review titles; edit/remove any you disagree with. Move to \`state/${projectId}/tasks.json\` inside GeneralStaff's repo once registered. |
+ | \`hands_off.yaml\` | Restrictive hands-off patterns | Review each entry. Keep restrictive; loosen later. |
+ | \`verify_command.sh\` | Verification gate command | Confirm matches your test/build setup. |
+ | \`engineer_command.sh\` | Bot engineer launcher | Confirm or replace with your per-project wrapper. |
+@@ -468,20 +467,26 @@ were also written to the project root — those are live (not in the proposal
+ dir). Review them; they are deliberately minimal. The bot's seeded tasks
+ will scaffold \`src/\` and \`tests/\` from there.
+ 
+-` : ""}## Next steps
++` : ""}## Seeded backlog — already live
++
++\`tasks.json\` was written to \`state/${projectId}/tasks.json\` in this
++project's root (NOT in the proposal dir). That is the canonical location
++the dispatcher reads; keeping it there means the file travels with your
++project's git history. Review it and edit titles/priorities in place.
++
++## Next steps
+ 
+ 1. **Review \`CLAUDE-AUTONOMOUS.md\`.** Fill in the Vision + Evaluation
+    criteria sections. These shape everything else.
+ 2. **Review \`hands_off.yaml\`.** Rule 5 requires this list be non-empty.
+    The generated list is restrictive on purpose — add more as you write
+    code with business logic.
+-3. **Review \`tasks.json\`.** Remove any task whose scope you disagree
+-   with. The bot will pick highest priority first; edit priorities
+-   accordingly.
++3. **Review \`state/${projectId}/tasks.json\`** (in this project's root).
++   Remove any task whose scope you disagree with. The bot will pick
++   highest priority first; edit priorities accordingly.
+ 4. **Move files into place:**
+    - \`CLAUDE-AUTONOMOUS.md\` → project root
+    - \`hands_off.yaml\` → project root
+-   - \`tasks.json\` → \`state/${projectId}/tasks.json\` inside the GeneralStaff repo
+    - \`idea.md\` → project root (optional — reference only)
+ 5. **Register in projects.yaml** (inside the GeneralStaff repo) with:
+ 
+@@ -527,10 +532,6 @@ function generateProposal(
+     join(proposalDir, "CLAUDE-AUTONOMOUS.md"),
+     claudeAutonomousMd(projectId, idea, stack),
+   );
+-  writeFileSync(
+-    join(proposalDir, "tasks.json"),
+-    tasksJsonForStack(stack.kind, projectId),
+-  );
+   writeFileSync(
+     join(proposalDir, "hands_off.yaml"),
+     handsOffYamlForStack(stack.kind),
+@@ -548,6 +549,19 @@ function generateProposal(
+     join(proposalDir, "README-PROPOSAL.md"),
+     readmeProposal(projectId, stack, createdScaffold),
+   );
++
++  // tasks.json goes to the canonical per-project state location
++  // (${targetDir}/state/<projectId>/tasks.json) rather than the
++  // proposal staging dir. gs-166 aligned runtime reads to this
++  // path; gs-167 aligns bootstrap writes so the file is already
++  // where the dispatcher looks for it. Do not overwrite an
++  // existing tasks.json — the user may have edited it.
++  const stateDir = join(targetDir, "state", projectId);
++  mkdirSync(stateDir, { recursive: true });
++  const tasksPath = join(stateDir, "tasks.json");
++  if (!existsSync(tasksPath)) {
++    writeFileSync(tasksPath, tasksJsonForStack(stack.kind, projectId));
++  }
+ }
+ 
+ // Main entry point. Called by the CLI. Idempotent if --force
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 5ca3eb2..988b710 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1001,7 +1001,7 @@
+   {
+     "id": "gs-167",
+     "title": "After gs-166 lands, update src/bootstrap.ts to write state/<id>/tasks.json inside the TARGET project directory, not inside GeneralStaff's state/ dir. Specifically: the tasks.json written by runBootstrap should go to `${targetDir}/state/<projectId>/tasks.json` so it's committed alongside the target project's code and the dispatcher can read it via project.path lookup. Update generateProposal (and possibly tests) to reflect the new location. The .generalstaff-proposal/ staging dir still contains an idea.md + CLAUDE-AUTONOMOUS.md draft + hands_off.yaml proposal; tasks.json moves to the canonical ${targetDir}/state/ location. README-PROPOSAL.md should be updated to explain the new layout. Update tests/bootstrap.test.ts accordingly. Depends on gs-166.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/bootstrap.test.ts b/tests/bootstrap.test.ts
+index be555bf..bf56b63 100644
+--- a/tests/bootstrap.test.ts
++++ b/tests/bootstrap.test.ts
+@@ -175,15 +175,18 @@ describe("runBootstrap", () => {
+     // Proposal files
+     const pDir = join(dir, ".generalstaff-proposal");
+     expect(existsSync(join(pDir, "CLAUDE-AUTONOMOUS.md"))).toBe(true);
+-    expect(existsSync(join(pDir, "tasks.json"))).toBe(true);
+     expect(existsSync(join(pDir, "hands_off.yaml"))).toBe(true);
+     expect(existsSync(join(pDir, "verify_command.sh"))).toBe(true);
+     expect(existsSync(join(pDir, "engineer_command.sh"))).toBe(true);
+     expect(existsSync(join(pDir, "idea.md"))).toBe(true);
+     expect(existsSync(join(pDir, "README-PROPOSAL.md"))).toBe(true);
+ 
+-    // Proposal content sanity
+-    const tasks = JSON.parse(readFileSync(join(pDir, "tasks.json"), "utf8"));
++    // tasks.json lives at the canonical dispatcher-readable
++    // location, NOT in the proposal staging dir (gs-167).
++    expect(existsSync(join(pDir, "tasks.json"))).toBe(false);
++    const tasksPath = join(dir, "state", "gamr", "tasks.json");
++    expect(existsSync(tasksPath)).toBe(true);
++    const tasks = JSON.parse(readFileSync(tasksPath, "utf8"));
+     expect(Array.isArray(tasks)).toBe(true);
+     expect(tasks.length).toBeGreaterThanOrEqual(10);
+     for (const t of tasks) {
+@@ -277,6 +280,35 @@ describe("runBootstrap", () => {
+     expect(idea).toContain("second idea");
+   });
+ 
++  it("preserves user edits to state/<id>/tasks.json across --force re-runs", async () => {
++    const dir = freshDir("rb-tasks-preserved");
++    const r1 = await runBootstrap({
++      targetDir: dir,
++      idea: "first idea",
++      stack: "bun-next",
++      projectId: "thing",
++    });
++    expect(r1.ok).toBe(true);
++
++    const tasksPath = join(dir, "state", "thing", "tasks.json");
++    writeFileSync(
++      tasksPath,
++      JSON.stringify([{ id: "thin-001", title: "user edit", status: "pending", priority: 1 }], null, 2) + "\n",
++    );
++
++    const r2 = await runBootstrap({
++      targetDir: dir,
++      idea: "second idea",
++      projectId: "thing",
++      force: true,
++    });
++    expect(r2.ok).toBe(true);
++
++    const tasks = JSON.parse(readFileSync(tasksPath, "utf8"));
++    expect(tasks).toHaveLength(1);
++    expect(tasks[0].title).toBe("user edit");
++  });
++
+   it("defaults project id to basename of targetDir", async () => {
+     const dir = freshDir("gamr-xyz");
+     const r = await runBootstrap({
