@@ -991,5 +991,35 @@
     "title": "Re-implement gs-146 (stop --status / --check) WITHOUT modifying src/safety.ts. In src/cli.ts's stop command handler, add a --status flag (and --check as alias) that is mutually exclusive with --force. When set: construct the STOP path inline via pathJoin(getRootDir(), 'STOP') — same pattern used in src/stop_watcher.ts and src/session.ts (see the 'workaround' comment near session.ts's STOP usage — stopFilePath is module-private in safety.ts and that's deliberate; do NOT export it). Check existsSync(stopPath); print 'STOP file: present at <path>' or 'STOP file: absent'. Read state/session.pid if it exists (readFileSync utf8, trim); print 'Session pid: <pid>' or 'Session pid: none recorded'. Do not create or remove anything — read-only inspection. Tests in tests/cli.test.ts covering: stop-present+pid, stop-present+nopid, stop-absent+pid, stop-absent+nopid, --status-with-force errors out. Wire into printUsage() help text. Do NOT modify src/safety.ts — it is hands-off and was the blocker for the original gs-146 (4 failed attempts in 2026-04-17 session 3). gs-132's rollback caught all 4 attempts cleanly; this task's purpose is to unblock the feature via a correct implementation.",
     "status": "done",
     "priority": 2
+  },
+  {
+    "id": "gs-166",
+    "title": "(PHASE 3 BLOCKER) Align tasks.json path handling between src/work_detection.ts and src/cycle.ts. Currently src/work_detection.ts:71 and :119 (greenfieldCountRemaining + greenfieldHasMoreWork) read from `${getRootDir()}/state/<projectId>/tasks.json` (inside GeneralStaff's repo), while src/cycle.ts:326 (detectMarkedDoneTasks) reads diff from `${project.path}/state/<projectId>/tasks.json` (inside the managed project's repo). For dogfood (project.path == getRootDir()) they coincide; for any non-dogfood project (like gamr) they diverge and the dispatcher cannot function. Fix: change greenfieldCountRemaining and greenfieldHasMoreWork signatures to accept a ProjectConfig (or projectPath + projectId) instead of just projectId, and read from `${project.path}/state/<projectId>/tasks.json`. Update all callers (likely src/session.ts, src/summary.ts, src/work_detection.ts internal dispatch, anywhere else grep finds). Add a test in tests/work_detection.test.ts specifically using a project.path that differs from getRootDir() to prove the fix. The dogfood case still works because generalstaff's project.path IS the GeneralStaff repo root. Background: discovered 2026-04-17 evening during first gamr bootstrap setup — see research-notes.md '2026-04-17 — Phase 3 state-path architectural finding' for full context. This fix unblocks Phase 3 entirely.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-167",
+    "title": "After gs-166 lands, update src/bootstrap.ts to write state/<id>/tasks.json inside the TARGET project directory, not inside GeneralStaff's state/ dir. Specifically: the tasks.json written by runBootstrap should go to `${targetDir}/state/<projectId>/tasks.json` so it's committed alongside the target project's code and the dispatcher can read it via project.path lookup. Update generateProposal (and possibly tests) to reflect the new location. The .generalstaff-proposal/ staging dir still contains an idea.md + CLAUDE-AUTONOMOUS.md draft + hands_off.yaml proposal; tasks.json moves to the canonical ${targetDir}/state/ location. README-PROPOSAL.md should be updated to explain the new layout. Update tests/bootstrap.test.ts accordingly. Depends on gs-166.",
+    "status": "pending",
+    "priority": 1
+  },
+  {
+    "id": "gs-168",
+    "title": "Add an integration test that exercises a FULL non-dogfood cycle end-to-end with a tmp fixture project. Create a fixture at tests/fixtures/fake_project/ with: a package.json (bun-plain stack), a state/fake_project/tasks.json with 1 pending task, a stub verify command that always passes. Register it in a test-only projects.yaml fixture. Spawn a dry-run cycle; assert: (a) worktree creates, (b) tasks.json is read correctly from project.path, (c) verification runs, (d) task-done detection reads from project.path. This is the regression guard so the state-path inconsistency from gs-166 cannot silently recur. Skip when running in CI without a usable bun binary.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-169",
+    "title": "Add test coverage for runBootstrap in src/bootstrap.ts covering the force path re-running on an existing scaffolded project WITHOUT a proposal dir — should re-create the proposal dir without re-scaffolding (since scaffold files already exist). Exercises the branch where dirExists=true, dirEmpty=false, proposalPath doesn't exist. Verifies result.createdScaffold === false even though force was true but nothing to force-overwrite.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-170",
+    "title": "Add a `generalstaff register <project-id>` CLI subcommand that reads state/<id>/tasks.json + a generated hands_off.yaml + project metadata and appends the project to projects.yaml. Prompts for confirmation (y/N) before editing; rejects if project id already registered. Error messages reference the bootstrap staging dir (`.generalstaff-proposal/`) if the project hasn't been bootstrapped yet. Tests covering: add new project, reject duplicate id, reject without confirmation, reject if state/<id>/ doesn't exist. Note: this modifies projects.yaml which is in hands_off — add an explicit exception for this command (it's the tool's own write path to its own config, equivalent to `init`). Document the exception in the command's help text. Depends on gs-166, gs-167.",
+    "status": "pending",
+    "priority": 2
   }
 ]

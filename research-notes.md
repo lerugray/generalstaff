@@ -427,6 +427,72 @@ automation to OSS users is the line.
 signal that Anthropic is committed to the design market — the
 tool won't be abandoned.
 
+## 2026-04-17 — Phase 3 state-path architectural finding
+
+**Source:** Discovered during the first attempt to register gamr
+as a managed project after `generalstaff bootstrap` landed. Pure
+Phase-3-generality-surfaces-a-bug moment.
+
+**The bug:** The dispatcher has two inconsistent conventions for
+where `tasks.json` lives:
+
+- `src/work_detection.ts` lines 71 and 119 (`greenfieldCountRemaining`
+  / `greenfieldHasMoreWork`) read from
+  `${getRootDir()}/state/<projectId>/tasks.json` —
+  i.e., **inside GeneralStaff's own repo**.
+- `src/cycle.ts` line 326 (`detectMarkedDoneTasks`) reads the diff
+  from `${project.path}/state/<projectId>/tasks.json` —
+  i.e., **inside the managed project's repo**.
+
+**Why it worked for dogfood:** for `generalstaff` managing
+`generalstaff`, `getRootDir()` and `project.path` are the same
+directory, so both paths resolve identically. The inconsistency
+was invisible.
+
+**Why it breaks for gamr (or any non-self project):** for gamr,
+`project.path` is `C:/Users/rweis/OneDrive/Documents/gamr` while
+`getRootDir()` is GeneralStaff's root. The two functions look
+at different files. Work detection sees tasks GeneralStaff
+knows about; cycle's task-done detection looks in a path that
+doesn't exist inside gamr (`gamr/state/gamr/tasks.json`).
+
+**Also:** the bot's worktree (`<project.path>/.bot-worktree`)
+never has access to GeneralStaff's `state/` directory, so even
+if we standardized both reads on `getRootDir()`, the bot
+physically can't update tasks.json from its own worktree
+commits. Tasks.json-update-by-commit only works if tasks.json
+lives inside the managed project's repo.
+
+**The correct fix (candidate, see gs-166):** align both reads
+on `${project.path}/state/<projectId>/tasks.json` — i.e., tasks
+live inside the managed project's repo. This requires:
+
+1. Change `greenfieldCountRemaining` and `greenfieldHasMoreWork`
+   signatures to accept `project: ProjectConfig` (or
+   `projectPath: string`) instead of just `projectId: string`.
+2. Update callers in `src/session.ts`, `src/summary.ts`, and
+   anywhere else that passes just the id.
+3. For the dogfood case: state/generalstaff/ stays where it is
+   (inside GeneralStaff's repo, which IS project.path for
+   generalstaff), so no data migration needed for the existing
+   setup.
+4. For gamr and future projects: `generalstaff bootstrap` needs
+   to generate state/<id>/tasks.json inside the TARGET project,
+   not GeneralStaff's state/ dir. Small change to bootstrap.ts.
+
+**Why this is actually a good Phase 3 finding, not a setback:**
+Phase 3's whole purpose was to surface generality bugs.
+Surfacing one before running a single gamr cycle is the
+dispatcher-level test working as intended — the setup itself
+caught the gap. Pattern convergence with §Hammerstein: "the
+architecture is the philosophy" — the architecture's constraints
+caught the architectural inconsistency.
+
+**Not a bootstrap-command bug.** The `generalstaff bootstrap`
+feature landed cleanly (19 tests passing, 948/948 overall). The
+bug is in the dispatcher's state-path handling — predates
+tonight's work.
+
 ## 2026-04-17 — pi-autoresearch + karpathy/autoresearch mechanisms
 
 Fact extraction from
