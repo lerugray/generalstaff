@@ -454,7 +454,6 @@ place and register the project.
 | File | What it is | Your action |
 | --- | --- | --- |
 | \`CLAUDE-AUTONOMOUS.md\` | Autobot contract draft | Edit the \`<FILL IN>\` sections. Move to repo root. |
-| \`tasks.json\` | Seeded scaffolding backlog | Review titles; edit/remove any you disagree with. Move to \`state/${projectId}/tasks.json\` inside GeneralStaff's repo once registered. |
 | \`hands_off.yaml\` | Restrictive hands-off patterns | Review each entry. Keep restrictive; loosen later. |
 | \`verify_command.sh\` | Verification gate command | Confirm matches your test/build setup. |
 | \`engineer_command.sh\` | Bot engineer launcher | Confirm or replace with your per-project wrapper. |
@@ -468,20 +467,26 @@ were also written to the project root — those are live (not in the proposal
 dir). Review them; they are deliberately minimal. The bot's seeded tasks
 will scaffold \`src/\` and \`tests/\` from there.
 
-` : ""}## Next steps
+` : ""}## Seeded backlog — already live
+
+\`tasks.json\` was written to \`state/${projectId}/tasks.json\` in this
+project's root (NOT in the proposal dir). That is the canonical location
+the dispatcher reads; keeping it there means the file travels with your
+project's git history. Review it and edit titles/priorities in place.
+
+## Next steps
 
 1. **Review \`CLAUDE-AUTONOMOUS.md\`.** Fill in the Vision + Evaluation
    criteria sections. These shape everything else.
 2. **Review \`hands_off.yaml\`.** Rule 5 requires this list be non-empty.
    The generated list is restrictive on purpose — add more as you write
    code with business logic.
-3. **Review \`tasks.json\`.** Remove any task whose scope you disagree
-   with. The bot will pick highest priority first; edit priorities
-   accordingly.
+3. **Review \`state/${projectId}/tasks.json\`** (in this project's root).
+   Remove any task whose scope you disagree with. The bot will pick
+   highest priority first; edit priorities accordingly.
 4. **Move files into place:**
    - \`CLAUDE-AUTONOMOUS.md\` → project root
    - \`hands_off.yaml\` → project root
-   - \`tasks.json\` → \`state/${projectId}/tasks.json\` inside the GeneralStaff repo
    - \`idea.md\` → project root (optional — reference only)
 5. **Register in projects.yaml** (inside the GeneralStaff repo) with:
 
@@ -528,10 +533,6 @@ function generateProposal(
     claudeAutonomousMd(projectId, idea, stack),
   );
   writeFileSync(
-    join(proposalDir, "tasks.json"),
-    tasksJsonForStack(stack.kind, projectId),
-  );
-  writeFileSync(
     join(proposalDir, "hands_off.yaml"),
     handsOffYamlForStack(stack.kind),
   );
@@ -548,6 +549,19 @@ function generateProposal(
     join(proposalDir, "README-PROPOSAL.md"),
     readmeProposal(projectId, stack, createdScaffold),
   );
+
+  // tasks.json goes to the canonical per-project state location
+  // (${targetDir}/state/<projectId>/tasks.json) rather than the
+  // proposal staging dir. gs-166 aligned runtime reads to this
+  // path; gs-167 aligns bootstrap writes so the file is already
+  // where the dispatcher looks for it. Do not overwrite an
+  // existing tasks.json — the user may have edited it.
+  const stateDir = join(targetDir, "state", projectId);
+  mkdirSync(stateDir, { recursive: true });
+  const tasksPath = join(stateDir, "tasks.json");
+  if (!existsSync(tasksPath)) {
+    writeFileSync(tasksPath, tasksJsonForStack(stack.kind, projectId));
+  }
 }
 
 // Main entry point. Called by the CLI. Idempotent if --force

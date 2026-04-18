@@ -1001,7 +1001,7 @@
   {
     "id": "gs-167",
     "title": "After gs-166 lands, update src/bootstrap.ts to write state/<id>/tasks.json inside the TARGET project directory, not inside GeneralStaff's state/ dir. Specifically: the tasks.json written by runBootstrap should go to `${targetDir}/state/<projectId>/tasks.json` so it's committed alongside the target project's code and the dispatcher can read it via project.path lookup. Update generateProposal (and possibly tests) to reflect the new location. The .generalstaff-proposal/ staging dir still contains an idea.md + CLAUDE-AUTONOMOUS.md draft + hands_off.yaml proposal; tasks.json moves to the canonical ${targetDir}/state/ location. README-PROPOSAL.md should be updated to explain the new layout. Update tests/bootstrap.test.ts accordingly. Depends on gs-166.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
