@@ -14,6 +14,7 @@ import {
   DEFAULT_SOFT_SKIP_WINDOW_SECONDS,
   hotReloadProjects,
   computeParallelEfficiency,
+  estimateReviewerSpendUSD,
 } from "../src/session";
 import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
 import { setRootDir } from "../src/state";
@@ -481,6 +482,172 @@ describe("writeDigest", () => {
     const files = readdirSync(digestDir);
     const content = readFileSync(join(digestDir, files[0]), "utf8");
     expect(content).toContain("### Round 1 (45s wall, 2 cycle(s))");
+  });
+});
+
+// gs-211: rough reviewer-spend estimate for openrouter sessions.
+describe("estimateReviewerSpendUSD (gs-211)", () => {
+  it("returns a positive estimate for openrouter with reviewer-firing cycles", () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
+      makeCycleResult({ cycle_id: "c-2", final_outcome: "verified" }),
+      makeCycleResult({ cycle_id: "c-3", final_outcome: "verification_failed" }),
+    ];
+    const est = estimateReviewerSpendUSD(
+      results,
+      "openrouter",
+      "qwen/qwen3-coder-30b-a3b-instruct",
+    );
+    expect(est).not.toBeNull();
+    expect(est!).toBeGreaterThan(0);
+    // 3 cycles × (2000 × 0.07 + 500 × 0.27) / 1e6 = 3 × 275e-6 = 0.000825
+    expect(est!).toBeCloseTo(0.000825, 6);
+  });
+
+  it("returns null when provider is claude", () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    expect(estimateReviewerSpendUSD(results, "claude")).toBeNull();
+    expect(estimateReviewerSpendUSD(results, "ollama", "qwen3:8b")).toBeNull();
+  });
+
+  it("returns null for openrouter with an unknown model", () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    expect(
+      estimateReviewerSpendUSD(results, "openrouter", "some/unknown-model"),
+    ).toBeNull();
+  });
+
+  it("defaults to qwen3-coder-30b when model is unset (matches src/reviewer.ts default)", () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    const est = estimateReviewerSpendUSD(results, "openrouter");
+    expect(est).not.toBeNull();
+    expect(est!).toBeGreaterThan(0);
+  });
+
+  it("counts only reviewer-firing cycles (skips verified_weak empty-diff and cycle_skipped)", () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
+      makeCycleResult({
+        cycle_id: "c-2",
+        final_outcome: "verified_weak",
+        reason: "empty diff",
+      }),
+      makeCycleResult({
+        cycle_id: "c-3",
+        final_outcome: "cycle_skipped",
+        reason: "no work",
+      }),
+      makeCycleResult({ cycle_id: "c-4", final_outcome: "verification_failed" }),
+    ];
+    const est = estimateReviewerSpendUSD(
+      results,
+      "openrouter",
+      "qwen/qwen3-coder-30b-a3b-instruct",
+    );
+    // Only c-1 and c-4 fire the reviewer → 2 cycles.
+    // 2 × (2000 × 0.07 + 500 × 0.27) / 1e6 = 0.00055
+    expect(est).toBeCloseTo(0.00055, 6);
+  });
+
+  it("handles case-insensitive provider names", () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    const est = estimateReviewerSpendUSD(
+      results,
+      "OpenRouter",
+      "qwen/qwen3-coder-plus",
+    );
+    expect(est).not.toBeNull();
+    expect(est!).toBeGreaterThan(0);
+  });
+
+  it("scales with rate table — coder-plus costs more than coder-30b for same cycle count", () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    const cheap = estimateReviewerSpendUSD(
+      results,
+      "openrouter",
+      "qwen/qwen3-coder-30b-a3b-instruct",
+    );
+    const pricey = estimateReviewerSpendUSD(
+      results,
+      "openrouter",
+      "qwen/qwen3-coder-plus",
+    );
+    expect(pricey!).toBeGreaterThan(cheap!);
+  });
+});
+
+// gs-211: digest rendering of the spend line.
+describe("writeDigest reviewer-spend line (gs-211)", () => {
+  it("renders the Est. reviewer spend line for openrouter with a known model", async () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
+      makeCycleResult({ cycle_id: "c-2", final_outcome: "verified" }),
+      makeCycleResult({ cycle_id: "c-3", final_outcome: "verification_failed" }),
+    ];
+    await writeDigest(results, 5, {
+      digest_dir: "digests",
+      reviewer_provider: "openrouter",
+      reviewer_model: "qwen/qwen3-coder-30b-a3b-instruct",
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("**Est. reviewer spend:**");
+    expect(content).toContain("3 cycles");
+    expect(content).toContain("qwen3-coder-30b rates");
+    expect(content).toMatch(/\*\*Est\. reviewer spend:\*\* ~\$0\.\d+/);
+  });
+
+  it("omits the spend line when reviewer provider is claude", async () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    await writeDigest(results, 5, {
+      digest_dir: "digests",
+      reviewer_provider: "claude",
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Est. reviewer spend:**");
+  });
+
+  it("omits the spend line when the openrouter model is unknown", async () => {
+    const results = [makeCycleResult({ final_outcome: "verified" })];
+    await writeDigest(results, 5, {
+      digest_dir: "digests",
+      reviewer_provider: "openrouter",
+      reviewer_model: "some/unknown-model",
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).not.toContain("**Est. reviewer spend:**");
+  });
+
+  it("counts only reviewer-firing cycles in the rendered line", async () => {
+    const results = [
+      makeCycleResult({ cycle_id: "c-1", final_outcome: "verified" }),
+      makeCycleResult({
+        cycle_id: "c-2",
+        final_outcome: "verified_weak",
+        reason: "empty diff",
+      }),
+      makeCycleResult({
+        cycle_id: "c-3",
+        final_outcome: "cycle_skipped",
+        reason: "no work",
+      }),
+      makeCycleResult({ cycle_id: "c-4", final_outcome: "verification_failed" }),
+    ];
+    await writeDigest(results, 5, {
+      digest_dir: "digests",
+      reviewer_provider: "openrouter",
+      reviewer_model: "qwen/qwen3-coder-30b-a3b-instruct",
+    });
+    const digestDir = join(TEST_DIR, "digests");
+    const files = readdirSync(digestDir);
+    const content = readFileSync(join(digestDir, files[0]), "utf8");
+    expect(content).toContain("2 cycles");
+    expect(content).not.toContain("4 cycles");
   });
 });
 
