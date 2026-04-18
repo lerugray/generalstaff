@@ -2418,3 +2418,4 @@
 {"timestamp":"2026-04-18T20:50:38.526Z","event":"worktree_preflight","cycle_id":"20260418205038_b6l9","project_id":"generalstaff","data":{"status":"removed"}}
 {"timestamp":"2026-04-18T20:50:38.625Z","event":"cycle_start","cycle_id":"20260418205038_b6l9","project_id":"generalstaff","data":{"start_sha":"9c4c5431645a998982130e45d8896329f103e4fe","branch":"bot/work"}}
 {"timestamp":"2026-04-18T20:50:38.626Z","event":"engineer_invoked","cycle_id":"20260418205038_b6l9","project_id":"generalstaff","data":{"command":"bash scripts/run_bot.sh ${cycle_budget_minutes}","cycle_budget_minutes":30,"dry_run":false}}
+{"timestamp":"2026-04-18T21:04:09.763Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
