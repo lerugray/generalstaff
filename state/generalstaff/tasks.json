@@ -1092,7 +1092,7 @@
   {
     "id": "gs-184",
     "title": "[INTERACTIVE-ONLY — touches scripts/run_bot.sh which is hands-off; bot will roll back if it tries] Add a within-project task-picker tiebreak rule to scripts/run_bot.sh's claude-p prompt. Today: the prompt says \"pick the highest-priority unfinished task\" with no defined tiebreak between same-priority entries, and the LLM picks unpredictably (potentially the last task in the JSON, the most recently mentioned, or random). On 2026-04-18 morning we worked around this by demoting gs-173 from P1 to P2 so gs-171 was uniquely P1. Structural fix: add one prompt line — `If multiple tasks have the same priority, pick the lowest gs-NNN (numeric suffix) first.` — to scripts/run_bot.sh AND to the bootstrap-template prompt in src/bootstrap.ts (so newly-bootstrapped projects inherit it). Test: regression for the bootstrap template's emitted prompt containing this line. Workaround-fine for now — only worth doing when same-priority collisions become routine.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

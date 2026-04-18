@@ -70,8 +70,10 @@ the main working tree — work only in this directory.
 
 ## Your task
 Read state/generalstaff/tasks.json and pick the highest-priority
-unfinished task. Work on it, run tests (bun test && bun x tsc --noEmit)
-to verify your changes, and commit when tests pass.
+unfinished task (status: 'pending', lowest priority number first;
+among same-priority tasks, lowest gs-NNN numeric suffix first). Work
+on it, run tests (bun test && bun x tsc --noEmit) to verify your
+changes, and commit when tests pass.
 
 ## Rules
 - Work ONLY on the task you pick. No scope creep.

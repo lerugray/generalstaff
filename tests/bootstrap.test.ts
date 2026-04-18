@@ -562,6 +562,13 @@ describe("runBootstrap", () => {
     // --dangerously-skip-permissions` with no prompt body. Make sure
     // the body is long enough to carry real instructions.
     expect(script.length).toBeGreaterThan(1000);
+
+    // gs-184 regression guard: the bootstrap template must carry a
+    // within-priority tiebreak rule so same-priority tasks are picked
+    // deterministically. Without this the LLM picks arbitrarily and
+    // we have to demote priorities manually to force ordering.
+    expect(script).toContain("lowest priority number first");
+    expect(script).toContain("lowest id first");
   });
 
   it("defaults project id to basename of targetDir", async () => {
