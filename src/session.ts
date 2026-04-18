@@ -1116,6 +1116,80 @@ export function computeParallelEfficiency(
   return efficiency;
 }
 
+// gs-211: rate table for known OpenRouter reviewer models, in USD per
+// 1M tokens. Keys are the canonical model IDs used by src/reviewer.ts;
+// shortLabel is the human-readable tag rendered in the digest line.
+// Sourced from openrouter.ai as of 2026-04-18; update when the posted
+// prices change.
+const REVIEWER_RATES_USD_PER_M: Record<
+  string,
+  { input: number; output: number; shortLabel: string }
+> = {
+  "qwen/qwen3-coder-30b-a3b-instruct": {
+    input: 0.07,
+    output: 0.27,
+    shortLabel: "qwen3-coder-30b",
+  },
+  "qwen/qwen3-coder-flash": {
+    input: 0.195,
+    output: 0.975,
+    shortLabel: "qwen3-coder-flash",
+  },
+  "qwen/qwen3-coder-plus": {
+    input: 0.65,
+    output: 3.25,
+    shortLabel: "qwen3-coder-plus",
+  },
+};
+
+// Per-cycle token heuristic for a reviewer invocation that actually
+// fires. Rough averages observed 2026-04-18 across ~20 verified cycles;
+// refine when we have real token accounting in PROGRESS.jsonl.
+const REVIEWER_INPUT_TOKENS_PER_CYCLE = 2000;
+const REVIEWER_OUTPUT_TOKENS_PER_CYCLE = 500;
+
+const REVIEWER_DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-coder-30b-a3b-instruct";
+
+function countReviewerFiringCycles(results: CycleResult[]): number {
+  return results.filter(
+    (r) =>
+      r.final_outcome === "verified" ||
+      r.final_outcome === "verification_failed",
+  ).length;
+}
+
+/**
+ * Rough USD estimate of the reviewer's OpenRouter spend for a session.
+ *
+ * Returns `null` when the provider is anything other than `openrouter`,
+ * or when the model isn't in the known rate table (unknown model = we
+ * refuse to guess rather than print a wrong number). Only cycles that
+ * actually ran the reviewer are counted — `verified_weak` (empty diff)
+ * and `cycle_skipped` short-circuit before reviewer invocation so they
+ * cost nothing.
+ *
+ * The number is a crude order-of-magnitude: the token counts are flat
+ * per-cycle averages, not real accounting. Good enough for "am I at
+ * $0.01 or $0.10 this session?"; don't use it for billing.
+ */
+export function estimateReviewerSpendUSD(
+  results: CycleResult[],
+  provider: string,
+  model?: string,
+): number | null {
+  if (provider.toLowerCase() !== "openrouter") return null;
+  const modelKey = model ?? REVIEWER_DEFAULT_OPENROUTER_MODEL;
+  const rate = REVIEWER_RATES_USD_PER_M[modelKey];
+  if (!rate) return null;
+  const firingCycles = countReviewerFiringCycles(results);
+  return (
+    (firingCycles *
+      (REVIEWER_INPUT_TOKENS_PER_CYCLE * rate.input +
+        REVIEWER_OUTPUT_TOKENS_PER_CYCLE * rate.output)) /
+    1_000_000
+  );
+}
+
 export async function writeDigest(
   results: CycleResult[],
   durationMinutes: number,
@@ -1176,6 +1250,27 @@ export async function writeDigest(
   content += `**Duration:** ${formatDuration(durationMinutes * 60)}\n`;
   content += `**Cycles:** ${results.length}\n`;
   content += `**Reviewer:** ${reviewerLabel}\n`;
+  // gs-211: rough reviewer-spend estimate for openrouter sessions. Omitted
+  // for non-openrouter providers and for unknown models (returns null).
+  if (config.reviewer_provider) {
+    const estUsd = estimateReviewerSpendUSD(
+      results,
+      config.reviewer_provider,
+      config.reviewer_model,
+    );
+    if (estUsd !== null) {
+      const modelKey =
+        config.reviewer_model ?? REVIEWER_DEFAULT_OPENROUTER_MODEL;
+      const rate = REVIEWER_RATES_USD_PER_M[modelKey];
+      const firingCycles = countReviewerFiringCycles(results);
+      content +=
+        `**Est. reviewer spend:** ~$${estUsd.toFixed(3)} ` +
+        `(${firingCycles} cycle${firingCycles === 1 ? "" : "s"} × ` +
+        `~${REVIEWER_INPUT_TOKENS_PER_CYCLE} in/` +
+        `${REVIEWER_OUTPUT_TOKENS_PER_CYCLE} out tokens @ ` +
+        `${rate.shortLabel} rates)\n`;
+    }
+  }
   if (results.length > 0) {
     content += `**Summary:** ${verified.length} verified, ${failed.length} failed\n`;
     if (narrative) {

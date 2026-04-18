@@ -1224,7 +1224,7 @@
   {
     "id": "gs-211",
     "title": "Digest adds a rough reviewer-spend estimate for openrouter sessions. CREATE ONLY: modify `src/session.ts` writeDigest (add an optional rendered line under the Reviewer header) + add helper `estimateReviewerSpendUSD(results: CycleResult[], provider: string, model?: string): number | null` alongside writeDigest; append tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch src/reviewer.ts, src/prompts/, src/safety.ts, scripts/, or any hands_off path. Motivation: today the digest shows `**Reviewer:** openrouter` but no cost signal — Ray wants a rough running total. When provider.toLowerCase() === 'openrouter', render a line like `**Est. reviewer spend:** ~$0.012 (6 cycles × ~2000 in/500 out tokens @ qwen3-coder-30b rates)`. Rate table keyed on known models: `qwen/qwen3-coder-30b-a3b-instruct` (default per src/reviewer.ts) = $0.07 input / $0.27 output per M tokens; `qwen/qwen3-coder-flash` = $0.195 / $0.975; `qwen/qwen3-coder-plus` = $0.65 / $3.25. Token-count heuristic: 2000 input + 500 output per cycle that actually ran the reviewer (outcome === 'verified' || outcome === 'verification_failed' — skip verified_weak empty-diff and cycle_skipped). Non-openrouter providers: return null / omit the line. Unknown model: return null. Tests: (a) openrouter + 3 reviewer-firing cycles → estimate line with > $0 figure; (b) claude reviewer → no line; (c) openrouter + unknown model → no line; (d) mixed outcomes correctly counts only reviewer-firing cycles. Expected diff: ~140 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/session.ts",
