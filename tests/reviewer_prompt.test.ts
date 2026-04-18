@@ -180,5 +180,26 @@ describe("reviewer prompt template", () => {
 
       expect(prompt).toContain("Respond with a JSON object only");
     });
+
+    // gs-172: belt-and-braces alongside gs-171's parser hardening.
+    // The prompt must explicitly forbid the Qwen failure mode where
+    // string values contained an unescaped inner colon
+    // (`"task": "status": "done"`), and must ask for bare task IDs
+    // in task_evidence so that complex inner content can't even arise.
+    it("forbids the unescaped-inner-colon pattern explicitly (gs-172)", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+
+      expect(prompt).toContain("STRICT FORMATTING RULES");
+      // The exact pathological example must appear as a NEVER:
+      expect(prompt).toContain('"task": "status": "done"');
+      expect(prompt).toMatch(/NEVER\s+emit/);
+    });
+
+    it("asks for bare task IDs in task_evidence (gs-172)", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+
+      expect(prompt).toContain("bare task identifier");
+      expect(prompt).toContain('NOT a natural-language summary');
+    });
   });
 });

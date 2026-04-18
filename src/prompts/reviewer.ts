@@ -112,6 +112,28 @@ Examine the diff and answer these questions:
 Respond with a JSON object only. No prose before or after the
 JSON. No markdown code fences around the JSON.
 
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes \`JSON.parse\` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   \`"task": "status": "done"\` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as \`\\"\` and
+   any inner backslash as \`\\\\\`. Do not include raw newlines
+   inside string values.
+4. For \`"task"\` values, use a **bare task identifier** like
+   \`"gs-170"\` or \`"gamr-001"\` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For \`"reason"\`, \`"evidence"\`, and \`"notes"\`, use plain
+   one-line prose. Keep them short.
+
 {
   "verdict": "verified" | "verified_weak" | "verification_failed",
   "reason": "one sentence explaining the verdict",
@@ -123,7 +145,7 @@ JSON. No markdown code fences around the JSON.
   ],
   "task_evidence": [
     {
-      "task": "exact marked-done task line",
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
       "evidence": "how the diff supports this",
       "confidence": "high" | "medium" | "low"
     }
