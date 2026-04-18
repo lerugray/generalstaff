@@ -7,7 +7,10 @@ import {
   stripSessionsArgs,
   loadRecentSessions,
   formatSessionsTable,
+  formatBacklogTable,
+  computeBacklogTotals,
   type SessionSummary,
+  type BacklogRow,
 } from "../src/sessions";
 
 describe("parseSessionsFlag", () => {
@@ -313,5 +316,74 @@ describe("formatSessionsTable", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("formatBacklogTable (gs-199)", () => {
+  it("returns placeholder when there are no projects", () => {
+    expect(formatBacklogTable([])).toBe("No projects registered.");
+  });
+
+  it("renders header, rows, and a TOTAL row with mixed-status fixture", () => {
+    const rows: BacklogRow[] = [
+      {
+        project_id: "alpha",
+        bot_pickable: 3,
+        interactive_only: 1,
+        handsoff_conflict: 0,
+        in_progress: 2,
+        done: 10,
+      },
+      {
+        project_id: "beta",
+        bot_pickable: 0,
+        interactive_only: 2,
+        handsoff_conflict: 4,
+        in_progress: 0,
+        done: 5,
+      },
+    ];
+    const out = formatBacklogTable(rows);
+    const lines = out.split("\n");
+    expect(lines[0]).toMatch(
+      /^Project\s+Bot-pickable\s+Interactive-only\s+Hands-off-conflict\s+In-progress\s+Done$/,
+    );
+    // Dividers under every column
+    expect(lines[1]).toMatch(/^-+\s+-+\s+-+\s+-+\s+-+\s+-+$/);
+    expect(out).toContain("alpha");
+    expect(out).toContain("beta");
+    // Totals row sums the four pending-bucket columns + done + in_progress
+    const totalLine = lines[lines.length - 1]!;
+    expect(totalLine).toContain("TOTAL");
+    expect(totalLine).toContain("3"); // bot_pickable total
+    expect(totalLine).toContain("4"); // handsoff_conflict total
+    expect(totalLine).toContain("15"); // done total 10+5
+  });
+
+  it("computeBacklogTotals sums the four pending buckets", () => {
+    const rows: BacklogRow[] = [
+      {
+        project_id: "a",
+        bot_pickable: 1,
+        interactive_only: 2,
+        handsoff_conflict: 3,
+        in_progress: 4,
+        done: 99,
+      },
+      {
+        project_id: "b",
+        bot_pickable: 10,
+        interactive_only: 20,
+        handsoff_conflict: 30,
+        in_progress: 40,
+        done: 99,
+      },
+    ];
+    expect(computeBacklogTotals(rows)).toEqual({
+      bot_pickable: 11,
+      interactive_only: 22,
+      handsoff_conflict: 33,
+      in_progress: 44,
+    });
   });
 });
