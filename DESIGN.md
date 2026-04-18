@@ -804,3 +804,211 @@ extraction with strict-required / permissive-optional
 distinctions. gs-171 will land the parser change; a
 follow-up may also tighten the reviewer prompt to discourage
 Qwen from emitting unescaped inner content, as belt-and-braces.
+
+## v5 — Auto-merge / chained-cycles dispatcher behavior (2026-04-18, gs-177)
+
+**Status:** design only. Implementation is queued as **gs-177**.
+This section is the design discussion that gs-177's code should
+land against, written 2026-04-18 after the morning gamr-cycle
+test (PHASE-3-COMPLETE-2026-04-18.md §"Generality gaps surfaced")
+exposed that the current dispatcher caps every project at one
+cycle per session when `auto_merge: false`, which is the
+default per Hard Rule #4.
+
+### The bug as observed
+
+After the first verified gamr cycle landed on `bot/work`, the
+dispatcher's preflight for cycle 2 hit `src/cycle.ts:467-497`:
+"branch has unmerged commits ahead of HEAD; resetting would
+destroy that work." That guard is correct (it prevents the
+2026-04-16 silent-orphan bug from recurring), but the consequence
+is that with `auto_merge: false` you get exactly one cycle per
+project per session, then the dispatcher correctly refuses to
+proceed.
+
+### The induced contradiction with Hard Rule #4
+
+Hard Rule #4 says auto_merge stays OFF until the user opts in
+"after 5 clean verification-passing cycles." But with the
+current dispatcher, getting to 5 cycles takes 5 separate
+sessions — every session produces one cycle, then the user has
+to manually merge `bot/work` into `master` before the next
+session can do anything. For a non-dogfood project this means
+the bot's first-meaningful work is gated on five rounds of
+human merge-and-relaunch.
+
+That's fine on dogfood (where Ray runs auto_merge=true after
+the early manual cycles validated the gate), but it's
+unworkable for the user-experience target: *"the process
+should need as little human interaction as possible after
+seeding the initial idea"* (Ray, 2026-04-18).
+
+### Design constraints
+
+1. **Verification gate must keep working as it does today.** A
+   verified cycle's commits cannot be lost; a failed cycle's
+   commits must roll back cleanly. (Hard Rule #6.)
+2. **Hard Rule #4's spirit must hold.** Master cannot receive
+   bot commits without either (a) explicit per-project opt-in
+   or (b) a clear post-hoc audit window where the user can
+   review and reject bot work before it gets blessed.
+3. **Cycle atomicity.** Cycle N+1's failure cannot retroactively
+   poison cycle N's verified commits.
+4. **Minimal human interaction post-seed.** The user shouldn't
+   have to merge after every cycle to unblock the next one. One
+   review pass per N cycles is OK; per-cycle mid-session
+   intervention is not.
+5. **Engineer's view of the codebase needs to be coherent.**
+   When cycle N+1 starts, the engineer needs to see at least
+   tasks.json updated by cycle N (otherwise it picks the same
+   task again). Ideally it sees ALL of cycle N's verified work,
+   so successor tasks that depend on predecessors can compose.
+
+### Three candidate designs
+
+#### (a) Accumulator branch — `bot/work` keeps growing
+
+**How it works.** Drop the "reset bot/work to HEAD before each
+cycle" step in `src/cycle.ts:499-507`. Each cycle starts from
+the current `bot/work` HEAD and adds new commits on top. With
+`auto_merge: true`, master fast-forwards every cycle as today
+— `bot/work` and master stay aligned. With `auto_merge: false`,
+`bot/work` accumulates verified-cycle commits across the
+session. Master is unchanged until human merge.
+
+**Pros.**
+- **Smallest dispatcher change.** Just delete the reset block;
+  the rest of the safety machinery already protects against
+  unmerged-loss because there's nothing destructive happening.
+- **Cycle N+1 sees cycle N's tasks.json update naturally** —
+  the engineer reads the worktree's view of `bot/work`, which
+  now includes cycle N's work.
+- **Single branch for human review** — `git diff master..bot/work`
+  shows everything the bot did in the session.
+
+**Cons.**
+- **Cycle atomicity weakens slightly.** A cycle that passes the
+  verification gate but introduces a regression that ONLY
+  manifests in cycle N+1's verification still poisons the
+  accumulator. Specifically: cycle N adds a function with a
+  subtle bug; cycle N's verification (which only runs the
+  Engineer's claimed tests) doesn't catch it; cycle N+1
+  imports that function and its verification fails — but
+  cycle N's commit is already on `bot/work`, so the
+  rollback only undoes cycle N+1, not the underlying cause.
+- **Long-lived `bot/work` divergence from master** can cause
+  merge conflicts when the user finally merges, especially if
+  there's been parallel master work.
+
+#### (b) Per-cycle branches — fresh `bot/cycle-<id>` each time
+
+**How it works.** Each cycle creates `bot/cycle-<id>` from
+master at cycle start, the engineer worktrees on it, and the
+branch lives on after the cycle. With `auto_merge: true`,
+the dispatcher merges the branch into master and deletes the
+branch. With `auto_merge: false`, the branch stays around for
+human review. `bot/work` as a concept goes away (or becomes
+deprecated alias of "the most recent bot/cycle-<id>").
+
+**Pros.**
+- **Maximal cycle atomicity.** Each cycle is a fully isolated
+  branch from master. A bad cycle can't affect future cycles
+  because future cycles don't start from it.
+- **Excellent audit surface.** Every cycle is its own branch;
+  `git diff master..bot/cycle-20260418112438_fcsb` shows
+  exactly what cycle X did, no archaeology.
+- **Trivial rollback.** Delete the branch.
+
+**Cons.**
+- **Cycle N+1 doesn't see cycle N's tasks.json update.**
+  Without the previous cycle's commits visible, the engineer
+  re-picks the same pending task. To fix, either:
+  (i) the dispatcher updates tasks.json on master between
+  cycles (a small "tasks-only" merge), or
+  (ii) cycle N+1's branch is created from "master + previous
+  bot/cycle-* branches" rather than just master.
+  Both add complexity.
+- **Branch proliferation.** A 50-cycle session leaves 50
+  bot/cycle-* branches. Cleanup story needed.
+- **Larger code change.** Every place that hardcodes
+  `bot/work` (engineer_command.sh in projects, various tests)
+  has to be updated.
+
+#### (c) Per-cycle branches with periodic batch-merge to a "verified" trunk
+
+**How it works.** Hybrid of (a) and (b). Each cycle gets a
+`bot/cycle-<id>` branch (atomicity). After verification, if
+the cycle's predecessor cycles haven't yet been merged to a
+`bot/verified` trunk (by the user or automation), the
+dispatcher fast-forwards `bot/verified` to include this
+cycle's work. Cycle N+1 starts from `bot/verified` (so it
+sees N's tasks.json). Master only updates on human merge or
+auto_merge=true.
+
+**Pros.**
+- Atomicity per cycle (branches stay).
+- Cycle N+1 sees N's work via bot/verified.
+- Master is gated cleanly behind human review of bot/verified.
+
+**Cons.**
+- **Three branches in play** (master, bot/verified,
+  bot/cycle-*) — more concepts than (a) or (b) alone.
+- The "bot/verified" name is a soft promise: it's only
+  verified per-cycle, not as an integrated whole.
+
+### Recommendation: ship (a) first, design (c) later
+
+**Implement (a) in gs-177** — it solves the immediate user
+constraint with the smallest possible change. The cons of (a)
+(weakened cycle atomicity if there's a cross-cycle regression)
+are real but manageable: in practice the failure mode is rare
+on bounded scaffolding tasks (the bulk of what a non-dogfood
+bot does), and when it does fire, the user is reviewing the
+bot/work branch as a whole anyway and can reject it.
+
+**Capture (c) as gs-179 (P3)** — a future architectural
+refinement. Introduce when there's evidence that (a)'s
+cross-cycle-regression risk is biting in practice. Until
+then, the extra concept of bot/verified buys complexity
+without measured value.
+
+**Do NOT pursue (b) standalone.** The "tasks.json doesn't
+propagate" problem in (b) is a real semantic gap that adds
+either a fragile "tasks-only merge" or a complicated branch-
+chain — both worse than (a)'s simplicity or (c)'s explicit
+accumulator.
+
+### Open questions for gs-177 implementation
+
+1. **Should the dispatcher commit a session-end snapshot to
+   `bot/work`?** Today's session-end leaves PROGRESS.jsonl
+   uncommitted in GS's tree (gs-178 added a workaround). A
+   complementary improvement would be: at session end, the
+   dispatcher commits all session PROGRESS.jsonl appends
+   into a single "session-end audit" commit on master (since
+   GS itself runs as a project where master IS what the user
+   sees). Out of scope for gs-177 but worth threading.
+2. **Branch naming for non-dogfood projects after (a) ships.**
+   `bot/work` as the accumulator is fine. Should the
+   dispatcher rename it to `bot/<session-id>` so each session's
+   work is a discrete branch? Probably not — adds complexity,
+   and `bot/work` is already a recognizable convention.
+3. **Migration for projects already using auto_merge: true.**
+   No change — auto_merge=true already makes master and
+   bot/work converge after each cycle, so dropping the reset
+   step is a no-op for that path.
+
+### Definition-of-done for gs-177
+
+- `src/cycle.ts:499-507` reset block becomes conditional on
+  `auto_merge: true` (or removed entirely if the
+  branch-already-at-master invariant holds for that case).
+- The "bot/work N commits ahead of HEAD" guard at
+  `src/cycle.ts:467-497` becomes a soft warning when
+  `auto_merge: false` (instead of an abort), or is removed
+  in that branch.
+- New test covers a multi-cycle session with `auto_merge:
+  false` chaining cleanly through 3+ cycles.
+- A test verifies cycle N+1's engineer sees cycle N's
+  tasks.json updates (the "successor sees predecessor" semantic).
+- DESIGN.md §v5 is referenced in the gs-177 commit message.
