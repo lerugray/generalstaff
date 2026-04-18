@@ -1190,14 +1190,15 @@
   {
     "id": "gs-202",
     "title": "Add `generalstaff status --totals` subview. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --totals flag handler; add exported `computeSessionTotals(sessions: SessionSummary[]): SessionTotals` helper + `SessionTotals` interface in `src/sessions.ts` alongside formatSessionsTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output is a multi-line summary: total sessions recorded, total cycles, total verified, total failed, total duration in hours, count of parallel vs sequential sessions, weighted-average parallel_efficiency across parallel sessions (weight = session duration), first-seen timestamp, last-seen timestamp. `--json` flag emits the same data as structured JSON. Mutually exclusive with --sessions, --summary, --backlog, --watch — print an error like `Error: --totals cannot be combined with --sessions/--summary/--backlog/--watch` and exit code 1 if combined. Tests: (a) fixture with 3 sessions (1 parallel efficiency=0.8 duration=60min, 2 sequential duration=30min each) asserting totals math + weighted avg efficiency; (b) --json output shape; (c) mutex error exit code 1 on combined flags; (d) empty history → zero totals. Expected diff: ~120 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "src/sessions.ts",
       "tests/sessions.test.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-18T18:24:23.065Z"
   },
   {
     "id": "gs-204",

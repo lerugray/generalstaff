@@ -52,6 +52,8 @@ import {
   formatSessionsTable,
   formatBacklogTable,
   computeBacklogTotals,
+  computeSessionTotals,
+  formatSessionTotals,
   parseSessionsFlag,
   stripSessionsArgs,
   type BacklogRow,
@@ -84,7 +86,7 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog]
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals]
                                                           Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
@@ -96,6 +98,8 @@ Usage:
     Example: generalstaff status --summary --json       # same, as JSON
     Example: generalstaff status --backlog              # per-project backlog buckets
     Example: generalstaff status --backlog --json       # same, as JSON
+    Example: generalstaff status --totals               # all-time aggregate session metrics
+    Example: generalstaff status --totals --json        # same, as JSON
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -337,6 +341,7 @@ switch (command) {
         json: { type: "boolean", default: false },
         summary: { type: "boolean", default: false },
         backlog: { type: "boolean", default: false },
+        totals: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -354,7 +359,32 @@ switch (command) {
       process.exit(1);
     }
 
+    // gs-202: --totals aggregates across the full session history; it
+    // can't coexist with any other subview.
+    if (
+      statusValues.totals &&
+      (sessionsFlag.enabled ||
+        statusValues.summary ||
+        statusValues.backlog ||
+        watch.enabled)
+    ) {
+      console.error(
+        "Error: --totals cannot be combined with --sessions/--summary/--backlog/--watch",
+      );
+      process.exit(1);
+    }
+
     const renderStatus = async () => {
+      if (statusValues.totals) {
+        const sessions = await loadRecentSessions(Number.MAX_SAFE_INTEGER);
+        const totals = computeSessionTotals(sessions);
+        if (statusValues.json) {
+          console.log(JSON.stringify(totals, null, 2));
+        } else {
+          console.log(formatSessionTotals(totals));
+        }
+        return;
+      }
       if (statusValues.backlog) {
         const projects = await loadProjects();
         const rows: BacklogRow[] = [];

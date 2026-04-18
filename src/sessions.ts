@@ -189,6 +189,110 @@ export function formatBacklogTable(rows: BacklogRow[]): string {
   return lines.join("\n");
 }
 
+// gs-202: aggregate totals across the full session history for
+// `generalstaff status --totals`. Summarises cycle throughput, time
+// spent, parallel-vs-sequential mix, and a duration-weighted average
+// efficiency for the parallel runs.
+export interface SessionTotals {
+  total_sessions: number;
+  total_cycles: number;
+  total_verified: number;
+  total_failed: number;
+  total_duration_hours: number;
+  parallel_sessions: number;
+  sequential_sessions: number;
+  weighted_avg_parallel_efficiency: number | null;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
+export function computeSessionTotals(sessions: SessionSummary[]): SessionTotals {
+  if (sessions.length === 0) {
+    return {
+      total_sessions: 0,
+      total_cycles: 0,
+      total_verified: 0,
+      total_failed: 0,
+      total_duration_hours: 0,
+      parallel_sessions: 0,
+      sequential_sessions: 0,
+      weighted_avg_parallel_efficiency: null,
+      first_seen: null,
+      last_seen: null,
+    };
+  }
+  let total_cycles = 0;
+  let total_verified = 0;
+  let total_failed = 0;
+  let total_duration_min = 0;
+  let parallel_sessions = 0;
+  let sequential_sessions = 0;
+  let weighted_eff_num = 0;
+  let weighted_eff_den = 0;
+  let first_seen_ms = Infinity;
+  let last_seen_ms = -Infinity;
+  for (const s of sessions) {
+    total_cycles += s.total_cycles;
+    total_verified += s.total_verified;
+    total_failed += s.total_failed;
+    total_duration_min += s.duration_minutes;
+    const isParallel =
+      typeof s.max_parallel_slots === "number" && s.max_parallel_slots > 1;
+    if (isParallel) {
+      parallel_sessions += 1;
+      if (typeof s.parallel_efficiency === "number") {
+        weighted_eff_num += s.parallel_efficiency * s.duration_minutes;
+        weighted_eff_den += s.duration_minutes;
+      }
+    } else {
+      sequential_sessions += 1;
+    }
+    const ms = new Date(s.started_at).getTime();
+    if (Number.isFinite(ms)) {
+      if (ms < first_seen_ms) first_seen_ms = ms;
+      if (ms > last_seen_ms) last_seen_ms = ms;
+    }
+  }
+  return {
+    total_sessions: sessions.length,
+    total_cycles,
+    total_verified,
+    total_failed,
+    total_duration_hours: total_duration_min / 60,
+    parallel_sessions,
+    sequential_sessions,
+    weighted_avg_parallel_efficiency:
+      weighted_eff_den > 0 ? weighted_eff_num / weighted_eff_den : null,
+    first_seen:
+      first_seen_ms === Infinity ? null : new Date(first_seen_ms).toISOString(),
+    last_seen:
+      last_seen_ms === -Infinity ? null : new Date(last_seen_ms).toISOString(),
+  };
+}
+
+export function formatSessionTotals(t: SessionTotals): string {
+  if (t.total_sessions === 0) {
+    return "No sessions recorded yet.";
+  }
+  const eff =
+    t.weighted_avg_parallel_efficiency !== null
+      ? `${(t.weighted_avg_parallel_efficiency * 100).toFixed(1)}%`
+      : "—";
+  const lines = [
+    `Total sessions:                   ${t.total_sessions}`,
+    `Total cycles:                     ${t.total_cycles}`,
+    `Total verified:                   ${t.total_verified}`,
+    `Total failed:                     ${t.total_failed}`,
+    `Total duration:                   ${t.total_duration_hours.toFixed(2)} hours`,
+    `Parallel sessions:                ${t.parallel_sessions}`,
+    `Sequential sessions:              ${t.sequential_sessions}`,
+    `Weighted-avg parallel efficiency: ${eff}`,
+    `First seen:                       ${t.first_seen ?? "—"}`,
+    `Last seen:                        ${t.last_seen ?? "—"}`,
+  ];
+  return lines.join("\n");
+}
+
 export function formatSessionsTable(
   sessions: SessionSummary[],
   now: Date = new Date(),

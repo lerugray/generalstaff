@@ -1793,4 +1793,160 @@ dispatcher:
       );
     });
   });
+
+  describe("status --totals (gs-202)", () => {
+    const TOTALS_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "status_totals_test",
+    );
+
+    const PROJECTS_YAML = `
+projects:
+  - id: alpha
+    path: ${TOTALS_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    hands_off: []
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(TOTALS_DIR, "state", "_fleet"), { recursive: true });
+      writeFileSync(join(TOTALS_DIR, "projects.yaml"), PROJECTS_YAML);
+    });
+
+    afterEach(() => {
+      rmSync(TOTALS_DIR, { recursive: true, force: true });
+    });
+
+    it("--totals --json emits zero totals for an empty history", async () => {
+      const result = await runCli(["status", "--totals", "--json"], TOTALS_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toEqual({
+        total_sessions: 0,
+        total_cycles: 0,
+        total_verified: 0,
+        total_failed: 0,
+        total_duration_hours: 0,
+        parallel_sessions: 0,
+        sequential_sessions: 0,
+        weighted_avg_parallel_efficiency: null,
+        first_seen: null,
+        last_seen: null,
+      });
+    });
+
+    it("--totals --json aggregates across recorded sessions", async () => {
+      const logPath = join(TOTALS_DIR, "state", "_fleet", "PROGRESS.jsonl");
+      const lines = [
+        {
+          timestamp: "2026-04-17T11:00:00.000Z",
+          event: "session_complete",
+          project_id: "_fleet",
+          data: {
+            duration_minutes: 60,
+            total_cycles: 8,
+            total_verified: 7,
+            total_failed: 1,
+            stop_reason: "budget",
+            reviewer: "openrouter",
+            max_parallel_slots: 2,
+            parallel_rounds: 3,
+            slot_idle_seconds: 30,
+            parallel_efficiency: 0.8,
+          },
+        },
+        {
+          timestamp: "2026-04-17T12:30:00.000Z",
+          event: "session_complete",
+          project_id: "_fleet",
+          data: {
+            duration_minutes: 30,
+            total_cycles: 3,
+            total_verified: 3,
+            total_failed: 0,
+            stop_reason: "budget",
+            reviewer: "claude",
+          },
+        },
+        {
+          timestamp: "2026-04-17T14:30:00.000Z",
+          event: "session_complete",
+          project_id: "_fleet",
+          data: {
+            duration_minutes: 30,
+            total_cycles: 2,
+            total_verified: 1,
+            total_failed: 1,
+            stop_reason: "max-cycles",
+            reviewer: "claude",
+          },
+        },
+      ];
+      writeFileSync(
+        logPath,
+        lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
+      );
+      const result = await runCli(
+        ["status", "--totals", "--json"],
+        TOTALS_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.total_sessions).toBe(3);
+      expect(parsed.total_cycles).toBe(13);
+      expect(parsed.total_verified).toBe(11);
+      expect(parsed.total_failed).toBe(2);
+      expect(parsed.total_duration_hours).toBeCloseTo(2.0, 6);
+      expect(parsed.parallel_sessions).toBe(1);
+      expect(parsed.sequential_sessions).toBe(2);
+      expect(parsed.weighted_avg_parallel_efficiency).toBeCloseTo(0.8, 6);
+    });
+
+    it("rejects --totals combined with --sessions", async () => {
+      const result = await runCli(
+        ["status", "--totals", "--sessions"],
+        TOTALS_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
+      );
+    });
+
+    it("rejects --totals combined with --summary", async () => {
+      const result = await runCli(
+        ["status", "--totals", "--summary"],
+        TOTALS_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
+      );
+    });
+
+    it("rejects --totals combined with --backlog", async () => {
+      const result = await runCli(
+        ["status", "--totals", "--backlog"],
+        TOTALS_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--totals cannot be combined with --sessions/--summary/--backlog/--watch",
+      );
+    });
+  });
 });
