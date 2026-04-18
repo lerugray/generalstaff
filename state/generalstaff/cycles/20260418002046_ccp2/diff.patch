@@ -1,0 +1,160 @@
+diff --git a/src/work_detection.ts b/src/work_detection.ts
+index b80f64e..60b88dd 100644
+--- a/src/work_detection.ts
++++ b/src/work_detection.ts
+@@ -5,7 +5,6 @@ import { existsSync } from "fs";
+ import { readFile } from "fs/promises";
+ import { join } from "path";
+ import { spawnSync } from "child_process";
+-import { getRootDir } from "./state";
+ import type { ProjectConfig } from "./types";
+ 
+ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
+@@ -13,7 +12,7 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
+     case "catalogdna_bot_tasks":
+       return catalogdnaHasMoreWork(project.path);
+     case "tasks_json":
+-      return greenfieldHasMoreWork(project.id);
++      return greenfieldHasMoreWork(project.path, project.id);
+     case "git_issues":
+       return gitIssuesHasMoreWork(project.path);
+     case "git_unmerged":
+@@ -30,7 +29,7 @@ export async function countRemainingWork(
+     case "catalogdna_bot_tasks":
+       return catalogdnaCountRemaining(project.path);
+     case "tasks_json":
+-      return greenfieldCountRemaining(project.id);
++      return greenfieldCountRemaining(project.path, project.id);
+     case "git_issues":
+       return gitIssuesCountRemaining(project.path);
+     case "git_unmerged":
+@@ -66,9 +65,10 @@ export async function catalogdnaCountRemaining(
+ }
+ 
+ export async function greenfieldCountRemaining(
++  projectPath: string,
+   projectId: string,
+ ): Promise<number> {
+-  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
++  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
+   if (!existsSync(tasksPath)) return 0;
+ 
+   try {
+@@ -114,9 +114,10 @@ export async function catalogdnaHasMoreWork(
+ }
+ 
+ export async function greenfieldHasMoreWork(
++  projectPath: string,
+   projectId: string,
+ ): Promise<boolean> {
+-  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
++  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
+   if (!existsSync(tasksPath)) return false;
+ 
+   try {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index bf6bcab..5ca3eb2 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -995,7 +995,7 @@
+   {
+     "id": "gs-166",
+     "title": "(PHASE 3 BLOCKER) Align tasks.json path handling between src/work_detection.ts and src/cycle.ts. Currently src/work_detection.ts:71 and :119 (greenfieldCountRemaining + greenfieldHasMoreWork) read from `${getRootDir()}/state/<projectId>/tasks.json` (inside GeneralStaff's repo), while src/cycle.ts:326 (detectMarkedDoneTasks) reads diff from `${project.path}/state/<projectId>/tasks.json` (inside the managed project's repo). For dogfood (project.path == getRootDir()) they coincide; for any non-dogfood project (like gamr) they diverge and the dispatcher cannot function. Fix: change greenfieldCountRemaining and greenfieldHasMoreWork signatures to accept a ProjectConfig (or projectPath + projectId) instead of just projectId, and read from `${project.path}/state/<projectId>/tasks.json`. Update all callers (likely src/session.ts, src/summary.ts, src/work_detection.ts internal dispatch, anywhere else grep finds). Add a test in tests/work_detection.test.ts specifically using a project.path that differs from getRootDir() to prove the fix. The dogfood case still works because generalstaff's project.path IS the GeneralStaff repo root. Background: discovered 2026-04-17 evening during first gamr bootstrap setup — see research-notes.md '2026-04-17 — Phase 3 state-path architectural finding' for full context. This fix unblocks Phase 3 entirely.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 1
+   },
+   {
+diff --git a/tests/work_detection.test.ts b/tests/work_detection.test.ts
+index 81f2047..a3b74fa 100644
+--- a/tests/work_detection.test.ts
++++ b/tests/work_detection.test.ts
+@@ -120,7 +120,7 @@ describe("greenfieldHasMoreWork", () => {
+         { id: "2", title: "Task 2", status: "pending", priority: 2 },
+       ]),
+     );
+-    expect(await greenfieldHasMoreWork("greenfield")).toBe(true);
++    expect(await greenfieldHasMoreWork(FIXTURES, "greenfield")).toBe(true);
+   });
+ 
+   it("returns false when all tasks are done", async () => {
+@@ -131,7 +131,7 @@ describe("greenfieldHasMoreWork", () => {
+         { id: "2", title: "Task 2", status: "skipped", priority: 2 },
+       ]),
+     );
+-    expect(await greenfieldHasMoreWork("all-done")).toBe(false);
++    expect(await greenfieldHasMoreWork(FIXTURES, "all-done")).toBe(false);
+   });
+ 
+   it("returns true when tasks include in_progress items", async () => {
+@@ -143,11 +143,11 @@ describe("greenfieldHasMoreWork", () => {
+         { id: "3", title: "Task 3", status: "skipped", priority: 3 },
+       ]),
+     );
+-    expect(await greenfieldHasMoreWork("in-prog")).toBe(true);
++    expect(await greenfieldHasMoreWork(FIXTURES, "in-prog")).toBe(true);
+   });
+ 
+   it("returns false when tasks.json doesn't exist", async () => {
+-    expect(await greenfieldHasMoreWork("nonexistent")).toBe(false);
++    expect(await greenfieldHasMoreWork(FIXTURES, "nonexistent")).toBe(false);
+   });
+ });
+ 
+@@ -222,7 +222,7 @@ describe("greenfieldCountRemaining", () => {
+         { id: "5", status: "pending" },
+       ]),
+     );
+-    expect(await greenfieldCountRemaining("count-green")).toBe(3);
++    expect(await greenfieldCountRemaining(FIXTURES, "count-green")).toBe(3);
+   });
+ 
+   it("returns 0 when all tasks are done or skipped", async () => {
+@@ -233,16 +233,44 @@ describe("greenfieldCountRemaining", () => {
+         { id: "2", status: "skipped" },
+       ]),
+     );
+-    expect(await greenfieldCountRemaining("count-done")).toBe(0);
++    expect(await greenfieldCountRemaining(FIXTURES, "count-done")).toBe(0);
+   });
+ 
+   it("returns 0 when tasks.json doesn't exist", async () => {
+-    expect(await greenfieldCountRemaining("nonexistent")).toBe(0);
++    expect(await greenfieldCountRemaining(FIXTURES, "nonexistent")).toBe(0);
+   });
+ 
+   it("returns 0 when JSON is malformed", async () => {
+     writeFixture("state/count-bad/tasks.json", "{ not json");
+-    expect(await greenfieldCountRemaining("count-bad")).toBe(0);
++    expect(await greenfieldCountRemaining(FIXTURES, "count-bad")).toBe(0);
++  });
++
++  it("reads from project.path (non-dogfood), not getRootDir()", async () => {
++    // Proves the Phase 3 fix: when project.path differs from getRootDir(),
++    // greenfieldCountRemaining must read from project.path, not the
++    // GeneralStaff repo root.
++    const projectPath = join(FIXTURES, "external-project");
++    mkdirSync(join(projectPath, "state", "gamr"), { recursive: true });
++    writeFileSync(
++      join(projectPath, "state", "gamr", "tasks.json"),
++      JSON.stringify([
++        { id: "1", status: "pending" },
++        { id: "2", status: "pending" },
++        { id: "3", status: "done" },
++      ]),
++      "utf8",
++    );
++
++    // Also write a decoy tasks.json under the fake GeneralStaff root that,
++    // if the old code path ran, would return a different count. This ensures
++    // we're reading from projectPath and not falling back to the root.
++    writeFixture(
++      "state/gamr/tasks.json",
++      JSON.stringify([{ id: "x", status: "pending" }]),
++    );
++
++    expect(await greenfieldCountRemaining(projectPath, "gamr")).toBe(2);
++    expect(await greenfieldHasMoreWork(projectPath, "gamr")).toBe(true);
+   });
+ });
+ 
