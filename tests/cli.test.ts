@@ -1665,4 +1665,132 @@ routes:
       }
     });
   });
+
+  describe("status --backlog (gs-199)", () => {
+    const BACKLOG_DIR = join(import.meta.dir, "fixtures", "status_backlog_test");
+    const ALPHA_DIR = join(BACKLOG_DIR, "alpha");
+    const BETA_DIR = join(BACKLOG_DIR, "beta");
+
+    const PROJECTS_YAML = () => `
+projects:
+  - id: alpha
+    path: ${ALPHA_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    hands_off:
+      - src/reviewer.ts
+  - id: beta
+    path: ${BETA_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
+      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(BACKLOG_DIR, "projects.yaml"), PROJECTS_YAML());
+      // alpha: 2 bot-pickable, 1 interactive_only, 1 done
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([
+          { id: "a-1", title: "t1", status: "pending", priority: 1 },
+          { id: "a-2", title: "t2", status: "pending", priority: 2 },
+          { id: "a-3", title: "t3", status: "pending", priority: 2, interactive_only: true },
+          { id: "a-4", title: "t4", status: "done", priority: 2 },
+        ]),
+      );
+      // beta: 1 bot-pickable, 1 hands_off conflict (touches src/reviewer.ts
+      // — not a hands_off path for beta, but CLAUDE.md is), 1 in_progress
+      writeFileSync(
+        join(BETA_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([
+          { id: "b-1", title: "t1", status: "pending", priority: 1 },
+          {
+            id: "b-2",
+            title: "t2",
+            status: "pending",
+            priority: 2,
+            expected_touches: ["CLAUDE.md"],
+          },
+          { id: "b-3", title: "t3", status: "in_progress", priority: 2 },
+        ]),
+      );
+    });
+
+    afterEach(() => {
+      rmSync(BACKLOG_DIR, { recursive: true, force: true });
+    });
+
+    it("--json emits projects + totals in the expected shape", async () => {
+      const result = await runCli(["status", "--backlog", "--json"], BACKLOG_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("projects");
+      expect(parsed).toHaveProperty("totals");
+      expect(parsed.projects).toHaveLength(2);
+      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
+      expect(alpha).toEqual({
+        id: "alpha",
+        bot_pickable: 2,
+        interactive_only: 1,
+        handsoff_conflict: 0,
+        in_progress: 0,
+        done: 1,
+      });
+      const beta = parsed.projects.find((p: { id: string }) => p.id === "beta");
+      expect(beta).toEqual({
+        id: "beta",
+        bot_pickable: 1,
+        interactive_only: 0,
+        handsoff_conflict: 1,
+        in_progress: 1,
+        done: 0,
+      });
+      expect(parsed.totals).toEqual({
+        bot_pickable: 3,
+        interactive_only: 1,
+        handsoff_conflict: 1,
+        in_progress: 1,
+      });
+    });
+
+    it("rejects --backlog combined with --sessions", async () => {
+      const result = await runCli(
+        ["status", "--backlog", "--sessions"],
+        BACKLOG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--backlog cannot be combined with --sessions/--summary/--watch",
+      );
+    });
+
+    it("rejects --backlog combined with --summary", async () => {
+      const result = await runCli(
+        ["status", "--backlog", "--summary"],
+        BACKLOG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--backlog cannot be combined with --sessions/--summary/--watch",
+      );
+    });
+  });
 });

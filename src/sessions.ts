@@ -113,6 +113,82 @@ export function stripSessionsArgs(rawArgs: string[]): string[] {
   );
 }
 
+// gs-199: backlog subview. One row per project with the four
+// pending-bucket counts plus in_progress + done. Data shape mirrors
+// WorkBreakdown from src/work_detection.ts but flattened and renamed
+// for stable CLI/JSON output.
+export interface BacklogRow {
+  project_id: string;
+  bot_pickable: number;
+  interactive_only: number;
+  handsoff_conflict: number;
+  in_progress: number;
+  done: number;
+}
+
+export interface BacklogTotals {
+  bot_pickable: number;
+  interactive_only: number;
+  handsoff_conflict: number;
+  in_progress: number;
+}
+
+export function computeBacklogTotals(rows: BacklogRow[]): BacklogTotals {
+  const t: BacklogTotals = {
+    bot_pickable: 0,
+    interactive_only: 0,
+    handsoff_conflict: 0,
+    in_progress: 0,
+  };
+  for (const r of rows) {
+    t.bot_pickable += r.bot_pickable;
+    t.interactive_only += r.interactive_only;
+    t.handsoff_conflict += r.handsoff_conflict;
+    t.in_progress += r.in_progress;
+  }
+  return t;
+}
+
+export function formatBacklogTable(rows: BacklogRow[]): string {
+  if (rows.length === 0) {
+    return "No projects registered.";
+  }
+  const header = [
+    "Project",
+    "Bot-pickable",
+    "Interactive-only",
+    "Hands-off-conflict",
+    "In-progress",
+    "Done",
+  ];
+  const body: string[][] = rows.map((r) => [
+    r.project_id,
+    String(r.bot_pickable),
+    String(r.interactive_only),
+    String(r.handsoff_conflict),
+    String(r.in_progress),
+    String(r.done),
+  ]);
+  const totals = computeBacklogTotals(rows);
+  const totalDone = rows.reduce((a, r) => a + r.done, 0);
+  body.push([
+    "TOTAL",
+    String(totals.bot_pickable),
+    String(totals.interactive_only),
+    String(totals.handsoff_conflict),
+    String(totals.in_progress),
+    String(totalDone),
+  ]);
+  const widths = header.map((h, i) =>
+    Math.max(h.length, ...body.map((r) => r[i]!.length)),
+  );
+  const pad = (cells: string[]) =>
+    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
+  const lines = [pad(header), widths.map((w) => "-".repeat(w)).join("  ")];
+  for (const r of body) lines.push(pad(r));
+  return lines.join("\n");
+}
+
 export function formatSessionsTable(
   sessions: SessionSummary[],
   now: Date = new Date(),

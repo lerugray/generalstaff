@@ -1178,7 +1178,7 @@
   {
     "id": "gs-199",
     "title": "Add `generalstaff status --backlog` subview. CREATE ONLY: extend the `case 'status'` block in `src/cli.ts` (new --backlog flag handling + a new renderBacklogTable helper — put the helper in `src/sessions.ts` alongside formatSessionsTable); append new tests to `tests/cli.test.ts` and/or `tests/sessions.test.ts`. DO NOT CREATE: new files outside tests; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output format: one row per project showing columns `Project | Bot-pickable | Interactive-only | Hands-off-conflict | In-progress | Done`, plus a total row summing the first four numeric columns. Data source: call `countRemainingWorkDetailed(project)` from gs-200 (assume it has landed; if it hasn't, fall back to simple pending/done counts from the existing countRemainingWork + loadTasks). `--json` flag emits the same data as `{projects: [{id, bot_pickable, interactive_only, handsoff_conflict, in_progress, done}], totals: {...}}`. Mutually exclusive with --sessions, --summary, --watch — print an error like `Error: --backlog cannot be combined with --sessions/--summary/--watch` and exit code 1 if combined. Tests: (a) table format with mixed-status fixture; (b) --json output shape; (c) mutex error with exit code 1 on combined flags. Expected diff: ~150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",

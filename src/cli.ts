@@ -50,9 +50,13 @@ import { parseWatchFlag, runWatchLoop, stripWatchArgs } from "./watch";
 import {
   loadRecentSessions,
   formatSessionsTable,
+  formatBacklogTable,
+  computeBacklogTotals,
   parseSessionsFlag,
   stripSessionsArgs,
+  type BacklogRow,
 } from "./sessions";
+import { countRemainingWorkDetailed } from "./work_detection";
 import {
   loadProviderRegistry,
   getProviderById,
@@ -80,7 +84,7 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary]
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog]
                                                           Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
@@ -90,6 +94,8 @@ Usage:
     Example: generalstaff status --sessions=20 --json   # last 20 sessions, JSON
     Example: generalstaff status --summary              # today's cycle/session metrics (UTC)
     Example: generalstaff status --summary --json       # same, as JSON
+    Example: generalstaff status --backlog              # per-project backlog buckets
+    Example: generalstaff status --backlog --json       # same, as JSON
 
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
@@ -330,11 +336,58 @@ switch (command) {
       options: {
         json: { type: "boolean", default: false },
         summary: { type: "boolean", default: false },
+        backlog: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
 
+    // gs-199: --backlog is mutually exclusive with the other status
+    // subviews. Detect the clash early so the user gets a single clear
+    // error instead of whichever branch runs first silently winning.
+    if (
+      statusValues.backlog &&
+      (sessionsFlag.enabled || statusValues.summary || watch.enabled)
+    ) {
+      console.error(
+        "Error: --backlog cannot be combined with --sessions/--summary/--watch",
+      );
+      process.exit(1);
+    }
+
     const renderStatus = async () => {
+      if (statusValues.backlog) {
+        const projects = await loadProjects();
+        const rows: BacklogRow[] = [];
+        for (const p of projects) {
+          const b = await countRemainingWorkDetailed(p);
+          rows.push({
+            project_id: p.id,
+            bot_pickable: b.pending_bot_pickable,
+            interactive_only: b.pending_interactive_only,
+            handsoff_conflict: b.pending_handsoff_conflict,
+            in_progress: b.in_progress,
+            done: b.done,
+          });
+        }
+        if (statusValues.json) {
+          const totals = computeBacklogTotals(rows);
+          const out = {
+            projects: rows.map((r) => ({
+              id: r.project_id,
+              bot_pickable: r.bot_pickable,
+              interactive_only: r.interactive_only,
+              handsoff_conflict: r.handsoff_conflict,
+              in_progress: r.in_progress,
+              done: r.done,
+            })),
+            totals,
+          };
+          console.log(JSON.stringify(out, null, 2));
+        } else {
+          console.log(formatBacklogTable(rows));
+        }
+        return;
+      }
       if (statusValues.summary) {
         const todaySummary = await buildTodaySessionSummary();
         if (statusValues.json) {
