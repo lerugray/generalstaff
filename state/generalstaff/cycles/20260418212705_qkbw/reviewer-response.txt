@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task gs-220, no hands-off violations, and the verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-220",
+      "evidence": "Added DEFAULT_UNPRODUCTIVE_THRESHOLD, UnproductiveStreak interface, updateUnproductiveStreak function, and integrated the logic into runSession in src/session.ts. Also added comprehensive tests in tests/session.test.ts covering all specified cases.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) returned exit code 0, confirming the code compiles and tests pass. The diff shows all necessary changes for gs-220 including new logic, constants, interfaces, and tests, with no unauthorized file modifications."
+}
