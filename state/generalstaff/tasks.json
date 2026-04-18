@@ -1300,5 +1300,15 @@
       "src/session.ts",
       "tests/fleet_messages.test.ts"
     ]
+  },
+  {
+    "id": "gs-220",
+    "title": "Extend gs-193 fast-fail backoff to catch SLOW-crash streaks (time-window escape hatch). CREATE ONLY: modify `src/session.ts` — add a second soft-skip trigger alongside the existing gs-193 time-window check: track a separate `unproductiveStreak` counter per project that increments on every verification_failed outcome WHERE diff_stats.files_changed === 0 (no work produced) and resets on any other outcome; when unproductiveStreak hits a threshold (DEFAULT_UNPRODUCTIVE_THRESHOLD = 3), soft-skip the project regardless of time span. Add `DEFAULT_UNPRODUCTIVE_THRESHOLD` alongside DEFAULT_SOFT_SKIP_THRESHOLD. Append tests to `tests/session.test.ts` covering: (a) 3 fast failures within window still trigger the existing gs-193 path (back-compat); (b) 3 slow failures with zero diff spread over >600s trigger the new path; (c) a single verified cycle between failures resets the unproductive streak; (d) 3 consecutive verification_failed WITH a real diff (e.g. engineer committed but reviewer rejected on scope) do NOT trigger the new path — that's a real scope problem deserving different handling. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Observed 2026-04-18 evening: during session bbjko8dw6 the engineer subprocess crashed 3 times due to Bun/claude.exe OOM — but the 3rd crash took 33 min (hang-before-death), so first-to-third span exceeded gs-193's 600s window and soft-skip never fired. The session wasted ~40 min on productive-zero cycles before I manually STOPped it. gs-193 catches fast-crash loops; gs-220 catches slow-crash-with-zero-progress loops. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/session.ts",
+      "tests/session.test.ts"
+    ]
   }
 ]
