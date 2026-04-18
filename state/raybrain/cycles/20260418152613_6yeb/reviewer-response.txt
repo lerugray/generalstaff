@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task, no hands-off violations, and the diff provides strong evidence for completing the task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "rayb-004",
+      "evidence": "The diff includes creation of src/raybrain/eval/__init__.py, src/raybrain/eval/ragas_runner.py, src/raybrain/eval/report.py, src/raybrain/eval/README.md, and modification of src/raybrain/cli.py to add the 'eval' command, along with tests/unit/test_ragas_runner.py, all matching the scope of task rayb-004.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming that all tests are working as expected."
+}
