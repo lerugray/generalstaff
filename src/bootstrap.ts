@@ -20,8 +20,24 @@ export type StackKind =
   | "node-next"
   | "rust-cargo"
   | "python-poetry"
+  | "python-uv"
+  | "python-pip"
   | "go-mod"
   | "unknown";
+
+// gs-190: all known stacks, exported so CLI arg-parsing stays in sync
+// with the StackKind union without duplicating the list. Ordered roughly
+// most-specific → most-generic so the CLI help reads naturally.
+export const ALL_STACK_KINDS: readonly StackKind[] = [
+  "bun-next",
+  "bun-plain",
+  "node-next",
+  "rust-cargo",
+  "python-uv",
+  "python-poetry",
+  "python-pip",
+  "go-mod",
+] as const;
 
 export interface DetectedStack {
   kind: StackKind;
@@ -63,10 +79,46 @@ const DEFAULT_ENGINEER_COMMAND = "bash engineer_command.sh ${cycle_budget_minute
 // command + budget. Without this, a newly-bootstrapped project's
 // first bot cycle would run a promptless `claude -p` on the main
 // working tree — clobbering the user's interactive work.
+// gs-190: stack-aware install step for the bot's worktree. The earlier
+// template hard-coded `bun install`, which fails silently on Python
+// projects and leaves the engineer subprocess without its deps (first
+// observed on raybrain 2026-04-18 before the other Claude session
+// hand-patched it). The strings here are intentionally defensive —
+// `|| true` for optional installs, fallbacks for lockfile-absent
+// bootstraps.
+export function installStepForStack(stack: StackKind): string {
+  switch (stack) {
+    case "bun-next":
+    case "bun-plain":
+      return `bun install --frozen-lockfile 2>/dev/null || bun install`;
+    case "node-next":
+      return `npm ci 2>/dev/null || npm install`;
+    case "python-uv":
+      return `uv sync 2>/dev/null || uv pip install -e . 2>/dev/null || true`;
+    case "python-poetry":
+      return `poetry install --no-interaction 2>/dev/null || true`;
+    case "python-pip":
+      return (
+        `python -m pip install -e . 2>/dev/null ` +
+        `|| python -m pip install -r requirements.txt 2>/dev/null ` +
+        `|| true`
+      );
+    case "rust-cargo":
+      // cargo builds lazily on the first `cargo test` — no install step.
+      return `# rust: cargo fetches deps on first build`;
+    case "go-mod":
+      return `go mod download 2>/dev/null || true`;
+    case "unknown":
+      return `# TODO: add dependency-install step for this project's stack`;
+  }
+}
+
 function engineerCommandScript(
   projectId: string,
   verifyCommand: string,
+  stack: StackKind = "bun-plain",
 ): string {
+  const installStep = installStepForStack(stack);
   return `#!/usr/bin/env bash
 # ${projectId} — autonomous engineering bot launcher
 #
@@ -115,7 +167,7 @@ git -C "\$PROJECT_ROOT" worktree add "\$WORKTREE_DIR" "\$BRANCH"
 # --- Install dependencies in worktree ---
 echo "Installing dependencies in worktree..."
 cd "\$WORKTREE_DIR"
-bun install --frozen-lockfile 2>/dev/null || bun install
+${installStep}
 
 # --- Run autonomous bot ---
 echo ""
@@ -201,6 +253,21 @@ function stackDefaults(kind: StackKind): DetectedStack {
         verifyCommand: "poetry run pytest && poetry run ruff check",
         engineerCommand: DEFAULT_ENGINEER_COMMAND,
       };
+    case "python-uv":
+      return {
+        kind,
+        verifyCommand: "uv run pytest && uv run ruff check",
+        engineerCommand: DEFAULT_ENGINEER_COMMAND,
+      };
+    case "python-pip":
+      return {
+        kind,
+        // python -m <tool> style so the verify command doesn't assume
+        // ruff/pytest are on PATH globally — they just need to be
+        // importable from the interpreter the bot installed into.
+        verifyCommand: "python -m pytest && python -m ruff check",
+        engineerCommand: DEFAULT_ENGINEER_COMMAND,
+      };
     case "go-mod":
       return {
         kind,
@@ -247,10 +314,63 @@ export function detectStack(
   }
 
   if (existsSync(join(targetDir, "Cargo.toml"))) return stackDefaults("rust-cargo");
-  if (existsSync(join(targetDir, "pyproject.toml"))) return stackDefaults("python-poetry");
+
+  // gs-190: Python detection. Earlier code only recognized pyproject.toml
+  // and always mapped it to poetry; raybrain uses uv and was misdetected.
+  // We now:
+  //   1. Inspect pyproject.toml for explicit uv / poetry markers (or a
+  //      sibling uv.lock) before falling back to python-poetry.
+  //   2. Recognize pip-style projects via requirements.txt / setup.py /
+  //      setup.cfg when no pyproject.toml is present.
+  // A lone `.python-version` is too weak a signal on its own — it often
+  // coexists with pyproject/requirements and would only overrule those,
+  // so it's only used as a tie-breaker for the pip fallback.
+  const pyprojectPath = join(targetDir, "pyproject.toml");
+  if (existsSync(pyprojectPath)) {
+    return stackDefaults(classifyPyproject(targetDir, pyprojectPath));
+  }
+  if (existsSync(join(targetDir, "requirements.txt"))) return stackDefaults("python-pip");
+  if (existsSync(join(targetDir, "setup.py"))) return stackDefaults("python-pip");
+  if (existsSync(join(targetDir, "setup.cfg"))) return stackDefaults("python-pip");
+  if (existsSync(join(targetDir, ".python-version"))) return stackDefaults("python-pip");
+
   if (existsSync(join(targetDir, "go.mod"))) return stackDefaults("go-mod");
 
   return stackDefaults("unknown");
+}
+
+// gs-190: pick the right Python stack for a project that has a
+// pyproject.toml. Looks at explicit sections + sibling lockfile
+// markers. Returns python-uv or python-poetry (the latter is also the
+// historical default — still used when a [tool.poetry] section is
+// explicit or nothing more specific matches).
+export function classifyPyproject(
+  targetDir: string,
+  pyprojectPath: string,
+): StackKind {
+  let text = "";
+  try {
+    text = readFileSync(pyprojectPath, "utf8");
+  } catch {
+    return "python-poetry";
+  }
+  // Explicit section wins. [tool.uv] appears in pyproject.toml when the
+  // project is managed by uv (astral-sh); [tool.poetry] for poetry.
+  // Order: tool.uv > tool.poetry > heuristics. Ray's raybrain has
+  // [tool.uv] + uv.lock. The character class (\]|\.|\s|$) allows the
+  // common header shapes — `[tool.uv]`, `[tool.uv.workspace]`, and
+  // whitespace-terminated variants without falsely matching `[tool.uvx]`.
+  if (/^\s*\[tool\.uv(\]|\.|\s|$)/m.test(text)) return "python-uv";
+  if (/^\s*\[tool\.poetry(\]|\.|\s|$)/m.test(text)) return "python-poetry";
+  // Sibling lockfile heuristic for projects that don't carry an explicit
+  // [tool.*] block — uv.lock is specific enough to trust.
+  if (existsSync(join(targetDir, "uv.lock"))) return "python-uv";
+  if (existsSync(join(targetDir, "poetry.lock"))) return "python-poetry";
+  // PEP 621 projects without a tool-specific block default to
+  // python-pip — verification runs with `python -m pytest` rather
+  // than assuming a specific package manager is installed.
+  if (/^\s*\[project\]/m.test(text)) return "python-pip";
+  return "python-poetry"; // historical default for pyproject.toml
 }
 
 // Scaffold a minimum-viable repo for greenfield stacks. Writes
@@ -658,7 +778,7 @@ function generateProposal(
   );
   writeFileSync(
     join(proposalDir, "engineer_command.sh"),
-    engineerCommandScript(projectId, stack.verifyCommand),
+    engineerCommandScript(projectId, stack.verifyCommand, stack.kind),
   );
   writeFileSync(join(proposalDir, "idea.md"), `# Raw idea\n\n${idea}\n`);
   writeFileSync(

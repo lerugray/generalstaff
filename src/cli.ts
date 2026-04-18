@@ -103,13 +103,15 @@ Usage:
                                                           Propose scaffolding for a new project (propose-don't-impose)
     Example: generalstaff bootstrap ../gamr "Tinder for gamers, strictly platonic" --stack=bun-next
     Example: generalstaff bootstrap ./util "utility library" --stack=bun-plain --id=util
-    # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-poetry, go-mod
+    Example: generalstaff bootstrap ./raybrain "local-first second brain" --stack=python-uv
+    # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-uv, python-poetry, python-pip, go-mod
     # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
 
-  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]
+  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes]
                                                           Append a bootstrapped project to projects.yaml (after review)
     Example: generalstaff register gamr --path=../gamr
     Example: generalstaff register gamr --path=../gamr --priority=3 --yes
+    Example: generalstaff register raybrain --path=../raybrain --stack=python-uv
     # Reads state/<id>/tasks.json + hands_off.yaml (from project root or .generalstaff-proposal/).
     # Rejects duplicates; prompts y/N before editing. projects.yaml IS in hands_off for the bot,
     # but 'register' is the tool's own write path to its own config — equivalent to 'init'.
@@ -1458,6 +1460,7 @@ switch (command) {
       options: {
         path: { type: "string" },
         priority: { type: "string" },
+        stack: { type: "string" },
         yes: { type: "boolean", short: "y", default: false },
       },
       allowPositionals: true,
@@ -1466,7 +1469,7 @@ switch (command) {
     if (!regProjectId) {
       console.error(
         "Error: project-id is required\n" +
-          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--yes]",
+          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes]",
       );
       process.exit(1);
     }
@@ -1487,12 +1490,25 @@ switch (command) {
       }
       regPriority = parsed;
     }
+    // gs-190: explicit stack override for the chicken-and-egg where
+    // stack-signal files aren't yet committed at register-time.
+    const { ALL_STACK_KINDS: REG_STACKS } = await import("./bootstrap");
+    if (
+      regValues.stack !== undefined &&
+      !REG_STACKS.includes(regValues.stack as (typeof REG_STACKS)[number])
+    ) {
+      console.error(
+        `Error: --stack must be one of: ${REG_STACKS.join(", ")}`,
+      );
+      process.exit(1);
+    }
     const { runRegister } = await import("./register");
     const regResult = await runRegister({
       projectId: regProjectId,
       projectPath: regValues.path,
       assumeYes: Boolean(regValues.yes),
       priority: regPriority,
+      stack: regValues.stack as (typeof REG_STACKS)[number] | undefined,
     });
     if (!regResult.ok) {
       console.error(`Error: ${regResult.reason}`);
@@ -1524,20 +1540,13 @@ switch (command) {
       );
       process.exit(1);
     }
-    const VALID_STACKS = [
-      "bun-next",
-      "bun-plain",
-      "node-next",
-      "rust-cargo",
-      "python-poetry",
-      "go-mod",
-    ] as const;
+    const { ALL_STACK_KINDS } = await import("./bootstrap");
     if (
       bsValues.stack !== undefined &&
-      !VALID_STACKS.includes(bsValues.stack as (typeof VALID_STACKS)[number])
+      !ALL_STACK_KINDS.includes(bsValues.stack as (typeof ALL_STACK_KINDS)[number])
     ) {
       console.error(
-        `Error: --stack must be one of: ${VALID_STACKS.join(", ")}`,
+        `Error: --stack must be one of: ${ALL_STACK_KINDS.join(", ")}`,
       );
       process.exit(1);
     }
@@ -1546,7 +1555,7 @@ switch (command) {
     const result = await runBootstrap({
       targetDir: resolvedTarget,
       idea: bsIdea,
-      stack: bsValues.stack as (typeof VALID_STACKS)[number] | undefined,
+      stack: bsValues.stack as (typeof ALL_STACK_KINDS)[number] | undefined,
       projectId: bsValues.id,
       force: Boolean(bsValues.force),
     });

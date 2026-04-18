@@ -1098,7 +1098,7 @@
   {
     "id": "gs-190",
     "title": "Extend src/bootstrap.ts:detectStack to recognize Python projects (sniff for pyproject.toml, requirements.txt, setup.py, setup.cfg, .python-version) AND handle the chicken-and-egg where stack-signal files don't exist at register-time. Solutions: accept --stack=<python|node|bun|...> arg to bootstrap/register, OR sniff existing engineer_command.sh content for uv/python/pip patterns. Surfaced 2026-04-18 raybrain bootstrap: gs-176 template generated Bun-first commands for a Python project, other Claude session manually patched. Bot-doable.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
