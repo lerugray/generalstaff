@@ -1,0 +1,243 @@
+diff --git a/src/git.ts b/src/git.ts
+index 417700f..6697655 100644
+--- a/src/git.ts
++++ b/src/git.ts
+@@ -8,6 +8,13 @@ import { getRootDir } from "./state";
+  *  Returns "" for equal-SHA / empty-input / unresolvable-SHA. Swallows all
+  *  errors — caller uses the return value to decide fallback display.
+  *
++ *  The optional `cwd` parameter selects which repository to resolve the SHA
++ *  in. When omitted, falls back to `getRootDir()` (the dispatcher repo),
++ *  which only makes sense for dogfood cycles. Non-dogfood callers must pass
++ *  the project's own path — otherwise the log call runs in the wrong repo
++ *  and every non-self SHA produces a "bad object" warning (observed during
++ *  the 2026-04-18 raybrain session).
++ *
+  *  Retries once on empty result. Background: during the 2026-04-17 morning
+  *  Ollama practice runs, the first cycle's subject resolution intermittently
+  *  returned empty even though the commit was reachable and a later manual
+@@ -16,16 +23,22 @@ import { getRootDir } from "./state";
+  *  Retry hides the symptom and stderr capture gives future sessions a trail
+  *  if the underlying cause resurfaces.
+  */
+-export function fetchCommitSubject(startSha: string, endSha: string): string {
++export function fetchCommitSubject(
++  startSha: string,
++  endSha: string,
++  cwd?: string,
++): string {
+   if (!endSha || endSha === startSha) return "";
+ 
++  const gitCwd = cwd ?? getRootDir();
++
+   let lastStderr = "";
+   let lastStatus: number | null = null;
+ 
+   for (let attempt = 0; attempt < 2; attempt++) {
+     try {
+       const result = spawnSync("git", ["log", "-1", "--format=%s", endSha], {
+-        cwd: getRootDir(),
++        cwd: gitCwd,
+         stdio: ["ignore", "pipe", "pipe"],
+         timeout: 5_000,
+       });
+diff --git a/src/session.ts b/src/session.ts
+index 039ca83..c819052 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -901,6 +901,15 @@ export async function runSession(options: SessionOptions) {
+       }
+     : undefined;
+ 
++  // gs-215: thread project paths into the digest so fetchCommitSubject
++  // resolves each cycle's SHAs in its own project repo, not the dispatcher
++  // repo. Without this, non-dogfood cycles log "bad object" warnings and
++  // every subject falls back to cycle_id.
++  const projectPaths: Record<string, string> = {};
++  for (const p of projects) {
++    projectPaths[p.id] = p.path;
++  }
++
+   // Write digest
+   await writeDigest(allResults, elapsed, {
+     digest_dir: config.digest_dir,
+@@ -908,6 +917,7 @@ export async function runSession(options: SessionOptions) {
+     reviewer_model: process.env.GENERALSTAFF_REVIEWER_MODEL,
+     parallel_metrics: parallelMetricsForDigest,
+     cycle_rounds: isParallelMode ? cycleRoundsAccumulator : undefined,
++    project_paths: projectPaths,
+   });
+ 
+   // Log session end for each project
+@@ -965,7 +975,12 @@ export async function runSession(options: SessionOptions) {
+   // the session.
+   if (!dryRun) {
+     const tasksDone = fleetBuckets.verified.map(
+-      (r) => fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id,
++      (r) =>
++        fetchCommitSubject(
++          r.cycle_start_sha,
++          r.cycle_end_sha,
++          projectPaths[r.project_id],
++        ) || r.cycle_id,
+     );
+     await notifySessionEnd({
+       success: fleetBuckets.failed.length === 0,
+@@ -1204,6 +1219,12 @@ export async function writeDigest(
+     // confusingly. Absent or all-size-1 → flat rendering (no regression
+     // for sequential sessions).
+     cycle_rounds?: CycleResult[][];
++    // gs-215: project_id → absolute project path. When omitted (or when
++    // a given project_id isn't in the map), fetchCommitSubject falls
++    // back to the dispatcher repo, which is only correct for dogfood
++    // cycles. Callers running multi-project sessions must populate this
++    // so non-self SHAs resolve in the project's own repo.
++    project_paths?: Record<string, string>;
+   },
+   deps?: WriteDigestDeps,
+ ) {
+@@ -1297,7 +1318,12 @@ export async function writeDigest(
+       content += `_No cycles passed verification this session._\n\n`;
+     } else {
+       verified.forEach((r, i) => {
+-        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
++        const subject =
++          fetchCommitSubject(
++            r.cycle_start_sha,
++            r.cycle_end_sha,
++            config.project_paths?.[r.project_id],
++          ) || r.cycle_id;
+         const diff = r.diff_stats
+           ? `  _(${formatFileCount(r.diff_stats.files_changed)}, +${r.diff_stats.insertions}/-${r.diff_stats.deletions})_`
+           : "";
+@@ -1311,7 +1337,12 @@ export async function writeDigest(
+       content += `_None — all cycles passed verification._\n\n`;
+     } else {
+       for (const r of failed) {
+-        const subject = fetchCommitSubject(r.cycle_start_sha, r.cycle_end_sha) || r.cycle_id;
++        const subject =
++          fetchCommitSubject(
++            r.cycle_start_sha,
++            r.cycle_end_sha,
++            config.project_paths?.[r.project_id],
++          ) || r.cycle_id;
+         content += `- **${subject}** — ${r.final_outcome}: ${r.reason}\n`;
+       }
+       content += `\n`;
+@@ -1492,10 +1523,24 @@ export async function regenerateDigest(
+ 
+   const durationMinutes = parsed.duration ? parseFormattedDuration(parsed.duration) : 0;
+ 
++  // gs-215: mirror the runSession wiring so regenerated digests also
++  // resolve each cycle's SHAs in the right project repo. loadProjectsYaml
++  // failure (missing/malformed projects.yaml) is non-fatal here — the
++  // regen still produces output, just with cycle_id fallbacks instead of
++  // subject lines for any project whose path isn't resolvable.
++  const regenProjectPaths: Record<string, string> = {};
++  try {
++    const yaml = await loadProjectsYaml();
++    for (const p of yaml.projects) regenProjectPaths[p.id] = p.path;
++  } catch {
++    // Ignore — fall back to empty map.
++  }
++
+   await writeDigest(results, durationMinutes, {
+     digest_dir: config.digest_dir,
+     reviewer_provider: reviewerProvider,
+     reviewer_model: reviewerModel,
++    project_paths: regenProjectPaths,
+   });
+ 
+   return { results, missing };
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 660f467..28b7ea9 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1245,13 +1245,14 @@
+   {
+     "id": "gs-215",
+     "title": "Fix fetchCommitSubject to resolve SHAs in the correct project's git repo. CREATE ONLY: modify `src/git.ts` (fetchCommitSubject currently shell-outs to `git log -1 <sha>` in the current working directory; change it to accept an optional `cwd` parameter so callers can pass the project's path); modify call sites in `src/session.ts` writeDigest that iterate cycle results to pass `project.path` through; append tests to `tests/git.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Observed 2026-04-18 evening: raybrain session bxs08e22x produced 6 verified cycles. When writeDigest iterated those cycles, fetchCommitSubject tried resolving raybrain SHAs (f31a778, 0e5abe2, etc.) in the GeneralStaff repo and emitted 6 `[fetchCommitSubject] warning: bad object` lines. Non-fatal (digest falls back to cycle_id) but the output is ugly and the subject lookup never succeeds. Fix: thread project.path through so the git-log call runs in the right repo. Tests: (a) default (no cwd) still works (back-compat); (b) cwd=<project.path> for a non-dogfood project resolves SHAs correctly; (c) unresolvable SHA returns null without crashing. Expected diff: ~80 lines.",
+-    "status": "pending",
++    "status": "completed",
+     "priority": 2,
+     "expected_touches": [
+       "src/git.ts",
+       "src/session.ts",
+       "tests/git.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T19:34:38.320Z"
+   },
+   {
+     "id": "gs-216",
+diff --git a/tests/git.test.ts b/tests/git.test.ts
+index b1d1eff..ac88f35 100644
+--- a/tests/git.test.ts
++++ b/tests/git.test.ts
+@@ -79,6 +79,66 @@ describe("fetchCommitSubject", () => {
+   // being reachable. If this test ever fails, the bug has a genuine git-level
+   // cause (object missing, ref collision, etc.) rather than a data-plumbing
+   // issue upstream.
++  // gs-215: `cwd` parameter lets callers pick which repo to resolve the
++  // SHA in. Without it, multi-project sessions try to resolve non-dogfood
++  // SHAs in the dispatcher repo and every lookup fails with "bad object".
++  it("resolves SHAs in the repo specified by cwd (non-dogfood project)", async () => {
++    const rootRepo = join(tmpdir(), "gs-git-root-" + Date.now());
++    const projectRepo = join(tmpdir(), "gs-git-project-" + Date.now());
++    try {
++      await initRepo(rootRepo);
++      await commitFile(rootRepo, "root.txt", "root", "root initial commit");
++      setRootDir(rootRepo);
++
++      await initRepo(projectRepo);
++      const sha1 = await commitFile(projectRepo, "p.txt", "one", "project first commit");
++      const sha2 = await commitFile(
++        projectRepo,
++        "p.txt",
++        "two",
++        "project subject only visible in project repo",
++      );
++
++      // Without cwd, the lookup runs in rootRepo and fails.
++      expect(fetchCommitSubject(sha1, sha2)).toBe("");
++      // With cwd, the lookup runs in projectRepo and succeeds.
++      expect(fetchCommitSubject(sha1, sha2, projectRepo)).toBe(
++        "project subject only visible in project repo",
++      );
++    } finally {
++      rmSync(rootRepo, { recursive: true, force: true });
++      rmSync(projectRepo, { recursive: true, force: true });
++    }
++  });
++
++  it("returns empty string when SHA is unresolvable in the given cwd (no crash)", async () => {
++    const repo = join(tmpdir(), "gs-git-cwd-bad-" + Date.now());
++    try {
++      await initRepo(repo);
++      await commitFile(repo, "a.txt", "one", "initial");
++      setRootDir(repo);
++      expect(
++        fetchCommitSubject("abc", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", repo),
++      ).toBe("");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("default (no cwd) still resolves SHAs in getRootDir() — back-compat", async () => {
++    const repo = join(tmpdir(), "gs-git-backcompat-" + Date.now());
++    try {
++      await initRepo(repo);
++      const sha1 = await commitFile(repo, "a.txt", "one", "first");
++      const sha2 = await commitFile(repo, "b.txt", "two", "back-compat subject");
++      setRootDir(repo);
++      // Omitting cwd — must still resolve via getRootDir().
++      expect(fetchCommitSubject(sha1, sha2)).toBe("back-compat subject");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
+   it("resolves end SHA after session-init + merge-into-master flow", async () => {
+     const repo = join(tmpdir(), "gs-git-merged-" + Date.now());
+     try {
