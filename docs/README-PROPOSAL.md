@@ -11,6 +11,16 @@ proposal).
 section. Bullets describe *what belongs there*. Each bullet cites
 the source doc whose existing content should seed that bullet.
 
+> **Staleness note (2026-04-18):** the specific `README.md` line
+> numbers cited in bullets below refer to the 2026-04-17 README
+> state. That README was rewritten on 2026-04-18 to reflect
+> Phases 1-4 shipped (previously "Phase 1 shipped") and the
+> re-sequenced roadmap (Phase 4 = parallel worktrees, not Tauri
+> UI). The structural proposal itself is still the intended
+> shape, but line references will not match the current file.
+> When the "later interactive session" mentioned above actually
+> runs, regenerate line refs from the current `README.md`.
+
 ---
 
 ## 1. Title + Tagline
