@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff fully aligns with the claimed task gs-175, including code changes, test updates, and task status flagging, with no scope drift or hands-off violations.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-175",
+      "evidence": "src/register.ts now uses resolve(opts.projectPath) to locate tasks.json; register.test.ts adds a new test verifying non-dogfood project path behavior; and state/generalstaff/tasks.json updates gs-175 status to 'done'.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "Verification passed with 0 exit code; all changes are tightly scoped to gs-175 and no unrelated files were modified."
+}
