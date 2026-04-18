@@ -1156,7 +1156,7 @@
   {
     "id": "gs-196",
     "title": "Parallel-mode digest: group cycle-detail sections by round. CREATE ONLY: modify `src/session.ts` writeDigest + the session_complete call path that invokes it (wire the cycle-rounds data through); append new tests to `tests/session.test.ts`. DO NOT CREATE: new files; do not touch any file outside src/session.ts and tests/session.test.ts; do not touch design docs, prompts, safety modules, scripts, or any hands_off path. Today the `## Details` section lists cycles flatly; in parallel mode the cycles interleave and make the rendering look jumbled. Fix: (1) extend the `writeDigest` config param to accept an optional `cycle_rounds: CycleResult[][]` — array of per-round cycle arrays, populated by runSession in parallel mode; (2) when `cycle_rounds` is supplied with at least one round of size > 1, render `### Round N (Ns wall, X cycle(s))` headers before each round's cycles, with `## <project> — <cycle>` sub-sections nested under each round header; (3) when `cycle_rounds` is absent or every round has size 1, fall back to the existing flat rendering — no regression for sequential sessions. Round wall = max cycle duration within that round (take max of ended_at - started_at). Tests: (a) sequential writeDigest call (no cycle_rounds) has NO `### Round` headers; (b) parallel writeDigest with 2 rounds of 2 cycles each has exactly 2 `### Round` headers; (c) round-wall text is formatted via formatDuration. Expected diff: ~180 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/session.ts",
