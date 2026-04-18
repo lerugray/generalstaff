@@ -120,7 +120,7 @@ describe("greenfieldHasMoreWork", () => {
         { id: "2", title: "Task 2", status: "pending", priority: 2 },
       ]),
     );
-    expect(await greenfieldHasMoreWork("greenfield")).toBe(true);
+    expect(await greenfieldHasMoreWork(FIXTURES, "greenfield")).toBe(true);
   });
 
   it("returns false when all tasks are done", async () => {
@@ -131,7 +131,7 @@ describe("greenfieldHasMoreWork", () => {
         { id: "2", title: "Task 2", status: "skipped", priority: 2 },
       ]),
     );
-    expect(await greenfieldHasMoreWork("all-done")).toBe(false);
+    expect(await greenfieldHasMoreWork(FIXTURES, "all-done")).toBe(false);
   });
 
   it("returns true when tasks include in_progress items", async () => {
@@ -143,11 +143,11 @@ describe("greenfieldHasMoreWork", () => {
         { id: "3", title: "Task 3", status: "skipped", priority: 3 },
       ]),
     );
-    expect(await greenfieldHasMoreWork("in-prog")).toBe(true);
+    expect(await greenfieldHasMoreWork(FIXTURES, "in-prog")).toBe(true);
   });
 
   it("returns false when tasks.json doesn't exist", async () => {
-    expect(await greenfieldHasMoreWork("nonexistent")).toBe(false);
+    expect(await greenfieldHasMoreWork(FIXTURES, "nonexistent")).toBe(false);
   });
 });
 
@@ -222,7 +222,7 @@ describe("greenfieldCountRemaining", () => {
         { id: "5", status: "pending" },
       ]),
     );
-    expect(await greenfieldCountRemaining("count-green")).toBe(3);
+    expect(await greenfieldCountRemaining(FIXTURES, "count-green")).toBe(3);
   });
 
   it("returns 0 when all tasks are done or skipped", async () => {
@@ -233,16 +233,44 @@ describe("greenfieldCountRemaining", () => {
         { id: "2", status: "skipped" },
       ]),
     );
-    expect(await greenfieldCountRemaining("count-done")).toBe(0);
+    expect(await greenfieldCountRemaining(FIXTURES, "count-done")).toBe(0);
   });
 
   it("returns 0 when tasks.json doesn't exist", async () => {
-    expect(await greenfieldCountRemaining("nonexistent")).toBe(0);
+    expect(await greenfieldCountRemaining(FIXTURES, "nonexistent")).toBe(0);
   });
 
   it("returns 0 when JSON is malformed", async () => {
     writeFixture("state/count-bad/tasks.json", "{ not json");
-    expect(await greenfieldCountRemaining("count-bad")).toBe(0);
+    expect(await greenfieldCountRemaining(FIXTURES, "count-bad")).toBe(0);
+  });
+
+  it("reads from project.path (non-dogfood), not getRootDir()", async () => {
+    // Proves the Phase 3 fix: when project.path differs from getRootDir(),
+    // greenfieldCountRemaining must read from project.path, not the
+    // GeneralStaff repo root.
+    const projectPath = join(FIXTURES, "external-project");
+    mkdirSync(join(projectPath, "state", "gamr"), { recursive: true });
+    writeFileSync(
+      join(projectPath, "state", "gamr", "tasks.json"),
+      JSON.stringify([
+        { id: "1", status: "pending" },
+        { id: "2", status: "pending" },
+        { id: "3", status: "done" },
+      ]),
+      "utf8",
+    );
+
+    // Also write a decoy tasks.json under the fake GeneralStaff root that,
+    // if the old code path ran, would return a different count. This ensures
+    // we're reading from projectPath and not falling back to the root.
+    writeFixture(
+      "state/gamr/tasks.json",
+      JSON.stringify([{ id: "x", status: "pending" }]),
+    );
+
+    expect(await greenfieldCountRemaining(projectPath, "gamr")).toBe(2);
+    expect(await greenfieldHasMoreWork(projectPath, "gamr")).toBe(true);
   });
 });
 

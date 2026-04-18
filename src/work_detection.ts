@@ -5,7 +5,6 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { getRootDir } from "./state";
 import type { ProjectConfig } from "./types";
 
 export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
@@ -13,7 +12,7 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
     case "catalogdna_bot_tasks":
       return catalogdnaHasMoreWork(project.path);
     case "tasks_json":
-      return greenfieldHasMoreWork(project.id);
+      return greenfieldHasMoreWork(project.path, project.id);
     case "git_issues":
       return gitIssuesHasMoreWork(project.path);
     case "git_unmerged":
@@ -30,7 +29,7 @@ export async function countRemainingWork(
     case "catalogdna_bot_tasks":
       return catalogdnaCountRemaining(project.path);
     case "tasks_json":
-      return greenfieldCountRemaining(project.id);
+      return greenfieldCountRemaining(project.path, project.id);
     case "git_issues":
       return gitIssuesCountRemaining(project.path);
     case "git_unmerged":
@@ -66,9 +65,10 @@ export async function catalogdnaCountRemaining(
 }
 
 export async function greenfieldCountRemaining(
+  projectPath: string,
   projectId: string,
 ): Promise<number> {
-  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
+  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
   if (!existsSync(tasksPath)) return 0;
 
   try {
@@ -114,9 +114,10 @@ export async function catalogdnaHasMoreWork(
 }
 
 export async function greenfieldHasMoreWork(
+  projectPath: string,
   projectId: string,
 ): Promise<boolean> {
-  const tasksPath = join(getRootDir(), "state", projectId, "tasks.json");
+  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
   if (!existsSync(tasksPath)) return false;
 
   try {
