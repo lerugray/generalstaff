@@ -8,11 +8,14 @@ with a verification gate that cannot be prompted around, mandatory
 hands-off lists, and a full audit log of every prompt, response, and
 diff. The principled alternative to closed-source SaaS bot platforms.
 
-> **Status (2026-04-16):** Phase 1 shipped. 23 source modules, 353
-> passing tests, 15 CLI commands. Dogfooded across 40+ autonomous
-> cycles with zero false positives from the verification gate. Private
-> repo, preparing for public launch. Ships cross-platform (Windows,
-> macOS, Linux).
+> **Status (2026-04-18):** Phases 1-4 shipped. Over 1,000 passing
+> tests across sequential and parallel dispatcher paths, 15+ CLI
+> commands, three managed projects cycling (generalstaff self-dogfood
+> + gamr + raybrain). Phase 4 lands **opt-in parallel worktrees** —
+> set `dispatcher.max_parallel_slots: N` in `projects.yaml` to run N
+> cycles per round; default 1 keeps the sequential behaviour from
+> Phases 1-3 bit-for-bit unchanged. Private repo, preparing for
+> public launch. Ships cross-platform (Windows, macOS, Linux).
 
 ## The problem
 
@@ -172,28 +175,48 @@ Details and rationale for each: [`RULE-RELAXATION-2026-04-15.md`](RULE-RELAXATIO
 
 ## Roadmap
 
-- **Phase 2:** Multi-provider LLM routing (`provider_config.yaml`).
-  Reviewer already runs on OpenRouter Qwen by default (validated 4/4
-  verdict agreement with Claude on sample cycles); engineer routing
-  and Ollama-tier summarization are next. See
-  [`FUTURE-DIRECTIONS-2026-04-15.md`](FUTURE-DIRECTIONS-2026-04-15.md) §2.
-- **Phase 3:** Add a second managed project (structurally different
-  from the dogfood) to stress-test the abstractions.
-- **Phase 4:** Local desktop UI shell (Tauri) for control and audit.
+Phase numbering was re-sequenced when multi-project throughput became
+the next bottleneck before the planned UI work. The full narrative for
+each closed phase lives in a `PHASE-N-COMPLETE-*.md` doc at the repo
+root.
+
+- ✓ **Phase 1** (closed 2026-04-17): sequential MVP, independent
+  verification gate, reviewer, open audit log. See
+  [`PHASE-1-COMPLETE-2026-04-17.md`](PHASE-1-COMPLETE-2026-04-17.md).
+- ✓ **Phase 2** (closed 2026-04-17): multi-provider LLM routing
+  (Ollama + OpenRouter + Claude), digest narrative, provider registry.
+  See [`PHASE-2-COMPLETE-2026-04-17.md`](PHASE-2-COMPLETE-2026-04-17.md).
+- ✓ **Phase 3** (closed 2026-04-18 morning): dispatcher generality
+  across non-dogfood projects; `gamr` became the first second managed
+  project. Five generality gaps surfaced and catalogued; the
+  afternoon closure-tail shipped them same-day. See
+  [`PHASE-3-COMPLETE-2026-04-18.md`](PHASE-3-COMPLETE-2026-04-18.md).
+- ✓ **Phase 4** (closed 2026-04-18 afternoon): parallel worktrees.
+  `pickNextProjects(N)` + round-based Promise.all session loop +
+  per-provider reviewer concurrency semaphore + efficiency
+  observability in the digest and `status --sessions` table. Default
+  `max_parallel_slots: 1` preserves Phase 1-3 behaviour. See
+  [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md).
+- **Phase 5** (next): local desktop UI shell (Tauri) for control and
+  audit — read side is ready; the gs-188 observability fields feed
+  straight in.
 - **Phase 5.5+:** Kriegspiel / command-room UI theme. See
   [`UI-VISION-2026-04-15.md`](UI-VISION-2026-04-15.md).
-- **Phase 7:** Public launch. You are here, approximately.
+- **Phase 7:** Public launch.
 
 ## Documentation
 
-- [`DESIGN.md`](DESIGN.md) -- full architecture sketch (v1 + v2,
-  append-only)
+- [`DESIGN.md`](DESIGN.md) -- full architecture sketch (v1 through
+  v6, append-only; v6 = Phase 4 parallel worktrees)
 - [`PIVOT-2026-04-15.md`](PIVOT-2026-04-15.md) -- the open-source
-  pivot decision and 12-phase plan
+  pivot decision and original 12-phase plan
 - [`PHASE-1-PLAN-2026-04-15.md`](PHASE-1-PLAN-2026-04-15.md) -- the
-  plan that shipped
+  Phase 1 plan that shipped
+- [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md)
+  -- parallel worktrees closure narrative, including the three
+  design-decision resolutions and the gs-188 observability surface
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
-  reference
+  reference, including the `max_parallel_slots` opt-in
 - [`CLAUDE.md`](CLAUDE.md) -- instructions for Claude Code sessions
   operating in this repo
 - [`research-notes.md`](research-notes.md) -- research on prior art
