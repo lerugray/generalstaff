@@ -1,0 +1,209 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 64313aa..876f400 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -73,12 +73,14 @@ function printUsage() {
+ 
+ Usage:
+   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
+-                       [--exclude-project=<id>[,<id>...]] [--verbose] [--chain=<n>]
++                       [--exclude-project=<id>[,<id>...]] [--project=<id>[,<id>...]]
++                       [--verbose] [--chain=<n>]
+                                                           Run a session (multiple cycles)
+     Example: generalstaff session --budget=480          # overnight 8-hour run
+     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
+     Example: generalstaff session --dry-run             # preview without committing
+     Example: generalstaff session --exclude-project=catalogdna,retrogaze
++    Example: generalstaff session --project=raybrain    # run only the listed project(s); sugar for --exclude-project=<everything-else>
+     Example: generalstaff session --verbose             # stream PROGRESS.jsonl events to stdout
+     Example: generalstaff session --chain=3             # run 3 back-to-back sessions with the same options
+ 
+@@ -244,6 +246,7 @@ switch (command) {
+         "max-cycles": { type: "string" },
+         "dry-run": { type: "boolean", default: false },
+         "exclude-project": { type: "string" },
++        project: { type: "string" },
+         verbose: { type: "boolean", default: false },
+         chain: { type: "string" },
+       },
+@@ -263,6 +266,13 @@ switch (command) {
+       }
+       maxCycles = parsed;
+     }
++    // gs-214: --project=<id>[,<id>] is the inverse of --exclude-project —
++    // sugar for "run only these projects, exclude the rest". The translation
++    // happens here so runSession keeps a single code path.
++    if (values.project !== undefined && values["exclude-project"] !== undefined) {
++      console.error("Error: --project cannot be combined with --exclude-project");
++      process.exit(1);
++    }
+     let excludeProjects: string[] | undefined;
+     if (values["exclude-project"] !== undefined) {
+       excludeProjects = values["exclude-project"]
+@@ -270,6 +280,25 @@ switch (command) {
+         .map((s) => s.trim())
+         .filter((s) => s.length > 0);
+     }
++    if (values.project !== undefined) {
++      const requested = values.project
++        .split(",")
++        .map((s) => s.trim())
++        .filter((s) => s.length > 0);
++      const all = await loadProjects();
++      const known = new Set(all.map((p) => p.id));
++      const resolved = new Set<string>();
++      for (const id of requested) {
++        if (!known.has(id)) {
++          console.warn(
++            `Warning: --project="${id}" does not match any registered project (ignored)`,
++          );
++          continue;
++        }
++        resolved.add(id);
++      }
++      excludeProjects = all.map((p) => p.id).filter((id) => !resolved.has(id));
++    }
+     let chain = 1;
+     if (values.chain !== undefined) {
+       const parsed = parseInt(values.chain, 10);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0e2629f..6fcd586 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1234,11 +1234,12 @@
+   {
+     "id": "gs-214",
+     "title": "Add `--project=<id>[,<id>...]` inverse of --exclude-project. CREATE ONLY: extend `case 'session'` in `src/cli.ts` (add --project option to parseArgs; translate `--project=a,b` into `excludeProjects = all_registered - {a,b}` at session-startup time before runSession is called); extend `--help` output to document the new flag; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/session.ts (the translation happens before runSession); do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Semantic: `--project=a,b` is sugar for `--exclude-project=<all-ids-except-a-and-b>`. Mutually exclusive with --exclude-project — print error `Error: --project cannot be combined with --exclude-project` and exit code 1 if both supplied. Unknown project ids in --project list should warn (don't abort) — mirrors --exclude-project's existing behavior. Motivation: the raybrain bot's handoff message suggested `--project=raybrain` ergonomically (2026-04-18 evening). Currently the only way to run a dedicated single-project session is `--exclude-project=<comma-list-of-everything-else>` which is tedious and error-prone when the registry grows. Tests: (a) --project=X resolves to excludeProjects covering the complement; (b) multi-id --project=a,b; (c) --project+--exclude-project mutex error; (d) unknown id warns; (e) --help shows the new flag. Expected diff: ~100 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T18:43:00.655Z"
+   }
+ ]
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 1423b10..23e3e8b 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -92,6 +92,117 @@ describe("CLI", () => {
+     });
+   });
+ 
++  describe("session --project (gs-214)", () => {
++    const PROJECT_FLAG_DIR = join(
++      import.meta.dir,
++      "fixtures",
++      "session_project_flag_test",
++    );
++
++    const PROJECT_FLAG_YAML = `
++projects:
++  - id: alpha
++    path: /tmp/generalstaff_test_nonexistent_alpha_xyz
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++  - id: beta
++    path: /tmp/generalstaff_test_nonexistent_beta_xyz
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++  - id: gamma
++    path: /tmp/generalstaff_test_nonexistent_gamma_xyz
++    priority: 3
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(PROJECT_FLAG_DIR, { recursive: true });
++      writeFileSync(
++        join(PROJECT_FLAG_DIR, "projects.yaml"),
++        PROJECT_FLAG_YAML,
++      );
++    });
++
++    afterEach(() => {
++      rmSync(PROJECT_FLAG_DIR, { recursive: true, force: true });
++    });
++
++    it("--project=X resolves to excludeProjects covering the complement", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha", "--dry-run", "--budget=1"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stdout).toContain("Excluding: beta, gamma");
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
++    });
++
++    it("multi-id --project=a,b excludes the rest", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha,gamma", "--dry-run", "--budget=1"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stdout).toContain("Excluding: beta");
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\bgamma\b/);
++    });
++
++    it("--project combined with --exclude-project is a mutex error", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha", "--exclude-project=beta"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--project cannot be combined with --exclude-project",
++      );
++    });
++
++    it("unknown id in --project list warns but does not abort", async () => {
++      const result = await runCli(
++        [
++          "session",
++          "--project=alpha,nonexistent_xyz",
++          "--dry-run",
++          "--budget=1",
++        ],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stderr).toContain("nonexistent_xyz");
++      expect(result.stderr).toContain(
++        "does not match any registered project",
++      );
++      // alpha was resolved, so only beta + gamma get excluded
++      expect(result.stdout).toContain("Excluding: beta, gamma");
++    });
++
++    it("--help documents --project", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("--project=<id>");
++    });
++  });
++
+   describe("no arguments", () => {
+     it("prints usage and exits 0", async () => {
+       const result = await runCli([]);

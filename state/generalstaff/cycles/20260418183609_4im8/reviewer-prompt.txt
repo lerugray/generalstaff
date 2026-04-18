@@ -1,0 +1,571 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+],
+"completed_at": "2026-04-18T18:43:00.655Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 64313aa..876f400 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -73,12 +73,14 @@ function printUsage() {
+ 
+ Usage:
+   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
+-                       [--exclude-project=<id>[,<id>...]] [--verbose] [--chain=<n>]
++                       [--exclude-project=<id>[,<id>...]] [--project=<id>[,<id>...]]
++                       [--verbose] [--chain=<n>]
+                                                           Run a session (multiple cycles)
+     Example: generalstaff session --budget=480          # overnight 8-hour run
+     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
+     Example: generalstaff session --dry-run             # preview without committing
+     Example: generalstaff session --exclude-project=catalogdna,retrogaze
++    Example: generalstaff session --project=raybrain    # run only the listed project(s); sugar for --exclude-project=<everything-else>
+     Example: generalstaff session --verbose             # stream PROGRESS.jsonl events to stdout
+     Example: generalstaff session --chain=3             # run 3 back-to-back sessions with the same options
+ 
+@@ -244,6 +246,7 @@ switch (command) {
+         "max-cycles": { type: "string" },
+         "dry-run": { type: "boolean", default: false },
+         "exclude-project": { type: "string" },
++        project: { type: "string" },
+         verbose: { type: "boolean", default: false },
+         chain: { type: "string" },
+       },
+@@ -263,6 +266,13 @@ switch (command) {
+       }
+       maxCycles = parsed;
+     }
++    // gs-214: --project=<id>[,<id>] is the inverse of --exclude-project —
++    // sugar for "run only these projects, exclude the rest". The translation
++    // happens here so runSession keeps a single code path.
++    if (values.project !== undefined && values["exclude-project"] !== undefined) {
++      console.error("Error: --project cannot be combined with --exclude-project");
++      process.exit(1);
++    }
+     let excludeProjects: string[] | undefined;
+     if (values["exclude-project"] !== undefined) {
+       excludeProjects = values["exclude-project"]
+@@ -270,6 +280,25 @@ switch (command) {
+         .map((s) => s.trim())
+         .filter((s) => s.length > 0);
+     }
++    if (values.project !== undefined) {
++      const requested = values.project
++        .split(",")
++        .map((s) => s.trim())
++        .filter((s) => s.length > 0);
++      const all = await loadProjects();
++      const known = new Set(all.map((p) => p.id));
++      const resolved = new Set<string>();
++      for (const id of requested) {
++        if (!known.has(id)) {
++          console.warn(
++            `Warning: --project="${id}" does not match any registered project (ignored)`,
++          );
++          continue;
++        }
++        resolved.add(id);
++      }
++      excludeProjects = all.map((p) => p.id).filter((id) => !resolved.has(id));
++    }
+     let chain = 1;
+     if (values.chain !== undefined) {
+       const parsed = parseInt(values.chain, 10);
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0e2629f..6fcd586 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1234,11 +1234,12 @@
+   {
+     "id": "gs-214",
+     "title": "Add `--project=<id>[,<id>...]` inverse of --exclude-project. CREATE ONLY: extend `case 'session'` in `src/cli.ts` (add --project option to parseArgs; translate `--project=a,b` into `excludeProjects = all_registered - {a,b}` at session-startup time before runSession is called); extend `--help` output to document the new flag; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ modules; do not touch src/session.ts (the translation happens before runSession); do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Semantic: `--project=a,b` is sugar for `--exclude-project=<all-ids-except-a-and-b>`. Mutually exclusive with --exclude-project — print error `Error: --project cannot be combined with --exclude-project` and exit code 1 if both supplied. Unknown project ids in --project list should warn (don't abort) — mirrors --exclude-project's existing behavior. Motivation: the raybrain bot's handoff message suggested `--project=raybrain` ergonomically (2026-04-18 evening). Currently the only way to run a dedicated single-project session is `--exclude-project=<comma-list-of-everything-else>` which is tedious and error-prone when the registry grows. Tests: (a) --project=X resolves to excludeProjects covering the complement; (b) multi-id --project=a,b; (c) --project+--exclude-project mutex error; (d) unknown id warns; (e) --help shows the new flag. Expected diff: ~100 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T18:43:00.655Z"
+   }
+ ]
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 1423b10..23e3e8b 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -92,6 +92,117 @@ describe("CLI", () => {
+     });
+   });
+ 
++  describe("session --project (gs-214)", () => {
++    const PROJECT_FLAG_DIR = join(
++      import.meta.dir,
++      "fixtures",
++      "session_project_flag_test",
++    );
++
++    const PROJECT_FLAG_YAML = `
++projects:
++  - id: alpha
++    path: /tmp/generalstaff_test_nonexistent_alpha_xyz
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++  - id: beta
++    path: /tmp/generalstaff_test_nonexistent_beta_xyz
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++  - id: gamma
++    path: /tmp/generalstaff_test_nonexistent_gamma_xyz
++    priority: 3
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(PROJECT_FLAG_DIR, { recursive: true });
++      writeFileSync(
++        join(PROJECT_FLAG_DIR, "projects.yaml"),
++        PROJECT_FLAG_YAML,
++      );
++    });
++
++    afterEach(() => {
++      rmSync(PROJECT_FLAG_DIR, { recursive: true, force: true });
++    });
++
++    it("--project=X resolves to excludeProjects covering the complement", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha", "--dry-run", "--budget=1"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stdout).toContain("Excluding: beta, gamma");
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
++    });
++
++    it("multi-id --project=a,b excludes the rest", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha,gamma", "--dry-run", "--budget=1"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stdout).toContain("Excluding: beta");
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\balpha\b/);
++      expect(result.stdout).not.toMatch(/Excluding:[^\n]*\bgamma\b/);
++    });
++
++    it("--project combined with --exclude-project is a mutex error", async () => {
++      const result = await runCli(
++        ["session", "--project=alpha", "--exclude-project=beta"],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "--project cannot be combined with --exclude-project",
++      );
++    });
++
++    it("unknown id in --project list warns but does not abort", async () => {
++      const result = await runCli(
++        [
++          "session",
++          "--project=alpha,nonexistent_xyz",
++          "--dry-run",
++          "--budget=1",
++        ],
++        PROJECT_FLAG_DIR,
++      );
++      expect(result.stderr).toContain("nonexistent_xyz");
++      expect(result.stderr).toContain(
++        "does not match any registered project",
++      );
++      // alpha was resolved, so only beta + gamma get excluded
++      expect(result.stdout).toContain("Excluding: beta, gamma");
++    });
++
++    it("--help documents --project", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("--project=<id>");
++    });
++  });
++
+   describe("no arguments", () => {
+     it("prints usage and exits 0", async () => {
+       const result = await runCli([]);
+
+
+Diff summary: src/cli.ts                    |  31 +++++++++++-
+ state/generalstaff/tasks.json |   5 +-
+ tests/cli.test.ts             | 111 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 144 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-18T18:43:30.797Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260418_184418.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_184418.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 att
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
