@@ -1,0 +1,689 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+],
+"completed_at": "2026-04-18T21:24:12.238Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/fleet_messages.ts b/src/fleet_messages.ts
+new file mode 100644
+index 0000000..f0b3b78
+--- /dev/null
++++ b/src/fleet_messages.ts
+@@ -0,0 +1,90 @@
++// GeneralStaff — shared-inbox fleet messages (gs-219)
++// Append-only JSONL at <rootDir>/state/_fleet/messages.jsonl. Each session
++// writes structured breadcrumbs (status, handoffs, blockers) that other
++// sessions can read at startup. Not a human-review substitute — purely a
++// lightweight cross-session channel.
++
++import { existsSync, mkdirSync } from "fs";
++import { appendFile, readFile } from "fs/promises";
++import { join, dirname } from "path";
++import { getRootDir } from "./state";
++
++export interface FleetMessage {
++  timestamp: string;
++  from: string;
++  body: string;
++  [key: string]: unknown;
++}
++
++function messagesPath(): string {
++  return join(getRootDir(), "state", "_fleet", "messages.jsonl");
++}
++
++export async function appendFleetMessage(
++  from: string,
++  body: string,
++  extra?: Record<string, unknown>,
++): Promise<void> {
++  const entry: FleetMessage = {
++    timestamp: new Date().toISOString(),
++    from,
++    body,
++    ...(extra ?? {}),
++  };
++
++  const filePath = messagesPath();
++  const dir = dirname(filePath);
++  if (!existsSync(dir)) {
++    mkdirSync(dir, { recursive: true });
++  }
++
++  await appendFile(filePath, JSON.stringify(entry) + "\n", "utf8");
++}
++
++// Returns messages whose `timestamp` is strictly greater than the supplied
++// ISO-8601 cutoff. Missing / empty file returns []. Malformed JSONL lines
++// are skipped with a console.warn so a corrupt line doesn't crash the
++// session-start log replay.
++export async function readFleetMessagesSince(
++  timestamp: string,
++): Promise<FleetMessage[]> {
++  const filePath = messagesPath();
++  if (!existsSync(filePath)) return [];
++
++  const content = await readFile(filePath, "utf8");
++  const out: FleetMessage[] = [];
++  let lineNumber = 0;
++  for (const line of content.split("\n")) {
++    lineNumber += 1;
++    if (!line.trim()) continue;
++    let parsed: unknown;
++    try {
++      parsed = JSON.parse(line);
++    } catch (err) {
++      console.warn(
++        `fleet_messages: skipping malformed line ${lineNumber} in ${filePath}: ${(err as Error).message}`,
++      );
++      continue;
++    }
++    if (!isFleetMessage(parsed)) {
++      console.warn(
++        `fleet_messages: skipping line ${lineNumber} (missing required fields)`,
++      );
++      continue;
++    }
++    if (parsed.timestamp > timestamp) {
++      out.push(parsed);
++    }
++  }
++  return out;
++}
++
++function isFleetMessage(value: unknown): value is FleetMessage {
++  if (!value || typeof value !== "object") return false;
++  const v = value as Record<string, unknown>;
++  return (
++    typeof v.timestamp === "string" &&
++    typeof v.from === "string" &&
++    typeof v.body === "string"
++  );
++}
+diff --git a/src/session.ts b/src/session.ts
+index c819052..53c12b8 100644
+--- a/src/session.ts
++++ b/src/session.ts
+@@ -26,6 +26,7 @@ import type { SessionPlanEstimate } from "./dispatcher";
+ import { formatDuration, formatFileCount } from "./format";
+ import { fetchCommitSubject } from "./git";
+ import { notifySessionEnd } from "./notify";
++import { readFleetMessagesSince } from "./fleet_messages";
+ import { countRemainingWork } from "./work_detection";
+ import { categorizeResults } from "./results";
+ import { checkOllamaReachable } from "./ollama";
+@@ -254,7 +255,20 @@ export async function runSession(options: SessionOptions) {
+     console.log(`Max cycles: ${maxCycles}`);
+   }
+   console.log(`Dry run: ${dryRun}`);
+-  console.log(`Started: ${new Date().toISOString()}\n`);
++  const sessionStartIso = new Date(sessionStart).toISOString();
++  console.log(`Started: ${sessionStartIso}\n`);
++
++  // gs-219: shared-inbox handoff channel. Pick up messages other sessions
++  // left since this one came online; the sessionStart cutoff prevents a
++  // restart from re-replaying ancient history.
++  try {
++    const inbox = await readFleetMessagesSince(sessionStartIso);
++    for (const msg of inbox) {
++      console.log(`[inbox] ${msg.timestamp} ${msg.from}: ${msg.body}`);
++    }
++  } catch (err) {
++    console.warn(`[inbox] failed to read fleet messages: ${(err as Error).message}`);
++  }
+ 
+   const yaml = await loadProjectsYaml();
+   // gs-191: mutable so the main loop can swap in a fresh list between
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 6e8f166..07216e8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1293,13 +1293,14 @@
+   {
+     "id": "gs-219",
+     "title": "Add `state/_fleet/messages.jsonl` shared-inbox mechanism for cross-session/cross-agent communication. CREATE ONLY: a new exported module `src/fleet_messages.ts` with `appendFleetMessage(from: string, body: string, extra?: Record<string, unknown>): Promise<void>` and `readFleetMessagesSince(timestamp: string): Promise<FleetMessage[]>`; modify `src/session.ts` to read unread messages at session start and log each with a `[inbox]` prefix to console.log; append tests to `tests/fleet_messages.test.ts`. DO NOT CREATE: files outside src/fleet_messages.ts, tests/fleet_messages.test.ts, and minimal session.ts edits; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or design docs. Message format: `{timestamp, from, body, ...extra}` as JSONL. File: `<rootDir>/state/_fleet/messages.jsonl` (append-only). Motivation: 2026-04-18 raybrain interactive bot and GeneralStaff dispatcher session had to relay status via Ray copy-pasting between them; a shared-inbox pattern lets each session leave structured breadcrumbs for the other. This is NOT a replacement for human review — it's a lightweight handoff channel. Each session should only log messages from the session_start timestamp forward (so restarts don't re-log ancient history). Tests: (a) appendFleetMessage writes a well-formed JSONL line; (b) readFleetMessagesSince filters by timestamp correctly; (c) empty file / missing file returns []; (d) malformed line is skipped with a warning, not a crash. Expected diff: ~180 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/fleet_messages.ts",
+       "src/session.ts",
+       "tests/fleet_messages.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-18T21:24:12.238Z"
+   },
+   {
+     "id": "gs-220",
+diff --git a/tests/fleet_messages.test.ts b/tests/fleet_messages.test.ts
+new file mode 100644
+index 0000000..5c50e89
+--- /dev/null
++++ b/tests/fleet_messages.test.ts
+@@ -0,0 +1,170 @@
++import { describe, expect, it, beforeEach, afterEach } from "bun:test";
++import {
++  appendFleetMessage,
++  readFleetMessagesSince,
++} from "../src/fleet_messages";
++import { setRootDir } from "../src/state";
++import { join } from "path";
++import {
++  mkdirSync,
++  rmSync,
++  readFileSync,
++  existsSync,
++  writeFileSync,
++  appendFileSync,
++} from "fs";
++
++const TEST_DIR = join(import.meta.dir, "fixtures", "fleet_messages_test");
++const MSG_PATH = join(TEST_DIR, "state", "_fleet", "messages.jsonl");
++
++beforeEach(() => {
++  mkdirSync(TEST_DIR, { recursive: true });
++  setRootDir(TEST_DIR);
++});
++
++afterEach(() => {
++  rmSync(TEST_DIR, { recursive: true, force: true });
++});
++
++describe("appendFleetMessage", () => {
++  it("writes a well-formed JSONL line at state/_fleet/messages.jsonl", async () => {
++    await appendFleetMessage("raybrain-bot", "session_end: rayb-006 verified");
++
++    expect(existsSync(MSG_PATH)).toBe(true);
++    const lines = readFileSync(MSG_PATH, "utf8").trim().split("\n");
++    expect(lines).toHaveLength(1);
++
++    const parsed = JSON.parse(lines[0]);
++    expect(parsed.from).toBe("raybrain-bot");
++    expect(parsed.body).toBe("session_end: rayb-006 verified");
++    expect(typeof parsed.timestamp).toBe("string");
++    expect(new Date(parsed.timestamp).toString()).not.toBe("Invalid Date");
++  });
++
++  it("merges extra fields into the JSONL entry", async () => {
++    await appendFleetMessage("gs-dispatcher", "soft-skipped", {
++      project: "gamr",
++      reason: "hands_off_intersect",
++    });
++
++    const entry = JSON.parse(readFileSync(MSG_PATH, "utf8").trim());
++    expect(entry.project).toBe("gamr");
++    expect(entry.reason).toBe("hands_off_intersect");
++    expect(entry.from).toBe("gs-dispatcher");
++    expect(entry.body).toBe("soft-skipped");
++  });
++
++  it("appends successive messages without clobbering earlier lines", async () => {
++    await appendFleetMessage("a", "first");
++    await appendFleetMessage("b", "second");
++    await appendFleetMessage("c", "third");
++
++    const lines = readFileSync(MSG_PATH, "utf8").trim().split("\n");
++    expect(lines).toHaveLength(3);
++    expect(JSON.parse(lines[0]).body).toBe("first");
++    expect(JSON.parse(lines[1]).body).toBe("second");
++    expect(JSON.parse(lines[2]).body).toBe("third");
++  });
++});
++
++describe("readFleetMessagesSince", () => {
++  it("returns [] when the file does not exist", async () => {
++    const out = await readFleetMessagesSince("2020-01-01T00:00:00.000Z");
++    expect(out).toEqual([]);
++  });
++
++  it("returns [] when the file is empty", async () => {
++    mkdirSync(join(TEST_DIR, "state", "_fleet"), { recursive: true });
++    writeFileSync(MSG_PATH, "", "utf8");
++
++    const out = await readFleetMessagesSince("2020-01-01T00:00:00.000Z");
++    expect(out).toEqual([]);
++  });
++
++  it("filters strictly by timestamp cutoff", async () => {
++    mkdirSync(join(TEST_DIR, "state", "_fleet"), { recursive: true });
++    const lines = [
++      { timestamp: "2026-04-18T10:00:00.000Z", from: "a", body: "older" },
++      { timestamp: "2026-04-18T12:00:00.000Z", from: "b", body: "cutoff" },
++      { timestamp: "2026-04-18T14:00:00.000Z", from: "c", body: "newer" },
++    ]
++      .map((m) => JSON.stringify(m))
++      .join("\n");
++    writeFileSync(MSG_PATH, lines + "\n", "utf8");
++
++    const out = await readFleetMessagesSince("2026-04-18T12:00:00.000Z");
++    expect(out).toHaveLength(1);
++    expect(out[0].body).toBe("newer");
++  });
++
++  it("skips malformed lines with a warning and does not crash", async () => {
++    mkdirSync(join(TEST_DIR, "state", "_fleet"), { recursive: true });
++    const content = [
++      JSON.stringify({
++        timestamp: "2026-04-18T14:00:00.000Z",
++        from: "a",
++        body: "good",
++      }),
++      "{this is not valid json",
++      JSON.stringify({ from: "b", body: "missing-timestamp" }),
++      JSON.stringify({
++        timestamp: "2026-04-18T15:00:00.000Z",
++        from: "c",
++        body: "also-good",
++      }),
++    ].join("\n");
++    writeFileSync(MSG_PATH, content + "\n", "utf8");
++
++    const warnings: string[] = [];
++    const originalWarn = console.warn;
++    console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
++    try {
++      const out = await readFleetMessagesSince("2020-01-01T00:00:00.000Z");
++      expect(out).toHaveLength(2);
++      expect(out.map((m) => m.body)).toEqual(["good", "also-good"]);
++    } finally {
++      console.warn = originalWarn;
++    }
++
++    expect(warnings.length).toBeGreaterThanOrEqual(2);
++    expect(warnings.some((w) => w.includes("malformed"))).toBe(true);
++    expect(warnings.some((w) => w.includes("missing required fields"))).toBe(
++      true,
++    );
++  });
++
++  it("skips blank lines without warning", async () => {
++    mkdirSync(join(TEST_DIR, "state", "_fleet"), { recursive: true });
++    const content =
++      JSON.stringify({
++        timestamp: "2026-04-18T14:00:00.000Z",
++        from: "a",
++        body: "x",
++      }) + "\n\n\n";
++    writeFileSync(MSG_PATH, content, "utf8");
++
++    const warnings: string[] = [];
++    const originalWarn = console.warn;
++    console.warn = (...args: unknown[]) => warnings.push(args.join(" "));
++    try {
++      const out = await readFleetMessagesSince("2020-01-01T00:00:00.000Z");
++      expect(out).toHaveLength(1);
++    } finally {
++      console.warn = originalWarn;
++    }
++
++    expect(warnings).toHaveLength(0);
++  });
++
++  it("round-trips appendFleetMessage output through readFleetMessagesSince", async () => {
++    const cutoff = new Date(Date.now() - 1000).toISOString();
++    await appendFleetMessage("round", "trip-1");
++    await appendFleetMessage("round", "trip-2", { project: "p" });
++
++    const out = await readFleetMessagesSince(cutoff);
++    expect(out).toHaveLength(2);
++    expect(out[0].body).toBe("trip-1");
++    expect(out[1].body).toBe("trip-2");
++    expect(out[1].project).toBe("p");
++  });
++});
+
+
+Diff summary: src/fleet_messages.ts         |  90 ++++++++++++++++++++++
+ src/session.ts                |  16 +++-
+ state/generalstaff/tasks.json |   5 +-
+ tests/fleet_messages.test.ts  | 170 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 278 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-18T21:24:43.417Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.113 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve 285a91a6 after 2 attempts (status=128, stderr=fatal: bad object 285a91a6bef032e6a1c00f5847a6f70960dd4496)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260418_212527.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260418_212527.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 1234
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
