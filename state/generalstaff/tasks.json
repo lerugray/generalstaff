@@ -1080,7 +1080,7 @@
   {
     "id": "gs-180",
     "title": "Add `--summary` flag to `generalstaff status` that prints today's session metrics: total cycles, verified count, verification-failed count, average cycle duration, total bot wall-clock minutes, last session end timestamp. Source: read state/_fleet/PROGRESS.jsonl + each project's PROGRESS.jsonl, filter to events from today (UTC midnight cutoff), aggregate. Format as one-line-per-metric for terminal readability; `--json` flag (already exists for status) should also work with --summary. Touch points: src/cli.ts + maybe a small helper in src/audit.ts or src/digest.ts. Tests covering: a synthetic PROGRESS.jsonl fixture with cross-day events filtered correctly, empty fixture returning zeros, --json output structure. Should pass under `bun test && bun x tsc --noEmit`.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
