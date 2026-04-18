@@ -1015,8 +1015,23 @@ accumulator.
 
 ## v6 — Parallel worktrees / multi-project concurrent cycles (2026-04-18, Phase 4)
 
-**Status:** design only. Implementation queued (gs-185+).
-This section is the architectural discussion before code,
+**Status:** ✓ shipped 2026-04-18 afternoon.
+  - gs-185 (picker returns N) — `src/dispatcher.ts` `pickNextProjects`
+  - gs-186 (session.ts parallel loop) — opt-in via
+    `dispatcher.max_parallel_slots > 1`; round-based strict-wait
+  - gs-187 (per-provider reviewer semaphore) — `src/reviewer.ts`
+    `withReviewerSemaphore`; defaults claude=∞, openrouter=2,
+    ollama=1, env-overridable
+  - gs-188 (observability) — `parallel_efficiency` in
+    `session_complete`, dedicated digest section, sessions-table
+    Parallel column; sequential sessions are bit-for-bit unchanged
+See **PHASE-4-COMPLETE-2026-04-18.md** for the shipped-state
+narrative. The design text below is preserved as-written because
+the pattern and the open questions it called out are the right
+long-run reference; the "shipped" markers above just supersede the
+"queued" pointer the doc originally carried.
+
+This section was the architectural discussion before code,
 written 2026-04-18 morning after the Phase 3 closure tail
 (gs-175..178) shipped and validated the bot's
 single-project autonomous chaining. Phase 4's user-value

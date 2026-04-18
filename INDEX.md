@@ -62,6 +62,22 @@ at `github.com/lerugray/generalstaff` (private) as of
   the from-scratch architecture that the deep-dive on catalogdna
   showed was wrong-shaped)
 
+## Phase closure narratives
+
+- [[PHASE-1-COMPLETE-2026-04-17]] — Phase 1 sequential MVP closure
+- [[PHASE-2-COMPLETE-2026-04-17]] — Phase 2 multi-provider routing
+  closure (Ollama + OpenRouter + Claude, digest narrative,
+  provider registry)
+- [[PHASE-3-COMPLETE-2026-04-18]] — Phase 3 dispatcher generality
+  closure (gamr as first non-dogfood project + 5 generality gaps
+  catalogued), plus the Closure-tail addendum covering the
+  morning follow-ups
+- [[PHASE-4-COMPLETE-2026-04-18]] — Phase 4 parallel worktrees
+  closure (gs-185..188 + gs-190/191/193/195 from the closure-tail
+  shipped in the same afternoon arc). Read this for the
+  max_parallel_slots opt-in, the reviewer semaphore defaults, and
+  the gs-188 observability surface
+
 ## Background research
 
 - [[research-notes]] — verbatim findings on nightcrawler,
@@ -192,11 +208,28 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
   See PHASE-3-COMPLETE-2026-04-18.md §"Closure-tail addendum"
   for the evidence + the "minimal human interaction"
   user-experience milestone narrative.
-- **Phase 4 (next):** Parallel worktrees — multiple projects
-  cycling simultaneously instead of sequentially. Full design
-  in DESIGN.md §v6 with gstack+Conductor external precedent.
-  Implementation queued as gs-185..188; gs-193 fast-fail
-  backoff is the higher-priority prerequisite.
+- **Phase 4:** ✓ COMPLETE (2026-04-18 afternoon). See
+  [[PHASE-4-COMPLETE-2026-04-18]]. Parallel worktrees landed
+  opt-in via `dispatcher.max_parallel_slots` in projects.yaml.
+  All four planned steps shipped in one arc:
+  gs-185 (pickNextProjects returns up to N), gs-186 (session
+  loop runs N cycles in Promise.all per round with strict-wait),
+  gs-187 (per-provider concurrency semaphore keyed on
+  claude/openrouter/ollama), gs-188 (parallel_efficiency +
+  digest section + status --sessions Parallel column).
+  Default `max_parallel_slots: 1` keeps Phase 1-3 sequential
+  behaviour bit-for-bit unchanged. DESIGN.md §v6 marked
+  "shipped" (previously "design only"); the gstack+Conductor
+  external precedent is confirmed applicable.
+- **Phase 3 closure-tail (remaining):** ✓ DONE same day.
+  gs-193 fast-fail backoff (prevents retry-spin disasters),
+  gs-191 hot-reload projects.yaml (mid-session registrations
+  visible), gs-195 queue-time hands_off gate
+  (expected_touches + interactive_only task fields),
+  gs-190 Python stack detection (uv/poetry/pip + --stack on
+  register). All ranked items from TODAY-2026-04-18-CLOSURE.md
+  "Next-session priorities" now shipped except the P3 picker
+  tiebreak (gs-184), which is interactive-only and low-value.
 - **raybrain:** Third registered project (private second-brain).
   Phase 1 shipped autonomously 2026-04-18 (rayb-001..005 in
   one 27-min session, zero intervention). Phase 2 = real
@@ -205,13 +238,16 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
 
 ## Next-session pickup
 
-**Read TODAY-2026-04-18-CLOSURE.md first.** That doc is the
-one-stop brief for any fresh session opening this vault — it
-captures the full 2026-04-18 morning arc (22 verified cycles
-across 3 projects, 15 generality gaps surfaced, 5 closed,
-the minimal-human-interaction milestone), lists pending work
-ranked by value, and points at the source-of-truth docs for
-deeper context.
+**Read PHASE-4-COMPLETE-2026-04-18.md first** if Phase 4
+parallel mode is the focus — that's the newest shipped
+architecture and the one a fresh session is most likely
+to need context on.
+
+**Read TODAY-2026-04-18-CLOSURE.md** for the morning arc
+(22 verified cycles across 3 projects, 15 generality gaps
+surfaced, 5 closed, the minimal-human-interaction milestone)
+if the afternoon Phase 4 work isn't the focus. That doc
+covers the morning only; Phase 4 doesn't appear there.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it

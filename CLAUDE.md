@@ -241,6 +241,32 @@ explicitly, don't proactively write.
   without either field remain bot-pickable by default (matches
   pre-gs-195 behaviour).
 
+- **Parallel mode is opt-in (gs-186 / Phase 4).** The
+  dispatcher supports running N cycles per round in parallel
+  via `dispatcher.max_parallel_slots: N` in `projects.yaml`.
+  The default is 1 (sequential, bit-for-bit identical to
+  Phases 1-3). The design is round-based strict-wait — all
+  slots in a round must finish before the next round starts.
+
+  When to turn it on: when the fleet has ≥2 projects with real
+  backlogs each and session wall-clock is the bottleneck.
+  Don't turn it on just because more is more — parallel N
+  roughly multiplies reviewer-step API spend by N on external
+  providers (OpenRouter / paid Claude). Hard Rule 8 (BYOK)
+  applies: the user pays. Start conservative: 2 slots on a
+  3-project fleet, watch `slot_idle_seconds` in the digest +
+  `status --sessions` table, bump if utilization is high.
+
+  Chaining is disabled in parallel mode — each round picks
+  fresh projects. gs-187's per-provider semaphore prevents
+  reviewer stampedes (OpenRouter free-tier 429s in particular);
+  see `GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>` below to
+  tune it.
+
+  The full Phase 4 narrative, including the decision rationale
+  for defaults and the open measurement questions, lives in
+  **PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
+
 ### Reviewer provider configuration
 
 The verification-gate reviewer (`src/reviewer.ts`) is
@@ -271,6 +297,14 @@ is sourced from the user's own environment at launch.
 - `OLLAMA_HOST` — optional. Defaults to
   `http://localhost:11434`. Used by the ollama reviewer
   and the pre-flight reachability check (gs-103).
+- `GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>` — gs-187,
+  integer, optional. Overrides the per-provider semaphore
+  limit used by the Phase 4 parallel session loop. Defaults:
+  claude=∞, openrouter=2, ollama=1. Set to raise the cap
+  (e.g. `=8` on an OpenRouter paid tier) or lower it to
+  throttle. Only meaningful when `dispatcher.max_parallel_slots
+  > 1` in `projects.yaml`; sequential sessions acquire at most
+  one token and the limit never binds.
 
 **Credential sourcing on Ray's machines.** The OpenRouter
 key is stored in the MiroShark `.env` at
