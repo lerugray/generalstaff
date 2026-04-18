@@ -1049,7 +1049,7 @@
   {
     "id": "gs-175",
     "title": "Fix `src/register.ts` state-path drift: line 48-50 currently reads `${getRootDir()}/state/${projectId}/tasks.json` (GeneralStaff root), inconsistent with `src/work_detection.ts` post-gs-166 which reads `${project.path}/state/${projectId}/tasks.json` (target repo). For dogfood the two paths coincide and the bug is invisible; for any non-dogfood project they diverge and the register CLI cannot find tasks.json even when it exists in the correct (new) place. Surfaced 2026-04-18 during interactive execution of gs-173 — had to bypass the CLI and edit projects.yaml manually. Fix: change register.ts to use `${resolve(opts.projectPath)}/state/${projectId}/tasks.json`. Add a test using a non-dogfood projectPath fixture so this drift can't reappear. Update register.test.ts for the new contract.",
-    "status": "pending",
+    "status": "done",
     "priority": 1
   },
   {
