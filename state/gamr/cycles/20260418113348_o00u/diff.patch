@@ -1,0 +1,26 @@
+diff --git a/app/page.tsx b/app/page.tsx
+new file mode 100644
+index 0000000..f493be0
+--- /dev/null
++++ b/app/page.tsx
+@@ -0,0 +1,7 @@
++export default function Page() {
++  return (
++    <main>
++      <h1>gamr</h1>
++    </main>
++  );
++}
+diff --git a/state/gamr/tasks.json b/state/gamr/tasks.json
+index d828882..f168fe9 100644
+--- a/state/gamr/tasks.json
++++ b/state/gamr/tasks.json
+@@ -14,7 +14,7 @@
+   {
+     "id": "gamr-003",
+     "title": "Add `app/page.tsx` with a minimal Next.js 15 App Router home page. Just a static `<main><h1>gamr</h1></main>` — DO NOT write user-facing copy beyond the project name. The point is to exercise the full Next.js scaffold, not to design the product. Depends on gamr-002. Should pass under `bun test && bun x tsc --noEmit`.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2
+   }
+ ]

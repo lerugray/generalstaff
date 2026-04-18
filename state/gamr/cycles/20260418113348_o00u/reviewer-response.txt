@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff matches the claimed task, contains no hands-off violations, and provides strong evidence for the completed task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gamr-003",
+      "evidence": "The diff creates app/page.tsx with a minimal Next.js home page as specified in the task, and updates tasks.json to mark the task as done.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed successfully, confirming the task's implementation is valid."
+}
