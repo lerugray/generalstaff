@@ -10,6 +10,7 @@ import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
+import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
 
 const exitCodeArg = process.argv[2] ?? "0";
 const engineerExitCode: number | null =
@@ -128,31 +129,13 @@ async function run() {
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
     await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
 
-    const project: ProjectConfig = {
-      id: "test-proj",
+    const project = makeProjectConfig({
       path: PROJ_DIR,
-      priority: 1,
-      engineer_command: "echo ok",
-      verification_command: "echo ok",
-      cycle_budget_minutes: 25,
-      work_detection: "tasks_json",
-      concurrency_detection: "none",
-      branch: "bot/work",
-      auto_merge: false,
-      hands_off: [],
-    };
+    });
 
-    const config: DispatcherConfig = {
+    const config = makeDispatcherConfig({
       state_dir: join(TEST_DIR, "state"),
-      fleet_state_file: "fleet_state.json",
-      stop_file: "STOP",
-      override_file: "OVERRIDE",
-      picker: "priority_staleness",
-      max_cycles_per_project_per_session: 3,
-      log_dir: "logs",
-      digest_dir: "digests",
-      max_parallel_slots: 1,
-    };
+    });
 
     const result = await executeCycle(project, config);
 

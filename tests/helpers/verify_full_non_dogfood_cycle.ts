@@ -23,6 +23,7 @@ import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, cpSync, chmodSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
+import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
 
 const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_full_non_dogfood");
 const TEST_ROOT = join(TEST_DIR, "generalstaff-root");
@@ -129,34 +130,18 @@ async function run() {
   try {
     await setupFixture();
 
-    const project: ProjectConfig = {
+    const project = makeProjectConfig({
       id: "fake_project",
       path: PROJ_DIR,
-      priority: 1,
       engineer_command: "echo unused (mocked)",
       // Real verification command — hits verify.sh inside the worktree.
       // Not a noop, so verification.ts will spawn it and we can prove
       // CWD via the marker the script writes.
       verification_command: "bash verify.sh",
-      cycle_budget_minutes: 25,
-      work_detection: "tasks_json",
-      concurrency_detection: "none",
-      branch: "bot/work",
-      auto_merge: false,
       hands_off: ["CLAUDE.md"],
-    };
+    });
 
-    const config: DispatcherConfig = {
-      state_dir: "state",
-      fleet_state_file: "fleet_state.json",
-      stop_file: "STOP",
-      override_file: "OVERRIDE",
-      picker: "priority_staleness",
-      max_cycles_per_project_per_session: 3,
-      log_dir: "logs",
-      digest_dir: "digests",
-      max_parallel_slots: 1,
-    };
+    const config = makeDispatcherConfig();
 
     // (b) Pre-cycle: prove work_detection reads from project.path.
     // PROJ_DIR/state/fake_project/tasks.json has 1 pending task.
