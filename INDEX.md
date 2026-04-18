@@ -188,20 +188,30 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
   false-negative-rollback failure mode (10 cycles in 24h pre-fix,
   zero in the 3-cycle gamr sample post-fix).
 - **Phase 3 closure tail:** ✓ DONE (2026-04-18 morning).
-  All four catalogued P1 generality gaps shipped same day:
-  gs-175 (register CLI state-path) + gs-176 (bootstrap
-  engineer_command template) by the bot autonomously;
-  gs-177 (auto_merge=false accumulator) + gs-178 (audit-tree
-  exemption) interactively. Validated end-to-end via two
-  multi-cycle bot sessions (5 + 5 cycles, zero rollbacks,
-  zero manual merges between cycles). The implicit 5th gap
-  (picker tiebreak) is queued as gs-184 but workaround-fine.
+  All four catalogued P1 generality gaps shipped same day.
   See PHASE-3-COMPLETE-2026-04-18.md §"Closure-tail addendum"
   for the evidence + the "minimal human interaction"
   user-experience milestone narrative.
 - **Phase 4 (next):** Parallel worktrees — multiple projects
-  cycling simultaneously instead of sequentially. Design
-  discussion drafting in DESIGN.md §v6.
+  cycling simultaneously instead of sequentially. Full design
+  in DESIGN.md §v6 with gstack+Conductor external precedent.
+  Implementation queued as gs-185..188; gs-193 fast-fail
+  backoff is the higher-priority prerequisite.
+- **raybrain:** Third registered project (private second-brain).
+  Phase 1 shipped autonomously 2026-04-18 (rayb-001..005 in
+  one 27-min session, zero intervention). Phase 2 = real
+  corpus ingestion, gated on Ray's taste call. See
+  TODAY-2026-04-18-CLOSURE.md for the full narrative.
+
+## Next-session pickup
+
+**Read TODAY-2026-04-18-CLOSURE.md first.** That doc is the
+one-stop brief for any fresh session opening this vault — it
+captures the full 2026-04-18 morning arc (22 verified cycles
+across 3 projects, 15 generality gaps surfaced, 5 closed,
+the minimal-human-interaction milestone), lists pending work
+ranked by value, and points at the source-of-truth docs for
+deeper context.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it
