@@ -1252,5 +1252,52 @@
       "src/session.ts",
       "tests/git.test.ts"
     ]
+  },
+  {
+    "id": "gs-216",
+    "title": "Finish the test-fixture refactor started 2026-04-18 afternoon. CREATE ONLY: edit the six remaining subprocess helpers under `tests/helpers/` that still have inline `ProjectConfig` / `DispatcherConfig` literals, replacing them with calls to `makeProjectConfig(overrides)` + `makeDispatcherConfig(overrides)` from `tests/helpers/fixtures.ts` (the shared factory module that already exists). DO NOT CREATE: new files; do not touch src/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Targets: (1) `tests/helpers/verify_capped_projects_skipped.ts`, (2) `tests/helpers/verify_exclude_project.ts`, (3) `tests/helpers/verify_max_cycles.ts`, (4) `tests/helpers/verify_session_complete_event.ts`, (5) `tests/helpers/verify_ollama_preflight_warning.ts`, (6) `tests/helpers/verify_parallel_session.ts`. Pattern for each: add `import { makeProjectConfig, makeDispatcherConfig } from './fixtures'` near the top; replace the ProjectConfig literal with `makeProjectConfig({ path: ..., hands_off: ..., etc })` passing only the fields that specialize from defaults; replace the DispatcherConfig literal similarly. Preserve each helper's specific customizations — don't change test semantics. No removal of the `ProjectConfig`/`DispatcherConfig` type imports since some helpers still reference them for other local typing. Verify `bun test` still passes all helpers (no regression) and `bunx tsc --noEmit` is clean. Expected diff: ~100 lines net reduction across 6 files.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/helpers/verify_capped_projects_skipped.ts",
+      "tests/helpers/verify_exclude_project.ts",
+      "tests/helpers/verify_max_cycles.ts",
+      "tests/helpers/verify_session_complete_event.ts",
+      "tests/helpers/verify_ollama_preflight_warning.ts",
+      "tests/helpers/verify_parallel_session.ts"
+    ]
+  },
+  {
+    "id": "gs-217",
+    "title": "Add `generalstaff status --fleet` subview showing a one-row-per-project snapshot. CREATE ONLY: extend `case 'status'` in `src/cli.ts` with a --fleet flag handler; add exported `formatFleetTable(rows: FleetRow[]): string` + `FleetRow` interface in `src/sessions.ts` alongside formatSessionsTable / formatBacklogTable; append tests to `tests/sessions.test.ts` and/or `tests/cli.test.ts`. DO NOT CREATE: new files outside tests; no changes to src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any design doc. Output columns (one row per registered project, plus a TOTAL row): `Project | Last cycle (relative) | Total cycles | Verified | Failed | Bot-pickable (pending) | Auto-merge | Branch`. Last-cycle relative time uses formatRelativeTime (already imported); bot-pickable uses countRemainingWorkDetailed (gs-200). Pulls from: projects.yaml via loadProjects(), fleet_state.json via loadFleetState(), per-project state dirs via countRemainingWorkDetailed(). `--json` flag emits structured data. Mutually exclusive with --sessions, --summary, --backlog, --totals, --watch (error + exit 1 on combined flags). Tests: (a) 2-project fleet renders 2 rows + TOTAL; (b) --json output shape; (c) empty fleet edge case; (d) mutex error. Expected diff: ~150 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/sessions.ts",
+      "tests/sessions.test.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-218",
+    "title": "Add schema validation to tasks.json loader. CREATE ONLY: modify `src/tasks.ts` loadTasks to validate each task has the required `GreenfieldTask` fields (id: non-empty string; title: string; status: valid enum value; priority: positive number) and correct types; on malformed entries, throw `TaskValidationError` with a clear message including the offending entry's index and the specific field that failed (e.g. `tasks.json[3]: missing required field 'id'` or `tasks.json[7]: priority must be a positive integer, got 'high'`). Add an optional `warn: (msg: string) => void` parameter with default `console.warn` so tests can capture warnings. Unknown fields (e.g. `completed_at` added by bot engineers, gs-195's `expected_touches`, gs-195's `interactive_only`) should NOT error — pass through silently for forward-compatibility. Append tests to `tests/tasks.test.ts` covering: (a) happy path; (b) missing id; (c) wrong status enum; (d) negative priority; (e) unknown field passes through; (f) empty array is valid; (g) error message includes entry index + field name. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, or any hands_off path. Expected diff: ~150 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/tasks.ts",
+      "tests/tasks.test.ts"
+    ]
+  },
+  {
+    "id": "gs-219",
+    "title": "Add `state/_fleet/messages.jsonl` shared-inbox mechanism for cross-session/cross-agent communication. CREATE ONLY: a new exported module `src/fleet_messages.ts` with `appendFleetMessage(from: string, body: string, extra?: Record<string, unknown>): Promise<void>` and `readFleetMessagesSince(timestamp: string): Promise<FleetMessage[]>`; modify `src/session.ts` to read unread messages at session start and log each with a `[inbox]` prefix to console.log; append tests to `tests/fleet_messages.test.ts`. DO NOT CREATE: files outside src/fleet_messages.ts, tests/fleet_messages.test.ts, and minimal session.ts edits; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or design docs. Message format: `{timestamp, from, body, ...extra}` as JSONL. File: `<rootDir>/state/_fleet/messages.jsonl` (append-only). Motivation: 2026-04-18 raybrain interactive bot and GeneralStaff dispatcher session had to relay status via Ray copy-pasting between them; a shared-inbox pattern lets each session leave structured breadcrumbs for the other. This is NOT a replacement for human review — it's a lightweight handoff channel. Each session should only log messages from the session_start timestamp forward (so restarts don't re-log ancient history). Tests: (a) appendFleetMessage writes a well-formed JSONL line; (b) readFleetMessagesSince filters by timestamp correctly; (c) empty file / missing file returns []; (d) malformed line is skipped with a warning, not a crash. Expected diff: ~180 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/fleet_messages.ts",
+      "src/session.ts",
+      "tests/fleet_messages.test.ts"
+    ]
   }
 ]
