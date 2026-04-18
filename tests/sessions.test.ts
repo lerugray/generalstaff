@@ -11,8 +11,10 @@ import {
   computeBacklogTotals,
   computeSessionTotals,
   formatSessionTotals,
+  formatFleetTable,
   type SessionSummary,
   type BacklogRow,
+  type FleetRow,
 } from "../src/sessions";
 
 describe("parseSessionsFlag", () => {
@@ -531,5 +533,63 @@ describe("formatBacklogTable (gs-199)", () => {
       handsoff_conflict: 33,
       in_progress: 44,
     });
+  });
+});
+
+describe("formatFleetTable (gs-217)", () => {
+  const NOW = new Date("2026-04-18T12:00:00.000Z");
+
+  it("returns placeholder when there are no projects", () => {
+    expect(formatFleetTable([])).toBe("No projects registered.");
+  });
+
+  it("renders header, one row per project, and a TOTAL row", () => {
+    const rows: FleetRow[] = [
+      {
+        project_id: "alpha",
+        last_cycle_at: "2026-04-18T11:30:00.000Z",
+        total_cycles: 10,
+        total_verified: 8,
+        total_failed: 2,
+        bot_pickable: 3,
+        auto_merge: true,
+        branch: "bot/work",
+      },
+      {
+        project_id: "beta",
+        last_cycle_at: null,
+        total_cycles: 0,
+        total_verified: 0,
+        total_failed: 0,
+        bot_pickable: 4,
+        auto_merge: false,
+        branch: "main",
+      },
+    ];
+    const out = formatFleetTable(rows, NOW);
+    const lines = out.split("\n");
+    expect(lines[0]!.trim()).toMatch(
+      /^Project\s+Last cycle\s+Total cycles\s+Verified\s+Failed\s+Bot-pickable\s+Auto-merge\s+Branch$/,
+    );
+    expect(lines[1]!.trim()).toMatch(/^-+\s+-+\s+-+\s+-+\s+-+\s+-+\s+-+\s+-+$/);
+    expect(out).toContain("alpha");
+    expect(out).toContain("beta");
+    expect(out).toContain("never"); // beta has no last_cycle
+    expect(out).toContain("on"); // alpha auto_merge=true
+    expect(out).toContain("off"); // beta auto_merge=false
+    expect(out).toContain("bot/work");
+    expect(out).toContain("main");
+    const totalLine = lines[lines.length - 1]!;
+    expect(totalLine).toContain("TOTAL");
+    const totalCells = totalLine.trim().split(/\s{2,}/);
+    // Project | Last cycle | Total cycles | Verified | Failed | Bot-pickable | Auto-merge | Branch
+    expect(totalCells[0]).toBe("TOTAL");
+    expect(totalCells[1]).toBe("-");
+    expect(totalCells[2]).toBe("10"); // total_cycles sum
+    expect(totalCells[3]).toBe("8"); // total_verified sum
+    expect(totalCells[4]).toBe("2"); // total_failed sum
+    expect(totalCells[5]).toBe("7"); // bot_pickable sum 3+4
+    expect(totalCells[6]).toBe("-");
+    expect(totalCells[7]).toBe("-");
   });
 });

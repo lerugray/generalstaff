@@ -293,6 +293,79 @@ export function formatSessionTotals(t: SessionTotals): string {
   return lines.join("\n");
 }
 
+// gs-217: fleet subview. One row per registered project summarising
+// the bits that come up repeatedly in "what's the fleet doing today"
+// questions — last activity, cycle throughput, remaining bot-pickable
+// backlog, and whether auto-merge is armed. Data is assembled by the
+// CLI from projects.yaml + fleet_state.json + countRemainingWorkDetailed;
+// this module only owns the rendering.
+export interface FleetRow {
+  project_id: string;
+  last_cycle_at: string | null;
+  total_cycles: number;
+  total_verified: number;
+  total_failed: number;
+  bot_pickable: number;
+  auto_merge: boolean;
+  branch: string;
+}
+
+export function formatFleetTable(
+  rows: FleetRow[],
+  now: Date = new Date(),
+): string {
+  if (rows.length === 0) {
+    return "No projects registered.";
+  }
+  const header = [
+    "Project",
+    "Last cycle",
+    "Total cycles",
+    "Verified",
+    "Failed",
+    "Bot-pickable",
+    "Auto-merge",
+    "Branch",
+  ];
+  const body: string[][] = rows.map((r) => [
+    r.project_id,
+    r.last_cycle_at ? formatRelativeTime(r.last_cycle_at, now) : "never",
+    String(r.total_cycles),
+    String(r.total_verified),
+    String(r.total_failed),
+    String(r.bot_pickable),
+    r.auto_merge ? "on" : "off",
+    r.branch,
+  ]);
+  const totals = rows.reduce(
+    (a, r) => ({
+      total_cycles: a.total_cycles + r.total_cycles,
+      total_verified: a.total_verified + r.total_verified,
+      total_failed: a.total_failed + r.total_failed,
+      bot_pickable: a.bot_pickable + r.bot_pickable,
+    }),
+    { total_cycles: 0, total_verified: 0, total_failed: 0, bot_pickable: 0 },
+  );
+  body.push([
+    "TOTAL",
+    "-",
+    String(totals.total_cycles),
+    String(totals.total_verified),
+    String(totals.total_failed),
+    String(totals.bot_pickable),
+    "-",
+    "-",
+  ]);
+  const widths = header.map((h, i) =>
+    Math.max(h.length, ...body.map((r) => r[i]!.length)),
+  );
+  const pad = (cells: string[]) =>
+    cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
+  const lines = [pad(header), widths.map((w) => "-".repeat(w)).join("  ")];
+  for (const r of body) lines.push(pad(r));
+  return lines.join("\n");
+}
+
 export function formatSessionsTable(
   sessions: SessionSummary[],
   now: Date = new Date(),
