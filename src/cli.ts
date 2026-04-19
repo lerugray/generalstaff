@@ -13,6 +13,7 @@ import {
   loadDispatcherConfig,
   getProject,
   ProjectNotFoundError,
+  ProjectsYamlNotFoundError,
 } from "./projects";
 import {
   isStopFilePresent,
@@ -313,6 +314,7 @@ if (
 
 const command = args[0];
 
+try {
 switch (command) {
   case "session": {
     // gs-244: subcommand-level --help / help matching gs-233's view pattern.
@@ -2981,4 +2983,15 @@ switch (command) {
     console.error(`Unknown command: ${command}`);
     printUsage();
     process.exit(1);
+}
+} catch (err) {
+  // First-run friendly: if projects.yaml isn't there yet, show the
+  // clean message that loadProjectsYaml throws (the message itself
+  // points the user at projects.yaml.example), not Bun's stack trace.
+  // Other errors re-throw to preserve existing behavior.
+  if (err instanceof ProjectsYamlNotFoundError) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+  throw err;
 }

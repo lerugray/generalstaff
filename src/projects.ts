@@ -784,14 +784,25 @@ export function validateHandsOff(project: ProjectConfig): ProjectWarning[] {
   return warnings;
 }
 
+// Raised when projects.yaml isn't at the expected path. Typed so CLI
+// handlers can catch it and print a clean message instead of the
+// Bun stack trace that a generic Error produces for first-run users
+// (who have cloned but not yet copied projects.yaml.example).
+export class ProjectsYamlNotFoundError extends Error {
+  constructor(public filePath: string) {
+    super(
+      `projects.yaml not found at ${filePath}. Copy projects.yaml.example and fill in your paths.`,
+    );
+    this.name = "ProjectsYamlNotFoundError";
+  }
+}
+
 export async function loadProjectsYaml(
   yamlPath?: string,
 ): Promise<ProjectsYaml> {
   const filePath = yamlPath ?? join(getRootDir(), "projects.yaml");
   if (!existsSync(filePath)) {
-    throw new Error(
-      `projects.yaml not found at ${filePath}. Copy projects.yaml.example and fill in your paths.`,
-    );
+    throw new ProjectsYamlNotFoundError(filePath);
   }
 
   const raw = await readFile(filePath, "utf8");

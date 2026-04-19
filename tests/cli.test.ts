@@ -30,13 +30,13 @@ describe("CLI", () => {
     it("prints the version and exits 0", async () => {
       const result = await runCli(["--version"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0.0.1");
+      expect(result.stdout.trim()).toBe("0.1.0");
     });
 
     it("accepts -v shorthand", async () => {
       const result = await runCli(["-v"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0.0.1");
+      expect(result.stdout.trim()).toBe("0.1.0");
     });
   });
 
@@ -44,7 +44,7 @@ describe("CLI", () => {
     it("prints usage and exits 0", async () => {
       const result = await runCli(["--help"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("generalstaff v0.0.1");
+      expect(result.stdout).toContain("generalstaff v0.1.0");
       expect(result.stdout).toContain("Usage:");
       expect(result.stdout).toContain("session");
       expect(result.stdout).toContain("cycle");
@@ -274,6 +274,48 @@ dispatcher:
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("--project=<id>");
     });
+  });
+
+  describe("first-run friendly error (missing projects.yaml)", () => {
+    // Regression: a fresh clone with no projects.yaml used to dump a
+    // Bun stack trace from every CLI that called loadProjects*. Now
+    // it should exit 1 with a clean message pointing the user at
+    // projects.yaml.example. Tests each of the four commands that
+    // bit a first-run user during the 2026-04-19 install walkthrough.
+
+    const EMPTY_DIR = join(import.meta.dir, "fixtures", "empty_first_run");
+
+    beforeEach(() => {
+      rmSync(EMPTY_DIR, { recursive: true, force: true });
+      mkdirSync(EMPTY_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(EMPTY_DIR, { recursive: true, force: true });
+    });
+
+    const COMMANDS: Array<[string, string[]]> = [
+      ["status --backlog", ["status", "--backlog"]],
+      ["status", ["status"]],
+      ["view fleet-overview", ["view", "fleet-overview"]],
+      ["session --dry-run --budget=1", ["session", "--dry-run", "--budget=1"]],
+    ];
+
+    for (const [label, args] of COMMANDS) {
+      it(`${label} exits 1 with friendly message, not a stack trace`, async () => {
+        const result = await runCli(args, EMPTY_DIR);
+        expect(result.exitCode).toBe(1);
+        // The friendly message points the user at projects.yaml.example.
+        const combined = result.stdout + result.stderr;
+        expect(combined).toContain("projects.yaml not found at");
+        expect(combined).toContain("Copy projects.yaml.example");
+        // No stack trace. Bun dumps the source line with a caret and
+        // the internal call stack when an error is unhandled; the
+        // typed-error catch suppresses that.
+        expect(combined).not.toContain("at loadProjectsYaml");
+        expect(combined).not.toMatch(/^\s*\|\s*throw new Error/m);
+      });
+    }
   });
 
   describe("session --provider (gs-249)", () => {
@@ -879,7 +921,7 @@ dispatcher:
     it("prints version, bun, platform, and projects.yaml path", async () => {
       const result = await runCli(["version"], VERSION_TEST_DIR);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("generalstaff v0.0.1");
+      expect(result.stdout).toContain("generalstaff v0.1.0");
       expect(result.stdout).toContain("bun:");
       expect(result.stdout).toContain(Bun.version);
       expect(result.stdout).toContain("platform:");
