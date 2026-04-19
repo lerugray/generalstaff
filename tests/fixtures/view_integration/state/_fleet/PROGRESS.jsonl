@@ -1,0 +1,4 @@
+{"timestamp":"2026-04-18T11:00:00.000Z","event":"session_start","data":{"session_id":"sess-int-001","budget_minutes":30}}
+{"timestamp":"2026-04-18T11:00:30.000Z","event":"cycle_start","cycle_id":"cyc-int-001","project_id":"gs-test","data":{"session_id":"sess-int-001","task_id":"t-2","sha_before":"aaa111"}}
+{"timestamp":"2026-04-18T11:02:30.000Z","event":"cycle_end","cycle_id":"cyc-int-001","project_id":"gs-test","data":{"session_id":"sess-int-001","task_id":"t-2","outcome":"verified","duration_seconds":120,"files_touched":["src/foo.ts"],"sha_after":"bbb222","diff_stats":{"additions":12,"deletions":3}}}
+{"timestamp":"2026-04-18T11:10:00.000Z","event":"session_end","data":{"session_id":"sess-int-001","duration_minutes":10,"stop_reason":"max-cycles","reviewer":"openrouter"}}

@@ -34,6 +34,7 @@ tests/fixtures/*
 !tests/fixtures/reviewer_calibration/
 !tests/fixtures/provider_config_malformed/
 !tests/fixtures/fake_project/
+!tests/fixtures/view_integration/
 
 # Bot worktree (created by scripts/run_bot.sh, cleaned on exit)
 .bot-worktree/
