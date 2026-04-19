@@ -1414,7 +1414,7 @@
   {
     "id": "gs-230",
     "title": "Phase 6 CLI wiring: `view inbox [--since=<iso>]` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with an `inbox` sub-view that calls `getInboxView(since)` from `src/views/inbox.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view inbox` emits date-labeled groups (newest first), each group showing the date_label header then per-message rows (timestamp, from with from_type glyph — human=square dot, bot=open circle, system=em-dash, kind chip if non-null, body, and refs on a continuation line); default since = 7 days ago ISO. `--since=<iso>` filters messages to that timestamp forward. `--json` emits the full InboxData. Invalid --since surfaces the InboxError message and exits 1. Tests: (a) json output structure; (b) default since = 7 days; (c) --since flag honored; (d) invalid --since errors + exits 1; (e) empty messages.jsonl renders 'No messages.' friendly text (not an error); (f) from_type glyph rendering (human/bot/system differentiation). Expected diff: ~170 lines. Depends on gs-226.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",

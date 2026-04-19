@@ -3074,4 +3074,172 @@ dispatcher:
       expect(result.stdout).toContain("Diff: +15/-1");
     });
   });
+
+  describe("view inbox subcommand (gs-230)", () => {
+    const VIEW_DIR = join(import.meta.dir, "fixtures", "view_inbox_test");
+    const FLEET_DIR = join(VIEW_DIR, "state", "_fleet");
+
+    const isoDaysAgo = (days: number): string =>
+      new Date(Date.now() - days * 86_400_000).toISOString();
+
+    const writeMessages = (msgs: Array<Record<string, unknown>>) => {
+      const body = msgs.map((m) => JSON.stringify(m)).join("\n") + "\n";
+      writeFileSync(join(FLEET_DIR, "messages.jsonl"), body);
+    };
+
+    beforeEach(() => {
+      mkdirSync(FLEET_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("--json emits the full InboxData shape", async () => {
+      writeMessages([
+        {
+          timestamp: isoDaysAgo(1),
+          from: "generalstaff-bot",
+          body: "shipped gs-230",
+          kind: "fyi",
+          refs: [{ session_id: "sess-1", task_id: "gs-230" }],
+        },
+        {
+          timestamp: isoDaysAgo(2),
+          from: "ray",
+          body: "nice work",
+        },
+      ]);
+      const result = await runCli(["view", "inbox", "--json"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(Array.isArray(parsed.groups)).toBe(true);
+      expect(parsed.unread_count).toBe(2);
+      expect(typeof parsed.oldest_shown).toBe("string");
+      expect(typeof parsed.rendered_at).toBe("string");
+      expect(parsed.groups.length).toBeGreaterThan(0);
+      const first = parsed.groups[0];
+      expect(first).toHaveProperty("date_label");
+      expect(first).toHaveProperty("date_iso");
+      expect(Array.isArray(first.messages)).toBe(true);
+      const msg = first.messages[0];
+      expect(msg).toHaveProperty("timestamp");
+      expect(msg).toHaveProperty("from");
+      expect(msg).toHaveProperty("from_type");
+      expect(msg).toHaveProperty("kind");
+      expect(msg).toHaveProperty("body");
+      expect(msg).toHaveProperty("refs");
+    });
+
+    it("default since is 7 days ago — older messages filtered", async () => {
+      writeMessages([
+        {
+          timestamp: isoDaysAgo(1),
+          from: "ray",
+          body: "recent message",
+        },
+        {
+          timestamp: isoDaysAgo(30),
+          from: "ray",
+          body: "stale message",
+        },
+      ]);
+      const result = await runCli(["view", "inbox", "--json"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.unread_count).toBe(1);
+      const bodies = parsed.groups.flatMap((g: { messages: Array<{ body: string }> }) =>
+        g.messages.map((m) => m.body),
+      );
+      expect(bodies).toContain("recent message");
+      expect(bodies).not.toContain("stale message");
+    });
+
+    it("--since flag is honored", async () => {
+      writeMessages([
+        {
+          timestamp: isoDaysAgo(1),
+          from: "ray",
+          body: "recent",
+        },
+        {
+          timestamp: isoDaysAgo(10),
+          from: "ray",
+          body: "older",
+        },
+      ]);
+      // Cutoff at 5 days ago — only the recent one survives.
+      const since = isoDaysAgo(5);
+      const result = await runCli(
+        ["view", "inbox", `--since=${since}`, "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.unread_count).toBe(1);
+      const bodies = parsed.groups.flatMap((g: { messages: Array<{ body: string }> }) =>
+        g.messages.map((m) => m.body),
+      );
+      expect(bodies).toContain("recent");
+      expect(bodies).not.toContain("older");
+    });
+
+    it("invalid --since errors and exits 1", async () => {
+      writeMessages([
+        { timestamp: isoDaysAgo(1), from: "ray", body: "hi" },
+      ]);
+      const result = await runCli(
+        ["view", "inbox", "--since=not-a-date"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Error:");
+      expect(result.stderr).toContain("invalid since timestamp");
+    });
+
+    it("empty messages.jsonl renders friendly text (not an error)", async () => {
+      writeFileSync(join(FLEET_DIR, "messages.jsonl"), "");
+      const result = await runCli(["view", "inbox"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No messages.");
+    });
+
+    it("renders from_type glyphs distinctly for human / bot / system", async () => {
+      writeMessages([
+        {
+          timestamp: isoDaysAgo(1),
+          from: "ray",
+          body: "human-msg",
+        },
+        {
+          timestamp: isoDaysAgo(1),
+          from: "generalstaff-bot",
+          body: "bot-msg",
+        },
+        {
+          timestamp: isoDaysAgo(1),
+          from: "dispatcher",
+          body: "system-msg",
+        },
+      ]);
+      const result = await runCli(["view", "inbox"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      // Glyph differentiation — each message gets a distinct from_type marker.
+      const humanLine = result.stdout
+        .split("\n")
+        .find((l) => l.includes("human-msg"));
+      const botLine = result.stdout
+        .split("\n")
+        .find((l) => l.includes("bot-msg"));
+      const systemLine = result.stdout
+        .split("\n")
+        .find((l) => l.includes("system-msg"));
+      expect(humanLine).toBeDefined();
+      expect(botLine).toBeDefined();
+      expect(systemLine).toBeDefined();
+      expect(humanLine).toContain("▪");
+      expect(botLine).toContain("○");
+      expect(systemLine).toContain("—");
+    });
+  });
 });
