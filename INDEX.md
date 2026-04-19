@@ -41,7 +41,17 @@ at `github.com/lerugray/generalstaff` (private) as of
   budget-per-bot with spend guards (Phase 10+), "bring your own
   imagination" framing (applied to README), Retrogaze as
   preferred Phase 3 second project, and the market observation
-  on why nobody else has built this yet
+  on why nobody else has built this yet. §7 addendums 3-5 added
+  2026-04-18 evening: anchor-extension strategy validated for
+  Phase 5 UI work, prose accessibility for non-programmer
+  audiences, Phase 5 views as load-bearing marketing artifact.
+- `docs/phase-5-references/` — five dashboard reference HTMLs
+  built 2026-04-18 evening (fleet overview, task queue, session
+  tail, dispatch detail, inbox) plus a README explaining what
+  each view establishes and which CSS vocabulary carries across
+  them. One Claude Design brief anchored the visual system;
+  four hand-built views extended it. Read the directory README
+  first for orientation.
 
 ## Implementation planning
 
@@ -232,22 +242,40 @@ Phase 1 codebase landed 2026-04-16. Bun + TypeScript.
   tiebreak (gs-184), which is interactive-only and low-value.
 - **raybrain:** Third registered project (private second-brain).
   Phase 1 shipped autonomously 2026-04-18 (rayb-001..005 in
-  one 27-min session, zero intervention). Phase 2 = real
-  corpus ingestion, gated on Ray's taste call. See
-  TODAY-2026-04-18-CLOSURE.md for the full narrative.
+  one 27-min session, zero intervention). Phase 2 shipped
+  2026-04-18 evening (rayb-006..011 in one 6/6 autonomous
+  session — pydantic schema, privacy guards, ingest, wiki
+  store, LanceDB retriever, CLI). See TODAY-2026-04-18-CLOSURE.md
+  for the morning narrative; later work lives in git log.
+- **Phase 5 (visual anchor only):** ✓ DONE 2026-04-18 evening.
+  Five dashboard reference views shipped to
+  `docs/phase-5-references/` as plain HTML — fleet overview
+  (Claude Design anchor), task queue, session tail, dispatch
+  detail, inbox (four hand-built, reusing the anchor's CSS
+  vocabulary). Establishes palette, type stack, and component
+  vocabulary for the eventual UI shell without committing to
+  an implementation stack (Tauri, local web server, or other).
+  Strategic capture in FUTURE-DIRECTIONS §7 addendums 3-5.
+  The visual-anchor phase only — the dashboard shell itself
+  (live read side, control surface) is still ahead.
 
 ## Next-session pickup
 
-**Read PHASE-4-COMPLETE-2026-04-18.md first** if Phase 4
-parallel mode is the focus — that's the newest shipped
-architecture and the one a fresh session is most likely
-to need context on.
+**Read `docs/phase-5-references/README.md` first** if Phase 5
+UI work is the focus — that's the newest artifact set and
+the one a fresh session on 2026-04-19+ is most likely to
+need context on. It documents the five reference views and
+the anchor-extension strategy behind them.
+
+**Read PHASE-4-COMPLETE-2026-04-18.md** if Phase 4 parallel
+mode is the focus — the newest shipped dispatcher architecture,
+preceded Phase 5.
 
 **Read TODAY-2026-04-18-CLOSURE.md** for the morning arc
 (22 verified cycles across 3 projects, 15 generality gaps
 surfaced, 5 closed, the minimal-human-interaction milestone)
-if the afternoon Phase 4 work isn't the focus. That doc
-covers the morning only; Phase 4 doesn't appear there.
+if the morning work is relevant. That doc covers the morning
+only; Phase 4 and Phase 5 don't appear there.
 - **Phase 7:** Public GitHub release. The folder gets renamed to
   a public-facing repo at that point; this index file becomes the
   vault entry for any contributor who clones the repo and opens it
