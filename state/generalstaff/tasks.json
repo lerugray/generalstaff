@@ -1471,5 +1471,44 @@
     "expected_touches": [
       "tests/gitignore.test.ts"
     ]
+  },
+  {
+    "id": "gs-236",
+    "title": "Gitignore `state/session.pid` so session-end pid cleanup doesn't leave a tracked-file deletion as clean-tree residue. CREATE ONLY: modify `.gitignore` to add `state/session.pid` (with a short comment explaining it's a transient pid file written at session start and cleaned at session end); run `git rm --cached state/session.pid` if the file is currently tracked (one-liner in the task — bot should detect and remove-from-index if present); append a test to `tests/gitignore.test.ts` asserting the pattern is present. DO NOT CREATE: new files outside the test; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: tonight's relaunches repeatedly produced `D state/session.pid` as uncommitted state requiring a separate cleanup commit before the next launch. Making it .gitignored removes the friction and prevents future session-end churn commits. Expected diff: ~20 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      ".gitignore",
+      "tests/gitignore.test.ts"
+    ]
+  },
+  {
+    "id": "gs-237",
+    "title": "Polish `projects.yaml.example` to prominently document `dispatcher.max_parallel_slots` and `GENERALSTAFF_REVIEWER_*` env vars. CREATE ONLY: modify `projects.yaml.example` — add a prominent commented section near the top of the `dispatcher:` block explaining max_parallel_slots (with the 2-slot default and the BYOK-spend tradeoff from CLAUDE.md §Parallel-mode); add a comment near the top of the file listing the key env vars (GENERALSTAFF_REVIEWER_PROVIDER, GENERALSTAFF_REVIEWER_MODEL, GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER, OPENROUTER_API_KEY, OLLAMA_HOST, GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>) with one-line descriptions. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml (the real one, not the example), or any hands_off path. Note: `projects.yaml.example` is NOT in the hands-off list (only the real `projects.yaml` is). Motivation: Phase 4 opt-in parallel mode is undocumented in the example config; a new user reading the example has no signal that the knob exists. Expected diff: ~50 lines of added comments.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "projects.yaml.example"
+    ]
+  },
+  {
+    "id": "gs-238",
+    "title": "Add `--project=<id>` filter flag to `generalstaff tasks list`. CREATE ONLY: extend the `case \"tasks\"` / `list` subhandler in `src/cli.ts` (or the equivalent tasks-list handler) to accept `--project=<id>`; when set, filter the output to tasks from only that project's tasks.json; when unset, keep existing behavior (current default — inspect source to confirm whether 'current behavior' is single-project implicit or multi-project aggregate). Error if --project=<unknown-id>. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --project=generalstaff filters output; (b) --project=unknown errors + exits 1; (c) existing default behavior unchanged (back-compat). Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-239",
+    "title": "Add `generalstaff digest last [--json]` CLI subcommand printing the most recent digest file. CREATE ONLY: add a `case \"digest\"` handler in `src/cli.ts` with a `last` subcommand that reads the digests/ directory (path from dispatcher.digest_dir in projects.yaml, defaults to `./digests/`), finds the most recent file by mtime, and prints its contents to stdout. `--json` wraps the file path + content + timestamp in a JSON object. If digests/ is missing or empty, print `No digests found.` and exit 0 (not an error). Append tests to `tests/cli.test.ts` covering: (a) happy path prints file contents; (b) empty digests/ prints friendly message; (c) --json output shape. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: digests are the human-readable session narratives but there's no CLI shortcut to read the latest — current flow requires `ls digests/` + `cat <file>`. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
