@@ -627,6 +627,32 @@ describe("countRemainingWorkDetailed", () => {
     expect(b.total).toBe(7);
   });
 
+  it("gs-231: status='completed' counts in the done bucket, not pending_bot_pickable", async () => {
+    // gs-215 was marked `completed` by the bot before the status enum
+    // was locked down. greenfieldCountRemainingDetailed bypasses the
+    // validator by casting JSON.parse output directly, so `"completed"`
+    // can survive — it should be bucketed as terminal/done rather than
+    // leaking back into pending_bot_pickable.
+    writeFixture(
+      "state/gs-231-completed/tasks.json",
+      JSON.stringify([
+        { id: "1", title: "plain pending", status: "pending", priority: 1 },
+        { id: "2", title: "legacy", status: "completed", priority: 1 },
+        { id: "3", title: "done", status: "done", priority: 1 },
+      ]),
+    );
+    const project = makeProject({
+      id: "gs-231-completed",
+      work_detection: "tasks_json",
+    });
+    const b = await countRemainingWorkDetailed(project);
+    expect(b.done).toBe(2);
+    expect(b.pending_bot_pickable).toBe(1);
+    expect(b.pending_interactive_only).toBe(0);
+    expect(b.pending_handsoff_conflict).toBe(0);
+    expect(b.total).toBe(3);
+  });
+
   it("returns an all-zero breakdown when tasks.json is missing", async () => {
     const project = makeProject({
       id: "gs-200-missing",

@@ -1302,4 +1302,16 @@ describe("isTaskBotPickable + botPickableTasks (gs-195)", () => {
     const result = isTaskBotPickable(t, ["src/schema/**"]);
     expect(result).toEqual({ ok: false, reason: "interactive_only" });
   });
+
+  it("gs-231: status='completed' is not pickable (treated as terminal)", () => {
+    // gs-215 was marked `completed` by the bot before the status enum
+    // was locked down. The validator now rejects that value, but
+    // isTaskBotPickable is the last line of defense for callers that
+    // bypass loadTasks.
+    const t = task({
+      status: "completed" as unknown as GreenfieldTask["status"],
+    });
+    const result = isTaskBotPickable(t, []);
+    expect(result).toEqual({ ok: false, reason: "not_pending" });
+  });
 });

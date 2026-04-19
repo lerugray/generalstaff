@@ -182,7 +182,18 @@ export function isTaskBotPickable(
   // Mirror pendingTasks() semantic: bot-pickable starts from the same
   // "not-done-and-not-skipped" filter (so in_progress tasks remain
   // pickable by the bot's next cycle). The new gates layer on top.
-  if (task.status === "done" || task.status === "skipped") {
+  // gs-231: also treat a stray `status: "completed"` as terminal.
+  // The validator (validateTaskEntry) rejects that value, but raw
+  // reads that bypass loadTasks (e.g. greenfieldCountRemainingDetailed
+  // casts JSON.parse output directly) could still surface it. Guard
+  // defensively here so unknown-but-terminal statuses don't leak back
+  // into the bot-pickable pool.
+  const terminalStatus = task.status as string;
+  if (
+    terminalStatus === "done" ||
+    terminalStatus === "skipped" ||
+    terminalStatus === "completed"
+  ) {
     return { ok: false, reason: "not_pending" };
   }
   if (task.interactive_only) {

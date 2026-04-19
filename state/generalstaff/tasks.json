@@ -1424,7 +1424,7 @@
   {
     "id": "gs-231",
     "title": "Harden isTaskBotPickable to treat `status: \"completed\"` same as `status: \"done\"`. CREATE ONLY: modify `src/tasks.ts` isTaskBotPickable — the existing `if (task.status === \"done\" || task.status === \"skipped\")` branch should also match `\"completed\"` (for tasks the bot marked `completed` before the status enum was locked down). Same treatment: return `{ ok: false, reason: \"not_pending\" }`. Also update `greenfieldCountRemainingDetailed` in `src/work_detection.ts` to count `\"completed\"` tasks under `done` instead of the default pending-bucket fallthrough. Append tests to `tests/tasks.test.ts` covering: (a) status='completed' returns not_pickable with reason not_pending; (b) status='completed' counts in done bucket in WorkBreakdown. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-215 historical task was marked 'completed' rather than 'done' by the bot, leaking past this filter and showing as bot-pickable in `status --backlog` until interactively patched 2026-04-18 evening. Harden at the pickability-check layer rather than normalizing tasks.json entries, so any future stray status values don't re-spawn the issue. Expected diff: ~60 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/tasks.ts",
