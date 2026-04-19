@@ -1606,3 +1606,91 @@ raybrain Phase 3 query interface, personal page redesign) without
 having to ration against Phase 5 specifically. This is the
 practical payoff of the discipline: one brief's investment frees
 the rest of the week for other surfaces.
+
+### Addendum-4 — 2026-04-18 late evening: prose accessibility for non-programmer audiences
+
+**What prompted this.** Reviewing the four Phase 5 reference views
+(`fleet-overview`, `task-queue-v1`, `session-tail-v1`,
+`dispatch-detail-v1`), Ray observed that as a non-programmer
+he could appreciate the visual language but could barely parse
+the actual *content*. The cryptic prose is concentrated but
+pervasive:
+
+- SHA fragments (`ceeddcf → 50a8da4`)
+- Shell command strings (`bun test && bun x tsc --noEmit`)
+- Path references (`src/safety.ts`, `src/prompts/`)
+- Git terminology (`hunk`, `branch`, `unified diff`, `commit`)
+- Process terminology (`exit 0`, `watchdog`, `stdout`, `STOP file`)
+- Domain terminology (`scope drift`, `hands-off violations`,
+  `silent failures`, `soft-skip`, `verification gate`)
+- Status codes (`verified`, `rolled back`, `no-work`)
+
+**Why this is a real concern, not just cosmetic.** GeneralStaff's
+primary audience is developers running the dispatcher on their
+own code. That audience reads this prose fluently. But Phase 5 is
+also the first surface a non-developer would see — portfolio
+viewers judging Ray's work, potential collaborators, journalists
+writing about anti-slop AI agents, users of sibling projects who
+want to understand what GeneralStaff does without adopting it.
+For those audiences the prose reads as impenetrable, not as
+*considered density* the way it reads to developers.
+
+This matters because the whole Phase 5 design argument — "this is
+a considered, legible, taste-heavy product, not SaaS slop" — is
+partially defeated if the *words* are legible only to 2% of
+readers. The printed-dispatch-sheet aesthetic promises legibility
+and partially doesn't deliver on prose alone.
+
+**Shape of a future solution (not building this yet).**
+
+1. **Parallel-prose mode.** A toggle that swaps cryptic terms for
+   plain-language equivalents in the same layout:
+   - `verified` → `checked and shipped`
+   - `exit 0` → `completed normally`
+   - `watchdog` → `deadline timer`
+   - `hunk` → `code change`
+   - `hands-off violations` → `edited files it shouldn't have`
+   - `scope drift` → `edited files it wasn't asked to`
+   - `silent failures` → `broken code that wasn't flagged`
+   - `bun test && bun x tsc --noEmit` → `runs the tests and
+     checks types` (with the raw command still visible on hover)
+
+2. **Glossary-on-demand.** Dotted underline on every domain term
+   the first time it appears in a view; hover/click reveals a
+   one-sentence definition in the afterword tradition. Low
+   cognitive cost for experts (they just ignore the underlines),
+   high payoff for novices.
+
+3. **Two-tier prose in the afterword.** Expand the existing
+   afterword pattern: each explanatory paragraph gets a plain-
+   language first sentence, then the technical elaboration. A
+   non-programmer reads the first sentence and understands the
+   shape; a programmer reads the rest for precision.
+
+4. **Don't plain-language the identifiers.** Commit SHAs, cycle
+   ids, file paths, session ids — these stay as-is. They're not
+   jargon, they're *identifiers*. Renaming them defeats their
+   purpose (pointing at specific artifacts). The goal is
+   accessible *surrounding prose*, not reformatted data.
+
+**When to build this.** Deferred past MVP Phase 5. Get the
+functional views shipped first, then revisit when (a) someone
+non-technical actually tries to use the product and reports
+confusion, or (b) portfolio/demo pressure makes prose legibility
+a launch-week priority. Building it speculatively costs time for
+a benefit that might not match what real users actually need.
+
+**What to not do.** Don't simplify the prose *in place* for the
+dev-primary audience. That would dumb down the surface for the
+majority reader in service of a minority reader. The right answer
+is a toggle, a glossary, or a two-tier treatment — never a
+single-tier dumb-down.
+
+**Connection to Hard Rule 1.** Prose accessibility is a taste
+decision by definition — what counts as "plain language" depends
+on who's reading. This stays with Ray (command sets direction) or
+with human collaborators, not with the bot. The bot can
+*implement* a glossary once the mappings are decided, but it
+cannot decide what counts as plain language without producing
+confident slop. Captured as forward direction, not as a queued
+task.
