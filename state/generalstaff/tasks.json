@@ -1772,5 +1772,45 @@
       "src/cycle.ts",
       "tests/verification.test.ts"
     ]
+  },
+  {
+    "id": "gs-262",
+    "title": "Add `--json` to `generalstaff --version`. CREATE ONLY: modify the version-printing branch in `src/cli.ts` (search for the VERSION constant and the `--version` handling — likely near the top of the dispatch or in printUsage). When `--version --json` is passed, emit a single-line JSON object: `{\"version\": \"0.1.0\", \"commit\": \"<short sha of HEAD at build>\", \"bun\": \"<bun version>\"}`. The commit SHA should be resolved at runtime via `git -C <cwd> rev-parse --short HEAD`; if that fails (not a git repo), emit `\"commit\": null` rather than crashing. Bun version via `Bun.version`. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --version (no --json) unchanged; (b) --version --json returns valid JSON with version field; (c) --version --json includes non-null bun field; (d) --version --json in non-git dir emits commit:null without crashing. Motivation: scriptable parsing for bug reports and install-time detection. Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-263",
+    "title": "`doctor` surfaces the active reviewer provider. CREATE ONLY: extend `src/doctor.ts` sanity-checks section with a new informational check that reports which reviewer provider would run based on current env: resolve GENERALSTAFF_REVIEWER_PROVIDER (default 'claude'), show as a PASS row with detail like `reviewer: openrouter (model: qwen/qwen3-coder-plus)`. If provider=openrouter and OPENROUTER_API_KEY is unset, mark as WARN with the same pattern the existing OPENROUTER_API_KEY check uses. If provider=ollama, include OLLAMA_HOST (default http://localhost:11434). If provider=claude, just confirm. Append tests to `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) default (no env) → claude provider PASS; (b) openrouter + key set → PASS with model; (c) openrouter + no key → WARN; (d) ollama → PASS with OLLAMA_HOST. Motivation: a user asking 'what happens if I run session right now' should see the answer in doctor output without reading code. Expected diff: ~110 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/doctor.ts",
+      "tests/doctor.test.ts"
+    ]
+  },
+  {
+    "id": "gs-264",
+    "title": "Add `cycle show <cycle-id> [--json]` as a text-mode-friendly alias for `view dispatch-detail`. CREATE ONLY: extend the `cycle` subcommand handler in `src/cli.ts` with a `show` sub-subcommand. Behavior: identical to `view dispatch-detail <cycle-id>` (reuse the same function getDispatchDetail from src/views/dispatch_detail.ts) — phase durations, diff summary, checks block, etc. The only difference is that this surface is where users already are for cycle-related operations (alongside `cycle`, `cycle-redo`, and bare `cycle`). `--json` emits the full DispatchDetailData. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `cycle show <known-id>` exits 0 with structured report; (b) missing id errors + exits 1; (c) unknown id surfaces DispatchDetailError + exits 1; (d) --json emits valid JSON. Motivation: discoverability. A user thinking 'show me what happened in that cycle' will type `cycle show` before they'll find `view dispatch-detail`. Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-265",
+    "title": "Add `--limit=N` to `status --sessions`. CREATE ONLY: inspect `src/cli.ts` status handler for how `--sessions` currently renders (may already accept a limit positional like `--sessions=5`). If not, add an explicit `--limit=N` flag that bounds the number of recent sessions shown (default 10). Honors existing `--since=<iso>` filter (gs-247) — applies BOTH if both set. Error cleanly on non-positive-integer. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT**: if `--sessions=<N>` positional syntax already works and adding `--limit=N` would be redundant, flag this task `interactive_only: true` with the reason `--sessions already accepts a limit via <positional>, nothing to add`. Tests: (a) default limit renders ≤10; (b) --limit=3 renders 3; (c) --limit=0 errors; (d) --limit=abc errors; (e) --limit + --since honors both. Motivation: a user running a long-standing fleet wants to see 'last 3 sessions' without reading the whole log. Expected diff: ~70 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
