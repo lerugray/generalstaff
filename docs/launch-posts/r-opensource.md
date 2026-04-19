@@ -126,7 +126,7 @@ let someone fork this, close-source the fork, wrap it in a
 SaaS, and reintroduce the same opacity problem I'm trying to
 solve. AGPL makes that specific move unprofitable. If you want
 to integrate with a non-AGPL codebase, the repo is also the
-install path — your codebase calls GeneralStaff as a subprocess
+install path. Your codebase calls GeneralStaff as a subprocess
 via its CLI, which doesn't trigger AGPL's linking clauses.
 
 **Q: What's the exit strategy if you stop maintaining it?**
@@ -162,7 +162,7 @@ The engineer is whatever shell command you configure in
 reviewer layer has first-class support for three providers
 (Claude via `claude -p`, OpenRouter Qwen3 Coder, local Ollama),
 all configurable per-session or per-env. Adding a new reviewer
-provider is ~50 lines — there's a pattern to follow in
+provider is ~50 lines; there's a pattern to follow in
 `src/reviewer.ts`.
 
 ---
