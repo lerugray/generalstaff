@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff fully implements the gs-226 task by adding the 'view' subcommand with fleet-overview support, updating help text, adding tests, and marking the task as done, with no hands-off violations or scope drift.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-226",
+      "evidence": "src/cli.ts added case \"view\" with fleet-overview implementation, valid views list, JSON output, table formatting, and updated help; tests/cli.test.ts added comprehensive tests for view subcommand; tasks.json updated status to \"done\".",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification output shows test pass and no-type errors; all changes are confined to CLI and test files as required. Other views (task-queue, etc.) are stubbed with clear messaging as specified."
+}

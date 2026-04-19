@@ -1,0 +1,668 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 1e44079..f82dba0 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -227,6 +227,11 @@ Usage:
+     Example: generalstaff diff myapp 20260416125750_8w9n
+     Example: generalstaff diff myapp 20260416125750_8w9n --stat
+ 
++  generalstaff view <name> [options]                      Structured fleet views (Phase 6)
++    Example: generalstaff view fleet-overview            # one row per project + aggregates
++    Example: generalstaff view fleet-overview --json     # same, as JSON
++    # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
++
+   generalstaff --version                                  Show version
+   generalstaff --help                                     Show this help`);
+ }
+@@ -1865,6 +1870,100 @@ switch (command) {
+     break;
+   }
+ 
++  case "view": {
++    const VALID_VIEWS = [
++      "fleet-overview",
++      "task-queue",
++      "session-tail",
++      "dispatch-detail",
++      "inbox",
++    ] as const;
++    const viewName = args[1];
++    const viewArgs = args.slice(2);
++
++    if (!viewName) {
++      console.error(
++        "Usage: generalstaff view <name> [options]\n" +
++          "\n" +
++          "Available views:\n" +
++          "  fleet-overview              One row per project + aggregates\n" +
++          "  task-queue <project-id>     Task buckets (In-flight/Ready/Blocked/Shipped) (gs-227)\n" +
++          "  session-tail [--limit=N]    Newest sessions with per-cycle breakdown (gs-228)\n" +
++          "  dispatch-detail <cycle-id>  Full cycle report: phases, diff, checks (gs-229)\n" +
++          "  inbox [--since=<iso>]       Fleet message inbox (gs-230)\n",
++      );
++      process.exit(1);
++    }
++
++    if (!(VALID_VIEWS as readonly string[]).includes(viewName)) {
++      console.error(
++        `Error: unknown view '${viewName}'. Valid views: ${VALID_VIEWS.join(", ")}`,
++      );
++      process.exit(1);
++    }
++
++    if (viewName === "fleet-overview") {
++      const { values: viewValues } = parseArgs({
++        args: viewArgs,
++        options: {
++          json: { type: "boolean", default: false },
++        },
++        allowPositionals: true,
++      });
++      const { getFleetOverview } = await import("./views/fleet_overview");
++      const data = await getFleetOverview();
++      if (viewValues.json) {
++        console.log(JSON.stringify(data, null, 2));
++      } else {
++        const headers = [
++          "project",
++          "last_cycle",
++          "cycles",
++          "verified",
++          "failed",
++          "pickable",
++          "auto_merge",
++          "branch",
++        ];
++        const cells = data.projects.map((p) => [
++          p.id,
++          p.last_cycle_at ? formatRelativeTime(p.last_cycle_at) : "never",
++          String(p.cycles_total),
++          String(p.verified),
++          String(p.failed),
++          String(p.bot_pickable),
++          p.auto_merge ? "yes" : "no",
++          p.branch,
++        ]);
++        const widths = headers.map((h, i) =>
++          Math.max(h.length, ...cells.map((row) => row[i].length), 0),
++        );
++        const fmtRow = (row: string[]) =>
++          row.map((v, i) => v.padEnd(widths[i])).join("  ");
++        console.log(fmtRow(headers));
++        for (const row of cells) console.log(fmtRow(row));
++        const passRatePct = `${Math.round(data.aggregates.pass_rate * 100)}%`;
++        const slotEff =
++          data.aggregates.slot_efficiency_recent === null
++            ? "n/a"
++            : data.aggregates.slot_efficiency_recent.toFixed(2);
++        console.log(
++          `\nTotal cycles: ${data.aggregates.total_cycles}  pass_rate: ${passRatePct}  slot_efficiency_recent: ${slotEff}`,
++        );
++      }
++      break;
++    }
++
++    // task-queue, session-tail, dispatch-detail, inbox are queued as
++    // gs-227..230. Recognise them as valid names (so they don't collide
++    // with the "unknown view" branch) but surface a clear not-yet-wired
++    // message until their CLI shims land.
++    console.error(
++      `Error: view '${viewName}' is not yet wired up — queued as a follow-up task`,
++    );
++    process.exit(1);
++  }
++
+   default:
+     console.error(`Unknown command: ${command}`);
+     printUsage();
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index eea7e3a..1a5e5fc 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1372,7 +1372,7 @@
+   {
+     "id": "gs-226",
+     "title": "Phase 6 CLI wiring: add `view` subcommand + `fleet-overview` handler. CREATE ONLY: modifications to `src/cli.ts` — add `case \"view\"` that dispatches on the next positional arg (the sub-view name); implement `view fleet-overview [--json]` by importing and calling `getFleetOverview()` from `src/views/fleet_overview.ts`; extend the main `--help` output to document `view <name>`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view fleet-overview` emits a human-readable table (one row per project: id, last_cycle relative time, cycles_total, verified, failed, bot_pickable, auto_merge, branch) plus an aggregates summary line (total_cycles, pass_rate as %, slot_efficiency_recent or `n/a`); `--json` emits the full FleetOverviewData object as JSON. `generalstaff view` with no sub-view prints usage listing all sub-views (fleet-overview + stubs for the other four queued below) and exits 1. `generalstaff view unknown-name` prints `Error: unknown view 'unknown-name'. Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox` and exits 1. Reuse `formatRelativeTime` from `src/relative_time.ts` if it exists (otherwise inline a minimal relative-time formatter — do not create a new shared module). Tests: (a) --json output parses and contains projects[] + aggregates; (b) no-subcommand prints usage + exits 1; (c) unknown view errors + exits 1; (d) table format includes all registered projects as rows; (e) aggregates summary line renders pass_rate as percentage. Expected diff: ~180 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 1a5a3bf..3e16b09 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -2397,4 +2397,174 @@ index 111..222 100644
+       );
+     });
+   });
++
++  describe("view subcommand (gs-226)", () => {
++    const VIEW_DIR = join(import.meta.dir, "fixtures", "view_gs226_test");
++    const ALPHA_DIR = join(VIEW_DIR, "alpha");
++    const BETA_DIR = join(VIEW_DIR, "beta");
++
++    const PROJECTS_YAML = () => `
++projects:
++  - id: alpha
++    path: ${ALPHA_DIR.replace(/\\/g, "/")}
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    branch: bot/work
++    auto_merge: true
++    hands_off:
++      - src/reviewer.ts
++  - id: beta
++    path: ${BETA_DIR.replace(/\\/g, "/")}
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    branch: main
++    auto_merge: false
++    hands_off:
++      - CLAUDE.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
++      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
++      writeFileSync(join(VIEW_DIR, "projects.yaml"), PROJECTS_YAML());
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
++        JSON.stringify([
++          { id: "a-1", title: "t1", status: "pending", priority: 1 },
++          { id: "a-2", title: "t2", status: "pending", priority: 2 },
++        ]),
++      );
++      writeFileSync(
++        join(BETA_DIR, "state", "beta", "tasks.json"),
++        JSON.stringify([
++          { id: "b-1", title: "t1", status: "pending", priority: 1 },
++        ]),
++      );
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "STATE.json"),
++        JSON.stringify({
++          project_id: "alpha",
++          current_cycle_id: null,
++          last_cycle_id: "c1",
++          last_cycle_at: "2026-04-18T11:30:00.000Z",
++          last_cycle_outcome: "verified",
++          cycles_this_session: 0,
++        }),
++      );
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "PROGRESS.jsonl"),
++        [
++          {
++            timestamp: "2026-04-18T10:00:00Z",
++            event: "cycle_end",
++            cycle_id: "c1",
++            project_id: "alpha",
++            data: { outcome: "verified" },
++          },
++          {
++            timestamp: "2026-04-18T10:05:00Z",
++            event: "cycle_end",
++            cycle_id: "c2",
++            project_id: "alpha",
++            data: { outcome: "verified" },
++          },
++          {
++            timestamp: "2026-04-18T10:10:00Z",
++            event: "cycle_end",
++            cycle_id: "c3",
++            project_id: "alpha",
++            data: { outcome: "verification_failed" },
++          },
++        ]
++          .map((e) => JSON.stringify(e))
++          .join("\n") + "\n",
++      );
++    });
++
++    afterEach(() => {
++      rmSync(VIEW_DIR, { recursive: true, force: true });
++    });
++
++    it("view fleet-overview --json emits FleetOverviewData shape", async () => {
++      const result = await runCli(
++        ["view", "fleet-overview", "--json"],
++        VIEW_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed).toHaveProperty("projects");
++      expect(parsed).toHaveProperty("aggregates");
++      expect(parsed).toHaveProperty("rendered_at");
++      expect(Array.isArray(parsed.projects)).toBe(true);
++      expect(parsed.projects).toHaveLength(2);
++      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
++      expect(alpha.cycles_total).toBe(3);
++      expect(alpha.verified).toBe(2);
++      expect(alpha.failed).toBe(1);
++      expect(alpha.branch).toBe("bot/work");
++      expect(alpha.auto_merge).toBe(true);
++      expect(parsed.aggregates.project_count).toBe(2);
++      expect(parsed.aggregates.total_cycles).toBe(3);
++    });
++
++    it("view with no sub-view prints usage and exits 1", async () => {
++      const result = await runCli(["view"], VIEW_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("Usage: generalstaff view <name>");
++      expect(result.stderr).toContain("fleet-overview");
++      expect(result.stderr).toContain("task-queue");
++      expect(result.stderr).toContain("session-tail");
++      expect(result.stderr).toContain("dispatch-detail");
++      expect(result.stderr).toContain("inbox");
++    });
++
++    it("view unknown-name prints the valid-views list and exits 1", async () => {
++      const result = await runCli(["view", "unknown-name"], VIEW_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "Error: unknown view 'unknown-name'. Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox",
++      );
++    });
++
++    it("view fleet-overview table includes all registered projects as rows", async () => {
++      const result = await runCli(["view", "fleet-overview"], VIEW_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("alpha");
++      expect(result.stdout).toContain("beta");
++      expect(result.stdout).toContain("bot/work");
++      expect(result.stdout).toContain("main");
++      // beta has no PROGRESS.jsonl / STATE.json, so last_cycle is "never"
++      expect(result.stdout).toContain("never");
++    });
++
++    it("view fleet-overview aggregates line renders pass_rate as a percentage", async () => {
++      const result = await runCli(["view", "fleet-overview"], VIEW_DIR);
++      expect(result.exitCode).toBe(0);
++      // 2 verified / 3 (2 verified + 1 failed) = 67%
++      expect(result.stdout).toMatch(/pass_rate:\s*67%/);
++      expect(result.stdout).toContain("Total cycles: 3");
++      expect(result.stdout).toContain("slot_efficiency_recent: n/a");
++    });
++
++    it("is listed in --help output", async () => {
++      const result = await runCli(["--help"]);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff view <name>");
++    });
++  });
+ });
+
+
+Diff summary: src/cli.ts                    |  99 ++++++++++++++++++++++++
+ state/generalstaff/tasks.json |   2 +-
+ tests/cli.test.ts             | 170 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 270 insertions(+), 1 deletion(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T02:37:11.968Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve 5577ee25 after 2 attempts (status=128, stderr=fatal: bad object 5577ee25abfac916a0eaeebbd7b6f1a3fa753396)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\nested\deep\digests\digest_20260419_023757.md
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_023757.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 1234
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
