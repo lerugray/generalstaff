@@ -1810,6 +1810,8 @@
     "title": "Add `--limit=N` to `status --sessions`. CREATE ONLY: inspect `src/cli.ts` status handler for how `--sessions` currently renders (may already accept a limit positional like `--sessions=5`). If not, add an explicit `--limit=N` flag that bounds the number of recent sessions shown (default 10). Honors existing `--since=<iso>` filter (gs-247) — applies BOTH if both set. Error cleanly on non-positive-integer. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT**: if `--sessions=<N>` positional syntax already works and adding `--limit=N` would be redundant, flag this task `interactive_only: true` with the reason `--sessions already accepts a limit via <positional>, nothing to add`. Tests: (a) default limit renders ≤10; (b) --limit=3 renders 3; (c) --limit=0 errors; (d) --limit=abc errors; (e) --limit + --since honors both. Motivation: a user running a long-standing fleet wants to see 'last 3 sessions' without reading the whole log. Expected diff: ~70 lines.",
     "status": "pending",
     "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "--sessions already accepts a limit via --sessions=<N> (parsed in src/sessions.ts parseSessionsFlag, wired through src/cli.ts status handler; documented in help text at cli.ts:117-118, 626). Adding --limit=N would be a redundant alias. Per task body instructions, flagging interactive_only so a human can decide whether the alias is worth the surface area.",
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
