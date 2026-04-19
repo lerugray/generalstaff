@@ -194,6 +194,7 @@ export interface GreenfieldTask {
   // (same behaviour as before gs-195).
   expected_touches?: string[];
   interactive_only?: boolean;
+  interactive_only_reason?: string;
 }
 
 // --- Concurrency detection ---

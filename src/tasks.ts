@@ -273,10 +273,19 @@ export function nextTaskId(
   return prefix + String(maxN + 1).padStart(width, "0");
 }
 
+// gs-253: optional queue-time bot-pickability hints. All fields are
+// opt-in; omitting them reproduces the pre-gs-253 behaviour.
+export interface AddTaskOptions {
+  interactiveOnly?: boolean;
+  interactiveOnlyReason?: string;
+  expectedTouches?: string[];
+}
+
 export async function addTask(
   projectId: string,
   title: string,
   priority = 2,
+  options: AddTaskOptions = {},
 ): Promise<GreenfieldTask> {
   const trimmed = title.trim();
   if (!trimmed) {
@@ -291,6 +300,15 @@ export async function addTask(
     status: "pending",
     priority,
   };
+  if (options.expectedTouches && options.expectedTouches.length > 0) {
+    task.expected_touches = options.expectedTouches;
+  }
+  if (options.interactiveOnly === true) {
+    task.interactive_only = true;
+    if (options.interactiveOnlyReason !== undefined) {
+      task.interactive_only_reason = options.interactiveOnlyReason;
+    }
+  }
   const updated = [...existing, task];
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");

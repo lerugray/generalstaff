@@ -1204,6 +1204,10 @@ switch (command) {
         options: {
           project: { type: "string" },
           priority: { type: "string" },
+          // gs-253: queue-time bot-pickability hints.
+          "interactive-only": { type: "boolean", default: false },
+          "interactive-only-reason": { type: "string" },
+          "expected-touches": { type: "string" },
         },
         allowPositionals: true,
       });
@@ -1232,9 +1236,35 @@ switch (command) {
         }
         priority = parsed;
       }
+      const interactiveOnly = taskValues["interactive-only"] === true;
+      const rawReason = taskValues["interactive-only-reason"];
+      const interactiveOnlyReason =
+        typeof rawReason === "string" ? rawReason.trim() : undefined;
+      if (interactiveOnly && (interactiveOnlyReason === undefined || interactiveOnlyReason.length === 0)) {
+        console.error(
+          "Error: --interactive-only requires --interactive-only-reason=<string>",
+        );
+        process.exit(1);
+      }
+      let expectedTouches: string[] | undefined;
+      const rawExpected = taskValues["expected-touches"];
+      if (typeof rawExpected === "string") {
+        const parts = rawExpected.split(",").map((p) => p.trim());
+        if (parts.length === 0 || parts.some((p) => p.length === 0)) {
+          console.error(
+            "Error: --expected-touches entries must not be empty",
+          );
+          process.exit(1);
+        }
+        expectedTouches = parts;
+      }
       let task;
       try {
-        task = await addTask(taskValues.project, title, priority);
+        task = await addTask(taskValues.project, title, priority, {
+          interactiveOnly,
+          interactiveOnlyReason,
+          expectedTouches,
+        });
       } catch (err) {
         if (err instanceof TaskValidationError) {
           console.error(`Error: ${err.message}`);
