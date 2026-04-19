@@ -1725,5 +1725,50 @@
       "src/cli.ts",
       "tests/cli.test.ts"
     ]
+  },
+  {
+    "id": "gs-258",
+    "title": "Add `generalstaff doctor` first-run sanity checks. CREATE ONLY: extend `src/doctor.ts` with three new pass/fail checks tuned for a fresh-clone user: (a) `projects.yaml exists and contains at least 1 project` (fail message: 'No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.'); (b) `projects.yaml is not the unmodified example` (detect by diffing against projects.yaml.example — fail only if byte-identical — message: 'projects.yaml is unmodified from the shipped example. Replace the placeholder project entries with real projects.'); (c) `state_dir exists and is writable` (fail message: 'state_dir not writable — check permissions on <path>'). All three are warnings/fails only when the condition applies — clean install with no projects yet should fail (a) but pass (b) and (c). Append tests to `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) empty projects list fails with right message; (b) projects identical to example file fails; (c) projects.yaml customized passes; (d) read-only state_dir fails with right message; (e) clean happy-path passes. Motivation: a fresh user cloning the repo hits `generalstaff doctor` first; those failures should point them at the fix. Expected diff: ~130 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/doctor.ts",
+      "tests/doctor.test.ts"
+    ]
+  },
+  {
+    "id": "gs-259",
+    "title": "Make `generalstaff register` validate the project path before writing projects.yaml. CREATE ONLY: modify the register subcommand handler in `src/cli.ts` (or src/register.ts if that's where the logic lives — inspect both) to run these checks BEFORE appending a new project entry: (a) path exists and is a directory; (b) path contains a `.git/` directory OR the user passed `--allow-non-git` (warning only, not a fail); (c) engineer_command refers to an executable the user can run (best-effort: if the command is a script like `run_bot.sh`, check it exists at path + is executable; if it's a binary, skip this check — don't break on PATH resolution). If any check fails, print a clear error and exit 1 WITHOUT mutating projects.yaml. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml (the real one, not test fixtures), or any hands_off path. Tests: (a) non-existent path fails; (b) non-git path fails unless --allow-non-git; (c) missing engineer_command script fails; (d) all-green path writes successfully. Motivation: today a typo in the path argument writes the bad entry and the first cycle fails with an opaque error — pre-write validation catches it at CLI time. Expected diff: ~140 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/register.ts",
+      "tests/cli.test.ts",
+      "tests/register.test.ts"
+    ]
+  },
+  {
+    "id": "gs-260",
+    "title": "Surface `parallel_efficiency` in `status --summary` when the fleet has run parallel sessions recently. CREATE ONLY: modify `src/summary.ts` (or whoever computes status --summary — check src/cli.ts status handler for the call path) to compute the mean parallel_efficiency from `session_complete` events in the summary window that have that field set (it's only set in parallel mode — see gs-186). Text: add a one-line `parallel_efficiency: 0.XX (over N parallel sessions)` under the existing cycle metrics. JSON: add `parallel_efficiency: { mean: number, sessions: number }` field. Omit the line entirely (both modes) when no parallel sessions matched. Respect existing `--since` filter. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-session fixture with parallel-metrics computes correct mean; (b) sequential-only fleet omits the line; (c) --since filter narrows the pool; (d) mixed sequential + parallel sessions only averages the parallel ones. Motivation: parallel_efficiency is only visible per-session today; a rolling fleet-level view makes it easier to spot when the picker is padding empty-queue slots (like the pre-gs-232 regression). Expected diff: ~130 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/summary.ts",
+      "src/cli.ts",
+      "tests/summary.test.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-261",
+    "title": "Friendlier error when the verification_command exits with a 'command not found' signature. CREATE ONLY: modify `src/verification.ts` (or wherever the verification subprocess is spawned — inspect cycle.ts for the invocation) so when the command exits 127 (POSIX convention for command-not-found) OR stderr contains the shell's standard 'command not found' / 'is not recognized' / 'cannot find' strings, the returned error message adds a helpful one-liner: `Verification command '<cmd>' not found — is the tool installed in <project.path>? (Try: cd <path> && <cmd head>)`. Still treat it as verification_failed (don't change semantics) — just the error message surfacing. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) exit code 127 triggers the helpful message; (b) 'command not found' substring in stderr triggers it; (c) normal test failure (exit 1) does NOT trigger it (unchanged behavior); (d) message includes project path + command head. Motivation: a fresh user whose managed project is missing `bun` or a language runtime gets a cryptic exit-127 message today; this surfaces the real cause. Expected diff: ~110 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/verification.ts",
+      "src/cycle.ts",
+      "tests/verification.test.ts"
+    ]
   }
 ]
