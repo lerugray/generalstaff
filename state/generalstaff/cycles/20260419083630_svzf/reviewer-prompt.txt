@@ -1,0 +1,598 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+],
+"completed_at": "2026-04-19T08:43:07.039Z"
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/summary.ts b/src/summary.ts
+index bafb771..7373dc4 100644
+--- a/src/summary.ts
++++ b/src/summary.ts
+@@ -300,6 +300,13 @@ export function formatSummary(
+ 
+ // --- Today's session summary (gs-180) ---
+ 
++export interface CycleDurationPercentiles {
++  p50: number;
++  p90: number;
++  max: number;
++  count: number;
++}
++
+ export interface TodaySessionSummary {
+   date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
+   cycles_total: number;
+@@ -308,6 +315,19 @@ export interface TodaySessionSummary {
+   avg_cycle_duration_seconds: number;
+   wall_clock_minutes: number;
+   last_session_end: string | null;
++  // gs-252: percentiles over duration_seconds across the same filtered
++  // cycle_end pool that feeds avg_cycle_duration_seconds. null when no
++  // cycles match the window.
++  cycle_duration: CycleDurationPercentiles | null;
++}
++
++// gs-252: nearest-rank percentile (1-indexed). Sorted asc; for percentile p
++// (0..1) the rank is ceil(p * n), index is rank - 1 clamped to [0, n-1].
++function nearestRankPercentile(sortedAsc: number[], p: number): number {
++  const n = sortedAsc.length;
++  if (n === 0) return 0;
++  const rank = Math.max(1, Math.ceil(p * n));
++  return sortedAsc[Math.min(n - 1, rank - 1)];
+ }
+ 
+ export async function buildTodaySessionSummary(
+@@ -336,6 +356,7 @@ export async function buildTodaySessionSummary(
+     avg_cycle_duration_seconds: 0,
+     wall_clock_minutes: 0,
+     last_session_end: null,
++    cycle_duration: null,
+   };
+ 
+   const stateDir = join(getRootDir(), "state");
+@@ -343,6 +364,7 @@ export async function buildTodaySessionSummary(
+ 
+   let totalDurationSeconds = 0;
+   let lastSessionEndMs = -Infinity;
++  const durations: number[] = [];
+ 
+   let projectDirs: string[];
+   try {
+@@ -390,6 +412,7 @@ export async function buildTodaySessionSummary(
+         const dur = value.data.duration_seconds;
+         if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
+           totalDurationSeconds += dur;
++          durations.push(dur);
+         }
+       }
+     }
+@@ -399,6 +422,15 @@ export async function buildTodaySessionSummary(
+     result.avg_cycle_duration_seconds =
+       totalDurationSeconds / result.cycles_total;
+   }
++  if (durations.length > 0) {
++    durations.sort((a, b) => a - b);
++    result.cycle_duration = {
++      p50: nearestRankPercentile(durations, 0.5),
++      p90: nearestRankPercentile(durations, 0.9),
++      max: durations[durations.length - 1],
++      count: durations.length,
++    };
++  }
+   return result;
+ }
+ 
+@@ -415,5 +447,13 @@ export function formatTodaySessionSummary(s: TodaySessionSummary): string {
+   );
+   lines.push(`Total bot wall-clock:      ${s.wall_clock_minutes} min`);
+   lines.push(`Last session end:          ${s.last_session_end ?? "n/a"}`);
++  if (s.cycle_duration) {
++    const cd = s.cycle_duration;
++    lines.push(
++      `cycle_duration:            p50=${Math.round(cd.p50)}s p90=${Math.round(cd.p90)}s max=${Math.round(cd.max)}s`,
++    );
++  } else {
++    lines.push(`cycle_duration:            (no cycles)`);
++  }
+   return lines.join("\n");
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 0672eb5..60cf7e6 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1657,14 +1657,15 @@
+   {
+     "id": "gs-252",
+     "title": "Add cycle duration percentiles (p50/p90/max) to `generalstaff status --summary`. CREATE ONLY: modify `src/summary.ts` (or wherever `status --summary` computes its metrics — inspect the summary path in `src/cli.ts` status handler) to compute p50, p90, and max of the `duration_seconds` field across the session_complete / cycle_end events already being scanned for the summary. Text rendering: add a one-line `cycle_duration: p50=Ns p90=Ns max=Ns` under the existing metrics. `--json` shape: add a `cycle_duration: { p50: number, p90: number, max: number, count: number }` field (count = number of cycles contributing to the percentiles). If no cycles match (empty pool), emit `cycle_duration: (no cycles)` in text mode and `cycle_duration: null` in JSON. Must respect the existing `--since` filter (gs-247) — percentiles only over filtered events. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-cycle fixture → percentiles match hand-computed values; (b) empty pool renders null/no-cycles both modes; (c) --since filter narrows the pool; (d) single-cycle edge case: p50 = p90 = max = that one duration. Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/summary.ts",
+       "src/cli.ts",
+       "tests/summary.test.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-19T08:43:07.039Z"
+   },
+   {
+     "id": "gs-253",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 3ed1e7b..eadda89 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -4730,6 +4730,10 @@ dispatcher:
+       // outside.
+       expect(parsed.wall_clock_minutes).toBe(75);
+       expect(parsed.last_session_end).toBe("2026-04-17T18:15:00.000Z");
++      // gs-252: cycle_duration percentiles span only the same filtered pool.
++      // Durations in window: [240, 60] → sorted [60, 240] → p50 (rank ceil(0.5*2)=1
++      // → idx 0) = 60; p90 (rank ceil(0.9*2)=2 → idx 1) = 240; max = 240; count = 2.
++      expect(parsed.cycle_duration).toEqual({ p50: 60, p90: 240, max: 240, count: 2 });
+     });
+ 
+     it("rejects an unparseable --since value with a clear error", async () => {
+diff --git a/tests/summary.test.ts b/tests/summary.test.ts
+index 97996e9..80ecd19 100644
+--- a/tests/summary.test.ts
++++ b/tests/summary.test.ts
+@@ -523,6 +523,7 @@ describe("buildTodaySessionSummary", () => {
+       avg_cycle_duration_seconds: 90,
+       wall_clock_minutes: 60,
+       last_session_end: "2026-04-18T14:00:00.000Z",
++      cycle_duration: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     const lines = out.split("\n");
+@@ -543,9 +544,81 @@ describe("buildTodaySessionSummary", () => {
+       avg_cycle_duration_seconds: 0,
+       wall_clock_minutes: 0,
+       last_session_end: null,
++      cycle_duration: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     expect(out).toContain("Average cycle duration:    n/a");
+     expect(out).toContain("Last session end:          n/a");
+   });
+ });
++
++describe("buildTodaySessionSummary cycle_duration percentiles (gs-252)", () => {
++  const NOW = new Date("2026-04-18T15:30:00.000Z");
++
++  it("computes p50/p90/max from a 3-cycle fixture (nearest-rank)", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "alpha"), { recursive: true });
++    const log = [
++      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T10:00:00.000Z", outcome: "verified", durationSeconds: 60 }),
++      cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-18T10:05:00.000Z", outcome: "verified", durationSeconds: 120 }),
++      cycleEnd({ project: "alpha", cycleId: "c3", ts: "2026-04-18T10:10:00.000Z", outcome: "verified", durationSeconds: 180 }),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    // Sorted [60, 120, 180]: p50 → ceil(0.5*3)=2 → idx 1 → 120;
++    // p90 → ceil(0.9*3)=3 → idx 2 → 180; max = 180.
++    expect(s.cycle_duration).toEqual({ p50: 120, p90: 180, max: 180, count: 3 });
++  });
++
++  it("emits null cycle_duration when the pool is empty", async () => {
++    rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.cycle_duration).toBeNull();
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("cycle_duration:            (no cycles)");
++  });
++
++  it("respects the --since cutoff: percentiles span only filtered events", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "alpha"), { recursive: true });
++    const log = [
++      // Pre-cutoff — excluded.
++      cycleEnd({ project: "alpha", cycleId: "c0", ts: "2026-04-18T08:00:00.000Z", outcome: "verified", durationSeconds: 9999 }),
++      // Inside the window — counted.
++      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T11:00:00.000Z", outcome: "verified", durationSeconds: 30 }),
++      cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-18T11:05:00.000Z", outcome: "verified", durationSeconds: 90 }),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), log);
++
++    const cutoffMs = Date.parse("2026-04-18T10:00:00.000Z");
++    const s = await buildTodaySessionSummary(NOW, cutoffMs);
++    expect(s.cycle_duration).toEqual({ p50: 30, p90: 90, max: 90, count: 2 });
++  });
++
++  it("single-cycle edge case: p50 = p90 = max equals that one duration", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "alpha"), { recursive: true });
++    writeFileSync(
++      join(stateDir, "alpha", "PROGRESS.jsonl"),
++      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T10:00:00.000Z", outcome: "verified", durationSeconds: 77 }) + "\n",
++    );
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.cycle_duration).toEqual({ p50: 77, p90: 77, max: 77, count: 1 });
++  });
++
++  it("formatTodaySessionSummary renders p50/p90/max line", () => {
++    const s = {
++      date: "2026-04-18",
++      cycles_total: 3,
++      verified: 3,
++      verification_failed: 0,
++      avg_cycle_duration_seconds: 120,
++      wall_clock_minutes: 6,
++      last_session_end: "2026-04-18T11:00:00.000Z",
++      cycle_duration: { p50: 120, p90: 180, max: 180, count: 3 },
++    };
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("cycle_duration:            p50=120s p90=180s max=180s");
++  });
++});
+
+
+Diff summary: src/summary.ts                | 40 ++++++++++++++++++++++++
+ state/generalstaff/tasks.json |  5 +--
+ tests/cli.test.ts             |  4 +++
+ tests/summary.test.ts         | 73 +++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 120 insertions(+), 2 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T08:43:43.429Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve ac09dbbb after 2 attempts (status=128, stderr=fatal: bad object ac09dbbbca9945b85a5d1cc1599670222429b4cc)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_084455.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
