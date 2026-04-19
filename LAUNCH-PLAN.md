@@ -245,3 +245,59 @@ Polsia territory. It's opt-in multiplicative throughput, and
 the honest framing is "when your fleet grows past one project,
 you can set `max_parallel_slots: N` and pay roughly N× reviewer
 spend for N× cycle count per session." Literal, not aspirational.
+
+## 2026-04-18 evening — Gates #4 and #5 closure
+
+Shipped in one interactive session (commit `086d1c9`):
+
+- **Gate #4 (README polished):** structurally closed via twelve
+  edits against the ten-point VOICE.md-aligned plan (tagline widened
+  from "for solo founders" per VOICE.md §3 neutrality-on-motivation;
+  status block compressed and de-dated; "Built by itself" dogfooding
+  callout added near top per VOICE.md §9.1; labor-economics paragraph
+  added to "The problem" per VOICE.md §1; concrete dogfooding example
+  added to "The approach"; human-livability opener added to "Who
+  this is for" per VOICE.md §3; Hammerstein section expanded with
+  the lazy+clever ranking and Hard-Rule-1 tie; roadmap cleaned —
+  Phase 5 split into visual-anchor ✓ closed + UI shell in progress,
+  "Phase 7" replaced with "Public launch" framing). Further
+  sentence-level prose polish is Ray's judgment call; structural
+  surface is complete.
+- **Gate #5 (SUPPORTERS + LICENSE):** closed.
+  - `LICENSE`: **AGPL-3.0-or-later**. Canonical text from
+    gnu.org. Chosen over MIT to prevent the SaaS-fork attack (a
+    Polsia competitor forking GS and reselling as closed SaaS) that
+    the project positions against. The AGPL-over-scares-enterprise
+    concern captured in §"Pre-launch artifact checklist" above
+    applies to enterprise-sales projects; GS's audience per
+    VOICE.md is solo developers / minimum-wage-adjacent, not
+    enterprise-legal-filtered. The plugin-ecosystem chilling effect
+    AGPL sometimes produces is low-risk here because GS is a thin
+    wrapper over Claude Code with plugins that run as separate
+    processes.
+  - `SUPPORTERS.md`: empty sponsor list at launch; naming opt-in.
+  - `CONTRIBUTING.md`: new — correctness PRs welcome, taste-work
+    PRs need an issue first (Hard Rule 1 for contributors), audit
+    log is the bug report.
+
+**VOICE.md is public-by-intent.** Flagged to Ray that the personal-
+context section (minimum-wage framing) would be visible to anyone
+cloning the public repo. Ray confirmed keep public — the openness
+is on-brand for a project whose credibility claim is "our audit
+log is the product," and the public voice-calibration document is
+itself a voice signal competitors cannot match.
+
+### Remaining pre-launch items
+
+- **Clone URL in README Quickstart.** Currently points at
+  `https://github.com/lerugray/generalstaff.git` which is a private
+  repo — will 404 for public readers until launch day. Flag-for-
+  launch-day, not a pre-launch edit.
+- **README sentence-level polish.** Any specific prose Ray wants
+  to rework is an interactive-session task; the structural voice
+  pass is complete.
+- **Final artifact checklist items from §"Pre-launch artifact
+  checklist" above.** GitHub Sponsors live link, release tag
+  v0.1.0, install one-liner end-to-end test, first non-Ray user
+  runs it successfully — all still open, all outside the scope
+  of tonight's close.

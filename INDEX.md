@@ -115,6 +115,13 @@ at `github.com/lerugray/generalstaff` (private) as of
   Phase 3 kicked off by attempting to register `gamr` as the
   first non-dogfood project — which surfaced the state-path
   architectural finding (gs-166..gs-170 queued for overnight).
+- [[2026-04-18-evening]] — launch-prep taste pass (home PC,
+  Opus 4.7). Gates #4 (README voice pass per VOICE.md §9) and
+  #5 (LICENSE AGPL-3.0, SUPPORTERS, CONTRIBUTING) closed. Five
+  Phase 6 data-contract tasks queued (`gs-221..225`);
+  autonomous bot landed 2/5 (`gs-221` fleet_overview,
+  `gs-222` task_queue) before hitting empty-cycles soft-stop.
+  VOICE.md confirmed public-by-intent.
 
 ## Conventions for working in this folder
 
