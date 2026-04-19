@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes correspond to the claimed task gs-233, no hands-off violations, and the verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-233",
+      "evidence": "Changes in src/cli.ts add help handling for 'view' command and update tests in tests/cli.test.ts to verify the new behavior.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The diff correctly implements the help functionality for the 'view' subcommand as specified in gs-233, and all tests pass."
+}
