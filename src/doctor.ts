@@ -71,6 +71,25 @@ export interface DoctorOptions {
   // indented context lines (resolved paths, git HEAD SHAs, byte sizes,
   // task counts). Failing checks print the same detail as without it.
   verbose?: boolean;
+  // gs-251: when true, emit a single structured JSON object on stdout
+  // instead of the usual human-readable text. --json + --fix emits the
+  // post-fix state; --json + --verbose is accepted but a no-op (verbose
+  // only affects text rendering).
+  json?: boolean;
+}
+
+// gs-251: shape of a single check in --json output.
+export interface DoctorJsonCheck {
+  name: string;
+  status: "pass" | "fail" | "skipped";
+  detail?: string;
+  fixable?: boolean;
+}
+
+// gs-251: shape of the overall --json payload.
+export interface DoctorJsonReport {
+  ok: boolean;
+  checks: DoctorJsonCheck[];
 }
 
 async function checkCommand(
@@ -451,6 +470,10 @@ async function defaultPrompt(question: string): Promise<boolean> {
 }
 
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+  if (opts.json) {
+    await runDoctorJson(opts);
+    return;
+  }
   const exitOnFailure = opts.exitOnFailure ?? true;
   console.log("GeneralStaff Doctor\n");
   console.log("Checking prerequisites...\n");
@@ -618,4 +641,195 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     console.log("Fix project-path failures before using GeneralStaff.");
     if (exitOnFailure) process.exit(1);
   }
+}
+
+// gs-251: collect the doctor state as structured data. Does not print.
+// Shared between the initial scan and the post-fix re-scan in JSON mode.
+async function collectDoctorJsonReport(
+  opts: DoctorOptions,
+): Promise<DoctorJsonReport> {
+  const checks: DoctorJsonCheck[] = [];
+
+  // Prerequisites.
+  for (const prereq of PREREQUISITES) {
+    const result = await checkCommand(
+      prereq.name,
+      prereq.versionArg,
+      prereq.minVersion,
+    );
+    if (!result.found) {
+      checks.push({
+        name: `prereq: ${prereq.name}`,
+        status: "fail",
+        detail: "not found on PATH",
+      });
+    } else if (result.belowMinimum) {
+      checks.push({
+        name: `prereq: ${prereq.name}`,
+        status: "fail",
+        detail: `${result.version} (need >=${result.belowMinimum.required})`,
+      });
+    } else {
+      checks.push({
+        name: `prereq: ${prereq.name}`,
+        status: "pass",
+        detail: result.version ?? undefined,
+      });
+    }
+  }
+
+  // Load projects. If unavailable, emit skipped entries for the
+  // project-scoped checks so the consumer sees they were not run.
+  let projects: ProjectConfig[] = [];
+  let projectsLoadError: string | null = null;
+  try {
+    const loader =
+      opts.loadProjects ??
+      (async () => (await import("./projects")).loadProjects());
+    projects = await loader();
+  } catch (e) {
+    projectsLoadError = (e as Error).message;
+  }
+
+  if (projectsLoadError !== null) {
+    for (const name of ["project paths", "state dirs", "tasks.json"]) {
+      checks.push({
+        name,
+        status: "skipped",
+        detail: `projects.yaml not loaded: ${projectsLoadError}`,
+      });
+    }
+  } else {
+    const sanity: SanityCheckResult[] = [
+      checkProjectPaths(projects),
+      checkProjectStateDirs(projects),
+      checkProjectTasksJson(projects),
+    ];
+    for (const s of sanity) {
+      if (s.problems.length === 0) {
+        checks.push({ name: s.name, status: "pass", detail: s.okDetail });
+      } else {
+        checks.push({
+          name: s.name,
+          status: "fail",
+          detail: s.problems.join("; "),
+        });
+      }
+    }
+  }
+
+  const digests = checkDigestsWritable();
+  if (digests.problems.length === 0) {
+    checks.push({ name: digests.name, status: "pass", detail: digests.okDetail });
+  } else {
+    checks.push({
+      name: digests.name,
+      status: "fail",
+      detail: digests.problems.join("; "),
+    });
+  }
+
+  // Fixable issues — one check row per issue so the consumer can
+  // iterate them and act. Absence of issues is reported as a single
+  // pass row per category to keep the output stable.
+  if (projectsLoadError === null) {
+    const stateDirIssues = await findStateDirIssues(projects);
+    if (stateDirIssues.length === 0) {
+      checks.push({
+        name: "state-dir-missing",
+        status: "pass",
+        detail: "no missing state/<id>/ dirs",
+        fixable: true,
+      });
+    } else {
+      for (const issue of stateDirIssues) {
+        checks.push({
+          name: issue.id,
+          status: "fail",
+          detail: issue.description,
+          fixable: true,
+        });
+      }
+    }
+
+    const staleIssues = await findStaleWorktreeIssues(projects);
+    if (staleIssues.length === 0) {
+      checks.push({
+        name: "stale-worktree",
+        status: "pass",
+        detail: "no stale worktrees",
+        fixable: true,
+      });
+    } else {
+      for (const issue of staleIssues) {
+        checks.push({
+          name: issue.id,
+          status: "fail",
+          detail: issue.description,
+          fixable: true,
+        });
+      }
+    }
+  }
+
+  const stopIssues = await findOrphanedStopFileIssue();
+  if (stopIssues.length === 0) {
+    checks.push({
+      name: "orphaned-stop-file",
+      status: "pass",
+      detail: "no STOP file present",
+      fixable: true,
+    });
+  } else {
+    for (const issue of stopIssues) {
+      checks.push({
+        name: issue.id,
+        status: "fail",
+        detail: issue.description,
+        fixable: true,
+      });
+    }
+  }
+
+  const ok = !checks.some((c) => c.status === "fail");
+  return { ok, checks };
+}
+
+async function runDoctorJson(opts: DoctorOptions): Promise<void> {
+  const exitOnFailure = opts.exitOnFailure ?? true;
+
+  // In --fix mode, collect issues, apply approved ones, then re-scan
+  // so the emitted report reflects post-fix state (per task spec).
+  if (opts.fix) {
+    let projects: ProjectConfig[] = [];
+    try {
+      const loader =
+        opts.loadProjects ??
+        (async () => (await import("./projects")).loadProjects());
+      projects = await loader();
+    } catch {
+      // If projects.yaml won't load we still attempt the orphan-STOP fix.
+    }
+    const issues: DiagnosticIssue[] = [];
+    issues.push(...(await findStateDirIssues(projects)));
+    issues.push(...(await findStaleWorktreeIssues(projects)));
+    issues.push(...(await findOrphanedStopFileIssue()));
+    const promptFn = opts.prompt ?? defaultPrompt;
+    for (const issue of issues) {
+      const approve =
+        opts.assumeYes === true
+          ? true
+          : await promptFn(`Fix: ${issue.description}?`);
+      if (!approve) continue;
+      try {
+        await issue.fix();
+      } catch {
+        // Swallow — post-fix re-scan will surface the remaining failure.
+      }
+    }
+  }
+
+  const report = await collectDoctorJsonReport(opts);
+  console.log(JSON.stringify(report));
+  if (!report.ok && exitOnFailure) process.exit(1);
 }
