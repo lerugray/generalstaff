@@ -4858,4 +4858,138 @@ dispatcher:
       expect(startedAts).toContain("2026-04-17T12:00:00.000Z");
     });
   });
+
+  describe("task add (gs-253) — queue-time bot-pickability flags", () => {
+    const TA_DIR = join(import.meta.dir, "fixtures", "task_add_gs253");
+    const TA_YAML = `
+projects:
+  - id: generalstaff
+    path: /tmp/gs
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+    const TASKS_PATH = join(TA_DIR, "state", "generalstaff", "tasks.json");
+
+    beforeEach(() => {
+      rmSync(TA_DIR, { recursive: true, force: true });
+      mkdirSync(join(TA_DIR, "state", "generalstaff"), { recursive: true });
+      writeFileSync(join(TA_DIR, "projects.yaml"), TA_YAML);
+      writeFileSync(TASKS_PATH, "[]\n");
+    });
+
+    afterEach(() => {
+      rmSync(TA_DIR, { recursive: true, force: true });
+    });
+
+    it("writes interactive_only + interactive_only_reason when both flags provided", async () => {
+      const result = await runCli(
+        [
+          "task",
+          "add",
+          "--project=generalstaff",
+          "--interactive-only",
+          "--interactive-only-reason=touches hands_off path",
+          "seed title",
+        ],
+        TA_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved).toHaveLength(1);
+      expect(saved[0].title).toBe("seed title");
+      expect(saved[0].interactive_only).toBe(true);
+      expect(saved[0].interactive_only_reason).toBe("touches hands_off path");
+    });
+
+    it("errors and exits 1 when --interactive-only is set without a reason", async () => {
+      const result = await runCli(
+        [
+          "task",
+          "add",
+          "--project=generalstaff",
+          "--interactive-only",
+          "seed title",
+        ],
+        TA_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --interactive-only requires --interactive-only-reason=<string>",
+      );
+      // File must not have been rewritten.
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved).toHaveLength(0);
+    });
+
+    it("writes trimmed expected_touches array from comma-separated input", async () => {
+      const result = await runCli(
+        [
+          "task",
+          "add",
+          "--project=generalstaff",
+          "--expected-touches=src/a.ts, src/b.ts ,src/c.ts",
+          "seed title",
+        ],
+        TA_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved).toHaveLength(1);
+      expect(saved[0].expected_touches).toEqual([
+        "src/a.ts",
+        "src/b.ts",
+        "src/c.ts",
+      ]);
+    });
+
+    it("errors and exits 1 when --expected-touches contains an empty entry", async () => {
+      const result = await runCli(
+        [
+          "task",
+          "add",
+          "--project=generalstaff",
+          "--expected-touches=src/a.ts,,src/b.ts",
+          "seed title",
+        ],
+        TA_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --expected-touches entries must not be empty",
+      );
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved).toHaveLength(0);
+    });
+
+    it("with neither flag set, task row looks identical to pre-gs-253 behaviour", async () => {
+      const result = await runCli(
+        ["task", "add", "--project=generalstaff", "plain title"],
+        TA_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved).toHaveLength(1);
+      const t = saved[0];
+      expect(Object.keys(t).sort()).toEqual(
+        ["id", "priority", "status", "title"].sort(),
+      );
+      expect(t.title).toBe("plain title");
+      expect(t.status).toBe("pending");
+      expect(t.priority).toBe(2);
+    });
+  });
 });
