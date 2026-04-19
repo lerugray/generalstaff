@@ -1205,6 +1205,48 @@ switch (command) {
   }
 
   case "digest": {
+    if (args[1] === "last") {
+      const { values: lastValues } = parseArgs({
+        args: args.slice(2),
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      const dispatcher = await loadDispatcherConfig();
+      const digestDir = resolve(getRootDir(), dispatcher.digest_dir);
+      const files = existsSync(digestDir)
+        ? readdirSync(digestDir).filter((f) => /^digest_\d{8}_\d{6}\.md$/.test(f))
+        : [];
+      if (files.length === 0) {
+        console.log("No digests found.");
+        break;
+      }
+      const { statSync } = await import("fs");
+      let newest = files[0]!;
+      let newestMtime = statSync(join(digestDir, newest)).mtimeMs;
+      for (const f of files.slice(1)) {
+        const m = statSync(join(digestDir, f)).mtimeMs;
+        if (m > newestMtime) {
+          newest = f;
+          newestMtime = m;
+        }
+      }
+      const chosenPath = join(digestDir, newest);
+      const content = readFileSync(chosenPath, "utf8");
+      if (lastValues.json) {
+        console.log(
+          JSON.stringify(
+            { path: chosenPath, content, timestamp: new Date(newestMtime).toISOString() },
+            null,
+            2,
+          ),
+        );
+      } else {
+        process.stdout.write(content);
+      }
+      break;
+    }
     const { values: digestValues } = parseArgs({
       args: args.slice(1),
       options: {
