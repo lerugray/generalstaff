@@ -10,6 +10,9 @@ import {
   findOrphanedStopFileIssue,
   findProjectPathProblems,
   checkStrandedBotCommits,
+  checkProjectsYamlHasProject,
+  checkProjectsYamlCustomized,
+  checkStateDirWritable,
 } from "../src/doctor";
 import { setRootDir } from "../src/state";
 import type { ProjectConfig } from "../src/types";
@@ -324,11 +327,18 @@ describe("runDoctor --json", () => {
   });
 
   it("exits 0 with ok:true when everything passes", async () => {
-    // No projects + clean FIXTURE ⇒ no fixable issues and sanity
-    // checks that iterate projects report "no projects registered".
+    // Happy path requires the gs-258 first-run checks to pass too:
+    // projects.yaml present + differs from example + ≥1 project
+    // registered + state_dir writable.
+    const projectPath = join(FIXTURE, "real-repo");
+    mkdirSync(join(projectPath, ".git"), { recursive: true });
+    mkdirSync(join(FIXTURE, "state", "real"), { recursive: true });
+    writeFileSync(join(FIXTURE, "projects.yaml.example"), "# example\n");
+    writeFileSync(join(FIXTURE, "projects.yaml"), "# customized\n");
+    const p = makeProject("real", projectPath);
     const { report } = await captureJson({
       json: true,
-      loadProjects: async () => [],
+      loadProjects: async () => [p],
       exitOnFailure: false,
     });
     expect(report.ok).toBe(true);
@@ -390,6 +400,123 @@ describe("runDoctor --json", () => {
     for (const c of report.checks as Array<{ status: string }>) {
       expect(["pass", "fail", "skipped"]).toContain(c.status);
     }
+  });
+});
+
+// gs-258: first-run sanity checks — empty projects.yaml, unmodified
+// example, and unwritable state_dir each map to a pointed fix hint.
+describe("gs-258 first-run sanity checks", () => {
+  beforeEach(() => {
+    mkdirSync(FIXTURE, { recursive: true });
+    setRootDir(FIXTURE);
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  it("(a) empty projects list fails with register hint", () => {
+    // projects.yaml exists but loaded list is empty.
+    writeFileSync(join(FIXTURE, "projects.yaml"), "projects: []\n");
+    const result = checkProjectsYamlHasProject(
+      [],
+      join(FIXTURE, "projects.yaml"),
+    );
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]!).toContain("No projects registered");
+    expect(result.problems[0]!).toContain("generalstaff register");
+    expect(result.problems[0]!).toContain("projects.yaml.example");
+  });
+
+  it("(a) missing projects.yaml also fails with register hint", () => {
+    const result = checkProjectsYamlHasProject(
+      [],
+      join(FIXTURE, "does-not-exist.yaml"),
+    );
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]!).toContain("No projects registered");
+  });
+
+  it("(a) passes when at least one project is registered", () => {
+    writeFileSync(join(FIXTURE, "projects.yaml"), "projects: [...]\n");
+    const p = makeProject("alpha", "/tmp/ignored");
+    const result = checkProjectsYamlHasProject(
+      [p],
+      join(FIXTURE, "projects.yaml"),
+    );
+    expect(result.problems).toEqual([]);
+    expect(result.okDetail).toContain("1 project(s) registered");
+  });
+
+  it("(b) byte-identical projects.yaml fails with unmodified hint", () => {
+    const example = join(FIXTURE, "projects.yaml.example");
+    const yaml = join(FIXTURE, "projects.yaml");
+    writeFileSync(example, "# example content\nprojects: []\n");
+    writeFileSync(yaml, "# example content\nprojects: []\n");
+    const result = checkProjectsYamlCustomized(yaml, example);
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]!).toContain(
+      "projects.yaml is unmodified from the shipped example",
+    );
+  });
+
+  it("(c) customized projects.yaml passes", () => {
+    const example = join(FIXTURE, "projects.yaml.example");
+    const yaml = join(FIXTURE, "projects.yaml");
+    writeFileSync(example, "# example content\nprojects: []\n");
+    writeFileSync(yaml, "# real content\nprojects: [real]\n");
+    const result = checkProjectsYamlCustomized(yaml, example);
+    expect(result.problems).toEqual([]);
+    expect(result.okDetail).toContain("differs from shipped example");
+  });
+
+  it("(b/c) passes silently when projects.yaml is absent", () => {
+    // (a) surfaces the missing-file case; (b) should not pile on.
+    const example = join(FIXTURE, "projects.yaml.example");
+    writeFileSync(example, "# example\n");
+    const result = checkProjectsYamlCustomized(
+      join(FIXTURE, "projects.yaml"),
+      example,
+    );
+    expect(result.problems).toEqual([]);
+  });
+
+  it("(d) unwritable state_dir fails with permissions hint", () => {
+    // Plant a file at <root>/state so existsSync is true but any write
+    // probe underneath fails with ENOTDIR. Cross-platform equivalent of
+    // chmod 0 that works on Windows CI.
+    writeFileSync(join(FIXTURE, "state"), "not a directory");
+    const result = checkStateDirWritable();
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]!).toContain("state_dir not writable");
+    expect(result.problems[0]!).toContain("check permissions on");
+    expect(result.problems[0]!).toContain(join(FIXTURE, "state"));
+  });
+
+  it("(c) state_dir passes when writable or auto-creatable", () => {
+    mkdirSync(join(FIXTURE, "state"), { recursive: true });
+    const result = checkStateDirWritable();
+    expect(result.problems).toEqual([]);
+    expect(result.okDetail).toContain("state_dir writable");
+  });
+
+  it("(c) state_dir passes when missing but parent is writable", () => {
+    // Fresh FIXTURE — state/ doesn't exist but FIXTURE itself is writable.
+    const result = checkStateDirWritable();
+    expect(result.problems).toEqual([]);
+    expect(result.okDetail).toContain("will be created on first write");
+  });
+
+  it("(e) clean happy-path: all three checks pass together", () => {
+    const example = join(FIXTURE, "projects.yaml.example");
+    const yaml = join(FIXTURE, "projects.yaml");
+    writeFileSync(example, "# example\nprojects: []\n");
+    writeFileSync(yaml, "# real\nprojects: [real-entry]\n");
+    mkdirSync(join(FIXTURE, "state"), { recursive: true });
+    const p = makeProject("alpha", "/tmp/ignored");
+    expect(checkProjectsYamlHasProject([p], yaml).problems).toEqual([]);
+    expect(checkProjectsYamlCustomized(yaml, example).problems).toEqual([]);
+    expect(checkStateDirWritable().problems).toEqual([]);
   });
 });
 
