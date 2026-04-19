@@ -729,3 +729,5 @@
 {"timestamp":"2026-04-19T14:19:21.130Z","event":"session_start","project_id":"raybrain","data":{"budget_minutes":45,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
 {"timestamp":"2026-04-19T14:32:33.513Z","event":"session_end","project_id":"raybrain","data":{"duration_minutes":13,"total_cycles":0,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-19T14:33:59.161Z","event":"session_start","project_id":"raybrain","data":{"budget_minutes":75,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
+{"timestamp":"2026-04-19T14:33:59.858Z","event":"cycle_start","cycle_id":"20260419143359_qy6a","project_id":"raybrain","data":{"start_sha":"ded2a9405c18e7e008926265d05664908339e29d","branch":"bot/work"}}
+{"timestamp":"2026-04-19T14:33:59.859Z","event":"engineer_invoked","cycle_id":"20260419143359_qy6a","project_id":"raybrain","data":{"command":"bash engineer_command.sh ${cycle_budget_minutes}","cycle_budget_minutes":30,"dry_run":false}}
