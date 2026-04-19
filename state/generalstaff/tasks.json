@@ -1317,12 +1317,13 @@
   {
     "id": "gs-221",
     "title": "Phase 6 data-contract: fleet overview view module. CREATE ONLY: `src/views/fleet_overview.ts` exporting `getFleetOverview(): Promise<FleetOverviewData>` along with the `FleetOverviewData`, `FleetOverviewProjectRow`, and `FleetOverviewAggregates` interfaces; `tests/views/fleet_overview.test.ts` with unit tests. DO NOT CREATE: src/cli.ts changes (CLI wiring is a later task); any new src/ file outside src/views/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Data shape: FleetOverviewData = { projects: FleetOverviewProjectRow[], aggregates: FleetOverviewAggregates, rendered_at: string /*ISO*/ }; FleetOverviewProjectRow = { id: string, last_cycle_at: string | null /*ISO*/, last_cycle_outcome: string | null, cycles_total: number, verified: number, failed: number, bot_pickable: number, auto_merge: boolean, branch: string, priority: number }; FleetOverviewAggregates = { total_cycles: number, total_verified: number, total_failed: number, pass_rate: number /*0..1, 0 when no cycles*/, project_count: number, slot_efficiency_recent: number | null /*mean parallel_efficiency over last 10 session_complete events with max_parallel_slots > 1, or null if fewer than 5 such events*/ }. Data sources: (1) loadProjects() from src/projects.ts for the registry; (2) join(project.path, 'state', project.id, 'STATE.json') for last_cycle_at + last_cycle_outcome; (3) per-project PROGRESS.jsonl at join(project.path, 'state', project.id, 'PROGRESS.jsonl') for cycles_total/verified/failed (count cycle_end events, switch on data.outcome); (4) countRemainingWorkDetailed(project).pending_bot_pickable for bot_pickable; (5) state/_fleet/PROGRESS.jsonl session_complete events for slot_efficiency_recent. Tests: (a) happy path with 2 mocked projects; (b) empty fleet returns projects: [], aggregates with zeros and pass_rate: 0; (c) project with zero cycles (last_cycle_at: null); (d) slot_efficiency_recent returns null when fewer than 5 parallel sessions; (e) pass_rate formula = verified / (verified + failed), 0 when denominator 0. Reference: `docs/phase-5-references/fleet-overview-2026-04-18.zip` — field names align with that HTML's table columns + summary band. Expected diff: ~250 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/views/fleet_overview.ts",
       "tests/views/fleet_overview.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T01:30:44.337Z"
   },
   {
     "id": "gs-222",
