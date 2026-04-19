@@ -92,13 +92,14 @@ function printUsage() {
 Usage:
   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
                        [--exclude-project=<id>[,<id>...]] [--project=<id>[,<id>...]]
-                       [--verbose] [--chain=<n>]
+                       [--verbose] [--chain=<n>] [--provider=<claude|openrouter|ollama>]
                                                           Run a session (multiple cycles)
     Example: generalstaff session --budget=480          # overnight 8-hour run
     Example: generalstaff session --max-cycles=5        # stop after 5 cycles
     Example: generalstaff session --dry-run             # preview without committing
     Example: generalstaff session --exclude-project=catalogdna,retrogaze
     Example: generalstaff session --project=raybrain    # run only the listed project(s); sugar for --exclude-project=<everything-else>
+    Example: generalstaff session --provider=ollama     # override GENERALSTAFF_REVIEWER_PROVIDER for this session
     Example: generalstaff session --verbose             # stream PROGRESS.jsonl events to stdout
     Example: generalstaff session --chain=3             # run 3 back-to-back sessions with the same options
 
@@ -329,12 +330,14 @@ switch (command) {
           "  --project=<id>[,...]          Run only the listed project(s) (sugar for --exclude-project=<rest>)\n" +
           "  --verbose                     Stream PROGRESS.jsonl events to stdout\n" +
           "  --chain=<n>                   Run N back-to-back sessions with the same options\n" +
+          "  --provider=<name>             Reviewer provider (claude|openrouter|ollama); overrides env for this session\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff session --budget=480             # overnight 8-hour run\n" +
           "  generalstaff session --max-cycles=5           # stop after 5 cycles\n" +
           "  generalstaff session --project=raybrain       # run only raybrain\n" +
-          "  generalstaff session --chain=3 --budget=60    # three 1-hour sessions back-to-back\n",
+          "  generalstaff session --chain=3 --budget=60    # three 1-hour sessions back-to-back\n" +
+          "  generalstaff session --provider=ollama        # use Ollama reviewer for this session\n",
       );
       process.exit(0);
     }
@@ -348,6 +351,7 @@ switch (command) {
         project: { type: "string" },
         verbose: { type: "boolean", default: false },
         chain: { type: "string" },
+        provider: { type: "string" },
       },
       allowPositionals: false,
     });
@@ -407,12 +411,28 @@ switch (command) {
       }
       chain = parsed;
     }
+    // gs-249: --provider=<name> overrides GENERALSTAFF_REVIEWER_PROVIDER for
+    // this session only. Validated against the supported set here so the
+    // reviewer module can assume a known-good value without re-checking.
+    const VALID_PROVIDERS = ["claude", "openrouter", "ollama"] as const;
+    let reviewerProviderOverride: string | undefined;
+    if (values.provider !== undefined) {
+      const normalized = values.provider.toLowerCase();
+      if (!(VALID_PROVIDERS as readonly string[]).includes(normalized)) {
+        console.error(
+          `Error: unknown --provider: ${values.provider} (supported: ${VALID_PROVIDERS.join(", ")})`,
+        );
+        process.exit(1);
+      }
+      reviewerProviderOverride = normalized;
+    }
     const sessionOpts = {
       budgetMinutes: budget,
       dryRun: values["dry-run"]!,
       maxCycles,
       excludeProjects,
       verbose: values.verbose!,
+      reviewerProviderOverride,
     };
     // gs-119: record this process's PID so `stop --force` can locate
     // and kill it. Best-effort — failure must not prevent the session

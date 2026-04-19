@@ -576,7 +576,9 @@ export async function runSession(options: SessionOptions) {
 
       const roundStartMs = Date.now();
       const roundResults = await Promise.all(
-        eligible.map((p) => executeCycle(p.project, config, dryRun)),
+        eligible.map((p) =>
+          executeCycle(p.project, config, dryRun, options.reviewerProviderOverride),
+        ),
       );
       const roundWallMs = Date.now() - roundStartMs;
       cycleRoundsAccumulator.push([...roundResults]);
@@ -799,7 +801,12 @@ export async function runSession(options: SessionOptions) {
     }
 
     // Execute cycle
-    const result = await executeCycle(currentProject, config, dryRun);
+    const result = await executeCycle(
+      currentProject,
+      config,
+      dryRun,
+      options.reviewerProviderOverride,
+    );
     allResults.push(result);
 
     // Track cycles per project

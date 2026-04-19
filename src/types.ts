@@ -165,6 +165,10 @@ export interface SessionOptions {
   maxCycles?: number;
   excludeProjects?: string[];
   verbose?: boolean;
+  // gs-249: CLI --provider override. Takes precedence over
+  // GENERALSTAFF_REVIEWER_PROVIDER env var for the duration of this
+  // session only. Not mutated into process.env.
+  reviewerProviderOverride?: string;
 }
 
 export interface SingleCycleOptions {

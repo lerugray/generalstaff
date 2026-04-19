@@ -429,6 +429,7 @@ export async function executeCycle(
   project: ProjectConfig,
   config: DispatcherConfig,
   dryRun: boolean = false,
+  reviewerProviderOverride?: string,
 ): Promise<CycleResult> {
   const cycleId = generateCycleId();
   const startedAt = new Date().toISOString();
@@ -730,6 +731,7 @@ export async function executeCycle(
       config,
       dryRun,
       reviewerCwd,
+      reviewerProviderOverride ? { provider: reviewerProviderOverride } : undefined,
     );
     console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
     if (reviewerResult.parseError) {

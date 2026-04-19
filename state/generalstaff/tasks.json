@@ -1622,14 +1622,19 @@
   {
     "id": "gs-249",
     "title": "Add `--provider=<claude|openrouter|ollama>` flag to `generalstaff session` overriding GENERALSTAFF_REVIEWER_PROVIDER env var for a single run. CREATE ONLY: extend the session subcommand handler in `src/cli.ts` with `--provider=<name>`. When set, this overrides the env var for the duration of that session — do NOT mutate process.env for the whole process; instead pass through as an explicit override to the reviewer module (inspect src/reviewer.ts to see how provider is currently resolved; wire the override param without touching safety.ts / prompts/). Invalid provider names error + exit 1. Precedence: CLI flag > env var > default (claude). Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT** if threading the override requires modifying src/reviewer.ts (a hands-off file), flag this task interactive-only (via the mechanism demonstrated in gs-237) — do not attempt to edit src/reviewer.ts. Tests: (a) --provider=openrouter overrides env; (b) unknown provider errors; (c) env var alone still works when --provider absent. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
+      "src/reviewer.ts",
+      "src/cycle.ts",
+      "src/session.ts",
+      "src/types.ts",
       "tests/cli.test.ts"
     ],
     "interactive_only": true,
-    "interactive_only_reason": "Threading a --provider CLI override to reviewer.runReviewer requires modifying src/reviewer.ts (currently reads process.env.GENERALSTAFF_REVIEWER_PROVIDER directly inside runReviewer; no provider param exists). src/reviewer.ts is hands-off (projects.yaml line). Task spec forbids mutating process.env for the whole process, so the only bot-safe path is blocked. Per the task IMPORTANT note, flagging interactive-only."
+    "interactive_only_reason": "Threading a --provider CLI override to reviewer.runReviewer requires modifying src/reviewer.ts (currently reads process.env.GENERALSTAFF_REVIEWER_PROVIDER directly inside runReviewer; no provider param exists). src/reviewer.ts is hands-off (projects.yaml line). Task spec forbids mutating process.env for the whole process, so the only bot-safe path is blocked. Per the task IMPORTANT note, flagging interactive-only.",
+    "completed_at": "2026-04-19T13:45:00.000Z"
   },
   {
     "id": "gs-250",

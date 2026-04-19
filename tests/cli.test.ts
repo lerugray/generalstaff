@@ -276,6 +276,82 @@ dispatcher:
     });
   });
 
+  describe("session --provider (gs-249)", () => {
+    const PROVIDER_FLAG_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "provider_flag_test",
+    );
+
+    beforeEach(() => {
+      rmSync(PROVIDER_FLAG_DIR, { recursive: true, force: true });
+      mkdirSync(PROVIDER_FLAG_DIR, { recursive: true });
+      writeFileSync(
+        join(PROVIDER_FLAG_DIR, "projects.yaml"),
+        `
+projects:
+  - id: alpha
+    path: /tmp/alpha
+    priority: 1
+    engineer_command: "echo alpha"
+    verification_command: "true"
+    cycle_budget_minutes: 1
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    hands_off:
+      - "node_modules/"
+dispatcher:
+  state_dir: ./state
+`,
+      );
+    });
+
+    afterEach(() => {
+      rmSync(PROVIDER_FLAG_DIR, { recursive: true, force: true });
+    });
+
+    it("unknown --provider errors and exits 1", async () => {
+      const result = await runCli(
+        ["session", "--provider=bogus", "--dry-run", "--budget=1"],
+        PROVIDER_FLAG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("unknown --provider: bogus");
+      expect(result.stderr).toContain("claude, openrouter, ollama");
+    });
+
+    it("valid --provider=openrouter is accepted (dry-run)", async () => {
+      const result = await runCli(
+        ["session", "--provider=openrouter", "--dry-run", "--budget=1"],
+        PROVIDER_FLAG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("--provider is case-insensitive", async () => {
+      const result = await runCli(
+        ["session", "--provider=OLLAMA", "--dry-run", "--budget=1"],
+        PROVIDER_FLAG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("session without --provider still runs (env-var-or-default path)", async () => {
+      const result = await runCli(
+        ["session", "--dry-run", "--budget=1"],
+        PROVIDER_FLAG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("--help documents --provider", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("--provider=");
+    });
+  });
+
   describe("no arguments", () => {
     it("prints usage and exits 0", async () => {
       const result = await runCli([]);

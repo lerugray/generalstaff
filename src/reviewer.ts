@@ -30,6 +30,11 @@ const DEFAULT_FAILED_RESPONSE: ReviewerResponse = {
   notes: "Malformed reviewer response — defaulting to verification_failed (fail-safe)",
 };
 
+export interface ReviewerProviderOverride {
+  provider?: string;
+  fallback?: string;
+}
+
 export async function runReviewer(
   project: ProjectConfig,
   cycleId: string,
@@ -37,6 +42,7 @@ export async function runReviewer(
   config?: DispatcherConfig,
   dryRun: boolean = false,
   cwdOverride?: string,
+  providerOverride?: ReviewerProviderOverride,
 ): Promise<ReviewerResult> {
   const prompt = buildReviewerPrompt(promptParams);
 
@@ -92,8 +98,18 @@ export async function runReviewer(
   // story for users who don't want to pay for an LLM API. The reviewer
   // is structured JSON-in/JSON-out so a tools-capable agent is not
   // required on any of these paths.
-  const provider = (process.env.GENERALSTAFF_REVIEWER_PROVIDER ?? "claude").toLowerCase();
-  const fallback = (process.env.GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER ?? "").toLowerCase();
+  // gs-249 precedence: CLI override > env var > default "claude".
+  // Override is scoped to this single call — process.env is not mutated.
+  const provider = (
+    providerOverride?.provider ??
+    process.env.GENERALSTAFF_REVIEWER_PROVIDER ??
+    "claude"
+  ).toLowerCase();
+  const fallback = (
+    providerOverride?.fallback ??
+    process.env.GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER ??
+    ""
+  ).toLowerCase();
   const cwd = cwdOverride ?? project.path;
   const { rawResponse } = await invokeReviewerWithFallback(prompt, cwd, {
     provider,
