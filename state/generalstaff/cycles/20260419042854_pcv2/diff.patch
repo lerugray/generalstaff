@@ -1,0 +1,353 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 98ecb4f..d14ad22 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -67,6 +67,7 @@ import {
+   ProviderConfigError,
+ } from "./providers/registry";
+ import type { ProviderHealth, ProviderRole } from "./providers/types";
++import { appendFleetMessage } from "./fleet_messages";
+ 
+ const VERSION = "0.0.1";
+ 
+@@ -232,6 +233,12 @@ Usage:
+     Example: generalstaff view fleet-overview --json     # same, as JSON
+     # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
+ 
++  generalstaff message send --from=<str> --body=<str> [--kind=<...>] [--session-id=<id>]
++                           [--task-id=<id>] [--cycle-id=<id>] [--json]
++                                                          Append a message to the fleet inbox (gs-240)
++    Example: generalstaff message send --from=ray --body="heads up on the next run"
++    Example: generalstaff message send --from=bot --kind=handoff --task-id=gs-240 "body as final arg"
++
+   generalstaff --version                                  Show version
+   generalstaff --help                                     Show this help`);
+ }
+@@ -2274,6 +2281,99 @@ switch (command) {
+     process.exit(1);
+   }
+ 
++  case "message": {
++    const sub = args[1];
++    if (!sub || sub === "--help" || sub === "help") {
++      console.log(
++        "Usage: generalstaff message send --from=<str> --body=<str> [options]\n" +
++          "\n" +
++          "Options:\n" +
++          "  --from=<str>         Required. Author identifier (e.g. 'ray', 'generalstaff-bot').\n" +
++          "  --body=<str>         Required. Message body (or pass as final positional argument).\n" +
++          "  --kind=<str>         Optional. One of: blocker, handoff, fyi, decision.\n" +
++          "  --session-id=<id>    Optional. Reference a session id.\n" +
++          "  --task-id=<id>       Optional. Reference a task id.\n" +
++          "  --cycle-id=<id>      Optional. Reference a cycle id.\n" +
++          "  --json               Emit the appended message object as JSON.\n",
++      );
++      process.exit(0);
++    }
++    if (sub !== "send") {
++      console.error(
++        `Error: unknown message subcommand '${sub}'. Valid: send`,
++      );
++      process.exit(1);
++    }
++
++    const { values: mValues, positionals: mPositionals } = parseArgs({
++      args: args.slice(2),
++      options: {
++        from: { type: "string" },
++        body: { type: "string" },
++        kind: { type: "string" },
++        "session-id": { type: "string" },
++        "task-id": { type: "string" },
++        "cycle-id": { type: "string" },
++        json: { type: "boolean", default: false },
++      },
++      allowPositionals: true,
++    });
++
++    const from = mValues.from;
++    const body =
++      mValues.body !== undefined && mValues.body !== ""
++        ? mValues.body
++        : mPositionals.length > 0
++          ? mPositionals.join(" ").trim()
++          : undefined;
++
++    if (!from || !body) {
++      console.error(
++        "Error: message send requires --from=<str> and --body=<str>",
++      );
++      process.exit(1);
++    }
++
++    const VALID_KINDS = ["blocker", "handoff", "fyi", "decision"] as const;
++    let kind: string | undefined;
++    if (mValues.kind !== undefined) {
++      if (!(VALID_KINDS as readonly string[]).includes(mValues.kind)) {
++        console.error(
++          `Error: invalid --kind '${mValues.kind}'. Valid: ${VALID_KINDS.join(", ")}`,
++        );
++        process.exit(1);
++      }
++      kind = mValues.kind;
++    }
++
++    const refEntry: Record<string, string> = {};
++    if (mValues["session-id"]) refEntry.session_id = mValues["session-id"];
++    if (mValues["task-id"]) refEntry.task_id = mValues["task-id"];
++    if (mValues["cycle-id"]) refEntry.cycle_id = mValues["cycle-id"];
++
++    const timestamp = new Date().toISOString();
++    const extra: Record<string, unknown> = { timestamp };
++    if (kind) extra.kind = kind;
++    if (Object.keys(refEntry).length > 0) extra.refs = [refEntry];
++
++    await appendFleetMessage(from, body, extra);
++
++    const entry: Record<string, unknown> = {
++      timestamp,
++      from,
++      body,
++      ...(kind ? { kind } : {}),
++      ...(Object.keys(refEntry).length > 0 ? { refs: [refEntry] } : {}),
++    };
++
++    if (mValues.json) {
++      console.log(JSON.stringify(entry));
++    } else {
++      console.log(`Appended message from ${from} at ${timestamp}`);
++    }
++    break;
++  }
++
+   default:
+     console.error(`Unknown command: ${command}`);
+     printUsage();
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 04bdc5d..b9783cb 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1517,12 +1517,13 @@
+   {
+     "id": "gs-240",
+     "title": "Add `generalstaff message send` CLI for posting to the fleet inbox. CREATE ONLY: add a `case \"message\"` handler in `src/cli.ts` with a `send` subcommand that calls `appendFleetMessage(from, body, extra)` from `src/fleet_messages.ts`. Flags: `--from=<str>` (required), `--body=<str>` (required, or positional final arg), `--kind=<blocker|handoff|fyi|decision>` (optional, passed into extra.kind), `--session-id=<id>`, `--task-id=<id>`, `--cycle-id=<id>` (optional refs, collected into extra.refs[0]). Missing --from or --body prints `Error: message send requires --from=<str> and --body=<str>` and exits 1. Invalid --kind prints the valid list and exits 1. `--json` emits the appended message object. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-219 shipped the read side (appendFleetMessage / readFleetMessagesSince); gs-225 + gs-230 shipped the view side. There is currently no CLI to POST a message — a human-originated handoff note requires editing messages.jsonl by hand. Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-19T04:35:14.418Z"
+   },
+   {
+     "id": "gs-241",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 4e7d455..08a73e6 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+ import { join } from "path";
+-import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "fs";
++import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
+ import { tmpdir } from "os";
+ import { $ } from "bun";
+ 
+@@ -3353,6 +3353,195 @@ dispatcher:
+     });
+   });
+ 
++  describe("message send subcommand (gs-240)", () => {
++    const MSG_DIR = join(import.meta.dir, "fixtures", "message_send_test");
++    const FLEET_DIR = join(MSG_DIR, "state", "_fleet");
++    const MSG_FILE = join(FLEET_DIR, "messages.jsonl");
++
++    const readMessages = (): Array<Record<string, unknown>> => {
++      if (!existsSync(MSG_FILE)) return [];
++      return readFileSync(MSG_FILE, "utf8")
++        .split("\n")
++        .filter((l) => l.trim())
++        .map((l) => JSON.parse(l));
++    };
++
++    beforeEach(() => {
++      rmSync(MSG_DIR, { recursive: true, force: true });
++      mkdirSync(MSG_DIR, { recursive: true });
++    });
++
++    afterEach(() => {
++      rmSync(MSG_DIR, { recursive: true, force: true });
++    });
++
++    it("appends an entry with --from and --body", async () => {
++      const result = await runCli(
++        ["message", "send", "--from=ray", "--body=hello there"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const msgs = readMessages();
++      expect(msgs.length).toBe(1);
++      expect(msgs[0].from).toBe("ray");
++      expect(msgs[0].body).toBe("hello there");
++      expect(typeof msgs[0].timestamp).toBe("string");
++    });
++
++    it("accepts body as a positional final argument", async () => {
++      const result = await runCli(
++        ["message", "send", "--from=ray", "positional body text"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const msgs = readMessages();
++      expect(msgs.length).toBe(1);
++      expect(msgs[0].body).toBe("positional body text");
++    });
++
++    it("errors and exits 1 when --from is missing", async () => {
++      const result = await runCli(
++        ["message", "send", "--body=orphan"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "message send requires --from=<str> and --body=<str>",
++      );
++      expect(readMessages().length).toBe(0);
++    });
++
++    it("errors and exits 1 when --body is missing", async () => {
++      const result = await runCli(
++        ["message", "send", "--from=ray"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain(
++        "message send requires --from=<str> and --body=<str>",
++      );
++      expect(readMessages().length).toBe(0);
++    });
++
++    it("errors and exits 1 when --kind is invalid", async () => {
++      const result = await runCli(
++        [
++          "message",
++          "send",
++          "--from=ray",
++          "--body=hi",
++          "--kind=bogus",
++        ],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("invalid --kind");
++      expect(result.stderr).toContain("blocker");
++      expect(result.stderr).toContain("handoff");
++      expect(result.stderr).toContain("fyi");
++      expect(result.stderr).toContain("decision");
++      expect(readMessages().length).toBe(0);
++    });
++
++    it("accepts each valid --kind", async () => {
++      for (const kind of ["blocker", "handoff", "fyi", "decision"]) {
++        const result = await runCli(
++          [
++            "message",
++            "send",
++            "--from=ray",
++            `--body=${kind}-msg`,
++            `--kind=${kind}`,
++          ],
++          MSG_DIR,
++        );
++        expect(result.exitCode).toBe(0);
++      }
++      const msgs = readMessages();
++      expect(msgs.length).toBe(4);
++      const kinds = msgs.map((m) => m.kind);
++      expect(kinds).toEqual(["blocker", "handoff", "fyi", "decision"]);
++    });
++
++    it("collects --session-id / --task-id / --cycle-id into refs[0]", async () => {
++      const result = await runCli(
++        [
++          "message",
++          "send",
++          "--from=bot",
++          "--body=shipped",
++          "--session-id=sess-1",
++          "--task-id=gs-240",
++          "--cycle-id=cyc-9",
++        ],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const msgs = readMessages();
++      expect(msgs.length).toBe(1);
++      const refs = msgs[0].refs as Array<Record<string, string>>;
++      expect(Array.isArray(refs)).toBe(true);
++      expect(refs.length).toBe(1);
++      expect(refs[0].session_id).toBe("sess-1");
++      expect(refs[0].task_id).toBe("gs-240");
++      expect(refs[0].cycle_id).toBe("cyc-9");
++    });
++
++    it("omits refs when no reference flags are provided", async () => {
++      const result = await runCli(
++        ["message", "send", "--from=ray", "--body=naked"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const msgs = readMessages();
++      expect(msgs.length).toBe(1);
++      expect(msgs[0].refs).toBeUndefined();
++      expect(msgs[0].kind).toBeUndefined();
++    });
++
++    it("--json emits the appended message object", async () => {
++      const result = await runCli(
++        [
++          "message",
++          "send",
++          "--from=ray",
++          "--body=jsonified",
++          "--kind=fyi",
++          "--task-id=gs-240",
++          "--json",
++        ],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.from).toBe("ray");
++      expect(parsed.body).toBe("jsonified");
++      expect(parsed.kind).toBe("fyi");
++      expect(typeof parsed.timestamp).toBe("string");
++      expect(parsed.refs).toEqual([{ task_id: "gs-240" }]);
++      const msgs = readMessages();
++      expect(msgs.length).toBe(1);
++      expect(msgs[0].timestamp).toBe(parsed.timestamp);
++    });
++
++    it("errors on unknown message subcommand", async () => {
++      const result = await runCli(
++        ["message", "bogus", "--from=ray", "--body=hi"],
++        MSG_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("unknown message subcommand");
++    });
++
++    it("message --help prints usage and exits 0", async () => {
++      const result = await runCli(["message", "--help"], MSG_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("message send");
++      expect(result.stdout).toContain("--from");
++      expect(result.stdout).toContain("--body");
++    });
++  });
++
+   describe("task list --project validation (gs-238)", () => {
+     const TL_DIR = join(import.meta.dir, "fixtures", "task_list_validate");
+ 
