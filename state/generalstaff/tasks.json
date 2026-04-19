@@ -1513,5 +1513,29 @@
       "tests/cli.test.ts"
     ],
     "completed_at": "2026-04-19T04:22:35.578Z"
+  },
+  {
+    "id": "gs-240",
+    "title": "Add `generalstaff message send` CLI for posting to the fleet inbox. CREATE ONLY: add a `case \"message\"` handler in `src/cli.ts` with a `send` subcommand that calls `appendFleetMessage(from, body, extra)` from `src/fleet_messages.ts`. Flags: `--from=<str>` (required), `--body=<str>` (required, or positional final arg), `--kind=<blocker|handoff|fyi|decision>` (optional, passed into extra.kind), `--session-id=<id>`, `--task-id=<id>`, `--cycle-id=<id>` (optional refs, collected into extra.refs[0]). Missing --from or --body prints `Error: message send requires --from=<str> and --body=<str>` and exits 1. Invalid --kind prints the valid list and exits 1. `--json` emits the appended message object. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-219 shipped the read side (appendFleetMessage / readFleetMessagesSince); gs-225 + gs-230 shipped the view side. There is currently no CLI to POST a message — a human-originated handoff note requires editing messages.jsonl by hand. Expected diff: ~130 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-241",
+    "title": "Add end-to-end integration tests exercising the `view` subcommand against a minimal fixture repo. CREATE ONLY: `tests/integration/view_subcommand.test.ts` that sets up a temporary fixture directory (under `tests/fixtures/view_integration/` via per-test tmpdir or existing fixture helpers) containing a minimal projects.yaml + state/<id>/PROGRESS.jsonl + state/<id>/tasks.json + state/_fleet/PROGRESS.jsonl + state/_fleet/messages.jsonl covering the shapes each view module consumes. Spawn `bun src/cli.ts view <name> --json` via child_process (or the existing Bun $ / spawnSync pattern used elsewhere in tests/), capture stdout, parse as JSON, assert shape invariants for each of: fleet-overview, task-queue, session-tail, dispatch-detail, inbox. DO NOT CREATE: new files outside tests/integration/ and tests/fixtures/view_integration/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) view fleet-overview --json returns projects[] with expected ids; (b) view task-queue <project-id> --json returns 4-bucket structure; (c) view session-tail --json returns sessions[] with the fixture session id; (d) view dispatch-detail <cycle-id> --json returns the expected cycle; (e) view inbox --json returns groups[] with the fixture message. Fixtures can be synthetic — do NOT import real project state. Expected diff: ~300 lines (~150 fixtures + ~150 test cases).",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "tests/integration/view_subcommand.test.ts",
+      "tests/fixtures/view_integration/projects.yaml",
+      "tests/fixtures/view_integration/state/gs-test/PROGRESS.jsonl",
+      "tests/fixtures/view_integration/state/gs-test/tasks.json",
+      "tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl",
+      "tests/fixtures/view_integration/state/_fleet/messages.jsonl"
+    ]
   }
 ]
