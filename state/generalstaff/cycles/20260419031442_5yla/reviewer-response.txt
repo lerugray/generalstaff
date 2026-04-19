@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes correspond to the claimed gs-232 task, no hands-off violations, and the verification command passed with comprehensive test coverage.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-232",
+      "evidence": "Modified src/dispatcher.ts to implement empty-queue filtering in parallel mode, added tests in tests/dispatcher.test.ts covering all specified scenarios (a)-(d) including back-compat for sequential mode.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The diff shows comprehensive implementation of gs-232 with clear documentation, logic changes in dispatcher.ts, and extensive test coverage in dispatcher.test.ts that validates all required behaviors including the back-compat requirement for sequential mode."
+}
