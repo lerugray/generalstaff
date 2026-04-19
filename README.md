@@ -29,6 +29,7 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 
 ## Contents
 
+- [Built in 4 days](#built-in-4-days)
 - [The problem](#the-problem)
 - [The approach](#the-approach)
 - [What it actually catches](#what-it-actually-catches)
@@ -44,6 +45,39 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 - [Contributing](#contributing)
 - [Support](#support)
 - [License](#license)
+
+## Built in 4 days
+
+On 2026-04-15 this repo was scaffold + Phase 0 design docs with no
+executable code (see `PIVOT-2026-04-15.md` for the day it was
+rescoped from "personal nightly dispatcher" to "open-source
+alternative to Polsia"). On 2026-04-19 it tagged v0.1.0.
+
+Between those two dates, dogfooding itself the whole time:
+
+- **1,175 commits**, of which **179** are shipped task commits
+  (one per `gs-XXX` feature or fix landing on master)
+- **1,441 passing tests** across 45 test files
+- **16,900+ lines of TypeScript** in `src/`
+- **190 verified + 19 rejected + 1 weak** reviewer verdicts on its
+  own diffs — the verification gate caught and rolled back ~9% of
+  what the engineer proposed, including hands-off violations on
+  `src/safety.ts`, `src/reviewer.ts`, and `src/prompts/`
+- Three managed projects cycling (itself, `gamr`, `raybrain`)
+- One pre-launch security audit, five HIGH/MEDIUM findings fixed
+  in the same audit pass
+
+The audit trail is literal: every cycle in that span wrote a line
+to
+[`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl).
+Anyone can `grep '"verdict":"verification_failed"'` that file and
+count the rejections themselves. The velocity doesn't land without
+the gate — the gate is what makes the velocity trustworthy instead
+of slop.
+
+This section exists because "built itself" reads as marketing
+prose without numbers attached. With the numbers attached, it's a
+working demonstration of what the tool is for.
 
 ## The problem
 
