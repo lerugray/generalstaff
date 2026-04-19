@@ -4845,6 +4845,67 @@ dispatcher:
       );
     });
 
+    it("--summary --json surfaces parallel_efficiency when parallel sessions exist (gs-260)", async () => {
+      // Append two parallel session_complete events so the window picks
+      // them up alongside the sequential ones already in the fixture.
+      const extra = [
+        {
+          timestamp: "2026-04-17T13:30:00.000Z",
+          event: "session_complete",
+          project_id: "_fleet",
+          data: {
+            duration_minutes: 30,
+            total_cycles: 4,
+            total_verified: 4,
+            total_failed: 0,
+            stop_reason: "budget",
+            reviewer: "openrouter",
+            max_parallel_slots: 2,
+            parallel_efficiency: 0.6,
+          },
+        },
+        {
+          timestamp: "2026-04-17T17:00:00.000Z",
+          event: "session_complete",
+          project_id: "_fleet",
+          data: {
+            duration_minutes: 30,
+            total_cycles: 4,
+            total_verified: 3,
+            total_failed: 1,
+            stop_reason: "budget",
+            reviewer: "openrouter",
+            max_parallel_slots: 2,
+            parallel_efficiency: 0.8,
+          },
+        },
+      ];
+      const existing = readFileSync(FLEET_LOG, "utf8");
+      writeFileSync(
+        FLEET_LOG,
+        existing + extra.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      );
+
+      const result = await runCli(
+        ["status", "--summary", "--since=2026-04-17T12:00:00.000Z", "--json"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
+    });
+
+    it("--summary --json omits parallel_efficiency when fleet ran sequential-only (gs-260)", async () => {
+      // The default fixture has no parallel_efficiency on any event.
+      const result = await runCli(
+        ["status", "--summary", "--since=2026-04-17T00:00:00.000Z", "--json"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.parallel_efficiency).toBeNull();
+    });
+
     it("inclusive boundary: --sessions --since=<ts> includes a session that started exactly at <ts>", async () => {
       // The 13:00 session was computed from a 14:00 timestamp minus 60min duration
       // so --since=2026-04-17T12:00:00.000Z should include it on the boundary.

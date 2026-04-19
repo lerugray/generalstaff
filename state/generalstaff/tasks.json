@@ -1753,7 +1753,7 @@
   {
     "id": "gs-260",
     "title": "Surface `parallel_efficiency` in `status --summary` when the fleet has run parallel sessions recently. CREATE ONLY: modify `src/summary.ts` (or whoever computes status --summary — check src/cli.ts status handler for the call path) to compute the mean parallel_efficiency from `session_complete` events in the summary window that have that field set (it's only set in parallel mode — see gs-186). Text: add a one-line `parallel_efficiency: 0.XX (over N parallel sessions)` under the existing cycle metrics. JSON: add `parallel_efficiency: { mean: number, sessions: number }` field. Omit the line entirely (both modes) when no parallel sessions matched. Respect existing `--since` filter. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-session fixture with parallel-metrics computes correct mean; (b) sequential-only fleet omits the line; (c) --since filter narrows the pool; (d) mixed sequential + parallel sessions only averages the parallel ones. Motivation: parallel_efficiency is only visible per-session today; a rolling fleet-level view makes it easier to spot when the picker is padding empty-queue slots (like the pre-gs-232 regression). Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/summary.ts",

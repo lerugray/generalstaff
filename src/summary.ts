@@ -307,6 +307,14 @@ export interface CycleDurationPercentiles {
   count: number;
 }
 
+// gs-260: rolling fleet-level mean of session-level parallel_efficiency.
+// Only populated when at least one session_complete event in the window
+// carried the field (set by parallel-mode sessions only — see gs-186).
+export interface ParallelEfficiencyMetrics {
+  mean: number;
+  sessions: number;
+}
+
 export interface TodaySessionSummary {
   date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
   cycles_total: number;
@@ -319,6 +327,10 @@ export interface TodaySessionSummary {
   // cycle_end pool that feeds avg_cycle_duration_seconds. null when no
   // cycles match the window.
   cycle_duration: CycleDurationPercentiles | null;
+  // gs-260: mean parallel_efficiency across session_complete events in
+  // the window that carried that field. null when none did (e.g. fully
+  // sequential fleet).
+  parallel_efficiency: ParallelEfficiencyMetrics | null;
 }
 
 // gs-252: nearest-rank percentile (1-indexed). Sorted asc; for percentile p
@@ -357,6 +369,7 @@ export async function buildTodaySessionSummary(
     wall_clock_minutes: 0,
     last_session_end: null,
     cycle_duration: null,
+    parallel_efficiency: null,
   };
 
   const stateDir = join(getRootDir(), "state");
@@ -365,6 +378,7 @@ export async function buildTodaySessionSummary(
   let totalDurationSeconds = 0;
   let lastSessionEndMs = -Infinity;
   const durations: number[] = [];
+  const parallelEffs: number[] = [];
 
   let projectDirs: string[];
   try {
@@ -400,6 +414,16 @@ export async function buildTodaySessionSummary(
             lastSessionEndMs = ts;
             result.last_session_end = value.timestamp;
           }
+          // gs-260: collect parallel_efficiency from session_complete
+          // events that carry the field. The field is only set in
+          // parallel mode (max_parallel_slots > 1; see gs-186), so its
+          // mere presence is the signal.
+          if (value.event === "session_complete") {
+            const eff = value.data.parallel_efficiency;
+            if (typeof eff === "number" && Number.isFinite(eff)) {
+              parallelEffs.push(eff);
+            }
+          }
         }
       } else if (value.event === "cycle_end") {
         result.cycles_total += 1;
@@ -431,6 +455,13 @@ export async function buildTodaySessionSummary(
       count: durations.length,
     };
   }
+  if (parallelEffs.length > 0) {
+    const sum = parallelEffs.reduce((a, b) => a + b, 0);
+    result.parallel_efficiency = {
+      mean: sum / parallelEffs.length,
+      sessions: parallelEffs.length,
+    };
+  }
   return result;
 }
 
@@ -454,6 +485,15 @@ export function formatTodaySessionSummary(s: TodaySessionSummary): string {
     );
   } else {
     lines.push(`cycle_duration:            (no cycles)`);
+  }
+  // gs-260: rolling fleet-level parallel_efficiency. Omit entirely when
+  // no parallel sessions matched — sequential-only fleets shouldn't see
+  // a metric whose denominator is zero.
+  if (s.parallel_efficiency) {
+    const pe = s.parallel_efficiency;
+    lines.push(
+      `parallel_efficiency:       ${pe.mean.toFixed(2)} (over ${pe.sessions} parallel session${pe.sessions === 1 ? "" : "s"})`,
+    );
   }
   return lines.join("\n");
 }
