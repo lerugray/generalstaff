@@ -1820,3 +1820,108 @@ Pre-building the marketing surface before launch readiness is
 itself the stupid-industrious quadrant. The right move is: note
 the connection, keep Phase 5 shipped and stable, revisit when
 launch is actually near.
+
+---
+
+## §11. In-app help assistant — Ollama-powered (added 2026-04-19)
+
+**Prompt for this section:** Ray, 2026-04-19 afternoon, during
+the launch-prep discussion: *"one thing I did in devforge was to
+utilize ollama to have a helpful ask bot, could have a simple
+button there to request features through the git as well if the
+program doesn't cover something the user wants."*
+
+### What it is
+
+A small chat panel in the Phase 6 dashboard that answers questions
+about GeneralStaff — *"how do I register a project?"* / *"what
+does verified_weak mean?"* / *"why did this cycle fail?"* — using
+a local Ollama model. No cloud API cost, no telemetry leaving
+the machine, no subscription dependency. Complements the CLI +
+docs rather than replacing them. Each answer has a *"didn't
+help — request this feature"* link that pre-fills a GitHub issue.
+
+### Why this is the right move
+
+1. **Fits the BYOK philosophy.** Ollama is local and free. A help
+   assistant requiring an API key or SaaS account would
+   contradict Hard Rule 8.
+2. **Non-programmer audience needs it.** Per §10 above and
+   UI-VISION-2026-04-19.md, the gap between CLI docs and a
+   non-programmer's mental model is real. Plain-language Q&A is
+   the right affordance.
+3. **Ties into existing observability.** Assistant reads the
+   user's actual PROGRESS.jsonl, tasks.json, and session logs
+   when answering — *"why did my last cycle fail"* becomes a
+   real diagnostic, not a generic FAQ lookup.
+4. **Ray built the pattern before in devforge.** Proven shape;
+   low novel-design risk.
+
+### Scope sketch
+
+- **Backend:** `/api/ask` endpoint in `generalstaff serve` (Phase
+  6 UI server). Spawns `ollama run <model>` (default qwen3:8b
+  to match existing reviewer config) with a system prompt that
+  frames the assistant as a GeneralStaff expert + injects
+  relevant context (current project state, last N PROGRESS
+  events, the user's question).
+- **Frontend:** chat panel in the dashboard (sidebar or modal —
+  UX decision later). Text input, message history, streaming
+  response rendering.
+- **Feature-request link:** each assistant message gets a
+  *"request this feature"* link that pre-fills a GitHub
+  new-issue URL with the conversation so far. No OAuth, no GH
+  token on the user side — they click through and submit from
+  their own GitHub account (the right trust boundary).
+- **Fallback:** if Ollama isn't running, show a friendly
+  *"install Ollama to enable the help assistant — or use
+  `generalstaff doctor` / the docs"* panel. Dashboard never
+  breaks.
+
+### Design questions to resolve before building
+
+1. **Context injection strategy.** Always send fleet summary +
+   last N PROGRESS events? Let the user scope? Retrieve-then-
+   answer? Start simplest.
+2. **Model choice.** qwen3:8b is default. Larger models answer
+   better but need more RAM. Auto-detect available Ollama
+   models and pick the biggest that fits, or document the
+   default + let users override via env var?
+3. **Streaming vs. batch.** Streaming feels responsive, batch is
+   simpler. Call it when we start implementing.
+4. **Privacy messaging.** Clear label that the assistant runs
+   locally — nothing leaves the machine. This is a selling
+   point vs. cloud-AI help integrations. Surface it in the
+   panel UI.
+
+### Scope boundaries
+
+- **NOT a generic AI assistant.** Answers GeneralStaff
+  questions only. System prompt enforces topic.
+- **NOT a task-queuer.** *"Queue a task for me"* → the
+  assistant replies with the CLI invocation and the
+  Dispatch-Orders form link. Bot work goes through the
+  verification gate, not a chat shortcut.
+- **NOT a replacement for docs.** Docs remain source of truth;
+  assistant paraphrases + localizes.
+
+### Phase + dependencies
+
+- **Depends on:** Phase 6 web UI (needs the server + client
+  substrate). Can't ship before that.
+- **Slots in:** Phase 6.5 or Phase 7. **Not critical-path for
+  v0.1.0 launch.**
+- **Related to:** `generalstaff doctor` (assistant can interpret
+  doctor output and suggest fixes), the dashboard's Attention
+  panel (assistant can explain why something's in attention).
+
+### What this does NOT commit to
+
+- No Ollama dependency as a hard requirement. Install works
+  without it; assistant is optional.
+- No cloud fallback. If Ollama isn't present, no assistant.
+  Users wanting cloud AI help can use Claude, ChatGPT,
+  etc. externally.
+- No GitHub-issue flow before basic chat works. Ship the
+  read-only version first; add the feature-request link once
+  chat UX is stable.

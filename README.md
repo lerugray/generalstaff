@@ -137,6 +137,26 @@ The bot only pushes to `bot/work` on your own remote. Export equals
   what every non-trivial user ends up writing anyway. This is that
   script, generalized, hardened, and made inspectable.
 
+## Works alongside
+
+GeneralStaff is runtime enforcement — it catches the bot at cycle
+boundaries with a verification gate, hands-off list, and audit log.
+That's defense at the *execution* layer. You can stack it with
+instruction-layer tools that make agents behave better *within* each
+cycle:
+
+- **[AGENTS.md / agents-md](https://github.com/TheRealSeanDonahoe/agents-md)**
+  — one drop-in rules file that teaches every coding agent to
+  push back on bad requests, produce minimal diffs, verify before
+  claiming done, and compound learned corrections in a
+  Section 11 reactive-pruning log. Works inside Claude Code, Codex,
+  Cursor, Gemini CLI, Aider, and the rest. Pair it with
+  GeneralStaff per-managed-project: agents-md tightens the engineer
+  subprocess, the verification gate catches what slips through.
+
+The combination is defense in depth. Use either alone if that fits;
+neither is a hard dependency of the other.
+
 ## Who this is for
 
 The thesis underneath the whole project is that AI tools should make
