@@ -289,7 +289,26 @@ if (rawArgs.includes("--no-color")) {
 const args = stripNoColorArgs(rawArgs);
 
 if (args.includes("--version") || args.includes("-v")) {
-  console.log(VERSION);
+  if (args.includes("--json")) {
+    let commit: string | null = null;
+    try {
+      const proc = Bun.spawn(
+        ["git", "-C", process.cwd(), "rev-parse", "--short", "HEAD"],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const stdout = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      if (exitCode === 0) {
+        const sha = stdout.trim();
+        if (sha.length > 0) commit = sha;
+      }
+    } catch {
+      commit = null;
+    }
+    console.log(JSON.stringify({ version: VERSION, commit, bun: Bun.version }));
+  } else {
+    console.log(VERSION);
+  }
   process.exit(0);
 }
 

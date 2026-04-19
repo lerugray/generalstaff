@@ -1776,7 +1776,7 @@
   {
     "id": "gs-262",
     "title": "Add `--json` to `generalstaff --version`. CREATE ONLY: modify the version-printing branch in `src/cli.ts` (search for the VERSION constant and the `--version` handling — likely near the top of the dispatch or in printUsage). When `--version --json` is passed, emit a single-line JSON object: `{\"version\": \"0.1.0\", \"commit\": \"<short sha of HEAD at build>\", \"bun\": \"<bun version>\"}`. The commit SHA should be resolved at runtime via `git -C <cwd> rev-parse --short HEAD`; if that fails (not a git repo), emit `\"commit\": null` rather than crashing. Bun version via `Bun.version`. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --version (no --json) unchanged; (b) --version --json returns valid JSON with version field; (c) --version --json includes non-null bun field; (d) --version --json in non-git dir emits commit:null without crashing. Motivation: scriptable parsing for bug reports and install-time detection. Expected diff: ~80 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",

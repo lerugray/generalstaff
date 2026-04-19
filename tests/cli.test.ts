@@ -38,6 +38,45 @@ describe("CLI", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe("0.1.0");
     });
+
+    // gs-262: --version --json emits scriptable metadata
+    it("--version (no --json) output unchanged", async () => {
+      const result = await runCli(["--version"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe("0.1.0");
+    });
+
+    it("--version --json returns valid JSON with version field", async () => {
+      const result = await runCli(["--version", "--json"]);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout.trim());
+      expect(parsed.version).toBe("0.1.0");
+      expect(parsed).toHaveProperty("commit");
+      expect(parsed).toHaveProperty("bun");
+    });
+
+    it("--version --json includes non-null bun field", async () => {
+      const result = await runCli(["--version", "--json"]);
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout.trim());
+      expect(typeof parsed.bun).toBe("string");
+      expect(parsed.bun.length).toBeGreaterThan(0);
+    });
+
+    it("--version --json in non-git dir emits commit:null without crashing", async () => {
+      const nonGitDir = join(tmpdir(), `gs-262-nongit-${Date.now()}`);
+      mkdirSync(nonGitDir, { recursive: true });
+      try {
+        const result = await runCli(["--version", "--json"], nonGitDir);
+        expect(result.exitCode).toBe(0);
+        const parsed = JSON.parse(result.stdout.trim());
+        expect(parsed.version).toBe("0.1.0");
+        expect(parsed.commit).toBeNull();
+        expect(typeof parsed.bun).toBe("string");
+      } finally {
+        rmSync(nonGitDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("--help", () => {
