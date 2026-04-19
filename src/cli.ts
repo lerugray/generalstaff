@@ -31,6 +31,7 @@ import {
   pendingTasks,
   addTask,
   markTaskDone,
+  markTaskInteractive,
   markTaskPending,
   removeTask,
   countTasks,
@@ -188,6 +189,10 @@ Usage:
     Example: generalstaff task done --project=myapp --task=my-042
   generalstaff task rm --project=<id> --task=<task-id>    Delete a task from tasks.json
     Example: generalstaff task rm --project=myapp --task=my-042
+  generalstaff task interactive --project=<id> <task-id> [--off]
+                                                          Flip a task's interactive_only flag
+    Example: generalstaff task interactive --project=myapp my-042
+    Example: generalstaff task interactive --project=myapp my-042 --off
   generalstaff task count [--project=<id>]                Report pending vs done counts
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
@@ -1114,6 +1119,74 @@ switch (command) {
       } else {
         console.log(`Removed ${result.task.id}: ${result.task.title}`);
       }
+    } else if (sub === "interactive") {
+      // gs-243: toggle a task's interactive_only flag from the CLI.
+      // Default: set interactive_only=true. Pass --off to clear it.
+      const { values: intValues, positionals: intPositionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          off: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      if (!intValues.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const taskId = intPositionals[0];
+      if (!taskId) {
+        console.error(
+          "Error: task-id positional is required\n" +
+            "  Usage: generalstaff task interactive --project=<id> <task-id> [--off]",
+        );
+        process.exit(1);
+      }
+      if (intPositionals.length > 1) {
+        console.error(
+          `Error: unexpected extra positional(s): ${intPositionals.slice(1).join(" ")}`,
+        );
+        process.exit(1);
+      }
+      const target = intValues.off === true ? false : true;
+      let result;
+      try {
+        result = await markTaskInteractive(
+          intValues.project,
+          taskId,
+          target,
+        );
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (result.kind === "project_not_found") {
+        console.error(
+          `Error: no tasks file for project '${intValues.project}' (${result.path})`,
+        );
+        process.exit(1);
+      } else if (result.kind === "task_not_found") {
+        console.error(
+          `Error: task '${taskId}' not found in project '${intValues.project}'`,
+        );
+        if (result.availableIds.length > 0) {
+          console.error(`  Available: ${result.availableIds.join(", ")}`);
+        }
+        process.exit(1);
+      } else if (result.kind === "unchanged") {
+        console.log(
+          `${result.task.id} interactive_only already ${result.value}.`,
+        );
+      } else {
+        console.log(
+          target
+            ? `Marked ${result.task.id} as interactive_only: ${result.task.title}`
+            : `Cleared interactive_only on ${result.task.id}: ${result.task.title}`,
+        );
+      }
     } else if (sub === "count") {
       const { values: countValues } = parseArgs({
         args: args.slice(2),
@@ -1149,11 +1222,12 @@ switch (command) {
       }
     } else {
       console.error(
-        "Error: task subcommand required (list, add, done, rm, or count)\n" +
+        "Error: task subcommand required (list, add, done, rm, interactive, or count)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
           "         generalstaff task done --project=<id> --task=<task-id>\n" +
           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
+          "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
           "         generalstaff task count [--project=<id>]",
       );
       process.exit(1);
