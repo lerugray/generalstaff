@@ -36,3 +36,10 @@ describe(".gitignore coverage for .claude/ transient files", () => {
     expect(explicit || subsumed).toBe(true);
   });
 });
+
+describe(".gitignore coverage for transient session pid file (gs-236)", () => {
+  it("ignores `state/session.pid` so session-end cleanup doesn't leave tracked-file deletion residue", () => {
+    const lines = readGitignoreLines();
+    expect(lines).toContain("state/session.pid");
+  });
+});
