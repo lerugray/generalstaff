@@ -1564,11 +1564,12 @@
   {
     "id": "gs-244",
     "title": "Align `--help` behavior across top-level subcommands. CREATE ONLY: extend the `session`, `cycle`, `status`, and `tasks` subcommand handlers in `src/cli.ts` to each recognize a `--help` flag (also `help` as second positional arg where it does not collide with existing positional args) and print a usage block listing their flags + brief one-line examples, exiting 0 on --help. Match the pattern gs-233 established for the `view` subcommand. Preserve all existing behavior for non-help invocations. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: inconsistency in --help support across subcommands is a DX papercut for new users learning the CLI surface. Tests: one test per subcommand asserting (a) --help exits 0 with usage output; (b) existing behavior unaffected when --help is absent. Expected diff: ~180 lines (one ~30-50 line help block per subcommand + tests).",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T05:18:00.557Z"
   }
 ]

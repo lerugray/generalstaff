@@ -72,6 +72,79 @@ describe("CLI", () => {
     });
   });
 
+  describe("subcommand --help (gs-244)", () => {
+    it("session --help prints session-specific usage and exits 0", async () => {
+      const result = await runCli(["session", "--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff session");
+      expect(result.stdout).toContain("--budget");
+      expect(result.stdout).toContain("--chain");
+      expect(result.stdout).toContain("--verbose");
+    });
+
+    it("session without --help still validates flags normally", async () => {
+      // Confirms the help-guard does not swallow real args — --chain=0 still errors.
+      const result = await runCli(["session", "--chain=0"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--chain must be a positive integer");
+    });
+
+    it("cycle --help prints cycle-specific usage and exits 0", async () => {
+      const result = await runCli(["cycle", "--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff cycle");
+      expect(result.stdout).toContain("--project");
+      expect(result.stdout).toContain("--dry-run");
+    });
+
+    it("cycle without --help still requires --project", async () => {
+      const result = await runCli(["cycle"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--project=<id> is required");
+    });
+
+    it("status --help prints status-specific usage and exits 0", async () => {
+      const result = await runCli(["status", "--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff status");
+      expect(result.stdout).toContain("--json");
+      expect(result.stdout).toContain("--sessions");
+      expect(result.stdout).toContain("--fleet");
+    });
+
+    it("status without --help rejects conflicting subview flags", async () => {
+      // Existing behavior preserved: mutually-exclusive subview flags still error.
+      const result = await runCli(["status", "--backlog", "--summary"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--backlog cannot be combined with --sessions/--summary/--watch",
+      );
+    });
+
+    it("task --help prints task-specific usage and exits 0", async () => {
+      const result = await runCli(["task", "--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff task");
+      expect(result.stdout).toContain("list");
+      expect(result.stdout).toContain("add");
+      expect(result.stdout).toContain("done");
+      expect(result.stdout).toContain("interactive");
+    });
+
+    it("task help (positional) prints task-specific usage and exits 0", async () => {
+      const result = await runCli(["task", "help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff task");
+      expect(result.stdout).toContain("interactive");
+    });
+
+    it("task without --help still requires a subcommand", async () => {
+      const result = await runCli(["task"]);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("task subcommand required");
+    });
+  });
+
   describe("session --chain validation", () => {
     it("rejects --chain=0 with a clear error", async () => {
       const result = await runCli(["session", "--chain=0"]);

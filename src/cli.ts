@@ -255,9 +255,20 @@ if (args.includes("--version") || args.includes("-v")) {
   process.exit(0);
 }
 
+// gs-244: subcommands with their own --help block short-circuit the
+// global help dispatch so that e.g. `session --help` lands in the
+// session case and prints session-specific usage instead of the
+// global usage table.
+const SUBCOMMANDS_WITH_OWN_HELP = new Set([
+  "view",
+  "session",
+  "cycle",
+  "status",
+  "task",
+]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
-  args[0] !== "view"
+  !SUBCOMMANDS_WITH_OWN_HELP.has(args[0] ?? "")
 ) {
   printUsage();
   process.exit(0);
@@ -267,6 +278,31 @@ const command = args[0];
 
 switch (command) {
   case "session": {
+    // gs-244: subcommand-level --help / help matching gs-233's view pattern.
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff session [options]\n" +
+          "\n" +
+          "Run a session: repeatedly pick the highest-priority project with pending\n" +
+          "bot-pickable work and run one cycle, until budget exhausts or no work remains.\n" +
+          "\n" +
+          "Options:\n" +
+          "  --budget=<minutes>            Budget in minutes (default: 480 = 8 hours)\n" +
+          "  --max-cycles=<n>              Stop after N cycles even if budget remains\n" +
+          "  --dry-run                     Preview without committing\n" +
+          "  --exclude-project=<id>[,...]  Skip the listed project id(s)\n" +
+          "  --project=<id>[,...]          Run only the listed project(s) (sugar for --exclude-project=<rest>)\n" +
+          "  --verbose                     Stream PROGRESS.jsonl events to stdout\n" +
+          "  --chain=<n>                   Run N back-to-back sessions with the same options\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff session --budget=480             # overnight 8-hour run\n" +
+          "  generalstaff session --max-cycles=5           # stop after 5 cycles\n" +
+          "  generalstaff session --project=raybrain       # run only raybrain\n" +
+          "  generalstaff session --chain=3 --budget=60    # three 1-hour sessions back-to-back\n",
+      );
+      process.exit(0);
+    }
     const { values } = parseArgs({
       args: args.slice(1),
       options: {
@@ -369,6 +405,25 @@ switch (command) {
   }
 
   case "cycle": {
+    // gs-244: subcommand-level --help / help matching gs-233's view pattern.
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff cycle --project=<id> [options]\n" +
+          "\n" +
+          "Run exactly one cycle on a single project — pick one task, execute one\n" +
+          "engineer + reviewer pass, and update state. Useful for probing a specific\n" +
+          "project without committing to a full session.\n" +
+          "\n" +
+          "Options:\n" +
+          "  --project=<id>   Project id (required)\n" +
+          "  --dry-run        Preview without committing\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff cycle --project=myapp\n" +
+          "  generalstaff cycle --project=myapp --dry-run\n",
+      );
+      process.exit(0);
+    }
     const { values } = parseArgs({
       args: args.slice(1),
       options: {
@@ -389,6 +444,33 @@ switch (command) {
   }
 
   case "status": {
+    // gs-244: subcommand-level --help / help matching gs-233's view pattern.
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff status [options]\n" +
+          "\n" +
+          "Show fleet state: per-project verification totals + optional subviews.\n" +
+          "The --sessions / --summary / --backlog / --totals / --fleet flags are\n" +
+          "mutually exclusive subviews; --json renders any of them as JSON.\n" +
+          "\n" +
+          "Options:\n" +
+          "  --json              Machine-readable output\n" +
+          "  --watch[=N]         Refresh every N seconds (default 5) until Ctrl-C\n" +
+          "  --sessions[=N]      Last N sessions as a table (default 10)\n" +
+          "  --summary           Today's cycle/session metrics (UTC)\n" +
+          "  --backlog           Per-project backlog buckets\n" +
+          "  --totals            All-time aggregate session metrics\n" +
+          "  --fleet             One-row-per-project fleet snapshot\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff status                           # default fleet state view\n" +
+          "  generalstaff status --json                    # JSON of the default view\n" +
+          "  generalstaff status --watch=10                # refresh every 10s\n" +
+          "  generalstaff status --sessions=20 --json      # last 20 sessions as JSON\n" +
+          "  generalstaff status --fleet                   # per-project snapshot\n",
+      );
+      process.exit(0);
+    }
     const rawStatusArgs = args.slice(1);
     const watch = parseWatchFlag(rawStatusArgs);
     const sessionsFlag = parseSessionsFlag(rawStatusArgs);
@@ -916,6 +998,37 @@ switch (command) {
 
   case "task": {
     const sub = args[1];
+    // gs-244: subcommand-level --help / help matching gs-233's view pattern.
+    // `help` as args[1] is a new keyword here — it does not collide with an
+    // existing sub-subcommand name (list/add/done/rm/interactive/count).
+    if (
+      args.includes("--help") ||
+      args.includes("-h") ||
+      sub === "--help" ||
+      sub === "help"
+    ) {
+      console.log(
+        "Usage: generalstaff task <subcommand> --project=<id> [options]\n" +
+          "\n" +
+          "Manage per-project task queues (reads/writes state/<id>/tasks.json).\n" +
+          "\n" +
+          "Subcommands:\n" +
+          "  list --project=<id> [--priority=N]                 Show pending tasks\n" +
+          "  add  --project=<id> [--priority=N] <title>         Append a new task\n" +
+          "  done --project=<id> --task=<task-id>               Mark a task as done\n" +
+          "  rm   --project=<id> --task=<task-id>               Delete a task\n" +
+          "  interactive --project=<id> <task-id> [--off]       Flip interactive_only flag\n" +
+          "  count [--project=<id>]                             Report pending vs done counts\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff task list --project=myapp\n" +
+          "  generalstaff task add --project=myapp --priority=1 \"Fix login bug\"\n" +
+          "  generalstaff task done --project=myapp --task=my-042\n" +
+          "  generalstaff task interactive --project=myapp my-042\n" +
+          "  generalstaff task count                             # all projects\n",
+      );
+      process.exit(0);
+    }
     if (sub === "list") {
       const { values } = parseArgs({
         args: args.slice(2),
