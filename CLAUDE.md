@@ -351,31 +351,60 @@ and low cycle-count means quota isn't at risk.
 key is stored in the MiroShark `.env` at
 `C:\Users\rweis\OneDrive\Documents\MiroShark\.env` under the
 field name `OPENAI_API_KEY` (the field name predates this
-routing — don't rename it). `scripts/run_session.bat` reads
-this file at launch and exports the key into the subprocess
-scope only; it is not written session-wide.
+routing — don't rename it). `scripts/run_session.bat` loads
+the key into the subprocess scope only; it is not written
+session-wide.
 
-**How `scripts/run_session.bat` wires it up.** The launcher
-takes two positional args: `run_session.bat <budget_min>
-<provider>`. Provider defaults to `openrouter`. The .bat:
+**How `scripts/run_session.bat` wires it up (as of 2026-04-19
+subroutine refactor).** The launcher takes two positional
+args: `run_session.bat <budget_min> <provider>`. Provider
+defaults to `openrouter`. The .bat:
 
 1. Sets `GENERALSTAFF_REVIEWER_PROVIDER` from the second arg.
-2. If the provider is `openrouter`, `findstr`-parses the
-   MiroShark `.env` for the `OPENAI_API_KEY=` line and
-   assigns it to `OPENROUTER_API_KEY` inside the subprocess
-   scope (see lines 60–71 of the .bat).
-3. If the key is missing, prints a clear warning pointing
-   the user at the alternative providers (`ollama`,
-   `claude`) — the session still proceeds but every cycle
-   will fail-safe.
-4. Ollama and claude providers need no credential plumbing:
+2. If the provider is `openrouter` and `OPENROUTER_API_KEY`
+   isn't already set in the env, calls `:load_openrouter_key`
+   which tries two file paths in order:
+   - a. `OPENROUTER_ENV_FILE` env var (if set and file exists)
+   - b. `%USERPROFILE%\.generalstaff\.env` (default fallback)
+3. For each file, `findstr`-parses `OPENROUTER_API_KEY=` first,
+   falls back to `OPENAI_API_KEY=` (MiroShark's field name).
+4. If no file yielded a key, calls `:warn_openrouter_missing`
+   which prints a loud warning listing the checked paths and
+   the session still proceeds (every cycle will fail-safe to
+   `verification_failed`).
+5. Ollama and claude providers need no credential plumbing:
    ollama talks to `localhost:11434`, `claude -p` uses its
    own subscription auth.
 
+**Why the subroutine refactor.** The pre-2026-04-19 loading
+logic was nested `if (...) (...)` blocks with `for /f ... do
+set` inside them. The cmd.exe parser has a delayed-expansion
+quirk that made the outer warning check fire even when loading
+succeeded. Observed across multiple sessions as a false-
+positive alarm with no actual impact (reviewer verdicts were
+coming back valid). The refactor pulls the loading into
+`:load_openrouter_key` and the warning into
+`:warn_openrouter_missing`, each called with `call :label` so
+they execute in a fresh subroutine context without the nested-
+block scoping issue.
+
+**Ray's one-time setup.** Either:
+- Set `OPENROUTER_ENV_FILE` persistently via
+  `setx OPENROUTER_ENV_FILE "C:\Users\rweis\OneDrive\Documents\MiroShark\.env"`
+  (new shells only; current shell won't see it).
+- Or create `C:\Users\rweis\.generalstaff\.env` as a copy or
+  a symlink (`mklink`) of MiroShark's `.env`. The default
+  path means no env var is needed per launch.
+- Or keep passing `OPENROUTER_ENV_FILE` explicitly via
+  PowerShell Start-Process (`$env:OPENROUTER_ENV_FILE = "..."
+  ; Start-Process ...`), as the interactive-Claude launches
+  have been doing.
+
 When adding a new provider, mirror this pattern: env-var
 selection in `reviewer.ts`, credential loading in the .bat
-(scoped to the subprocess, never session-wide), and a clear
-fallback to `verification_failed` if credentials are absent.
+via a `call :label` subroutine (scoped to the subprocess,
+never session-wide), and a clear fallback to
+`verification_failed` if credentials are absent.
 
 ### Project stakes (why this isn't just a hobby)
 

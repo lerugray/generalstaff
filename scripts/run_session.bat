@@ -65,30 +65,19 @@ REM Precedence for OPENROUTER_API_KEY:
 REM   1. Already set in the environment — used as-is
 REM   2. OPENROUTER_ENV_FILE points at a .env-style file containing
 REM      "OPENROUTER_API_KEY=..." or "OPENAI_API_KEY=..." — first match wins
-REM   3. Missing — loud warning, cycles fail-safe to verification_failed
+REM   3. Default path %USERPROFILE%\.generalstaff\.env if it exists
+REM   4. Missing — loud warning, cycles fail-safe to verification_failed
+REM
+REM Loading is factored through `call :load_openrouter_key` so each
+REM env-file check runs in a fresh subroutine scope. This sidesteps a
+REM cmd.exe delayed-expansion quirk where nested `for /f ... do set`
+REM inside `if (...)` blocks produced a false-positive warning even
+REM when loading succeeded (observed 2026-04-19, multiple sessions).
 REM
 REM Scoped to this subprocess; not exported session-wide.
 if /i "%PROVIDER%"=="openrouter" (
-  if "!OPENROUTER_API_KEY!"=="" (
-    if defined OPENROUTER_ENV_FILE (
-      if exist "!OPENROUTER_ENV_FILE!" (
-        for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENROUTER_API_KEY=" "!OPENROUTER_ENV_FILE!"`) do set "OPENROUTER_API_KEY=%%b"
-        if "!OPENROUTER_API_KEY!"=="" (
-          for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" "!OPENROUTER_ENV_FILE!"`) do set "OPENROUTER_API_KEY=%%b"
-        )
-      )
-    )
-  )
-  if "!OPENROUTER_API_KEY!"=="" (
-    echo WARNING: OPENROUTER_API_KEY not set and not loadable from OPENROUTER_ENV_FILE.
-    echo          Reviewer will fall through to a 'REVIEWER ERROR' string and every
-    echo          cycle will fail-safe to verification_failed. Either:
-    echo            set OPENROUTER_API_KEY=sk-or-...
-    echo            set OPENROUTER_ENV_FILE=C:\path\to\.env    (must define OPENROUTER_API_KEY or OPENAI_API_KEY)
-    echo          Or pass a different provider:
-    echo            scripts\run_session.bat %BUDGET% ollama
-    echo            scripts\run_session.bat %BUDGET% claude
-  )
+  if not defined OPENROUTER_API_KEY call :load_openrouter_key
+  if not defined OPENROUTER_API_KEY call :warn_openrouter_missing
 )
 
 echo === GeneralStaff session launcher ===
@@ -140,3 +129,49 @@ REM The legacy scripts\notify_telegram.ps1 script is still around for
 REM manual re-sends but is no longer invoked automatically here.
 
 endlocal & exit /b %EXITCODE%
+
+REM === Subroutines (reached only via `call :label`) ===
+REM Placed after `exit /b` so main flow never falls through into them.
+
+:load_openrouter_key
+REM Try user-specified OPENROUTER_ENV_FILE first
+if defined OPENROUTER_ENV_FILE (
+  if exist "%OPENROUTER_ENV_FILE%" (
+    call :parse_env_file "%OPENROUTER_ENV_FILE%"
+    if defined OPENROUTER_API_KEY goto :eof
+  )
+)
+REM Fall back to default path at %USERPROFILE%\.generalstaff\.env
+if exist "%USERPROFILE%\.generalstaff\.env" (
+  call :parse_env_file "%USERPROFILE%\.generalstaff\.env"
+)
+goto :eof
+
+:parse_env_file
+REM Arg %1: quoted path to a .env-style file. Sets OPENROUTER_API_KEY
+REM from the first matching line. Prefers OPENROUTER_API_KEY=... over
+REM OPENAI_API_KEY=... (the MiroShark .env uses the latter name).
+for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENROUTER_API_KEY=" %1`) do set "OPENROUTER_API_KEY=%%b"
+if not defined OPENROUTER_API_KEY (
+  for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" %1`) do set "OPENROUTER_API_KEY=%%b"
+)
+goto :eof
+
+:warn_openrouter_missing
+echo WARNING: OPENROUTER_API_KEY not set and no .env file found.
+echo          Checked:
+if defined OPENROUTER_ENV_FILE (
+  echo            - OPENROUTER_ENV_FILE = %OPENROUTER_ENV_FILE%
+) else (
+  echo            - OPENROUTER_ENV_FILE is unset
+)
+echo            - %USERPROFILE%\.generalstaff\.env
+echo          Reviewer will return 'REVIEWER ERROR' every cycle and
+echo          fail-safe to verification_failed. Either:
+echo            set OPENROUTER_API_KEY=sk-or-...
+echo            set OPENROUTER_ENV_FILE=C:\path\to\.env
+echo            create %USERPROFILE%\.generalstaff\.env with OPENROUTER_API_KEY=...
+echo          Or pass a different provider:
+echo            scripts\run_session.bat %BUDGET% ollama
+echo            scripts\run_session.bat %BUDGET% claude
+goto :eof
