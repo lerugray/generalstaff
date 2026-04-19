@@ -1539,5 +1539,35 @@
       "tests/fixtures/view_integration/state/_fleet/messages.jsonl"
     ],
     "completed_at": "2026-04-19T04:44:52.660Z"
+  },
+  {
+    "id": "gs-242",
+    "title": "Expand `generalstaff doctor` with additional sanity checks. CREATE ONLY: extend the existing `case \"doctor\"` handler in `src/cli.ts` (or wherever doctor logic lives — inspect first) with 4 new checks: (1) each registered project.path exists and is a git repo; (2) each registered project has state/<id>/ dir with PROGRESS.jsonl readable; (3) each project tasks.json parses as valid JSON if present; (4) digests/ is writable (or creatable); report each check with ✓/✗ markers and a one-line detail. Preserve all existing checks; additions only. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) all-green fixture produces all ✓; (b) missing project.path produces ✗ with path in detail; (c) malformed tasks.json produces ✗; (d) missing digests/ still passes if parent dir writable. Expected diff: ~150 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-243",
+    "title": "Add `generalstaff tasks interactive <task-id>` subcommand to flip a task interactive_only flag. CREATE ONLY: extend the existing `tasks` subcommand handler in `src/cli.ts` with an `interactive` sub-subcommand that accepts a task-id and toggles (or sets) the `interactive_only` field on that task in the appropriate state/<id>/tasks.json. Flags: `--project=<id>` required (which project the task belongs to); `--off` flag to set interactive_only=false (default: set true). Find the task by id, mutate, write back with stable JSON formatting. Error if task-id not found. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: currently the only way to mark a task interactive_only is to edit tasks.json by hand (as the bot did in gs-237 via a tasks-file modification that the reviewer happened to accept). A dedicated CLI makes this first-class. Tests: (a) setting interactive_only on a pending task; (b) --off flips it back; (c) unknown task-id errors + exit 1; (d) missing --project errors + exit 1; (e) existing fields preserved; (f) JSON formatting stable (no unintended reordering). Expected diff: ~130 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-244",
+    "title": "Align `--help` behavior across top-level subcommands. CREATE ONLY: extend the `session`, `cycle`, `status`, and `tasks` subcommand handlers in `src/cli.ts` to each recognize a `--help` flag (also `help` as second positional arg where it does not collide with existing positional args) and print a usage block listing their flags + brief one-line examples, exiting 0 on --help. Match the pattern gs-233 established for the `view` subcommand. Preserve all existing behavior for non-help invocations. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: inconsistency in --help support across subcommands is a DX papercut for new users learning the CLI surface. Tests: one test per subcommand asserting (a) --help exits 0 with usage output; (b) existing behavior unaffected when --help is absent. Expected diff: ~180 lines (one ~30-50 line help block per subcommand + tests).",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
