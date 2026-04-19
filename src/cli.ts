@@ -30,6 +30,7 @@ import {
   loadTasks,
   pendingTasks,
   addTask,
+  botPickableTasks,
   markTaskDone,
   markTaskInteractive,
   markTaskPending,
@@ -38,6 +39,16 @@ import {
   TasksLoadError,
   TaskValidationError,
 } from "./tasks";
+import { pickNextProjects } from "./dispatcher";
+
+// gs-250: pull the trailing digit run out of a task id so the preview
+// matches the engineer bot's "lowest gs-NNN numeric suffix first" sort
+// convention. Ids with no digits collapse to 0; `localeCompare` on the
+// original id tiebreaks those.
+function numericIdSuffix(id: string): number {
+  const m = /(\d+)(?!.*\d)/.exec(id);
+  return m ? parseInt(m[1]!, 10) : 0;
+}
 import {
   buildFleetSummary,
   buildTodaySessionSummary,
@@ -200,6 +211,10 @@ Usage:
   generalstaff task count [--project=<id>]                Report pending vs done counts
     Example: generalstaff task count                     # all projects
     Example: generalstaff task count --project=myapp     # single project
+  generalstaff task next [--project=<id>] [--json]        Preview the next task(s) the picker would pick (non-mutating)
+    Example: generalstaff task next                      # up to max_parallel_slots rows
+    Example: generalstaff task next --project=myapp      # restrict preview to one project
+    Example: generalstaff task next --json               # { slots: [{project_id, task_id, title}] }
 
   generalstaff cycle-redo --project=<id> --task=<task-id>  Reopen a done task as pending
     Example: generalstaff cycle-redo --project=myapp --task=my-042
@@ -1080,6 +1095,7 @@ switch (command) {
           "  interactive --project=<id> <task-id> [--off]       Flip interactive_only flag\n" +
           "  count [--project=<id>]                             Report pending vs done counts\n" +
           "  validate [--project=<id>] [--json]                 Validate tasks.json schema across projects\n" +
+          "  next [--project=<id>] [--json]                     Preview next task(s) the picker would pick\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff task list --project=myapp\n" +
@@ -1467,16 +1483,117 @@ switch (command) {
         }
       }
       if (anyFail) process.exit(1);
+    } else if (sub === "next") {
+      // gs-250: preview which task the picker would select next, without
+      // mutating any state. Runs the same pickNextProjects logic session.ts
+      // uses when max_parallel_slots > 1, then — for each picked project —
+      // loads tasks.json and picks the top bot-pickable task using the same
+      // "lowest priority number first; among same-priority, lowest numeric
+      // id suffix first" convention the engineer bot follows.
+      const { values: nextValues } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      const dispatcher = await loadDispatcherConfig();
+      const allProjects = await loadProjects();
+      let candidateProjects = allProjects;
+      if (nextValues.project) {
+        const match = allProjects.find((p) => p.id === nextValues.project);
+        if (!match) {
+          const ids = allProjects.map((p) => p.id).join(", ") || "(none)";
+          console.error(
+            `Error: project '${nextValues.project}' not found. Registered: ${ids}`,
+          );
+          process.exit(1);
+        }
+        candidateProjects = [match];
+      }
+      const fleet = await loadFleetState(dispatcher);
+      const maxCount = nextValues.project ? 1 : dispatcher.max_parallel_slots;
+      const picks = await pickNextProjects(
+        candidateProjects,
+        dispatcher,
+        fleet,
+        new Set<string>(),
+        maxCount,
+      );
+      const slots: Array<{
+        project_id: string;
+        task_id: string | null;
+        title: string | null;
+      }> = [];
+      for (const pick of picks) {
+        let taskId: string | null = null;
+        let taskTitle: string | null = null;
+        try {
+          const tasks = await loadTasks(pick.project.id);
+          const pickable = botPickableTasks(tasks, pick.project.hands_off);
+          const sorted = pickable.slice().sort((a, b) => {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            const na = numericIdSuffix(a.id);
+            const nb = numericIdSuffix(b.id);
+            if (na !== nb) return na - nb;
+            return a.id.localeCompare(b.id);
+          });
+          const top = sorted[0];
+          if (top) {
+            taskId = top.id;
+            taskTitle = top.title;
+          }
+        } catch (err) {
+          if (err instanceof TasksLoadError) {
+            // Malformed tasks.json: report empty slot rather than crash
+            // (preview should never fail-hard on per-project load errors).
+            taskId = null;
+            taskTitle = null;
+          } else {
+            throw err;
+          }
+        }
+        slots.push({
+          project_id: pick.project.id,
+          task_id: taskId,
+          title: taskTitle,
+        });
+      }
+      if (nextValues.json) {
+        const payload = {
+          slots: slots.map((s) => ({
+            project_id: s.project_id,
+            task_id: s.task_id,
+            title: s.title,
+          })),
+        };
+        console.log(JSON.stringify(payload, null, 2));
+      } else {
+        if (slots.length === 0) {
+          console.log("No eligible project — nothing to preview.");
+        } else {
+          for (const s of slots) {
+            if (s.task_id === null) {
+              console.log(`${s.project_id}  (no bot-pickable task)`);
+            } else {
+              const title = (s.title ?? "").slice(0, 80);
+              console.log(`${s.project_id}  ${s.task_id}  ${title}`);
+            }
+          }
+        }
+      }
     } else {
       console.error(
-        "Error: task subcommand required (list, add, done, rm, interactive, count, or validate)\n" +
+        "Error: task subcommand required (list, add, done, rm, interactive, count, validate, or next)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
           "         generalstaff task done --project=<id> --task=<task-id>\n" +
           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
           "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
           "         generalstaff task count [--project=<id>]\n" +
-          "         generalstaff task validate [--project=<id>] [--json]",
+          "         generalstaff task validate [--project=<id>] [--json]\n" +
+          "         generalstaff task next [--project=<id>] [--json]",
       );
       process.exit(1);
     }
