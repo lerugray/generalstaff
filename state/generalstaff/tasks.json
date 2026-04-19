@@ -1797,12 +1797,13 @@
   {
     "id": "gs-264",
     "title": "Add `cycle show <cycle-id> [--json]` as a text-mode-friendly alias for `view dispatch-detail`. CREATE ONLY: extend the `cycle` subcommand handler in `src/cli.ts` with a `show` sub-subcommand. Behavior: identical to `view dispatch-detail <cycle-id>` (reuse the same function getDispatchDetail from src/views/dispatch_detail.ts) — phase durations, diff summary, checks block, etc. The only difference is that this surface is where users already are for cycle-related operations (alongside `cycle`, `cycle-redo`, and bare `cycle`). `--json` emits the full DispatchDetailData. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `cycle show <known-id>` exits 0 with structured report; (b) missing id errors + exits 1; (c) unknown id surfaces DispatchDetailError + exits 1; (d) --json emits valid JSON. Motivation: discoverability. A user thinking 'show me what happened in that cycle' will type `cycle show` before they'll find `view dispatch-detail`. Expected diff: ~80 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T12:54:29.771Z"
   },
   {
     "id": "gs-265",

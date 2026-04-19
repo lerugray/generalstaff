@@ -486,10 +486,14 @@ switch (command) {
     if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
       console.log(
         "Usage: generalstaff cycle --project=<id> [options]\n" +
+          "       generalstaff cycle show <cycle-id> [--json]\n" +
           "\n" +
           "Run exactly one cycle on a single project — pick one task, execute one\n" +
           "engineer + reviewer pass, and update state. Useful for probing a specific\n" +
           "project without committing to a full session.\n" +
+          "\n" +
+          "Sub-subcommands:\n" +
+          "  show <cycle-id>  Alias for `view dispatch-detail <cycle-id>` (gs-264)\n" +
           "\n" +
           "Options:\n" +
           "  --project=<id>   Project id (required)\n" +
@@ -497,10 +501,96 @@ switch (command) {
           "\n" +
           "Examples:\n" +
           "  generalstaff cycle --project=myapp\n" +
-          "  generalstaff cycle --project=myapp --dry-run\n",
+          "  generalstaff cycle --project=myapp --dry-run\n" +
+          "  generalstaff cycle show cyc-001\n" +
+          "  generalstaff cycle show cyc-001 --json\n",
       );
       process.exit(0);
     }
+
+    // gs-264: `cycle show <cycle-id> [--json]` — text-mode-friendly alias
+    // for `view dispatch-detail <cycle-id>`. Identical output (same
+    // getDispatchDetail call and renderer), just surfaced where users
+    // already are for cycle-related operations.
+    if (args[1] === "show") {
+      const { values: showValues, positionals: showPositionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const cycleId = showPositionals[0];
+      if (!cycleId) {
+        console.error("Error: cycle show requires <cycle-id>");
+        process.exit(1);
+      }
+      const { getDispatchDetail, DispatchDetailError } = await import(
+        "./views/dispatch_detail"
+      );
+      let data;
+      try {
+        data = await getDispatchDetail(cycleId);
+      } catch (err) {
+        if (err instanceof DispatchDetailError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (showValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else {
+        const fmtDur = (s: number | null) =>
+          s === null ? "n/a" : `${Math.round(s)}s`;
+        const taskLine =
+          data.task_id === null
+            ? "—"
+            : data.task_title
+              ? `${data.task_id} — ${data.task_title}`
+              : data.task_id;
+        console.log(`Cycle:    ${data.cycle_id}`);
+        console.log(`Task:     ${taskLine}`);
+        console.log(`Project:  ${data.project_id}`);
+        console.log(`Verdict:  ${data.verdict}`);
+        console.log(`Duration: ${Math.round(data.duration_seconds)}s`);
+        console.log("");
+        console.log("Phases:");
+        for (const [label, phase] of [
+          ["engineer", data.engineer],
+          ["verification", data.verification],
+          ["review", data.review],
+        ] as const) {
+          const detail = phase.detail ? `  ${phase.detail}` : "";
+          console.log(
+            `  ${label.padEnd(13)} ${fmtDur(phase.duration_seconds).padStart(5)}${detail}`,
+          );
+        }
+        console.log("");
+        console.log(`Diff: +${data.diff_added}/-${data.diff_removed}`);
+        if (data.files_touched.length === 0) {
+          console.log("Files touched: (none)");
+        } else {
+          console.log("Files touched:");
+          for (const f of data.files_touched) {
+            console.log(`  +${f.added}/-${f.removed}  ${f.path}`);
+          }
+        }
+        console.log("");
+        console.log("Checks:");
+        if (data.checks.length === 0) {
+          console.log("  (none recorded)");
+        } else {
+          for (const c of data.checks) {
+            const status = c.passed ? "pass" : "FAIL";
+            const detail = c.detail ? `  ${c.detail}` : "";
+            console.log(`  ${c.name.padEnd(16)} ${status}${detail}`);
+          }
+        }
+      }
+      break;
+    }
+
     const { values } = parseArgs({
       args: args.slice(1),
       options: {

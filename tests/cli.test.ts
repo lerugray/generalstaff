@@ -3454,6 +3454,155 @@ dispatcher:
     });
   });
 
+  describe("cycle show subcommand (gs-264)", () => {
+    const VIEW_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "cycle_show_test",
+    );
+    const FLEET_DIR = join(VIEW_DIR, "state", "_fleet");
+
+    const buildLog = (cycleId: string): string => {
+      const events: Array<Record<string, unknown>> = [
+        {
+          timestamp: "2026-04-18T10:00:00Z",
+          event: "cycle_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { task_id: "a-1", session_id: "sess-01", sha_before: "aaa" },
+        },
+        {
+          timestamp: "2026-04-18T10:00:05Z",
+          event: "engineer_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", command: "claude -p" },
+        },
+        {
+          timestamp: "2026-04-18T10:01:05Z",
+          event: "engineer_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", duration_seconds: 60 },
+        },
+        {
+          timestamp: "2026-04-18T10:01:10Z",
+          event: "verification_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", command: "bun test" },
+        },
+        {
+          timestamp: "2026-04-18T10:01:40Z",
+          event: "verification_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            duration_seconds: 30,
+            outcome: "pass",
+          },
+        },
+        {
+          timestamp: "2026-04-18T10:01:45Z",
+          event: "reviewer_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01" },
+        },
+        {
+          timestamp: "2026-04-18T10:02:00Z",
+          event: "reviewer_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            duration_seconds: 15,
+            verdict: "verified",
+            scope_drift_files: [],
+            hands_off_violations: [],
+            silent_failures: [],
+          },
+        },
+        {
+          timestamp: "2026-04-18T10:02:05Z",
+          event: "cycle_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            task_id: "a-1",
+            outcome: "verified",
+            duration_seconds: 125,
+            sha_after: "bbb",
+            files_touched: [
+              { path: "src/foo.ts", added: 5, removed: 1 },
+            ],
+            diff_stats: { additions: 5, deletions: 1 },
+          },
+        },
+      ];
+      return events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    };
+
+    beforeEach(() => {
+      mkdirSync(FLEET_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("cycle show <known-id> exits 0 with structured report", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(["cycle", "show", "cyc-001"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Cycle:");
+      expect(result.stdout).toContain("cyc-001");
+      expect(result.stdout).toContain("Verdict:");
+      expect(result.stdout).toContain("verified");
+      expect(result.stdout).toContain("Phases:");
+      expect(result.stdout).toContain("engineer");
+      expect(result.stdout).toContain("Checks:");
+    });
+
+    it("missing cycle-id errors and exits 1", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(["cycle", "show"], VIEW_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Error: cycle show requires <cycle-id>");
+    });
+
+    it("unknown cycle-id surfaces DispatchDetailError and exits 1", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["cycle", "show", "cyc-does-not-exist"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: cycle not found: cyc-does-not-exist",
+      );
+    });
+
+    it("--json emits valid JSON with DispatchDetailData shape", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["cycle", "show", "cyc-001", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.cycle_id).toBe("cyc-001");
+      expect(parsed.task_id).toBe("a-1");
+      expect(parsed.project_id).toBe("alpha");
+      expect(parsed.verdict).toBe("verified");
+      expect(parsed).toHaveProperty("engineer");
+      expect(parsed).toHaveProperty("verification");
+      expect(parsed).toHaveProperty("review");
+    });
+  });
+
   describe("view inbox subcommand (gs-230)", () => {
     const VIEW_DIR = join(import.meta.dir, "fixtures", "view_inbox_test");
     const FLEET_DIR = join(VIEW_DIR, "state", "_fleet");
