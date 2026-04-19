@@ -1,0 +1,661 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index e81211d..6defa86 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -2603,7 +2603,9 @@ switch (command) {
+         }
+         limit = parsed;
+       }
+-      const { getRecentSessions } = await import("./views/session_tail");
++      const { getRecentSessions, formatAutoMergeSummary } = await import(
++        "./views/session_tail"
++      );
+       const data = await getRecentSessions(limit);
+       if (stValues.json) {
+         console.log(JSON.stringify(data, null, 2));
+@@ -2620,6 +2622,10 @@ switch (command) {
+           console.log(`  duration_minutes: ${s.duration_minutes}`);
+           console.log(`  reviewer:         ${s.reviewer ?? "(unknown)"}`);
+           console.log(`  stop_reason:      ${s.stop_reason ?? "(in-progress)"}`);
++          const autoMergeLine = formatAutoMergeSummary(s);
++          if (autoMergeLine !== null) {
++            console.log(`  ${autoMergeLine}`);
++          }
+           if (s.cycles.length === 0) {
+             console.log("  cycles: (none)");
+           } else {
+diff --git a/src/views/session_tail.ts b/src/views/session_tail.ts
+index 08a301c..e4e59eb 100644
+--- a/src/views/session_tail.ts
++++ b/src/views/session_tail.ts
+@@ -25,6 +25,14 @@ export interface CycleRecord {
+   diff_removed: number | null;
+ }
+ 
++export interface AutoMergeRecord {
++  project_id: string;
++  branch: string;
++  merged_commits: number;
++  result: "ok" | "failed" | "skipped" | "other";
++  reason?: string;
++}
++
+ export interface SessionRecord {
+   session_id: string;
+   started_at: string;
+@@ -35,6 +43,7 @@ export interface SessionRecord {
+   max_parallel_slots: number | null;
+   stop_reason: string | null;
+   cycles: CycleRecord[];
++  auto_merges: AutoMergeRecord[];
+ }
+ 
+ export interface EarlierSessionRow {
+@@ -121,6 +130,7 @@ interface SessionBuilder {
+   cycles: Map<string, CycleBuilder>;
+   // cycles without a cycle_id (shouldn't happen, defensive)
+   orphanCycles: CycleBuilder[];
++  auto_merges: AutoMergeRecord[];
+ }
+ 
+ interface CycleBuilder {
+@@ -151,9 +161,17 @@ function newSessionBuilder(id: string): SessionBuilder {
+     stop_reason: null,
+     cycles: new Map(),
+     orphanCycles: [],
++    auto_merges: [],
+   };
+ }
+ 
++function classifyAutoMergeResult(
++  v: unknown,
++): "ok" | "failed" | "skipped" | "other" {
++  if (v === "ok" || v === "failed" || v === "skipped") return v;
++  return "other";
++}
++
+ function getOrCreateCycle(
+   sb: SessionBuilder,
+   cycleId: string | undefined,
+@@ -279,6 +297,23 @@ function applyEvent(
+       }
+       return;
+     }
++    case "session_end_auto_merge": {
++      const projectId =
++        asString(evt.data.project_id) ?? evt.project_id ?? "unknown";
++      const branch = asString(evt.data.branch) ?? "";
++      const mergedCommits = asNumber(evt.data.merged_commits) ?? 0;
++      const result = classifyAutoMergeResult(evt.data.result);
++      const reason = asString(evt.data.reason);
++      const record: AutoMergeRecord = {
++        project_id: projectId,
++        branch,
++        merged_commits: mergedCommits,
++        result,
++      };
++      if (reason !== null) record.reason = reason;
++      sb.auto_merges.push(record);
++      return;
++    }
+     case "cycle_end": {
+       const cid = evt.cycle_id ?? asString(evt.data.cycle_id) ?? undefined;
+       const projectId =
+@@ -381,9 +416,30 @@ function finalizeSession(
+     max_parallel_slots: sb.max_parallel_slots,
+     stop_reason: sb.stop_reason,
+     cycles,
++    auto_merges: sb.auto_merges,
+   };
+ }
+ 
++// Formats a session's auto_merges as a one-line summary for CLI display.
++// Returns null if the session has no auto_merge events (caller should omit
++// the line entirely — no clutter for the common no-merge case).
++export function formatAutoMergeSummary(
++  session: SessionRecord,
++): string | null {
++  if (session.auto_merges.length === 0) return null;
++  const parts: string[] = [];
++  for (const m of session.auto_merges) {
++    if (m.result === "ok") {
++      parts.push(`${m.project_id}:ok(${m.merged_commits})`);
++    } else if (m.result === "failed") {
++      parts.push(`${m.project_id}:failed`);
++    } else {
++      parts.push(`${m.project_id}:${m.result}`);
++    }
++  }
++  return `auto-merge: ${parts.join(" ")}`;
++}
++
+ function toEarlierRow(record: SessionRecord): EarlierSessionRow {
+   let verified = 0;
+   let failed = 0;
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 71924d6..fe5f7e8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1709,7 +1709,7 @@
+   {
+     "id": "gs-256",
+     "title": "Surface `session_end_auto_merge` events in `view session-tail` output. CREATE ONLY: modify `src/views/session_tail.ts` (and its types, if any) so each rendered session block includes a one-line summary of session_end_auto_merge events: `auto-merge: <projectA:ok(N)> <projectB:failed>` — list only projects that had a session_end_auto_merge event in that session window, with `ok(N)` showing merged commit count and `failed` showing the failure state. If no events, omit the line entirely (don't clutter). JSON shape: add an `auto_merges: Array<{project_id, branch, merged_commits, result, reason?}>` field to each session in the SessionTailData type. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) session with one ok merge renders the line + JSON field; (b) session with one failed merge shows `failed`; (c) session with no merge events omits the line; (d) mixed ok/failed renders both. Motivation: tonight's harness improvement (gs-254) makes the merge visible in PROGRESS.jsonl but the reference views don't yet surface it. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/views/session_tail.ts",
+diff --git a/tests/views/session_tail.test.ts b/tests/views/session_tail.test.ts
+index a334ac6..9db9cd3 100644
+--- a/tests/views/session_tail.test.ts
++++ b/tests/views/session_tail.test.ts
+@@ -3,7 +3,10 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { join } from "path";
+ import { tmpdir } from "os";
+ import { setRootDir } from "../../src/state";
+-import { getRecentSessions } from "../../src/views/session_tail";
++import {
++  formatAutoMergeSummary,
++  getRecentSessions,
++} from "../../src/views/session_tail";
+ 
+ const FIXTURE_DIR = join(tmpdir(), `gs-session-tail-${process.pid}`);
+ 
+@@ -227,6 +230,124 @@ describe("getRecentSessions", () => {
+     expect(s.cycles).toHaveLength(1);
+   });
+ 
++  it("parses session_end_auto_merge events into the auto_merges array and formats the summary line (ok)", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 3,
++          result: "ok",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions).toHaveLength(1);
++    expect(data.sessions[0].auto_merges).toEqual([
++      {
++        project_id: "generalstaff",
++        branch: "bot/work",
++        merged_commits: 3,
++        result: "ok",
++      },
++    ]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:ok(3)",
++    );
++  });
++
++  it("renders 'failed' for a failed session_end_auto_merge and keeps the reason", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 0,
++          result: "failed",
++          reason: "dirty working tree",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toEqual([
++      {
++        project_id: "generalstaff",
++        branch: "bot/work",
++        merged_commits: 0,
++        result: "failed",
++        reason: "dirty working tree",
++      },
++    ]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:failed",
++    );
++  });
++
++  it("omits the auto-merge line when a session has no merge events", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      cycleStart("sess-a", "c1", "2026-04-18T10:01:00Z"),
++      cycleEnd("sess-a", "c1", "2026-04-18T10:02:00Z", "verified"),
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toEqual([]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBeNull();
++  });
++
++  it("renders both projects when a session has mixed ok/failed auto-merges", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 2,
++          result: "ok",
++        },
++      },
++      {
++        timestamp: "2026-04-18T10:09:30Z",
++        event: "session_end_auto_merge",
++        project_id: "gamr",
++        data: {
++          session_id: "sess-a",
++          project_id: "gamr",
++          branch: "bot/work",
++          merged_commits: 0,
++          result: "failed",
++          reason: "conflict",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toHaveLength(2);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:ok(2) gamr:failed",
++    );
++  });
++
+   it("classifies verified_weak as 'verified' and unknown outcome as 'other'", async () => {
+     writeFleetLog([
+       sessionStart("sess-a", "2026-04-18T10:00:00Z"),
+
+
+Diff summary: src/cli.ts                       |   8 ++-
+ src/views/session_tail.ts        |  56 ++++++++++++++++++
+ state/generalstaff/tasks.json    |   2 +-
+ tests/views/session_tail.test.ts | 123 ++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 186 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T09:27:26.099Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve ece90f71 after 2 attempts (status=128, stderr=fatal: bad object ece90f71ca76089a1e35e8991aaaff3d46bf43fe)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_092838.md
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

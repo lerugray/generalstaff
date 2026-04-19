@@ -1,0 +1,288 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index e81211d..6defa86 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -2603,7 +2603,9 @@ switch (command) {
+         }
+         limit = parsed;
+       }
+-      const { getRecentSessions } = await import("./views/session_tail");
++      const { getRecentSessions, formatAutoMergeSummary } = await import(
++        "./views/session_tail"
++      );
+       const data = await getRecentSessions(limit);
+       if (stValues.json) {
+         console.log(JSON.stringify(data, null, 2));
+@@ -2620,6 +2622,10 @@ switch (command) {
+           console.log(`  duration_minutes: ${s.duration_minutes}`);
+           console.log(`  reviewer:         ${s.reviewer ?? "(unknown)"}`);
+           console.log(`  stop_reason:      ${s.stop_reason ?? "(in-progress)"}`);
++          const autoMergeLine = formatAutoMergeSummary(s);
++          if (autoMergeLine !== null) {
++            console.log(`  ${autoMergeLine}`);
++          }
+           if (s.cycles.length === 0) {
+             console.log("  cycles: (none)");
+           } else {
+diff --git a/src/views/session_tail.ts b/src/views/session_tail.ts
+index 08a301c..e4e59eb 100644
+--- a/src/views/session_tail.ts
++++ b/src/views/session_tail.ts
+@@ -25,6 +25,14 @@ export interface CycleRecord {
+   diff_removed: number | null;
+ }
+ 
++export interface AutoMergeRecord {
++  project_id: string;
++  branch: string;
++  merged_commits: number;
++  result: "ok" | "failed" | "skipped" | "other";
++  reason?: string;
++}
++
+ export interface SessionRecord {
+   session_id: string;
+   started_at: string;
+@@ -35,6 +43,7 @@ export interface SessionRecord {
+   max_parallel_slots: number | null;
+   stop_reason: string | null;
+   cycles: CycleRecord[];
++  auto_merges: AutoMergeRecord[];
+ }
+ 
+ export interface EarlierSessionRow {
+@@ -121,6 +130,7 @@ interface SessionBuilder {
+   cycles: Map<string, CycleBuilder>;
+   // cycles without a cycle_id (shouldn't happen, defensive)
+   orphanCycles: CycleBuilder[];
++  auto_merges: AutoMergeRecord[];
+ }
+ 
+ interface CycleBuilder {
+@@ -151,9 +161,17 @@ function newSessionBuilder(id: string): SessionBuilder {
+     stop_reason: null,
+     cycles: new Map(),
+     orphanCycles: [],
++    auto_merges: [],
+   };
+ }
+ 
++function classifyAutoMergeResult(
++  v: unknown,
++): "ok" | "failed" | "skipped" | "other" {
++  if (v === "ok" || v === "failed" || v === "skipped") return v;
++  return "other";
++}
++
+ function getOrCreateCycle(
+   sb: SessionBuilder,
+   cycleId: string | undefined,
+@@ -279,6 +297,23 @@ function applyEvent(
+       }
+       return;
+     }
++    case "session_end_auto_merge": {
++      const projectId =
++        asString(evt.data.project_id) ?? evt.project_id ?? "unknown";
++      const branch = asString(evt.data.branch) ?? "";
++      const mergedCommits = asNumber(evt.data.merged_commits) ?? 0;
++      const result = classifyAutoMergeResult(evt.data.result);
++      const reason = asString(evt.data.reason);
++      const record: AutoMergeRecord = {
++        project_id: projectId,
++        branch,
++        merged_commits: mergedCommits,
++        result,
++      };
++      if (reason !== null) record.reason = reason;
++      sb.auto_merges.push(record);
++      return;
++    }
+     case "cycle_end": {
+       const cid = evt.cycle_id ?? asString(evt.data.cycle_id) ?? undefined;
+       const projectId =
+@@ -381,9 +416,30 @@ function finalizeSession(
+     max_parallel_slots: sb.max_parallel_slots,
+     stop_reason: sb.stop_reason,
+     cycles,
++    auto_merges: sb.auto_merges,
+   };
+ }
+ 
++// Formats a session's auto_merges as a one-line summary for CLI display.
++// Returns null if the session has no auto_merge events (caller should omit
++// the line entirely — no clutter for the common no-merge case).
++export function formatAutoMergeSummary(
++  session: SessionRecord,
++): string | null {
++  if (session.auto_merges.length === 0) return null;
++  const parts: string[] = [];
++  for (const m of session.auto_merges) {
++    if (m.result === "ok") {
++      parts.push(`${m.project_id}:ok(${m.merged_commits})`);
++    } else if (m.result === "failed") {
++      parts.push(`${m.project_id}:failed`);
++    } else {
++      parts.push(`${m.project_id}:${m.result}`);
++    }
++  }
++  return `auto-merge: ${parts.join(" ")}`;
++}
++
+ function toEarlierRow(record: SessionRecord): EarlierSessionRow {
+   let verified = 0;
+   let failed = 0;
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 71924d6..fe5f7e8 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1709,7 +1709,7 @@
+   {
+     "id": "gs-256",
+     "title": "Surface `session_end_auto_merge` events in `view session-tail` output. CREATE ONLY: modify `src/views/session_tail.ts` (and its types, if any) so each rendered session block includes a one-line summary of session_end_auto_merge events: `auto-merge: <projectA:ok(N)> <projectB:failed>` — list only projects that had a session_end_auto_merge event in that session window, with `ok(N)` showing merged commit count and `failed` showing the failure state. If no events, omit the line entirely (don't clutter). JSON shape: add an `auto_merges: Array<{project_id, branch, merged_commits, result, reason?}>` field to each session in the SessionTailData type. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) session with one ok merge renders the line + JSON field; (b) session with one failed merge shows `failed`; (c) session with no merge events omits the line; (d) mixed ok/failed renders both. Motivation: tonight's harness improvement (gs-254) makes the merge visible in PROGRESS.jsonl but the reference views don't yet surface it. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/views/session_tail.ts",
+diff --git a/tests/views/session_tail.test.ts b/tests/views/session_tail.test.ts
+index a334ac6..9db9cd3 100644
+--- a/tests/views/session_tail.test.ts
++++ b/tests/views/session_tail.test.ts
+@@ -3,7 +3,10 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
+ import { join } from "path";
+ import { tmpdir } from "os";
+ import { setRootDir } from "../../src/state";
+-import { getRecentSessions } from "../../src/views/session_tail";
++import {
++  formatAutoMergeSummary,
++  getRecentSessions,
++} from "../../src/views/session_tail";
+ 
+ const FIXTURE_DIR = join(tmpdir(), `gs-session-tail-${process.pid}`);
+ 
+@@ -227,6 +230,124 @@ describe("getRecentSessions", () => {
+     expect(s.cycles).toHaveLength(1);
+   });
+ 
++  it("parses session_end_auto_merge events into the auto_merges array and formats the summary line (ok)", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 3,
++          result: "ok",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions).toHaveLength(1);
++    expect(data.sessions[0].auto_merges).toEqual([
++      {
++        project_id: "generalstaff",
++        branch: "bot/work",
++        merged_commits: 3,
++        result: "ok",
++      },
++    ]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:ok(3)",
++    );
++  });
++
++  it("renders 'failed' for a failed session_end_auto_merge and keeps the reason", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 0,
++          result: "failed",
++          reason: "dirty working tree",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toEqual([
++      {
++        project_id: "generalstaff",
++        branch: "bot/work",
++        merged_commits: 0,
++        result: "failed",
++        reason: "dirty working tree",
++      },
++    ]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:failed",
++    );
++  });
++
++  it("omits the auto-merge line when a session has no merge events", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      cycleStart("sess-a", "c1", "2026-04-18T10:01:00Z"),
++      cycleEnd("sess-a", "c1", "2026-04-18T10:02:00Z", "verified"),
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toEqual([]);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBeNull();
++  });
++
++  it("renders both projects when a session has mixed ok/failed auto-merges", async () => {
++    writeFleetLog([
++      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
++      {
++        timestamp: "2026-04-18T10:09:00Z",
++        event: "session_end_auto_merge",
++        project_id: "generalstaff",
++        data: {
++          session_id: "sess-a",
++          project_id: "generalstaff",
++          branch: "bot/work",
++          merged_commits: 2,
++          result: "ok",
++        },
++      },
++      {
++        timestamp: "2026-04-18T10:09:30Z",
++        event: "session_end_auto_merge",
++        project_id: "gamr",
++        data: {
++          session_id: "sess-a",
++          project_id: "gamr",
++          branch: "bot/work",
++          merged_commits: 0,
++          result: "failed",
++          reason: "conflict",
++        },
++      },
++      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
++    ]);
++
++    const data = await getRecentSessions();
++    expect(data.sessions[0].auto_merges).toHaveLength(2);
++    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
++      "auto-merge: generalstaff:ok(2) gamr:failed",
++    );
++  });
++
+   it("classifies verified_weak as 'verified' and unknown outcome as 'other'", async () => {
+     writeFleetLog([
+       sessionStart("sess-a", "2026-04-18T10:00:00Z"),

@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task, no hands-off violations, and the verification command passed successfully.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-256",
+      "evidence": "The diff modifies src/views/session_tail.ts to add AutoMergeRecord type, auto_merges field to SessionRecord and SessionBuilder, and implements formatAutoMergeSummary function. It also updates src/cli.ts to use the new formatAutoMergeSummary function and adds tests in tests/views/session_tail.test.ts covering all required scenarios.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command passed with exit code 0, confirming all tests are green. The changes are scoped correctly and match the task requirements exactly."
+}
