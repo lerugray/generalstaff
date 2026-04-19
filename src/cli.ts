@@ -22,7 +22,7 @@ import {
   writeSessionPid,
   removeSessionPid,
 } from "./safety";
-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -245,10 +245,23 @@ Usage:
     Example: generalstaff message send --from=bot --kind=handoff --task-id=gs-240 "body as final arg"
 
   generalstaff --version                                  Show version
-  generalstaff --help                                     Show this help`);
+  generalstaff --help                                     Show this help
+
+Global flags:
+  --no-color                                              Disable ANSI color output (also honors NO_COLOR env var)`);
 }
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+
+// gs-245: --no-color is global. Detect it before any subcommand parseArgs
+// runs (parseArgs is strict-by-default and would reject the unknown flag),
+// then strip it from the args array so each subcommand sees its own
+// flags only. Combined with the NO_COLOR env var (no-color.org), this
+// is the single source of truth for whether ANSI color is emitted.
+if (rawArgs.includes("--no-color")) {
+  setColorOverride(false);
+}
+const args = stripNoColorArgs(rawArgs);
 
 if (args.includes("--version") || args.includes("-v")) {
   console.log(VERSION);
