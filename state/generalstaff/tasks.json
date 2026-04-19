@@ -1543,12 +1543,13 @@
   {
     "id": "gs-242",
     "title": "Expand `generalstaff doctor` with additional sanity checks. CREATE ONLY: extend the existing `case \"doctor\"` handler in `src/cli.ts` (or wherever doctor logic lives — inspect first) with 4 new checks: (1) each registered project.path exists and is a git repo; (2) each registered project has state/<id>/ dir with PROGRESS.jsonl readable; (3) each project tasks.json parses as valid JSON if present; (4) digests/ is writable (or creatable); report each check with ✓/✗ markers and a one-line detail. Preserve all existing checks; additions only. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) all-green fixture produces all ✓; (b) missing project.path produces ✗ with path in detail; (c) malformed tasks.json produces ✗; (d) missing digests/ still passes if parent dir writable. Expected diff: ~150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T05:02:49.022Z"
   },
   {
     "id": "gs-243",

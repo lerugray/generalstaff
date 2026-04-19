@@ -3641,3 +3641,224 @@ dispatcher:
     });
   });
 });
+
+// gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗
+// markers. Unit-tested directly; the CLI-integration assertions lean
+// on the existing `runCli(["doctor"])` flow covered by doctor.test.ts.
+describe("doctor sanity checks (gs-242)", () => {
+  const FIXTURE = join(tmpdir(), "gs-242-doctor-sanity");
+
+  beforeEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+    mkdirSync(FIXTURE, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  function makeProject(id: string, path: string) {
+    return {
+      id,
+      path,
+      priority: 1,
+      engineer_command: "echo hi",
+      verification_command: "echo ok",
+      cycle_budget_minutes: 30,
+      hands_off: ["CLAUDE.md"],
+    } as unknown as import("../src/types").ProjectConfig;
+  }
+
+  it("checkProjectPaths passes for every valid git repo (all-green fixture)", async () => {
+    const { checkProjectPaths } = await import("../src/doctor");
+    const repoA = join(FIXTURE, "repo-a");
+    const repoB = join(FIXTURE, "repo-b");
+    mkdirSync(join(repoA, ".git"), { recursive: true });
+    mkdirSync(join(repoB, ".git"), { recursive: true });
+    const result = checkProjectPaths([
+      makeProject("a", repoA),
+      makeProject("b", repoB),
+    ]);
+    expect(result.problems).toEqual([]);
+    expect(result.okDetail).toContain("2 project(s)");
+  });
+
+  it("checkProjectPaths flags a missing project.path and includes it in the detail", async () => {
+    const { checkProjectPaths } = await import("../src/doctor");
+    const missing = join(FIXTURE, "does-not-exist");
+    const result = checkProjectPaths([makeProject("ghost", missing)]);
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]!).toContain("ghost");
+    expect(result.problems[0]!).toContain(missing);
+  });
+
+  it("checkProjectStateDirs passes when state dir exists and PROGRESS.jsonl is readable", async () => {
+    const { checkProjectStateDirs } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      mkdirSync(join(FIXTURE, "state", "alpha"), { recursive: true });
+      writeFileSync(
+        join(FIXTURE, "state", "alpha", "PROGRESS.jsonl"),
+        '{"event":"test"}\n',
+      );
+      const result = checkProjectStateDirs([
+        makeProject("alpha", join(FIXTURE, "repo")),
+      ]);
+      expect(result.problems).toEqual([]);
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("checkProjectStateDirs flags a project whose state dir is missing", async () => {
+    const { checkProjectStateDirs } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      const result = checkProjectStateDirs([
+        makeProject("beta", join(FIXTURE, "repo")),
+      ]);
+      expect(result.problems).toHaveLength(1);
+      expect(result.problems[0]!).toContain("beta");
+      expect(result.problems[0]!).toContain("missing state dir");
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("checkProjectTasksJson flags malformed JSON with project id in detail", async () => {
+    const { checkProjectTasksJson } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      mkdirSync(join(FIXTURE, "state", "broken"), { recursive: true });
+      writeFileSync(
+        join(FIXTURE, "state", "broken", "tasks.json"),
+        "{not valid json",
+      );
+      const result = checkProjectTasksJson([
+        makeProject("broken", join(FIXTURE, "repo")),
+      ]);
+      expect(result.problems).toHaveLength(1);
+      expect(result.problems[0]!).toContain("broken");
+      expect(result.problems[0]!).toContain("tasks.json");
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("checkProjectTasksJson passes when tasks.json is absent (not every project uses it)", async () => {
+    const { checkProjectTasksJson } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      const result = checkProjectTasksJson([
+        makeProject("none", join(FIXTURE, "repo")),
+      ]);
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("no tasks.json");
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("checkDigestsWritable passes when digests/ exists and is writable", async () => {
+    const { checkDigestsWritable } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      mkdirSync(join(FIXTURE, "digests"), { recursive: true });
+      const result = checkDigestsWritable();
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("digests/");
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("checkDigestsWritable still passes when digests/ is missing but parent is writable", async () => {
+    const { checkDigestsWritable } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    try {
+      // No digests/ created. Parent FIXTURE is writable by test owner.
+      const result = checkDigestsWritable();
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("will be created");
+    } finally {
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("runDoctor prints ✓ markers for the new sanity checks on an all-green fixture", async () => {
+    const { runDoctor } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    const originalLog = console.log;
+    const out: string[] = [];
+    console.log = (...args: unknown[]) => {
+      out.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      const repo = join(FIXTURE, "repo");
+      mkdirSync(join(repo, ".git"), { recursive: true });
+      mkdirSync(join(FIXTURE, "state", "solo"), { recursive: true });
+      mkdirSync(join(FIXTURE, "digests"), { recursive: true });
+      await runDoctor({
+        loadProjects: async () => [makeProject("solo", repo)],
+        exitOnFailure: false,
+      });
+      const joined = out.join("\n");
+      expect(joined).toContain("Sanity checks");
+      expect(joined).toMatch(/✓\s+project paths/);
+      expect(joined).toMatch(/✓\s+state dirs/);
+      expect(joined).toMatch(/✓\s+tasks\.json/);
+      expect(joined).toMatch(/✓\s+digests\//);
+    } finally {
+      console.log = originalLog;
+      setRootDir(originalRoot);
+    }
+  });
+
+  it("runDoctor prints ✗ markers when a project path is missing or tasks.json is malformed", async () => {
+    const { runDoctor } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    const originalLog = console.log;
+    const out: string[] = [];
+    console.log = (...args: unknown[]) => {
+      out.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      // Project path missing entirely.
+      const ghost = makeProject("ghost", join(FIXTURE, "nope"));
+      // Project whose tasks.json is malformed.
+      const junk = makeProject("junk", join(FIXTURE, "junk-repo"));
+      mkdirSync(join(FIXTURE, "junk-repo", ".git"), { recursive: true });
+      mkdirSync(join(FIXTURE, "state", "junk"), { recursive: true });
+      writeFileSync(
+        join(FIXTURE, "state", "junk", "tasks.json"),
+        "not-json",
+      );
+      await runDoctor({
+        loadProjects: async () => [ghost, junk],
+        exitOnFailure: false,
+      });
+      const joined = out.join("\n");
+      expect(joined).toMatch(/✗\s+project paths.*ghost/);
+      expect(joined).toMatch(/✗\s+tasks\.json.*junk/);
+    } finally {
+      console.log = originalLog;
+      setRootDir(originalRoot);
+    }
+  });
+});

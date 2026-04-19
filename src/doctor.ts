@@ -1,7 +1,17 @@
 // GeneralStaff — doctor command: check prerequisites + diagnose
 // auto-resolvable issues. Pass { fix: true } to prompt for each fix.
 
-import { existsSync, mkdirSync, rmSync, statSync } from "fs";
+import {
+  accessSync,
+  constants as fsConstants,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  unlinkSync,
+} from "fs";
 import { unlink } from "fs/promises";
 import { join } from "path";
 import { $ } from "bun";
@@ -181,6 +191,144 @@ export async function findStaleWorktreeIssues(
   return issues;
 }
 
+// gs-242: four additional sanity checks surfaced by `doctor` with
+// ✓/✗ markers. These run alongside (not in place of) the pre-existing
+// PASS/FAIL/WARN checks so existing behaviour is preserved.
+//
+// Each helper returns a `SanityCheckResult` with a human-readable
+// detail line. Empty `problems` array means the check passed.
+
+export interface SanityCheckResult {
+  name: string;
+  problems: string[];
+  okDetail: string;
+}
+
+// Check (1): each registered project's path exists and is a git repo.
+// Mirrors findProjectPathProblems but presented as a single ✓/✗ check
+// so the doctor output can summarize "all projects point at real repos".
+export function checkProjectPaths(
+  projects: ProjectConfig[],
+): SanityCheckResult {
+  const problems: string[] = [];
+  for (const p of projects) {
+    if (!existsSync(p.path)) {
+      problems.push(`${p.id}: path does not exist — ${p.path}`);
+      continue;
+    }
+    if (!existsSync(join(p.path, ".git"))) {
+      problems.push(`${p.id}: not a git repository — ${p.path}`);
+    }
+  }
+  return {
+    name: "project paths",
+    problems,
+    okDetail: `${projects.length} project(s) point at valid git repos`,
+  };
+}
+
+// Check (2): each registered project has a state/<id>/ dir and its
+// PROGRESS.jsonl (if present) is readable. We do NOT require the file
+// to exist — a freshly-registered project won't have one yet.
+export function checkProjectStateDirs(
+  projects: ProjectConfig[],
+): SanityCheckResult {
+  const problems: string[] = [];
+  const stateRoot = join(getRootDir(), "state");
+  for (const p of projects) {
+    const dir = join(stateRoot, p.id);
+    if (!existsSync(dir)) {
+      problems.push(`${p.id}: missing state dir — ${dir}`);
+      continue;
+    }
+    const progress = join(dir, "PROGRESS.jsonl");
+    if (existsSync(progress)) {
+      try {
+        accessSync(progress, fsConstants.R_OK);
+      } catch {
+        problems.push(`${p.id}: PROGRESS.jsonl not readable — ${progress}`);
+      }
+    }
+  }
+  return {
+    name: "state dirs",
+    problems,
+    okDetail:
+      projects.length === 0
+        ? "no projects registered"
+        : `state/<id>/ present and PROGRESS.jsonl readable for ${projects.length} project(s)`,
+  };
+}
+
+// Check (3): each project's tasks.json (if present) parses as valid
+// JSON. Missing is fine — many projects carry work in bot_tasks.md or
+// upstream issue trackers instead.
+export function checkProjectTasksJson(
+  projects: ProjectConfig[],
+): SanityCheckResult {
+  const problems: string[] = [];
+  const stateRoot = join(getRootDir(), "state");
+  let checkedCount = 0;
+  for (const p of projects) {
+    const path = join(stateRoot, p.id, "tasks.json");
+    if (!existsSync(path)) continue;
+    checkedCount++;
+    try {
+      const raw = readFileSync(path, "utf-8");
+      JSON.parse(raw);
+    } catch (e) {
+      problems.push(
+        `${p.id}: tasks.json does not parse — ${(e as Error).message}`,
+      );
+    }
+  }
+  return {
+    name: "tasks.json",
+    problems,
+    okDetail:
+      checkedCount === 0
+        ? "no tasks.json files present"
+        : `${checkedCount} tasks.json file(s) parse as valid JSON`,
+  };
+}
+
+// Check (4): the digests/ directory is writable — either it exists
+// and is writable, or it's missing but the parent dir is writable so
+// it can be created. We do NOT create it here — doctor without --fix
+// is read-only.
+export function checkDigestsWritable(): SanityCheckResult {
+  const root = getRootDir();
+  const digests = join(root, "digests");
+  const problems: string[] = [];
+  let okDetail = `digests/ writable — ${digests}`;
+  if (existsSync(digests)) {
+    try {
+      accessSync(digests, fsConstants.W_OK);
+      // Belt-and-braces: accessSync on Windows sometimes reports W_OK
+      // on directories that actually reject writes. Probe with a
+      // throwaway file and clean up immediately.
+      const probe = join(digests, `.doctor-probe-${process.pid}`);
+      writeFileSync(probe, "");
+      unlinkSync(probe);
+    } catch (e) {
+      problems.push(
+        `digests/ exists but is not writable — ${digests}: ${(e as Error).message}`,
+      );
+    }
+  } else {
+    // Parent-dir writability determines whether digests/ can be created.
+    try {
+      accessSync(root, fsConstants.W_OK);
+      okDetail = `digests/ will be created on first write — parent ${root} is writable`;
+    } catch (e) {
+      problems.push(
+        `digests/ missing and parent dir not writable — ${root}: ${(e as Error).message}`,
+      );
+    }
+  }
+  return { name: "digests/", problems, okDetail };
+}
+
 export async function findOrphanedStopFileIssue(): Promise<DiagnosticIssue[]> {
   const stopPath = join(getRootDir(), "STOP");
   if (!existsSync(stopPath)) return [];
@@ -283,6 +431,26 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     }
   }
   const projectHealthPassed = projectPathProblems.length === 0;
+
+  // gs-242: sanity checks with ✓/✗ markers. These run regardless of
+  // projectsLoadError (a missing projects.yaml simply means the
+  // project-scoped checks evaluate against an empty list).
+  console.log("\nSanity checks...\n");
+  const sanityChecks: SanityCheckResult[] = [
+    checkProjectPaths(projects),
+    checkProjectStateDirs(projects),
+    checkProjectTasksJson(projects),
+    checkDigestsWritable(),
+  ];
+  for (const check of sanityChecks) {
+    if (check.problems.length === 0) {
+      console.log(`  ✓  ${check.name} — ${check.okDetail}`);
+    } else {
+      for (const problem of check.problems) {
+        console.log(`  ✗  ${check.name} — ${problem}`);
+      }
+    }
+  }
 
   if (!opts.fix) {
     console.log("");
