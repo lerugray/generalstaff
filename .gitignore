@@ -1,5 +1,7 @@
 # Real projects.yaml may contain absolute paths Ray prefers private
 projects.yaml
+# Tracked fixture registry — synthetic paths, safe to commit (gs-241).
+!tests/fixtures/view_integration/projects.yaml
 
 # Logs from dispatcher runs
 logs/
