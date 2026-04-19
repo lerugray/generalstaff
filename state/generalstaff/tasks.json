@@ -1368,5 +1368,55 @@
       "tests/views/inbox.test.ts"
     ],
     "completed_at": "2026-04-19T02:21:38.760Z"
+  },
+  {
+    "id": "gs-226",
+    "title": "Phase 6 CLI wiring: add `view` subcommand + `fleet-overview` handler. CREATE ONLY: modifications to `src/cli.ts` — add `case \"view\"` that dispatches on the next positional arg (the sub-view name); implement `view fleet-overview [--json]` by importing and calling `getFleetOverview()` from `src/views/fleet_overview.ts`; extend the main `--help` output to document `view <name>`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view fleet-overview` emits a human-readable table (one row per project: id, last_cycle relative time, cycles_total, verified, failed, bot_pickable, auto_merge, branch) plus an aggregates summary line (total_cycles, pass_rate as %, slot_efficiency_recent or `n/a`); `--json` emits the full FleetOverviewData object as JSON. `generalstaff view` with no sub-view prints usage listing all sub-views (fleet-overview + stubs for the other four queued below) and exits 1. `generalstaff view unknown-name` prints `Error: unknown view 'unknown-name'. Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox` and exits 1. Reuse `formatRelativeTime` from `src/relative_time.ts` if it exists (otherwise inline a minimal relative-time formatter — do not create a new shared module). Tests: (a) --json output parses and contains projects[] + aggregates; (b) no-subcommand prints usage + exits 1; (c) unknown view errors + exits 1; (d) table format includes all registered projects as rows; (e) aggregates summary line renders pass_rate as percentage. Expected diff: ~180 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-227",
+    "title": "Phase 6 CLI wiring: `view task-queue <project-id>` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with a `task-queue` sub-view that calls `getProjectTaskQueue(projectId)` from `src/views/task_queue.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view task-queue <project-id>` emits four labeled sections (In-flight, Ready, Blocked, Shipped) each listing the tasks in that bucket with id, priority, truncated title, and any block_reason/age_label; `--json` emits the full TaskQueueData object. Missing project-id arg prints `Error: view task-queue requires <project-id>` and exits 1. Unknown project-id surfaces the TaskQueueError message (e.g. `unknown project: foo`) and exits 1. Tests: (a) json output structure; (b) missing arg errors + exits 1; (c) unknown project errors + exits 1; (d) 4-section labeled output; (e) empty-bucket rendering (e.g. 'In-flight: (none)'). Expected diff: ~150 lines. Depends on gs-226 shipping the view-subcommand scaffold first.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-228",
+    "title": "Phase 6 CLI wiring: `view session-tail [--limit=N]` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with a `session-tail` sub-view that calls `getRecentSessions(limit)` from `src/views/session_tail.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view session-tail` emits newest-first session blocks — each block shows session_id, started_at, duration_minutes, reviewer, stop_reason, and a compact per-cycle line listing cycle_id + verdict + task_id + project_id + duration_seconds; default limit=3. `--limit=N` overrides the limit. `--json` emits the full SessionTailData (sessions[] + earlier_rail[] + rendered_at). Invalid --limit (non-integer or <=0) prints `Error: --limit must be a positive integer` and exits 1. Tests: (a) json output structure; (b) default limit=3; (c) --limit=5 honored; (d) invalid --limit errors + exits 1; (e) empty PROGRESS.jsonl renders 'No sessions yet' friendly message (not an error). Expected diff: ~160 lines. Depends on gs-226.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-229",
+    "title": "Phase 6 CLI wiring: `view dispatch-detail <cycle-id>` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with a `dispatch-detail` sub-view that calls `getDispatchDetail(cycleId)` from `src/views/dispatch_detail.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view dispatch-detail <cycle-id>` emits a structured text report — header (cycle_id, task_id + title, project_id, verdict, duration_seconds), phase breakdown (engineer / verification / review with per-phase durations and details), diff summary (diff_added / diff_removed, files_touched list with per-file add/del counts), and a checks block (scope / hands_off / silent_failures each with pass/fail + detail). `--json` emits the full DispatchDetailData. Missing cycle-id prints `Error: view dispatch-detail requires <cycle-id>` and exits 1. Unknown cycle-id surfaces the DispatchDetailError message and exits 1. Tests: (a) json output structure; (b) missing arg errors + exits 1; (c) unknown cycle errors + exits 1; (d) phase durations render as integers; (e) files_touched renders with +/− markers. Expected diff: ~180 lines. Depends on gs-226.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-230",
+    "title": "Phase 6 CLI wiring: `view inbox [--since=<iso>]` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with an `inbox` sub-view that calls `getInboxView(since)` from `src/views/inbox.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view inbox` emits date-labeled groups (newest first), each group showing the date_label header then per-message rows (timestamp, from with from_type glyph — human=square dot, bot=open circle, system=em-dash, kind chip if non-null, body, and refs on a continuation line); default since = 7 days ago ISO. `--since=<iso>` filters messages to that timestamp forward. `--json` emits the full InboxData. Invalid --since surfaces the InboxError message and exits 1. Tests: (a) json output structure; (b) default since = 7 days; (c) --since flag honored; (d) invalid --since errors + exits 1; (e) empty messages.jsonl renders 'No messages.' friendly text (not an error); (f) from_type glyph rendering (human/bot/system differentiation). Expected diff: ~170 lines. Depends on gs-226.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
