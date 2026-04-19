@@ -293,6 +293,31 @@ describe("pickNextProject", () => {
 });
 
 describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
+  // gs-232: in parallel mode (maxCount > 1) the picker now consults
+  // hasMoreWork() and skips empty-queue projects. Tests in this block
+  // that exercise N > 1 must seed a pending tasks.json entry for each
+  // project or they would be filtered out. The helper below mirrors
+  // `greenfieldHasMoreWork`'s expected layout: <projectPath>/state/
+  // <projectId>/tasks.json with at least one "pending" entry.
+  function seedProjectWithWork(
+    id: string,
+    overrides: Partial<ProjectConfig> = {},
+  ): ProjectConfig {
+    const projectPath = join(TEST_DIR, "projects", id);
+    const tasksDir = join(projectPath, "state", id);
+    mkdirSync(tasksDir, { recursive: true });
+    const tasks = [
+      {
+        id: `${id}-001`,
+        title: `${id} placeholder pending task`,
+        status: "pending",
+        priority: 1,
+      },
+    ];
+    writeFileSync(join(tasksDir, "tasks.json"), JSON.stringify(tasks), "utf8");
+    return makeProject({ id, path: projectPath, ...overrides });
+  }
+
   beforeEach(() => {
     mkdirSync(TEST_DIR, { recursive: true });
     setRootDir(TEST_DIR);
@@ -314,6 +339,8 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
   });
 
   it("maxCount=1 matches pickNextProject (back-compat for sequential dispatch)", async () => {
+    // Sequential mode: empty-queue filter is intentionally NOT applied
+    // (gs-232), so these `/tmp/test`-path projects still pick normally.
     const config = makeConfig();
     const projects = [
       makeProject({ id: "low-pri", priority: 5 }),
@@ -329,9 +356,9 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
   it("maxCount=N returns up to N distinct picks in score order", async () => {
     const config = makeConfig();
     const projects = [
-      makeProject({ id: "a", priority: 1 }),
-      makeProject({ id: "b", priority: 2 }),
-      makeProject({ id: "c", priority: 3 }),
+      seedProjectWithWork("a", { priority: 1 }),
+      seedProjectWithWork("b", { priority: 2 }),
+      seedProjectWithWork("c", { priority: 3 }),
     ];
     const fleet = makeFleet();
     const picks = await pickNextProjects(projects, config, fleet, new Set(), 3);
@@ -345,8 +372,8 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
   it("returns fewer than maxCount when fewer projects are eligible", async () => {
     const config = makeConfig();
     const projects = [
-      makeProject({ id: "a", priority: 1 }),
-      makeProject({ id: "b", priority: 2 }),
+      seedProjectWithWork("a", { priority: 1 }),
+      seedProjectWithWork("b", { priority: 2 }),
     ];
     const fleet = makeFleet();
     const picks = await pickNextProjects(projects, config, fleet, new Set(), 5);
@@ -356,9 +383,9 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
   it("respects skipProjectIds when filling multiple slots", async () => {
     const config = makeConfig();
     const projects = [
-      makeProject({ id: "skipped", priority: 1 }),
-      makeProject({ id: "a", priority: 2 }),
-      makeProject({ id: "b", priority: 3 }),
+      seedProjectWithWork("skipped", { priority: 1 }),
+      seedProjectWithWork("a", { priority: 2 }),
+      seedProjectWithWork("b", { priority: 3 }),
     ];
     const fleet = makeFleet();
     const picks = await pickNextProjects(
@@ -375,9 +402,9 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
     const config = makeConfig();
     writeFileSync(join(TEST_DIR, "next_project.txt"), "lo\n", "utf8");
     const projects = [
-      makeProject({ id: "hi", priority: 1 }),
-      makeProject({ id: "lo", priority: 5 }),
-      makeProject({ id: "med", priority: 3 }),
+      seedProjectWithWork("hi", { priority: 1 }),
+      seedProjectWithWork("lo", { priority: 5 }),
+      seedProjectWithWork("med", { priority: 3 }),
     ];
     const fleet = makeFleet();
     const picks = await pickNextProjects(projects, config, fleet, new Set(), 3);
@@ -395,8 +422,8 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
     const config = makeConfig();
     writeFileSync(join(TEST_DIR, "next_project.txt"), "hi\n", "utf8");
     const projects = [
-      makeProject({ id: "hi", priority: 1 }),
-      makeProject({ id: "lo", priority: 5 }),
+      seedProjectWithWork("hi", { priority: 1 }),
+      seedProjectWithWork("lo", { priority: 5 }),
     ];
     const fleet = makeFleet();
     const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
@@ -427,6 +454,146 @@ describe("pickNextProjects (gs-185 / Phase 4 picker)", () => {
       5,
     );
     expect(picks).toEqual([]);
+  });
+});
+
+// gs-232: in parallel mode (maxCount > 1) the picker consults
+// hasMoreWork() and skips projects whose queue is empty — avoids the
+// wave-3/4 failure mode where half the parallel slots burned ~30-60s
+// each on empty-diff verified_weak cycles from queue-empty projects.
+// Sequential mode (N=1) stays bit-for-bit identical (verified by the
+// back-compat case at the end).
+describe("pickNextProjects empty-queue filter (gs-232)", () => {
+  const EMPTY_QUEUE_DIR = join(
+    import.meta.dir,
+    "fixtures",
+    "dispatcher_empty_queue",
+  );
+
+  // Build a project path whose state/<id>/tasks.json holds one pending
+  // task — greenfieldHasMoreWork() will return true for it.
+  function makeProjectWithWork(id: string, priority = 1): ProjectConfig {
+    const projectPath = join(EMPTY_QUEUE_DIR, id);
+    const tasksDir = join(projectPath, "state", id);
+    mkdirSync(tasksDir, { recursive: true });
+    const tasks = [
+      {
+        id: `${id}-001`,
+        title: "placeholder pending task",
+        status: "pending",
+        priority: 1,
+      },
+    ];
+    writeFileSync(join(tasksDir, "tasks.json"), JSON.stringify(tasks), "utf8");
+    return makeProject({ id, path: projectPath, priority });
+  }
+
+  // An empty-queue project: path exists but no tasks.json → hasMoreWork=false.
+  function makeProjectEmpty(id: string, priority = 1): ProjectConfig {
+    const projectPath = join(EMPTY_QUEUE_DIR, id);
+    mkdirSync(projectPath, { recursive: true });
+    return makeProject({ id, path: projectPath, priority });
+  }
+
+  beforeEach(() => {
+    mkdirSync(EMPTY_QUEUE_DIR, { recursive: true });
+    setRootDir(EMPTY_QUEUE_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(EMPTY_QUEUE_DIR, { recursive: true, force: true });
+  });
+
+  it("(a) parallel mode: 2-project fleet, 1 with work → picks only the one with work", async () => {
+    const config = makeConfig({ max_parallel_slots: 2 });
+    const projects = [
+      makeProjectWithWork("has-work", 1),
+      makeProjectEmpty("empty", 1),
+    ];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
+    expect(picks.length).toBe(1);
+    expect(picks[0].project.id).toBe("has-work");
+  });
+
+  it("(b) parallel mode: both projects empty → returns []", async () => {
+    const config = makeConfig({ max_parallel_slots: 2 });
+    const projects = [
+      makeProjectEmpty("empty-a", 1),
+      makeProjectEmpty("empty-b", 1),
+    ];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
+    expect(picks).toEqual([]);
+  });
+
+  it("(c) parallel mode: 3 projects, 2 with work → pickNextProjects(2) returns both with-work projects", async () => {
+    const config = makeConfig({ max_parallel_slots: 2 });
+    const projects = [
+      makeProjectEmpty("empty", 1), // priority 1 → would rank first without the filter
+      makeProjectWithWork("work-a", 2),
+      makeProjectWithWork("work-b", 3),
+    ];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
+    expect(picks.length).toBe(2);
+    const ids = picks.map((p) => p.project.id).sort();
+    expect(ids).toEqual(["work-a", "work-b"]);
+  });
+
+  it("(d) back-compat: sequential mode (N=1) does NOT consult hasMoreWork — empty-queue project can still be picked", async () => {
+    // Pre-gs-232 contract: pickNextProject returns the picker's best
+    // guess regardless of queue depth. The downstream shouldChain /
+    // hasMoreWork gates handle empty-queue cases. Changing N=1 here
+    // would silently break session.ts's sequential loop, dry-run
+    // previews, and every existing call site.
+    const config = makeConfig({ max_parallel_slots: 1 });
+    const projects = [makeProjectEmpty("only-empty", 1)];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 1);
+    expect(picks.length).toBe(1);
+    expect(picks[0].project.id).toBe("only-empty");
+  });
+
+  it("(d.2) back-compat: N=1 picks the priority-winner even if its queue is empty", async () => {
+    // Same story with a 2-project fleet — sequential mode keeps
+    // priority × staleness as the sole signal at pick time.
+    const config = makeConfig({ max_parallel_slots: 1 });
+    const projects = [
+      makeProjectEmpty("empty-hi", 1),
+      makeProjectWithWork("work-lo", 5),
+    ];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 1);
+    expect(picks.length).toBe(1);
+    expect(picks[0].project.id).toBe("empty-hi");
+  });
+
+  it("parallel mode: override file pointing at empty-queue project is skipped; picker fills from projects with work", async () => {
+    const config = makeConfig({ max_parallel_slots: 2 });
+    writeFileSync(
+      join(EMPTY_QUEUE_DIR, "next_project.txt"),
+      "empty\n",
+      "utf8",
+    );
+    const projects = [
+      makeProjectEmpty("empty", 1),
+      makeProjectWithWork("work-a", 2),
+      makeProjectWithWork("work-b", 3),
+    ];
+    const fleet = makeFleet();
+
+    const picks = await pickNextProjects(projects, config, fleet, new Set(), 2);
+    expect(picks.length).toBe(2);
+    // Override project had no work → not picked; picker fills both slots
+    // from the work-a / work-b pool in priority order.
+    expect(picks.map((p) => p.project.id)).toEqual(["work-a", "work-b"]);
+    expect(picks[0].reason).toContain("picker");
   });
 });
 

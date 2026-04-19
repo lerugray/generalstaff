@@ -109,6 +109,24 @@ async function readOverrideFile(
 // back-compat wrapper that requests maxCount=1 — preserves the Phase 1-3
 // sequential dispatcher behaviour while `session.ts` (gs-186) layers on
 // parallelism separately. See DESIGN.md §v6 for the full phased plan.
+//
+// gs-232: in parallel mode (maxCount > 1), skip projects whose queue
+// has no bot-pickable work. Wave-3/4 runs showed parallel_efficiency
+// ~0.54 with slot_idle_seconds ~2000-2400s because empty-queue projects
+// (gamr, raybrain in their post-Phase-1 idle state) kept being picked
+// into slots, burning ~30-60s of engineer-subprocess startup for an
+// empty-diff verified_weak cycle each round. Filtering at pick time
+// lets the session soft-stop sooner when no project has work at all,
+// and spreads real cycles over projects that actually need them.
+//
+// Sequential mode (maxCount == 1) is intentionally NOT filtered here —
+// the Phase 1-3 contract is that `pickNextProject` returns the
+// picker's best guess regardless of queue depth, and chaining-time
+// `shouldChain` / `hasMoreWork` gates handle the empty-queue case
+// downstream. Changing that behaviour would break every call site
+// written against the single-pick contract (e.g. `session.ts`'s
+// sequential loop, `status` / dry-run preview commands). The filter
+// keys on `maxCount > 1` exclusively so N=1 stays bit-for-bit identical.
 export async function pickNextProjects(
   projects: ProjectConfig[],
   config: DispatcherConfig,
@@ -123,6 +141,9 @@ export async function pickNextProjects(
   // (so the same project can't fill multiple slots).
   const claimed = new Set<string>(skipProjectIds);
 
+  // gs-232: parallel-mode-only empty-queue filter (see function doc).
+  const skipEmptyQueue = maxCount > 1;
+
   // Override file gets the first slot when the pointed-at project is
   // eligible. With maxCount > 1, the remaining slots still come from
   // the scorer — so the override acts as a "prefer this one first"
@@ -131,11 +152,18 @@ export async function pickNextProjects(
   if (override) {
     const project = projects.find((p) => p.id === override);
     if (project && !claimed.has(project.id) && !isBotRunning(project).running) {
-      results.push({
-        project,
-        reason: `override: next_project.txt = "${override}"`,
-      });
-      claimed.add(project.id);
+      const hasWork = skipEmptyQueue ? await hasMoreWork(project) : true;
+      if (hasWork) {
+        results.push({
+          project,
+          reason: `override: next_project.txt = "${override}"`,
+        });
+        claimed.add(project.id);
+      } else {
+        // gs-232: claim-and-skip so the picker loop doesn't re-evaluate
+        // the same empty-queue project (and re-run hasMoreWork on it).
+        claimed.add(project.id);
+      }
     }
   }
 
@@ -147,6 +175,7 @@ export async function pickNextProjects(
     for (const { project, reason } of scored) {
       if (results.length >= maxCount) break;
       if (isBotRunning(project).running) continue;
+      if (skipEmptyQueue && !(await hasMoreWork(project))) continue;
       results.push({ project, reason: `picker: ${reason}` });
       claimed.add(project.id);
     }

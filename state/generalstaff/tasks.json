@@ -1435,7 +1435,7 @@
   {
     "id": "gs-232",
     "title": "Dispatcher: in parallel mode, skip empty-queue projects when filling slots. CREATE ONLY: modify `src/dispatcher.ts` pickNextProjects (or equivalent picker used by parallel mode per gs-185/gs-186) — before returning a project for a slot, check `hasMoreWork(project)`; if false, skip that project and try the next by priority*staleness; if no project has work, return an empty array (caller soft-stops on empty). Append tests to `tests/dispatcher.test.ts` covering: (a) 2-project fleet where 1 has work → pickNextProjects(2) returns [that 1, nothing] OR filters to just [the one with work] (document which); (b) 2 projects both empty → returns []; (c) 3 projects where 2 have work → pickNextProjects(2) returns both with-work projects; (d) back-compat: sequential mode (N=1) behaves identically to pre-change. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: wave-3 and wave-4 tonight both showed parallel_efficiency ~0.54 with slot_idle_seconds ~2000-2400s — meaning half the parallel capacity was burned on verified_weak empty-diff cycles from projects with no pending work (gamr, raybrain in their empty-queue state). A slot running on an empty-queue project wastes ~30-60s of engineer-subprocess startup plus blocks the session from soft-stopping sooner. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "expected_touches": [
       "src/dispatcher.ts",
