@@ -71,10 +71,15 @@ describe("isProgressEntry", () => {
       "worktree_preflight", "cycle_rollback",
       "provider_invoked", "provider_fallback",
       "cycle_end", "session_start", "session_end", "session_complete",
+      "session_end_auto_merge",
     ];
     for (const e of events) {
       expect(isProgressEntry({ ...valid, event: e })).toBe(true);
     }
+  });
+
+  it("accepts session_end_auto_merge (gs-254)", () => {
+    expect(isProgressEntry({ ...valid, event: "session_end_auto_merge" })).toBe(true);
   });
 
   it("accepts worktree_preflight event (regression for gs-134)", () => {

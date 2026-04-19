@@ -216,6 +216,7 @@ const VALID_EVENTS: readonly string[] = [
   "provider_invoked", "provider_fallback",
   "cycle_end", "cycle_watchdog", "project_soft_skipped",
   "session_start", "session_end", "session_complete",
+  "session_end_auto_merge",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {
