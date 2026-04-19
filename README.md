@@ -1,8 +1,6 @@
 # GeneralStaff
 
-<!-- TODO(launch): hero image — screenshot of web/index.html dashboard
-     mockup, cropped to the Situation + Attention + Fleet sections.
-     Replace this comment with: ![GeneralStaff dashboard](docs/images/dashboard-hero.png) -->
+![GeneralStaff Command Center — the dashboard showing current session, attention items, per-project fleet cards, and a preview of live-mode revenue metrics for post-launch projects](docs/images/dashboard-hero.png)
 
 **Open-source autonomous engineering that refuses to ship slop.**
 **Your code. Your keys. Your control.**
@@ -125,19 +123,31 @@ to; the log doesn't exist outside their ops.
 
 ## What it looks like
 
-Phase 5 ships a local dashboard with five linked views: a fleet
-overview showing every registered project's state at a glance, a
-per-project task queue, a live session log, per-cycle detail pages
-for drilling in when something needs attention, and a shared-inbox
-channel for cross-session handoff notes.
+The screenshot at the top is the Phase 6 dashboard mockup — a
+command-center view with five sections: current session status, items
+that need your attention, per-project fleet cards, dispatch controls,
+and a usage sidebar. The dimmed card at the bottom previews how a
+post-launch project's card will render once live-mode ingestion lands
+(revenue, active users, ad spend, uptime — see
+[`UI-VISION-2026-04-19.md`](UI-VISION-2026-04-19.md)).
 
-The visual direction is printed-paper. Warm cream background, serif
-for display, monospace for data, small-caps labels, a rust accent
-used only where something needs your eyes. No SaaS gradients, no
-dark-mode-by-default. Reference HTML for each view lives in
-[`docs/phase-5-references/`](docs/phase-5-references/), along with a
-README documenting what each view establishes and which patterns
-carry across them.
+**What's shipped today:** the data contract — five JSON view modules
+(`fleet-overview`, `task-queue`, `session-tail`, `dispatch-detail`,
+`inbox`) and their CLI wrapping. You can run
+`generalstaff view fleet-overview --json` right now and get the same
+data the dashboard will render. The mockup above lives at
+[`web/index.html`](web/index.html) (static HTML, open in any browser).
+
+**What's next:** wrapping the mockup in `Bun.serve` so the dashboard
+reads those JSON endpoints live instead of embedded static data. Zero
+new dependencies; the view modules already exist.
+
+**Visual direction:** printed paper. Warm cream background, serif
+for display, monospace for data, small-caps labels, a single rust
+accent used only where something needs your eyes. No SaaS gradients,
+no dark-mode-by-default. The earlier Phase 5 visual references (one
+reference page per view) live in
+[`docs/phase-5-references/`](docs/phase-5-references/).
 
 ## Quickstart
 
