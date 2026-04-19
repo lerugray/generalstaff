@@ -2010,7 +2010,62 @@ switch (command) {
       break;
     }
 
-    // session-tail, dispatch-detail, inbox are queued as gs-228..230.
+    if (viewName === "session-tail") {
+      const { values: stValues } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+          limit: { type: "string" },
+        },
+        allowPositionals: true,
+      });
+      let limit = 3;
+      if (stValues.limit !== undefined) {
+        const parsed = Number(stValues.limit);
+        if (
+          !Number.isInteger(parsed) ||
+          parsed <= 0 ||
+          !/^\d+$/.test(String(stValues.limit).trim())
+        ) {
+          console.error("Error: --limit must be a positive integer");
+          process.exit(1);
+        }
+        limit = parsed;
+      }
+      const { getRecentSessions } = await import("./views/session_tail");
+      const data = await getRecentSessions(limit);
+      if (stValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else if (data.sessions.length === 0) {
+        console.log("No sessions yet");
+      } else {
+        const verdictGlyph = (v: string) =>
+          v === "verified" ? "✓" : v === "failed" ? "✗" : "·";
+        for (let i = 0; i < data.sessions.length; i++) {
+          const s = data.sessions[i];
+          if (i > 0) console.log("");
+          console.log(`Session: ${s.session_id}`);
+          console.log(`  started_at:       ${s.started_at}`);
+          console.log(`  duration_minutes: ${s.duration_minutes}`);
+          console.log(`  reviewer:         ${s.reviewer ?? "(unknown)"}`);
+          console.log(`  stop_reason:      ${s.stop_reason ?? "(in-progress)"}`);
+          if (s.cycles.length === 0) {
+            console.log("  cycles: (none)");
+          } else {
+            console.log("  cycles:");
+            for (const c of s.cycles) {
+              const taskId = c.task_id ?? "—";
+              console.log(
+                `    ${verdictGlyph(c.verdict)} ${c.cycle_id}  ${c.verdict.padEnd(8)}  ${taskId}  ${c.project_id}  ${c.duration_seconds}s`,
+              );
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    // dispatch-detail, inbox are queued as gs-229..230.
     // Recognise them as valid names (so they don't collide with the
     // "unknown view" branch) but surface a clear not-yet-wired message
     // until their CLI shims land.

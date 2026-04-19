@@ -2727,4 +2727,171 @@ dispatcher:
       expect(result.stdout).toContain("Shipped: (none)");
     });
   });
+
+  describe("view session-tail subcommand (gs-228)", () => {
+    const VIEW_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "view_session_tail_test",
+    );
+    const FLEET_DIR = join(VIEW_DIR, "state", "_fleet");
+
+    const buildLog = (numSessions: number): string => {
+      const events: Array<Record<string, unknown>> = [];
+      for (let i = 0; i < numSessions; i++) {
+        const sessionId = `sess-${String(i).padStart(2, "0")}`;
+        // older sessions have earlier start times
+        const hour = String(10 + i).padStart(2, "0");
+        events.push({
+          timestamp: `2026-04-18T${hour}:00:00Z`,
+          event: "session_start",
+          data: { session_id: sessionId, budget_minutes: 30 },
+        });
+        events.push({
+          timestamp: `2026-04-18T${hour}:01:00Z`,
+          event: "cycle_start",
+          cycle_id: `c-${sessionId}`,
+          project_id: "generalstaff",
+          data: {
+            session_id: sessionId,
+            task_id: `gs-${i + 100}`,
+            sha_before: "aaa",
+          },
+        });
+        events.push({
+          timestamp: `2026-04-18T${hour}:02:00Z`,
+          event: "cycle_end",
+          cycle_id: `c-${sessionId}`,
+          project_id: "generalstaff",
+          data: {
+            session_id: sessionId,
+            outcome: "verified",
+            duration_seconds: 60,
+            files_touched: ["src/foo.ts"],
+            diff_stats: { additions: 5, deletions: 1 },
+          },
+        });
+        events.push({
+          timestamp: `2026-04-18T${hour}:10:00Z`,
+          event: "session_end",
+          data: {
+            session_id: sessionId,
+            duration_minutes: 10,
+            stop_reason: "max-cycles",
+            reviewer: "openrouter",
+          },
+        });
+      }
+      return events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    };
+
+    beforeEach(() => {
+      mkdirSync(FLEET_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("--json emits SessionTailData shape", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog(2));
+      const result = await runCli(
+        ["view", "session-tail", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("sessions");
+      expect(parsed).toHaveProperty("earlier_rail");
+      expect(parsed).toHaveProperty("rendered_at");
+      expect(Array.isArray(parsed.sessions)).toBe(true);
+      expect(parsed.sessions).toHaveLength(2);
+      // newest-first
+      expect(parsed.sessions[0].session_id).toBe("sess-01");
+      expect(parsed.sessions[1].session_id).toBe("sess-00");
+      expect(parsed.sessions[0].cycles).toHaveLength(1);
+      expect(parsed.sessions[0].cycles[0].verdict).toBe("verified");
+    });
+
+    it("default limit renders 3 sessions (newest first)", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog(5));
+      const result = await runCli(
+        ["view", "session-tail", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.sessions).toHaveLength(3);
+      expect(parsed.sessions[0].session_id).toBe("sess-04");
+      expect(parsed.sessions[1].session_id).toBe("sess-03");
+      expect(parsed.sessions[2].session_id).toBe("sess-02");
+      // older sessions show up in earlier_rail
+      expect(parsed.earlier_rail.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("--limit=5 honored", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog(6));
+      const result = await runCli(
+        ["view", "session-tail", "--limit=5", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.sessions).toHaveLength(5);
+    });
+
+    it("invalid --limit errors and exits 1", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog(2));
+      const resultZero = await runCli(
+        ["view", "session-tail", "--limit=0"],
+        VIEW_DIR,
+      );
+      expect(resultZero.exitCode).toBe(1);
+      expect(resultZero.stderr).toContain(
+        "Error: --limit must be a positive integer",
+      );
+
+      const resultNeg = await runCli(
+        ["view", "session-tail", "--limit=-1"],
+        VIEW_DIR,
+      );
+      expect(resultNeg.exitCode).toBe(1);
+      expect(resultNeg.stderr).toContain(
+        "Error: --limit must be a positive integer",
+      );
+
+      const resultText = await runCli(
+        ["view", "session-tail", "--limit=abc"],
+        VIEW_DIR,
+      );
+      expect(resultText.exitCode).toBe(1);
+      expect(resultText.stderr).toContain(
+        "Error: --limit must be a positive integer",
+      );
+    });
+
+    it("empty PROGRESS.jsonl renders 'No sessions yet' friendly message", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), "");
+      const result = await runCli(["view", "session-tail"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("No sessions yet");
+    });
+
+    it("text render includes session header fields and per-cycle line", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog(1));
+      const result = await runCli(["view", "session-tail"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Session: sess-00");
+      expect(result.stdout).toContain("duration_minutes: 10");
+      expect(result.stdout).toContain("reviewer:");
+      expect(result.stdout).toContain("openrouter");
+      expect(result.stdout).toContain("stop_reason:");
+      expect(result.stdout).toContain("max-cycles");
+      expect(result.stdout).toContain("c-sess-00");
+      expect(result.stdout).toContain("gs-100");
+      expect(result.stdout).toContain("generalstaff");
+      expect(result.stdout).toContain("60s");
+      expect(result.stdout).toContain("verified");
+    });
+  });
 });
