@@ -4047,6 +4047,188 @@ dispatcher:
       expect(parsed.beta!.errors[0]!.toLowerCase()).toContain("status");
     });
   });
+
+  describe("task next (gs-250)", () => {
+    const TN_DIR = join(import.meta.dir, "fixtures", "task_next");
+
+    // project.path needs to match getRootDir() (TN_DIR) so that the
+    // pickNextProjects empty-queue filter — which reads
+    // <project.path>/state/<id>/tasks.json — sees the same tasks.json
+    // the CLI writes under getRootDir(). Concurrency detection defaults
+    // to "none" so the absent `.bot-worktree` under TN_DIR is fine.
+    const tnYaml = (): string => `
+projects:
+  - id: generalstaff
+    path: ${TN_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+      - src/safety.ts
+  - id: beta
+    path: ${TN_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - README.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  max_parallel_slots: 2
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      rmSync(TN_DIR, { recursive: true, force: true });
+      mkdirSync(join(TN_DIR, "state", "generalstaff"), { recursive: true });
+      mkdirSync(join(TN_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(TN_DIR, "projects.yaml"), tnYaml());
+    });
+
+    afterEach(() => {
+      rmSync(TN_DIR, { recursive: true, force: true });
+    });
+
+    function writeTasks(projectId: string, body: unknown) {
+      writeFileSync(
+        join(TN_DIR, "state", projectId, "tasks.json"),
+        typeof body === "string" ? body : JSON.stringify(body),
+      );
+    }
+
+    it("(a) picks the lowest-priority, lowest-id pending task per slot", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-003", title: "priority 2 higher id", status: "pending", priority: 2 },
+        { id: "gs-001", title: "priority 2 lower id", status: "pending", priority: 2 },
+        { id: "gs-002", title: "priority 1 wins", status: "pending", priority: 1 },
+        { id: "gs-004", title: "already done", status: "done", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-010", title: "beta top task", status: "pending", priority: 1 },
+      ]);
+      const result = await runCli(["task", "next", "--json"], TN_DIR);
+      expect(result.exitCode).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        slots: Array<{ project_id: string; task_id: string | null; title: string | null }>;
+      };
+      expect(payload.slots.length).toBe(2);
+      const slotByProject = new Map(payload.slots.map((s) => [s.project_id, s]));
+      expect(slotByProject.get("generalstaff")?.task_id).toBe("gs-002");
+      expect(slotByProject.get("beta")?.task_id).toBe("bt-010");
+    });
+
+    it("(b) skips interactive_only and hands_off-intersecting tasks", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "interactive only", status: "pending", priority: 1, interactive_only: true },
+        { id: "gs-002", title: "touches hands_off", status: "pending", priority: 1, expected_touches: ["src/safety.ts"] },
+        { id: "gs-003", title: "pickable", status: "pending", priority: 2 },
+      ]);
+      writeTasks("beta", []);
+      const result = await runCli(["task", "next", "--json"], TN_DIR);
+      expect(result.exitCode).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        slots: Array<{ project_id: string; task_id: string | null }>;
+      };
+      const gs = payload.slots.find((s) => s.project_id === "generalstaff");
+      expect(gs?.task_id).toBe("gs-003");
+      const beta = payload.slots.find((s) => s.project_id === "beta");
+      // beta has no pickable tasks → not present in parallel-mode picks
+      // (gs-232 filters empty-queue projects at max_parallel_slots > 1).
+      expect(beta).toBeUndefined();
+    });
+
+    it("(c) --project=<id> restricts preview to one project", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "gs top", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "beta top", status: "pending", priority: 1 },
+      ]);
+      const result = await runCli(
+        ["task", "next", "--project=beta", "--json"],
+        TN_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        slots: Array<{ project_id: string; task_id: string | null }>;
+      };
+      expect(payload.slots.length).toBe(1);
+      expect(payload.slots[0]!.project_id).toBe("beta");
+      expect(payload.slots[0]!.task_id).toBe("bt-001");
+    });
+
+    it("(d) empty queues across every project emit an empty slots array", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "done", status: "done", priority: 1 },
+      ]);
+      writeTasks("beta", []);
+      const result = await runCli(["task", "next", "--json"], TN_DIR);
+      expect(result.exitCode).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        slots: Array<{ project_id: string }>;
+      };
+      expect(payload.slots).toEqual([]);
+    });
+
+    it("(e) unknown --project errors and exits 1", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      const result = await runCli(
+        ["task", "next", "--project=nosuch", "--json"],
+        TN_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("project 'nosuch' not found");
+      expect(result.stderr).toContain("Registered:");
+    });
+
+    it("(f) non-JSON output lists one row per slot with project_id task_id title", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "the top task", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "beta top", status: "pending", priority: 1 },
+      ]);
+      const result = await runCli(["task", "next"], TN_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff");
+      expect(result.stdout).toContain("gs-001");
+      expect(result.stdout).toContain("the top task");
+      expect(result.stdout).toContain("beta");
+      expect(result.stdout).toContain("bt-001");
+    });
+
+    it("(g) does not mutate tasks.json or create any state files", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "the top task", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", []);
+      const tasksPath = join(TN_DIR, "state", "generalstaff", "tasks.json");
+      const before = readFileSync(tasksPath, "utf8");
+      const fleetPath = join(TN_DIR, "fleet_state.json");
+      const result = await runCli(["task", "next", "--json"], TN_DIR);
+      expect(result.exitCode).toBe(0);
+      const after = readFileSync(tasksPath, "utf8");
+      expect(after).toBe(before);
+      // fleet_state.json shouldn't be created as a side-effect of preview.
+      expect(existsSync(fleetPath)).toBe(false);
+    });
+  });
 });
 
 // gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗

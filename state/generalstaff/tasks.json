@@ -1626,12 +1626,14 @@
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "interactive_only": true,
+    "interactive_only_reason": "Threading a --provider CLI override to reviewer.runReviewer requires modifying src/reviewer.ts (currently reads process.env.GENERALSTAFF_REVIEWER_PROVIDER directly inside runReviewer; no provider param exists). src/reviewer.ts is hands-off (projects.yaml line). Task spec forbids mutating process.env for the whole process, so the only bot-safe path is blocked. Per the task IMPORTANT note, flagging interactive-only."
   },
   {
     "id": "gs-250",
     "title": "Add `generalstaff tasks next [--project=<id>]` subcommand to preview what the picker would select next. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `next` sub-subcommand that calls the same picker logic used by session.ts (pickNextProjects / chooseNextTask — inspect src/dispatcher.ts for the right entry point) but in a NON-MUTATING way — no state writes, no cycle starts, just report what would be picked. Output: project_id + task_id + task title (truncated) per slot, for up to max_parallel_slots slots. `--project=<id>` restricts the preview to just that project. `--json` emits { slots: [{project_id, task_id, title}] }. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT** if the existing picker mutates state as a side effect and cannot be called non-destructively, flag interactive-only (the refactor needed to split mutation from selection is a judgment call, not bot-safe). Tests: (a) pickable tasks appear; (b) empty queues → empty slots array; (c) --project filters. Expected diff: ~120 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
