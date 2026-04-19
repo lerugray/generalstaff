@@ -1,0 +1,764 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+],
+"interactive_only": true,
+"interactive_only_reason": "Threading a --provider CLI override to reviewer.runReviewer requires modifying src/reviewer.ts (currently reads process.env.GENERALSTAFF_REVIEWER_PROVIDER directly inside runReviewer; no provider param exists). src/reviewer.ts is hands-off (projects.yaml line). Task spec forbids mutating process.env for the whole process, so the only bot-safe path is blocked. Per the task IMPORTANT note, flagging interactive-only."
+"status": "done",
+]
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index e3861ea..2bb04a3 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -30,6 +30,7 @@ import {
+   loadTasks,
+   pendingTasks,
+   addTask,
++  botPickableTasks,
+   markTaskDone,
+   markTaskInteractive,
+   markTaskPending,
+@@ -38,6 +39,16 @@ import {
+   TasksLoadError,
+   TaskValidationError,
+ } from "./tasks";
++import { pickNextProjects } from "./dispatcher";
++
++// gs-250: pull the trailing digit run out of a task id so the preview
++// matches the engineer bot's "lowest gs-NNN numeric suffix first" sort
++// convention. Ids with no digits collapse to 0; `localeCompare` on the
++// original id tiebreaks those.
++function numericIdSuffix(id: string): number {
++  const m = /(\d+)(?!.*\d)/.exec(id);
++  return m ? parseInt(m[1]!, 10) : 0;
++}
+ import {
+   buildFleetSummary,
+   buildTodaySessionSummary,
+@@ -200,6 +211,10 @@ Usage:
+   generalstaff task count [--project=<id>]                Report pending vs done counts
+     Example: generalstaff task count                     # all projects
+     Example: generalstaff task count --project=myapp     # single project
++  generalstaff task next [--project=<id>] [--json]        Preview the next task(s) the picker would pick (non-mutating)
++    Example: generalstaff task next                      # up to max_parallel_slots rows
++    Example: generalstaff task next --project=myapp      # restrict preview to one project
++    Example: generalstaff task next --json               # { slots: [{project_id, task_id, title}] }
+ 
+   generalstaff cycle-redo --project=<id> --task=<task-id>  Reopen a done task as pending
+     Example: generalstaff cycle-redo --project=myapp --task=my-042
+@@ -1080,6 +1095,7 @@ switch (command) {
+           "  interactive --project=<id> <task-id> [--off]       Flip interactive_only flag\n" +
+           "  count [--project=<id>]                             Report pending vs done counts\n" +
+           "  validate [--project=<id>] [--json]                 Validate tasks.json schema across projects\n" +
++          "  next [--project=<id>] [--json]                     Preview next task(s) the picker would pick\n" +
+           "\n" +
+           "Examples:\n" +
+           "  generalstaff task list --project=myapp\n" +
+@@ -1467,16 +1483,117 @@ switch (command) {
+         }
+       }
+       if (anyFail) process.exit(1);
++    } else if (sub === "next") {
++      // gs-250: preview which task the picker would select next, without
++      // mutating any state. Runs the same pickNextProjects logic session.ts
++      // uses when max_parallel_slots > 1, then — for each picked project —
++      // loads tasks.json and picks the top bot-pickable task using the same
++      // "lowest priority number first; among same-priority, lowest numeric
++      // id suffix first" convention the engineer bot follows.
++      const { values: nextValues } = parseArgs({
++        args: args.slice(2),
++        options: {
++          project: { type: "string" },
++          json: { type: "boolean", default: false },
++        },
++        allowPositionals: false,
++      });
++      const dispatcher = await loadDispatcherConfig();
++      const allProjects = await loadProjects();
++      let candidateProjects = allProjects;
++      if (nextValues.project) {
++        const match = allProjects.find((p) => p.id === nextValues.project);
++        if (!match) {
++          const ids = allProjects.map((p) => p.id).join(", ") || "(none)";
++          console.error(
++            `Error: project '${nextValues.project}' not found. Registered: ${ids}`,
++          );
++          process.exit(1);
++        }
++        candidateProjects = [match];
++      }
++      const fleet = await loadFleetState(dispatcher);
++      const maxCount = nextValues.project ? 1 : dispatcher.max_parallel_slots;
++      const picks = await pickNextProjects(
++        candidateProjects,
++        dispatcher,
++        fleet,
++        new Set<string>(),
++        maxCount,
++      );
++      const slots: Array<{
++        project_id: string;
++        task_id: string | null;
++        title: string | null;
++      }> = [];
++      for (const pick of picks) {
++        let taskId: string | null = null;
++        let taskTitle: string | null = null;
++        try {
++          const tasks = await loadTasks(pick.project.id);
++          const pickable = botPickableTasks(tasks, pick.project.hands_off);
++          const sorted = pickable.slice().sort((a, b) => {
++            if (a.priority !== b.priority) return a.priority - b.priority;
++            const na = numericIdSuffix(a.id);
++            const nb = numericIdSuffix(b.id);
++            if (na !== nb) return na - nb;
++            return a.id.localeCompare(b.id);
++          });
++          const top = sorted[0];
++          if (top) {
++            taskId = top.id;
++            taskTitle = top.title;
++          }
++        } catch (err) {
++          if (err instanceof TasksLoadError) {
++            // Malformed tasks.json: report empty slot rather than crash
++            // (preview should never fail-hard on per-project load errors).
++            taskId = null;
++            taskTitle = null;
++          } else {
++            throw err;
++          }
++        }
++        slots.push({
++          project_id: pick.project.id,
++          task_id: taskId,
++          title: taskTitle,
++        });
++      }
++      if (nextValues.json) {
++        const payload = {
++          slots: slots.map((s) => ({
++            project_id: s.project_id,
++            task_id: s.task_id,
++            title: s.title,
++          })),
++        };
++        console.log(JSON.stringify(payload, null, 2));
++      } else {
++        if (slots.length === 0) {
++          console.log("No eligible project — nothing to preview.");
++        } else {
++          for (const s of slots) {
++            if (s.task_id === null) {
++              console.log(`${s.project_id}  (no bot-pickable task)`);
++            } else {
++              const title = (s.title ?? "").slice(0, 80);
++              console.log(`${s.project_id}  ${s.task_id}  ${title}`);
++            }
++          }
++        }
++      }
+     } else {
+       console.error(
+-        "Error: task subcommand required (list, add, done, rm, interactive, count, or validate)\n" +
++        "Error: task subcommand required (list, add, done, rm, interactive, count, validate, or next)\n" +
+           "  Usage: generalstaff task list --project=<id>\n" +
+           "         generalstaff task add --project=<id> <title>\n" +
+           "         generalstaff task done --project=<id> --task=<task-id>\n" +
+           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
+           "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
+           "         generalstaff task count [--project=<id>]\n" +
+-          "         generalstaff task validate [--project=<id>] [--json]",
++          "         generalstaff task validate [--project=<id>] [--json]\n" +
++          "         generalstaff task next [--project=<id>] [--json]",
+       );
+       process.exit(1);
+     }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 5239baf..865bc46 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1626,16 +1626,18 @@
+     "expected_touches": [
+       "src/cli.ts",
+       "tests/cli.test.ts"
+-    ]
++    ],
++    "interactive_only": true,
++    "interactive_only_reason": "Threading a --provider CLI override to reviewer.runReviewer requires modifying src/reviewer.ts (currently reads process.env.GENERALSTAFF_REVIEWER_PROVIDER directly inside runReviewer; no provider param exists). src/reviewer.ts is hands-off (projects.yaml line). Task spec forbids mutating process.env for the whole process, so the only bot-safe path is blocked. Per the task IMPORTANT note, flagging interactive-only."
+   },
+   {
+     "id": "gs-250",
+     "title": "Add `generalstaff tasks next [--project=<id>]` subcommand to preview what the picker would select next. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `next` sub-subcommand that calls the same picker logic used by session.ts (pickNextProjects / chooseNextTask — inspect src/dispatcher.ts for the right entry point) but in a NON-MUTATING way — no state writes, no cycle starts, just report what would be picked. Output: project_id + task_id + task title (truncated) per slot, for up to max_parallel_slots slots. `--project=<id>` restricts the preview to just that project. `--json` emits { slots: [{project_id, task_id, title}] }. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT** if the existing picker mutates state as a side effect and cannot be called non-destructively, flag interactive-only (the refactor needed to split mutation from selection is a judgment call, not bot-safe). Tests: (a) pickable tasks appear; (b) empty queues → empty slots array; (c) --project filters. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+       "tests/cli.test.ts"
+     ]
+   }
+-]
++]
+\ No newline at end of file
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 90b3d81..3ed1e7b 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -4047,6 +4047,188 @@ dispatcher:
+       expect(parsed.beta!.errors[0]!.toLowerCase()).toContain("status");
+     });
+   });
++
++  describe("task next (gs-250)", () => {
++    const TN_DIR = join(import.meta.dir, "fixtures", "task_next");
++
++    // project.path needs to match getRootDir() (TN_DIR) so that the
++    // pickNextProjects empty-queue filter — which reads
++    // <project.path>/state/<id>/tasks.json — sees the same tasks.json
++    // the CLI writes under getRootDir(). Concurrency detection defaults
++    // to "none" so the absent `.bot-worktree` under TN_DIR is fine.
++    const tnYaml = (): string => `
++projects:
++  - id: generalstaff
++    path: ${TN_DIR.replace(/\\/g, "/")}
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    branch: bot/work
++    hands_off:
++      - CLAUDE.md
++      - src/safety.ts
++  - id: beta
++    path: ${TN_DIR.replace(/\\/g, "/")}
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    branch: bot/work
++    hands_off:
++      - README.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  max_parallel_slots: 2
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      rmSync(TN_DIR, { recursive: true, force: true });
++      mkdirSync(join(TN_DIR, "state", "generalstaff"), { recursive: true });
++      mkdirSync(join(TN_DIR, "state", "beta"), { recursive: true });
++      writeFileSync(join(TN_DIR, "projects.yaml"), tnYaml());
++    });
++
++    afterEach(() => {
++      rmSync(TN_DIR, { recursive: true, force: true });
++    });
++
++    function writeTasks(projectId: string, body: unknown) {
++      writeFileSync(
++        join(TN_DIR, "state", projectId, "tasks.json"),
++        typeof body === "string" ? body : JSON.stringify(body),
++      );
++    }
++
++    it("(a) picks the lowest-priority, lowest-id pending task per slot", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-003", title: "priority 2 higher id", status: "pending", priority: 2 },
++        { id: "gs-001", title: "priority 2 lower id", status: "pending", priority: 2 },
++        { id: "gs-002", title: "priority 1 wins", status: "pending", priority: 1 },
++        { id: "gs-004", title: "already done", status: "done", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-010", title: "beta top task", status: "pending", priority: 1 },
++      ]);
++      const result = await runCli(["task", "next", "--json"], TN_DIR);
++      expect(result.exitCode).toBe(0);
++      const payload = JSON.parse(result.stdout) as {
++        slots: Array<{ project_id: string; task_id: string | null; title: string | null }>;
++      };
++      expect(payload.slots.length).toBe(2);
++      const slotByProject = new Map(payload.slots.map((s) => [s.project_id, s]));
++      expect(slotByProject.get("generalstaff")?.task_id).toBe("gs-002");
++      expect(slotByProject.get("beta")?.task_id).toBe("bt-010");
++    });
++
++    it("(b) skips interactive_only and hands_off-intersecting tasks", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "interactive only", status: "pending", priority: 1, interactive_only: true },
++        { id: "gs-002", title: "touches hands_off", status: "pending", priority: 1, expected_touches: ["src/safety.ts"] },
++        { id: "gs-003", title: "pickable", status: "pending", priority: 2 },
++      ]);
++      writeTasks("beta", []);
++      const result = await runCli(["task", "next", "--json"], TN_DIR);
++      expect(result.exitCode).toBe(0);
++      const payload = JSON.parse(result.stdout) as {
++        slots: Array<{ project_id: string; task_id: string | null }>;
++      };
++      const gs = payload.slots.find((s) => s.project_id === "generalstaff");
++      expect(gs?.task_id).toBe("gs-003");
++      const beta = payload.slots.find((s) => s.project_id === "beta");
++      // beta has no pickable tasks → not present in parallel-mode picks
++      // (gs-232 filters empty-queue projects at max_parallel_slots > 1).
++      expect(beta).toBeUndefined();
++    });
++
++    it("(c) --project=<id> restricts preview to one project", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "gs top", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "beta top", status: "pending", priority: 1 },
++      ]);
++      const result = await runCli(
++        ["task", "next", "--project=beta", "--json"],
++        TN_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const payload = JSON.parse(result.stdout) as {
++        slots: Array<{ project_id: string; task_id: string | null }>;
++      };
++      expect(payload.slots.length).toBe(1);
++      expect(payload.slots[0]!.project_id).toBe("beta");
++      expect(payload.slots[0]!.task_id).toBe("bt-001");
++    });
++
++    it("(d) empty queues across every project emit an empty slots array", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "done", status: "done", priority: 1 },
++      ]);
++      writeTasks("beta", []);
++      const result = await runCli(["task", "next", "--json"], TN_DIR);
++      expect(result.exitCode).toBe(0);
++      const payload = JSON.parse(result.stdout) as {
++        slots: Array<{ project_id: string }>;
++      };
++      expect(payload.slots).toEqual([]);
++    });
++
++    it("(e) unknown --project errors and exits 1", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      const result = await runCli(
++        ["task", "next", "--project=nosuch", "--json"],
++        TN_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("project 'nosuch' not found");
++      expect(result.stderr).toContain("Registered:");
++    });
++
++    it("(f) non-JSON output lists one row per slot with project_id task_id title", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "the top task", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "beta top", status: "pending", priority: 1 },
++      ]);
++      const result = await runCli(["task", "next"], TN_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff");
++      expect(result.stdout).toContain("gs-001");
++      expect(result.stdout).toContain("the top task");
++      expect(result.stdout).toContain("beta");
++      expect(result.stdout).toContain("bt-001");
++    });
++
++    it("(g) does not mutate tasks.json or create any state files", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "the top task", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", []);
++      const tasksPath = join(TN_DIR, "state", "generalstaff", "tasks.json");
++      const before = readFileSync(tasksPath, "utf8");
++      const fleetPath = join(TN_DIR, "fleet_state.json");
++      const result = await runCli(["task", "next", "--json"], TN_DIR);
++      expect(result.exitCode).toBe(0);
++      const after = readFileSync(tasksPath, "utf8");
++      expect(after).toBe(before);
++      // fleet_state.json shouldn't be created as a side-effect of preview.
++      expect(existsSync(fleetPath)).toBe(false);
++    });
++  });
+ });
+ 
+ // gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗
+
+
+Diff summary: src/cli.ts                    | 121 +++++++++++++++++++++++++++-
+ state/generalstaff/tasks.json |   8 +-
+ tests/cli.test.ts             | 182 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 306 insertions(+), 5 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T06:09:50.875Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve 7d5ec51d after 2 attempts (status=128, stderr=fatal: bad object 7d5ec51d690341c0a2cd7acb6a9ff79543eba83b)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_061053.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
