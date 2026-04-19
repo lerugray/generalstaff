@@ -524,6 +524,7 @@ describe("buildTodaySessionSummary", () => {
       wall_clock_minutes: 60,
       last_session_end: "2026-04-18T14:00:00.000Z",
       cycle_duration: null,
+      parallel_efficiency: null,
     };
     const out = formatTodaySessionSummary(s);
     const lines = out.split("\n");
@@ -545,6 +546,7 @@ describe("buildTodaySessionSummary", () => {
       wall_clock_minutes: 0,
       last_session_end: null,
       cycle_duration: null,
+      parallel_efficiency: null,
     };
     const out = formatTodaySessionSummary(s);
     expect(out).toContain("Average cycle duration:    n/a");
@@ -617,8 +619,119 @@ describe("buildTodaySessionSummary cycle_duration percentiles (gs-252)", () => {
       wall_clock_minutes: 6,
       last_session_end: "2026-04-18T11:00:00.000Z",
       cycle_duration: { p50: 120, p90: 180, max: 180, count: 3 },
+      parallel_efficiency: null,
     };
     const out = formatTodaySessionSummary(s);
     expect(out).toContain("cycle_duration:            p50=120s p90=180s max=180s");
+  });
+});
+
+describe("buildTodaySessionSummary parallel_efficiency (gs-260)", () => {
+  const NOW = new Date("2026-04-18T15:30:00.000Z");
+
+  function sessionCompleteWithEff(
+    ts: string,
+    minutes: number,
+    parallel_efficiency: number | undefined,
+  ): string {
+    const data: Record<string, unknown> = {
+      duration_minutes: minutes,
+      total_cycles: 1,
+      total_verified: 1,
+      total_failed: 0,
+      stop_reason: "budget",
+    };
+    if (parallel_efficiency !== undefined) {
+      data.parallel_efficiency = parallel_efficiency;
+      data.max_parallel_slots = 2;
+    }
+    return JSON.stringify({
+      timestamp: ts,
+      event: "session_complete",
+      project_id: "_fleet",
+      data,
+    });
+  }
+
+  it("(a) computes mean across 3 parallel session_complete events", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
+    const log = [
+      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, 0.6),
+      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.8),
+      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.7),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
+
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.parallel_efficiency).not.toBeNull();
+    expect(s.parallel_efficiency!.sessions).toBe(3);
+    // (0.6 + 0.8 + 0.7) / 3 = 0.7
+    expect(s.parallel_efficiency!.mean).toBeCloseTo(0.7, 10);
+  });
+
+  it("(b) sequential-only fleet emits null and omits the format line", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
+    const log = [
+      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined),
+      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, undefined),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
+
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.parallel_efficiency).toBeNull();
+    const out = formatTodaySessionSummary(s);
+    expect(out).not.toContain("parallel_efficiency:");
+  });
+
+  it("(c) --since cutoff narrows the parallel-session pool", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
+    const log = [
+      // Pre-cutoff — excluded
+      sessionCompleteWithEff("2026-04-18T08:00:00.000Z", 30, 0.1),
+      // Inside the window — counted
+      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.5),
+      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
+
+    const cutoffMs = Date.parse("2026-04-18T10:00:00.000Z");
+    const s = await buildTodaySessionSummary(NOW, cutoffMs);
+    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
+  });
+
+  it("(d) mixed sequential + parallel: only the parallel ones contribute", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
+    const log = [
+      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined), // seq
+      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.5),       // par
+      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, undefined), // seq
+      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),       // par
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
+
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
+    const out = formatTodaySessionSummary(s);
+    expect(out).toContain("parallel_efficiency:       0.70 (over 2 parallel sessions)");
+  });
+
+  it("singular vs plural session label", () => {
+    const s = {
+      date: "2026-04-18",
+      cycles_total: 0,
+      verified: 0,
+      verification_failed: 0,
+      avg_cycle_duration_seconds: 0,
+      wall_clock_minutes: 0,
+      last_session_end: null,
+      cycle_duration: null,
+      parallel_efficiency: { mean: 0.55, sessions: 1 },
+    };
+    const out = formatTodaySessionSummary(s);
+    expect(out).toContain("parallel_efficiency:       0.55 (over 1 parallel session)");
   });
 });
