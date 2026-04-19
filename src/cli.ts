@@ -67,6 +67,7 @@ import {
   ProviderConfigError,
 } from "./providers/registry";
 import type { ProviderHealth, ProviderRole } from "./providers/types";
+import { appendFleetMessage } from "./fleet_messages";
 
 const VERSION = "0.0.1";
 
@@ -231,6 +232,12 @@ Usage:
     Example: generalstaff view fleet-overview            # one row per project + aggregates
     Example: generalstaff view fleet-overview --json     # same, as JSON
     # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
+
+  generalstaff message send --from=<str> --body=<str> [--kind=<...>] [--session-id=<id>]
+                           [--task-id=<id>] [--cycle-id=<id>] [--json]
+                                                          Append a message to the fleet inbox (gs-240)
+    Example: generalstaff message send --from=ray --body="heads up on the next run"
+    Example: generalstaff message send --from=bot --kind=handoff --task-id=gs-240 "body as final arg"
 
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
@@ -2272,6 +2279,99 @@ switch (command) {
     // Unreachable — VALID_VIEWS guard above catches unknown names.
     console.error(`Error: view '${viewName}' handler missing`);
     process.exit(1);
+  }
+
+  case "message": {
+    const sub = args[1];
+    if (!sub || sub === "--help" || sub === "help") {
+      console.log(
+        "Usage: generalstaff message send --from=<str> --body=<str> [options]\n" +
+          "\n" +
+          "Options:\n" +
+          "  --from=<str>         Required. Author identifier (e.g. 'ray', 'generalstaff-bot').\n" +
+          "  --body=<str>         Required. Message body (or pass as final positional argument).\n" +
+          "  --kind=<str>         Optional. One of: blocker, handoff, fyi, decision.\n" +
+          "  --session-id=<id>    Optional. Reference a session id.\n" +
+          "  --task-id=<id>       Optional. Reference a task id.\n" +
+          "  --cycle-id=<id>      Optional. Reference a cycle id.\n" +
+          "  --json               Emit the appended message object as JSON.\n",
+      );
+      process.exit(0);
+    }
+    if (sub !== "send") {
+      console.error(
+        `Error: unknown message subcommand '${sub}'. Valid: send`,
+      );
+      process.exit(1);
+    }
+
+    const { values: mValues, positionals: mPositionals } = parseArgs({
+      args: args.slice(2),
+      options: {
+        from: { type: "string" },
+        body: { type: "string" },
+        kind: { type: "string" },
+        "session-id": { type: "string" },
+        "task-id": { type: "string" },
+        "cycle-id": { type: "string" },
+        json: { type: "boolean", default: false },
+      },
+      allowPositionals: true,
+    });
+
+    const from = mValues.from;
+    const body =
+      mValues.body !== undefined && mValues.body !== ""
+        ? mValues.body
+        : mPositionals.length > 0
+          ? mPositionals.join(" ").trim()
+          : undefined;
+
+    if (!from || !body) {
+      console.error(
+        "Error: message send requires --from=<str> and --body=<str>",
+      );
+      process.exit(1);
+    }
+
+    const VALID_KINDS = ["blocker", "handoff", "fyi", "decision"] as const;
+    let kind: string | undefined;
+    if (mValues.kind !== undefined) {
+      if (!(VALID_KINDS as readonly string[]).includes(mValues.kind)) {
+        console.error(
+          `Error: invalid --kind '${mValues.kind}'. Valid: ${VALID_KINDS.join(", ")}`,
+        );
+        process.exit(1);
+      }
+      kind = mValues.kind;
+    }
+
+    const refEntry: Record<string, string> = {};
+    if (mValues["session-id"]) refEntry.session_id = mValues["session-id"];
+    if (mValues["task-id"]) refEntry.task_id = mValues["task-id"];
+    if (mValues["cycle-id"]) refEntry.cycle_id = mValues["cycle-id"];
+
+    const timestamp = new Date().toISOString();
+    const extra: Record<string, unknown> = { timestamp };
+    if (kind) extra.kind = kind;
+    if (Object.keys(refEntry).length > 0) extra.refs = [refEntry];
+
+    await appendFleetMessage(from, body, extra);
+
+    const entry: Record<string, unknown> = {
+      timestamp,
+      from,
+      body,
+      ...(kind ? { kind } : {}),
+      ...(Object.keys(refEntry).length > 0 ? { refs: [refEntry] } : {}),
+    };
+
+    if (mValues.json) {
+      console.log(JSON.stringify(entry));
+    } else {
+      console.log(`Appended message from ${from} at ${timestamp}`);
+    }
+    break;
   }
 
   default:
