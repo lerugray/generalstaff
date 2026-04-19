@@ -2522,15 +2522,37 @@ dispatcher:
       expect(parsed.aggregates.total_cycles).toBe(3);
     });
 
-    it("view with no sub-view prints usage and exits 1", async () => {
+    it("view with no sub-view prints usage to stdout and exits 0 (gs-233)", async () => {
       const result = await runCli(["view"], VIEW_DIR);
-      expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("Usage: generalstaff view <name>");
-      expect(result.stderr).toContain("fleet-overview");
-      expect(result.stderr).toContain("task-queue");
-      expect(result.stderr).toContain("session-tail");
-      expect(result.stderr).toContain("dispatch-detail");
-      expect(result.stderr).toContain("inbox");
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff view <name>");
+      expect(result.stdout).toContain("fleet-overview");
+      expect(result.stdout).toContain("task-queue");
+      expect(result.stdout).toContain("session-tail");
+      expect(result.stdout).toContain("dispatch-detail");
+      expect(result.stdout).toContain("inbox");
+    });
+
+    it("view --help prints usage to stdout and exits 0 (gs-233)", async () => {
+      const result = await runCli(["view", "--help"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff view <name>");
+      expect(result.stdout).toContain("fleet-overview");
+      expect(result.stdout).toContain("task-queue");
+      expect(result.stdout).toContain("session-tail");
+      expect(result.stdout).toContain("dispatch-detail");
+      expect(result.stdout).toContain("inbox");
+    });
+
+    it("view help prints usage to stdout and exits 0 (gs-233)", async () => {
+      const result = await runCli(["view", "help"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Usage: generalstaff view <name>");
+      expect(result.stdout).toContain("fleet-overview");
+      expect(result.stdout).toContain("task-queue");
+      expect(result.stdout).toContain("session-tail");
+      expect(result.stdout).toContain("dispatch-detail");
+      expect(result.stdout).toContain("inbox");
     });
 
     it("view unknown-name prints the valid-views list and exits 1", async () => {
