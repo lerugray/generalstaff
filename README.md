@@ -14,8 +14,12 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 > + gamr + raybrain). Phase 4 lands **opt-in parallel worktrees** —
 > set `dispatcher.max_parallel_slots: N` in `projects.yaml` to run N
 > cycles per round; default 1 keeps the sequential behaviour from
-> Phases 1-3 bit-for-bit unchanged. Private repo, preparing for
-> public launch. Ships cross-platform (Windows, macOS, Linux).
+> Phases 1-3 bit-for-bit unchanged. **Phase 5 visual anchor shipped
+> tonight:** five dashboard reference views in
+> `docs/phase-5-references/` establish the UI's look and information
+> layout. One Claude Design brief anchored the vocabulary; four
+> hand-built views extended it. Private repo, preparing for public launch.
+> Ships cross-platform (Windows, macOS, Linux).
 
 ## The problem
 
@@ -51,6 +55,22 @@ reality.
 - **Open audit log** (Hard Rule #9): every prompt, response, tool call,
   and diff in `state/<project>/PROGRESS.jsonl`. Fully reviewable after
   the fact.
+
+## What it looks like
+
+Phase 5 ships a local dashboard with five linked views: a fleet
+overview showing every registered project's state at a glance, a
+per-project task queue, a live session log, per-cycle detail pages
+for drilling in when something needs attention, and a shared-inbox
+channel for cross-session handoff notes.
+
+The visual direction is printed-paper. Warm cream background, serif
+for display, monospace for data, small-caps labels, a rust accent
+used only where something needs your eyes. No SaaS gradients, no
+dark-mode-by-default. Reference HTML for each view lives in
+[`docs/phase-5-references/`](docs/phase-5-references/), along with a
+README documenting what each view establishes and which patterns
+carry across them.
 
 ## Quickstart
 
@@ -197,9 +217,12 @@ root.
   observability in the digest and `status --sessions` table. Default
   `max_parallel_slots: 1` preserves Phase 1-3 behaviour. See
   [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md).
-- **Phase 5** (next): local desktop UI shell (Tauri) for control and
-  audit — read side is ready; the gs-188 observability fields feed
-  straight in.
+- **Phase 5** (in progress): local UI shell for control and audit.
+  **Visual anchor shipped 2026-04-18.** Five reference views in
+  [`docs/phase-5-references/`](docs/phase-5-references/) establish
+  the dashboard's look and information layout. Implementation stack
+  (Tauri, local web server, or other) is not yet chosen; the data
+  to render (gs-188's parallel-efficiency metrics) is already there.
 - **Phase 5.5+:** Kriegspiel / command-room UI theme. See
   [`UI-VISION-2026-04-15.md`](UI-VISION-2026-04-15.md).
 - **Phase 7:** Public launch.
@@ -217,6 +240,10 @@ root.
   design-decision resolutions and the gs-188 observability surface
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
   reference, including the `max_parallel_slots` opt-in
+- [`docs/phase-5-references/`](docs/phase-5-references/) -- Phase 5
+  UI reference views (fleet, queue, tail, detail, inbox) with a
+  README documenting what each establishes and how the vocabulary
+  carries across views
 - [`CLAUDE.md`](CLAUDE.md) -- instructions for Claude Code sessions
   operating in this repo
 - [`research-notes.md`](research-notes.md) -- research on prior art
