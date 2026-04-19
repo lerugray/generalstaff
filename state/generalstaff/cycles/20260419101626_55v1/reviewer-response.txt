@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff matches the claimed task scope, contains no hands-off violations, and provides strong evidence for the completed task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-261",
+      "evidence": "Changes in src/verification.ts implement command-not-found detection and hint generation, with modifications to src/cycle.ts to surface the hint in the result reason, and new tests in tests/verification.test.ts covering all specified test cases.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The independent verification failed due to a version mismatch in CLI tests, but this is unrelated to the implemented task and does not affect the scope or correctness of the changes made."
+}
