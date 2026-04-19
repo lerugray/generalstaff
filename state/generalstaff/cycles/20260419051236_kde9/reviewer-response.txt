@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff matches the claimed task gs-244, which involved adding --help support to subcommands in src/cli.ts and corresponding tests in tests/cli.test.ts, with no hands-off violations or scope drift.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-244",
+      "evidence": "Added --help support to session, cycle, status, and task subcommands in src/cli.ts with usage blocks matching gs-233's pattern, and added comprehensive tests in tests/cli.test.ts covering all subcommands.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "All changes are directly related to gs-244 and the verification command passed successfully."
+}
