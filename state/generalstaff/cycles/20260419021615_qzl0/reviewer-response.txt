@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff matches the claimed task scope, contains no hands-off violations, and provides strong evidence for the completed task.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-225",
+      "evidence": "Creates src/views/inbox.ts with getInboxView function and related interfaces, and tests/views/inbox.test.ts with comprehensive unit tests as specified in the task.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command (bun test && bun x tsc --noEmit) passed with exit code 0, confirming the code compiles and tests pass. The diff includes all required files and functionality for task gs-225."
+}
