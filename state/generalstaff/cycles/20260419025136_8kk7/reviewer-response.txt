@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "The diff matches the claimed task gs-229, contains no hands-off violations, and the verification command passed with no scope drift.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-229",
+      "evidence": "The diff adds a new case for 'dispatch-detail' in src/cli.ts that calls getDispatchDetail, includes corresponding tests in tests/cli.test.ts, and updates the task status to 'done' in tasks.json.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "All changes are directly related to gs-229 and the verification command passed successfully."
+}
