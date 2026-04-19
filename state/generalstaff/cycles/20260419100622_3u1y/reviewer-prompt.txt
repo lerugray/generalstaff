@@ -1,0 +1,686 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/summary.ts b/src/summary.ts
+index 7373dc4..075efbd 100644
+--- a/src/summary.ts
++++ b/src/summary.ts
+@@ -307,6 +307,14 @@ export interface CycleDurationPercentiles {
+   count: number;
+ }
+ 
++// gs-260: rolling fleet-level mean of session-level parallel_efficiency.
++// Only populated when at least one session_complete event in the window
++// carried the field (set by parallel-mode sessions only — see gs-186).
++export interface ParallelEfficiencyMetrics {
++  mean: number;
++  sessions: number;
++}
++
+ export interface TodaySessionSummary {
+   date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
+   cycles_total: number;
+@@ -319,6 +327,10 @@ export interface TodaySessionSummary {
+   // cycle_end pool that feeds avg_cycle_duration_seconds. null when no
+   // cycles match the window.
+   cycle_duration: CycleDurationPercentiles | null;
++  // gs-260: mean parallel_efficiency across session_complete events in
++  // the window that carried that field. null when none did (e.g. fully
++  // sequential fleet).
++  parallel_efficiency: ParallelEfficiencyMetrics | null;
+ }
+ 
+ // gs-252: nearest-rank percentile (1-indexed). Sorted asc; for percentile p
+@@ -357,6 +369,7 @@ export async function buildTodaySessionSummary(
+     wall_clock_minutes: 0,
+     last_session_end: null,
+     cycle_duration: null,
++    parallel_efficiency: null,
+   };
+ 
+   const stateDir = join(getRootDir(), "state");
+@@ -365,6 +378,7 @@ export async function buildTodaySessionSummary(
+   let totalDurationSeconds = 0;
+   let lastSessionEndMs = -Infinity;
+   const durations: number[] = [];
++  const parallelEffs: number[] = [];
+ 
+   let projectDirs: string[];
+   try {
+@@ -400,6 +414,16 @@ export async function buildTodaySessionSummary(
+             lastSessionEndMs = ts;
+             result.last_session_end = value.timestamp;
+           }
++          // gs-260: collect parallel_efficiency from session_complete
++          // events that carry the field. The field is only set in
++          // parallel mode (max_parallel_slots > 1; see gs-186), so its
++          // mere presence is the signal.
++          if (value.event === "session_complete") {
++            const eff = value.data.parallel_efficiency;
++            if (typeof eff === "number" && Number.isFinite(eff)) {
++              parallelEffs.push(eff);
++            }
++          }
+         }
+       } else if (value.event === "cycle_end") {
+         result.cycles_total += 1;
+@@ -431,6 +455,13 @@ export async function buildTodaySessionSummary(
+       count: durations.length,
+     };
+   }
++  if (parallelEffs.length > 0) {
++    const sum = parallelEffs.reduce((a, b) => a + b, 0);
++    result.parallel_efficiency = {
++      mean: sum / parallelEffs.length,
++      sessions: parallelEffs.length,
++    };
++  }
+   return result;
+ }
+ 
+@@ -455,5 +486,14 @@ export function formatTodaySessionSummary(s: TodaySessionSummary): string {
+   } else {
+     lines.push(`cycle_duration:            (no cycles)`);
+   }
++  // gs-260: rolling fleet-level parallel_efficiency. Omit entirely when
++  // no parallel sessions matched — sequential-only fleets shouldn't see
++  // a metric whose denominator is zero.
++  if (s.parallel_efficiency) {
++    const pe = s.parallel_efficiency;
++    lines.push(
++      `parallel_efficiency:       ${pe.mean.toFixed(2)} (over ${pe.sessions} parallel session${pe.sessions === 1 ? "" : "s"})`,
++    );
++  }
+   return lines.join("\n");
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 1db47a8..6e72328 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1753,7 +1753,7 @@
+   {
+     "id": "gs-260",
+     "title": "Surface `parallel_efficiency` in `status --summary` when the fleet has run parallel sessions recently. CREATE ONLY: modify `src/summary.ts` (or whoever computes status --summary — check src/cli.ts status handler for the call path) to compute the mean parallel_efficiency from `session_complete` events in the summary window that have that field set (it's only set in parallel mode — see gs-186). Text: add a one-line `parallel_efficiency: 0.XX (over N parallel sessions)` under the existing cycle metrics. JSON: add `parallel_efficiency: { mean: number, sessions: number }` field. Omit the line entirely (both modes) when no parallel sessions matched. Respect existing `--since` filter. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-session fixture with parallel-metrics computes correct mean; (b) sequential-only fleet omits the line; (c) --since filter narrows the pool; (d) mixed sequential + parallel sessions only averages the parallel ones. Motivation: parallel_efficiency is only visible per-session today; a rolling fleet-level view makes it easier to spot when the picker is padding empty-queue slots (like the pre-gs-232 regression). Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/summary.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 0ef1735..8294e50 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -4845,6 +4845,67 @@ dispatcher:
+       );
+     });
+ 
++    it("--summary --json surfaces parallel_efficiency when parallel sessions exist (gs-260)", async () => {
++      // Append two parallel session_complete events so the window picks
++      // them up alongside the sequential ones already in the fixture.
++      const extra = [
++        {
++          timestamp: "2026-04-17T13:30:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 4,
++            total_verified: 4,
++            total_failed: 0,
++            stop_reason: "budget",
++            reviewer: "openrouter",
++            max_parallel_slots: 2,
++            parallel_efficiency: 0.6,
++          },
++        },
++        {
++          timestamp: "2026-04-17T17:00:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 4,
++            total_verified: 3,
++            total_failed: 1,
++            stop_reason: "budget",
++            reviewer: "openrouter",
++            max_parallel_slots: 2,
++            parallel_efficiency: 0.8,
++          },
++        },
++      ];
++      const existing = readFileSync(FLEET_LOG, "utf8");
++      writeFileSync(
++        FLEET_LOG,
++        existing + extra.map((e) => JSON.stringify(e)).join("\n") + "\n",
++      );
++
++      const result = await runCli(
++        ["status", "--summary", "--since=2026-04-17T12:00:00.000Z", "--json"],
++        SINCE_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++    });
++
++    it("--summary --json omits parallel_efficiency when fleet ran sequential-only (gs-260)", async () => {
++      // The default fixture has no parallel_efficiency on any event.
++      const result = await runCli(
++        ["status", "--summary", "--since=2026-04-17T00:00:00.000Z", "--json"],
++        SINCE_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.parallel_efficiency).toBeNull();
++    });
++
+     it("inclusive boundary: --sessions --since=<ts> includes a session that started exactly at <ts>", async () => {
+       // The 13:00 session was computed from a 14:00 timestamp minus 60min duration
+       // so --since=2026-04-17T12:00:00.000Z should include it on the boundary.
+diff --git a/tests/summary.test.ts b/tests/summary.test.ts
+index 80ecd19..f4b7b0f 100644
+--- a/tests/summary.test.ts
++++ b/tests/summary.test.ts
+@@ -524,6 +524,7 @@ describe("buildTodaySessionSummary", () => {
+       wall_clock_minutes: 60,
+       last_session_end: "2026-04-18T14:00:00.000Z",
+       cycle_duration: null,
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     const lines = out.split("\n");
+@@ -545,6 +546,7 @@ describe("buildTodaySessionSummary", () => {
+       wall_clock_minutes: 0,
+       last_session_end: null,
+       cycle_duration: null,
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     expect(out).toContain("Average cycle duration:    n/a");
+@@ -617,8 +619,119 @@ describe("buildTodaySessionSummary cycle_duration percentiles (gs-252)", () => {
+       wall_clock_minutes: 6,
+       last_session_end: "2026-04-18T11:00:00.000Z",
+       cycle_duration: { p50: 120, p90: 180, max: 180, count: 3 },
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     expect(out).toContain("cycle_duration:            p50=120s p90=180s max=180s");
+   });
+ });
++
++describe("buildTodaySessionSummary parallel_efficiency (gs-260)", () => {
++  const NOW = new Date("2026-04-18T15:30:00.000Z");
++
++  function sessionCompleteWithEff(
++    ts: string,
++    minutes: number,
++    parallel_efficiency: number | undefined,
++  ): string {
++    const data: Record<string, unknown> = {
++      duration_minutes: minutes,
++      total_cycles: 1,
++      total_verified: 1,
++      total_failed: 0,
++      stop_reason: "budget",
++    };
++    if (parallel_efficiency !== undefined) {
++      data.parallel_efficiency = parallel_efficiency;
++      data.max_parallel_slots = 2;
++    }
++    return JSON.stringify({
++      timestamp: ts,
++      event: "session_complete",
++      project_id: "_fleet",
++      data,
++    });
++  }
++
++  it("(a) computes mean across 3 parallel session_complete events", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, 0.6),
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.8),
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.7),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).not.toBeNull();
++    expect(s.parallel_efficiency!.sessions).toBe(3);
++    // (0.6 + 0.8 + 0.7) / 3 = 0.7
++    expect(s.parallel_efficiency!.mean).toBeCloseTo(0.7, 10);
++  });
++
++  it("(b) sequential-only fleet emits null and omits the format line", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined),
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, undefined),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).toBeNull();
++    const out = formatTodaySessionSummary(s);
++    expect(out).not.toContain("parallel_efficiency:");
++  });
++
++  it("(c) --since cutoff narrows the parallel-session pool", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      // Pre-cutoff — excluded
++      sessionCompleteWithEff("2026-04-18T08:00:00.000Z", 30, 0.1),
++      // Inside the window — counted
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.5),
++      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const cutoffMs = Date.parse("2026-04-18T10:00:00.000Z");
++    const s = await buildTodaySessionSummary(NOW, cutoffMs);
++    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++  });
++
++  it("(d) mixed sequential + parallel: only the parallel ones contribute", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined), // seq
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.5),       // par
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, undefined), // seq
++      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),       // par
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("parallel_efficiency:       0.70 (over 2 parallel sessions)");
++  });
++
++  it("singular vs plural session label", () => {
++    const s = {
++      date: "2026-04-18",
++      cycles_total: 0,
++      verified: 0,
++      verification_failed: 0,
++      avg_cycle_duration_seconds: 0,
++      wall_clock_minutes: 0,
++      last_session_end: null,
++      cycle_duration: null,
++      parallel_efficiency: { mean: 0.55, sessions: 1 },
++    };
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("parallel_efficiency:       0.55 (over 1 parallel session)");
++  });
++});
+
+
+Diff summary: src/summary.ts                |  40 +++++++++++++++
+ state/generalstaff/tasks.json |   2 +-
+ tests/cli.test.ts             |  61 +++++++++++++++++++++++
+ tests/summary.test.ts         | 113 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 215 insertions(+), 1 deletion(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T10:14:13.449Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  projects registered — No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.
+  ✓  projects.yaml customized — no projects.yaml present
+  ✓  state_dir — state_dir will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  projects registered — No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.
+  ✓  projects.yaml customized — no projects.yaml present
+  ✓  state_dir — state_dir will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  projects registered — No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.
+  ✓  projects.yaml customized — no projects.yaml present
+  ✓  state_dir — state_dir will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✗  projects registered — No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.
+  ✓  projects.yaml customized — no projects.yaml present
+  ✓  state_dir — state_dir will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✗  projects registered — No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.
+  ✓  projects.yaml customized — no projects.yaml present
+  ✓  state_dir — state_dir will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve 5c4858b4 after 2 attempts (status=128, stderr=fatal: bad object 5c4858b4a3c12003945bec5a3725aa2b8646e57c)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_101537.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_101537.md
+[fetchCommitSubject]
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

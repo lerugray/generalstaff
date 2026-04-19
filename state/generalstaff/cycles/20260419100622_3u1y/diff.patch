@@ -1,0 +1,317 @@
+diff --git a/src/summary.ts b/src/summary.ts
+index 7373dc4..075efbd 100644
+--- a/src/summary.ts
++++ b/src/summary.ts
+@@ -307,6 +307,14 @@ export interface CycleDurationPercentiles {
+   count: number;
+ }
+ 
++// gs-260: rolling fleet-level mean of session-level parallel_efficiency.
++// Only populated when at least one session_complete event in the window
++// carried the field (set by parallel-mode sessions only — see gs-186).
++export interface ParallelEfficiencyMetrics {
++  mean: number;
++  sessions: number;
++}
++
+ export interface TodaySessionSummary {
+   date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
+   cycles_total: number;
+@@ -319,6 +327,10 @@ export interface TodaySessionSummary {
+   // cycle_end pool that feeds avg_cycle_duration_seconds. null when no
+   // cycles match the window.
+   cycle_duration: CycleDurationPercentiles | null;
++  // gs-260: mean parallel_efficiency across session_complete events in
++  // the window that carried that field. null when none did (e.g. fully
++  // sequential fleet).
++  parallel_efficiency: ParallelEfficiencyMetrics | null;
+ }
+ 
+ // gs-252: nearest-rank percentile (1-indexed). Sorted asc; for percentile p
+@@ -357,6 +369,7 @@ export async function buildTodaySessionSummary(
+     wall_clock_minutes: 0,
+     last_session_end: null,
+     cycle_duration: null,
++    parallel_efficiency: null,
+   };
+ 
+   const stateDir = join(getRootDir(), "state");
+@@ -365,6 +378,7 @@ export async function buildTodaySessionSummary(
+   let totalDurationSeconds = 0;
+   let lastSessionEndMs = -Infinity;
+   const durations: number[] = [];
++  const parallelEffs: number[] = [];
+ 
+   let projectDirs: string[];
+   try {
+@@ -400,6 +414,16 @@ export async function buildTodaySessionSummary(
+             lastSessionEndMs = ts;
+             result.last_session_end = value.timestamp;
+           }
++          // gs-260: collect parallel_efficiency from session_complete
++          // events that carry the field. The field is only set in
++          // parallel mode (max_parallel_slots > 1; see gs-186), so its
++          // mere presence is the signal.
++          if (value.event === "session_complete") {
++            const eff = value.data.parallel_efficiency;
++            if (typeof eff === "number" && Number.isFinite(eff)) {
++              parallelEffs.push(eff);
++            }
++          }
+         }
+       } else if (value.event === "cycle_end") {
+         result.cycles_total += 1;
+@@ -431,6 +455,13 @@ export async function buildTodaySessionSummary(
+       count: durations.length,
+     };
+   }
++  if (parallelEffs.length > 0) {
++    const sum = parallelEffs.reduce((a, b) => a + b, 0);
++    result.parallel_efficiency = {
++      mean: sum / parallelEffs.length,
++      sessions: parallelEffs.length,
++    };
++  }
+   return result;
+ }
+ 
+@@ -455,5 +486,14 @@ export function formatTodaySessionSummary(s: TodaySessionSummary): string {
+   } else {
+     lines.push(`cycle_duration:            (no cycles)`);
+   }
++  // gs-260: rolling fleet-level parallel_efficiency. Omit entirely when
++  // no parallel sessions matched — sequential-only fleets shouldn't see
++  // a metric whose denominator is zero.
++  if (s.parallel_efficiency) {
++    const pe = s.parallel_efficiency;
++    lines.push(
++      `parallel_efficiency:       ${pe.mean.toFixed(2)} (over ${pe.sessions} parallel session${pe.sessions === 1 ? "" : "s"})`,
++    );
++  }
+   return lines.join("\n");
+ }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 1db47a8..6e72328 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1753,7 +1753,7 @@
+   {
+     "id": "gs-260",
+     "title": "Surface `parallel_efficiency` in `status --summary` when the fleet has run parallel sessions recently. CREATE ONLY: modify `src/summary.ts` (or whoever computes status --summary — check src/cli.ts status handler for the call path) to compute the mean parallel_efficiency from `session_complete` events in the summary window that have that field set (it's only set in parallel mode — see gs-186). Text: add a one-line `parallel_efficiency: 0.XX (over N parallel sessions)` under the existing cycle metrics. JSON: add `parallel_efficiency: { mean: number, sessions: number }` field. Omit the line entirely (both modes) when no parallel sessions matched. Respect existing `--since` filter. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-session fixture with parallel-metrics computes correct mean; (b) sequential-only fleet omits the line; (c) --since filter narrows the pool; (d) mixed sequential + parallel sessions only averages the parallel ones. Motivation: parallel_efficiency is only visible per-session today; a rolling fleet-level view makes it easier to spot when the picker is padding empty-queue slots (like the pre-gs-232 regression). Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/summary.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 0ef1735..8294e50 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -4845,6 +4845,67 @@ dispatcher:
+       );
+     });
+ 
++    it("--summary --json surfaces parallel_efficiency when parallel sessions exist (gs-260)", async () => {
++      // Append two parallel session_complete events so the window picks
++      // them up alongside the sequential ones already in the fixture.
++      const extra = [
++        {
++          timestamp: "2026-04-17T13:30:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 4,
++            total_verified: 4,
++            total_failed: 0,
++            stop_reason: "budget",
++            reviewer: "openrouter",
++            max_parallel_slots: 2,
++            parallel_efficiency: 0.6,
++          },
++        },
++        {
++          timestamp: "2026-04-17T17:00:00.000Z",
++          event: "session_complete",
++          project_id: "_fleet",
++          data: {
++            duration_minutes: 30,
++            total_cycles: 4,
++            total_verified: 3,
++            total_failed: 1,
++            stop_reason: "budget",
++            reviewer: "openrouter",
++            max_parallel_slots: 2,
++            parallel_efficiency: 0.8,
++          },
++        },
++      ];
++      const existing = readFileSync(FLEET_LOG, "utf8");
++      writeFileSync(
++        FLEET_LOG,
++        existing + extra.map((e) => JSON.stringify(e)).join("\n") + "\n",
++      );
++
++      const result = await runCli(
++        ["status", "--summary", "--since=2026-04-17T12:00:00.000Z", "--json"],
++        SINCE_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++    });
++
++    it("--summary --json omits parallel_efficiency when fleet ran sequential-only (gs-260)", async () => {
++      // The default fixture has no parallel_efficiency on any event.
++      const result = await runCli(
++        ["status", "--summary", "--since=2026-04-17T00:00:00.000Z", "--json"],
++        SINCE_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.parallel_efficiency).toBeNull();
++    });
++
+     it("inclusive boundary: --sessions --since=<ts> includes a session that started exactly at <ts>", async () => {
+       // The 13:00 session was computed from a 14:00 timestamp minus 60min duration
+       // so --since=2026-04-17T12:00:00.000Z should include it on the boundary.
+diff --git a/tests/summary.test.ts b/tests/summary.test.ts
+index 80ecd19..f4b7b0f 100644
+--- a/tests/summary.test.ts
++++ b/tests/summary.test.ts
+@@ -524,6 +524,7 @@ describe("buildTodaySessionSummary", () => {
+       wall_clock_minutes: 60,
+       last_session_end: "2026-04-18T14:00:00.000Z",
+       cycle_duration: null,
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     const lines = out.split("\n");
+@@ -545,6 +546,7 @@ describe("buildTodaySessionSummary", () => {
+       wall_clock_minutes: 0,
+       last_session_end: null,
+       cycle_duration: null,
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     expect(out).toContain("Average cycle duration:    n/a");
+@@ -617,8 +619,119 @@ describe("buildTodaySessionSummary cycle_duration percentiles (gs-252)", () => {
+       wall_clock_minutes: 6,
+       last_session_end: "2026-04-18T11:00:00.000Z",
+       cycle_duration: { p50: 120, p90: 180, max: 180, count: 3 },
++      parallel_efficiency: null,
+     };
+     const out = formatTodaySessionSummary(s);
+     expect(out).toContain("cycle_duration:            p50=120s p90=180s max=180s");
+   });
+ });
++
++describe("buildTodaySessionSummary parallel_efficiency (gs-260)", () => {
++  const NOW = new Date("2026-04-18T15:30:00.000Z");
++
++  function sessionCompleteWithEff(
++    ts: string,
++    minutes: number,
++    parallel_efficiency: number | undefined,
++  ): string {
++    const data: Record<string, unknown> = {
++      duration_minutes: minutes,
++      total_cycles: 1,
++      total_verified: 1,
++      total_failed: 0,
++      stop_reason: "budget",
++    };
++    if (parallel_efficiency !== undefined) {
++      data.parallel_efficiency = parallel_efficiency;
++      data.max_parallel_slots = 2;
++    }
++    return JSON.stringify({
++      timestamp: ts,
++      event: "session_complete",
++      project_id: "_fleet",
++      data,
++    });
++  }
++
++  it("(a) computes mean across 3 parallel session_complete events", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, 0.6),
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.8),
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.7),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).not.toBeNull();
++    expect(s.parallel_efficiency!.sessions).toBe(3);
++    // (0.6 + 0.8 + 0.7) / 3 = 0.7
++    expect(s.parallel_efficiency!.mean).toBeCloseTo(0.7, 10);
++  });
++
++  it("(b) sequential-only fleet emits null and omits the format line", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined),
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, undefined),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).toBeNull();
++    const out = formatTodaySessionSummary(s);
++    expect(out).not.toContain("parallel_efficiency:");
++  });
++
++  it("(c) --since cutoff narrows the parallel-session pool", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      // Pre-cutoff — excluded
++      sessionCompleteWithEff("2026-04-18T08:00:00.000Z", 30, 0.1),
++      // Inside the window — counted
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, 0.5),
++      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const cutoffMs = Date.parse("2026-04-18T10:00:00.000Z");
++    const s = await buildTodaySessionSummary(NOW, cutoffMs);
++    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++  });
++
++  it("(d) mixed sequential + parallel: only the parallel ones contribute", async () => {
++    const stateDir = join(TEST_DIR, "state");
++    mkdirSync(join(stateDir, "_fleet"), { recursive: true });
++    const log = [
++      sessionCompleteWithEff("2026-04-18T09:00:00.000Z", 30, undefined), // seq
++      sessionCompleteWithEff("2026-04-18T10:00:00.000Z", 30, 0.5),       // par
++      sessionCompleteWithEff("2026-04-18T11:00:00.000Z", 30, undefined), // seq
++      sessionCompleteWithEff("2026-04-18T12:00:00.000Z", 30, 0.9),       // par
++    ].join("\n") + "\n";
++    writeFileSync(join(stateDir, "_fleet", "PROGRESS.jsonl"), log);
++
++    const s = await buildTodaySessionSummary(NOW);
++    expect(s.parallel_efficiency).toEqual({ mean: 0.7, sessions: 2 });
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("parallel_efficiency:       0.70 (over 2 parallel sessions)");
++  });
++
++  it("singular vs plural session label", () => {
++    const s = {
++      date: "2026-04-18",
++      cycles_total: 0,
++      verified: 0,
++      verification_failed: 0,
++      avg_cycle_duration_seconds: 0,
++      wall_clock_minutes: 0,
++      last_session_end: null,
++      cycle_duration: null,
++      parallel_efficiency: { mean: 0.55, sessions: 1 },
++    };
++    const out = formatTodaySessionSummary(s);
++    expect(out).toContain("parallel_efficiency:       0.55 (over 1 parallel session)");
++  });
++});
