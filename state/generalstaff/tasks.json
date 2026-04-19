@@ -1420,5 +1420,55 @@
       "src/cli.ts",
       "tests/cli.test.ts"
     ]
+  },
+  {
+    "id": "gs-231",
+    "title": "Harden isTaskBotPickable to treat `status: \"completed\"` same as `status: \"done\"`. CREATE ONLY: modify `src/tasks.ts` isTaskBotPickable — the existing `if (task.status === \"done\" || task.status === \"skipped\")` branch should also match `\"completed\"` (for tasks the bot marked `completed` before the status enum was locked down). Same treatment: return `{ ok: false, reason: \"not_pending\" }`. Also update `greenfieldCountRemainingDetailed` in `src/work_detection.ts` to count `\"completed\"` tasks under `done` instead of the default pending-bucket fallthrough. Append tests to `tests/tasks.test.ts` covering: (a) status='completed' returns not_pickable with reason not_pending; (b) status='completed' counts in done bucket in WorkBreakdown. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-215 historical task was marked 'completed' rather than 'done' by the bot, leaking past this filter and showing as bot-pickable in `status --backlog` until interactively patched 2026-04-18 evening. Harden at the pickability-check layer rather than normalizing tasks.json entries, so any future stray status values don't re-spawn the issue. Expected diff: ~60 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/tasks.ts",
+      "src/work_detection.ts",
+      "tests/tasks.test.ts"
+    ]
+  },
+  {
+    "id": "gs-232",
+    "title": "Dispatcher: in parallel mode, skip empty-queue projects when filling slots. CREATE ONLY: modify `src/dispatcher.ts` pickNextProjects (or equivalent picker used by parallel mode per gs-185/gs-186) — before returning a project for a slot, check `hasMoreWork(project)`; if false, skip that project and try the next by priority*staleness; if no project has work, return an empty array (caller soft-stops on empty). Append tests to `tests/dispatcher.test.ts` covering: (a) 2-project fleet where 1 has work → pickNextProjects(2) returns [that 1, nothing] OR filters to just [the one with work] (document which); (b) 2 projects both empty → returns []; (c) 3 projects where 2 have work → pickNextProjects(2) returns both with-work projects; (d) back-compat: sequential mode (N=1) behaves identically to pre-change. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: wave-3 and wave-4 tonight both showed parallel_efficiency ~0.54 with slot_idle_seconds ~2000-2400s — meaning half the parallel capacity was burned on verified_weak empty-diff cycles from projects with no pending work (gamr, raybrain in their empty-queue state). A slot running on an empty-queue project wastes ~30-60s of engineer-subprocess startup plus blocks the session from soft-stopping sooner. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 1,
+    "expected_touches": [
+      "src/dispatcher.ts",
+      "tests/dispatcher.test.ts"
+    ]
+  },
+  {
+    "id": "gs-233",
+    "title": "Add `generalstaff view --help` (and `view help`) listing all sub-views. CREATE ONLY: extend the `view` subcommand handler in `src/cli.ts` — when the second positional arg is `--help` or `help` (instead of a sub-view name), print a friendly usage block listing all valid sub-views (fleet-overview, task-queue, session-tail, dispatch-detail, inbox) with a one-line description each and their required/optional args; exit 0 (not 1 — --help is intentional user input, not an error). Also trigger the same output when `view` is invoked with no further args (currently exits 1 per gs-226). Append tests to `tests/cli.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `view --help` exits 0; (b) `view help` exits 0; (c) `view` (no args) now exits 0 with the same help output; (d) `view unknown-name` still exits 1 (unchanged); (e) help output includes all 5 sub-view names and one-line descriptions. Expected diff: ~80 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-234",
+    "title": "Improve `status --backlog` to print a friendly summary line when every registered project has 0 bot-pickable work. CREATE ONLY: modify the `status --backlog` handler in `src/cli.ts` — after rendering the existing table, if TOTAL.pending_bot_pickable === 0, append a one-line note: `\\nAll queues drained. Seed tasks with \\`generalstaff tasks add <project-id> --title=... --priority=N\\` or directly in \\`state/<project-id>/tasks.json\\`.` (exact wording in the spec). If TOTAL.pending_bot_pickable > 0, do not print the note (existing behavior unchanged). `--json` output is NOT modified — friendly note is text-mode only. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: during wave-3/4 tonight the bot's empty-cycles soft-stop fired after all queues drained, but `status --backlog` gave no visual signal that seeding was needed — just a row of zeros. Expected diff: ~60 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-235",
+    "title": "Regression test: verify `.gitignore` covers `.claude/` transient files so safety.ts clean-tree preflight doesn't trip on harness artifacts. CREATE ONLY: append a new test to `tests/gitignore.test.ts` (create the file if it doesn't exist yet, adjacent to other tests/ files) that reads the project `.gitignore` from the repo root and asserts: (a) the pattern `.claude/*` is present; (b) the exception `!.claude/settings.json` is present; (c) the pre-existing `.claude/settings.local.json` rule either stays present OR is subsumed under the broader pattern (test accepts both). DO NOT CREATE: any source modifications; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Test runner: bun test. Motivation: tonight's wave-2 spin was caused by `.claude/scheduled_tasks.lock` (ScheduleWakeup artifact) showing as untracked and blocking 8 cycles' preflight. Commit `ae299aa` broadened the rule; this test prevents silent regression if a future .gitignore edit strips it. Expected diff: ~40 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/gitignore.test.ts"
+    ]
   }
 ]
