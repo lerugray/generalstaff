@@ -1528,7 +1528,7 @@
   {
     "id": "gs-241",
     "title": "Add end-to-end integration tests exercising the `view` subcommand against a minimal fixture repo. CREATE ONLY: `tests/integration/view_subcommand.test.ts` that sets up a temporary fixture directory (under `tests/fixtures/view_integration/` via per-test tmpdir or existing fixture helpers) containing a minimal projects.yaml + state/<id>/PROGRESS.jsonl + state/<id>/tasks.json + state/_fleet/PROGRESS.jsonl + state/_fleet/messages.jsonl covering the shapes each view module consumes. Spawn `bun src/cli.ts view <name> --json` via child_process (or the existing Bun $ / spawnSync pattern used elsewhere in tests/), capture stdout, parse as JSON, assert shape invariants for each of: fleet-overview, task-queue, session-tail, dispatch-detail, inbox. DO NOT CREATE: new files outside tests/integration/ and tests/fixtures/view_integration/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) view fleet-overview --json returns projects[] with expected ids; (b) view task-queue <project-id> --json returns 4-bucket structure; (c) view session-tail --json returns sessions[] with the fixture session id; (d) view dispatch-detail <cycle-id> --json returns the expected cycle; (e) view inbox --json returns groups[] with the fixture message. Fixtures can be synthetic — do NOT import real project state. Expected diff: ~300 lines (~150 fixtures + ~150 test cases).",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "tests/integration/view_subcommand.test.ts",
@@ -1537,6 +1537,7 @@
       "tests/fixtures/view_integration/state/gs-test/tasks.json",
       "tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl",
       "tests/fixtures/view_integration/state/_fleet/messages.jsonl"
-    ]
+    ],
+    "completed_at": "2026-04-19T04:44:52.660Z"
   }
 ]

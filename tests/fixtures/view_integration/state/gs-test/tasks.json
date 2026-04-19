@@ -1,0 +1,35 @@
+[
+  {
+    "id": "t-1",
+    "title": "in-flight task",
+    "status": "in_progress",
+    "priority": 1
+  },
+  {
+    "id": "t-2",
+    "title": "ready pickable task",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "t-3",
+    "title": "interactive blocked task",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
+  },
+  {
+    "id": "t-4",
+    "title": "hands-off blocked task",
+    "status": "pending",
+    "priority": 4,
+    "expected_touches": ["src/reviewer.ts"]
+  },
+  {
+    "id": "t-5",
+    "title": "shipped task",
+    "status": "done",
+    "priority": 5,
+    "completed_at": "2026-04-17T10:00:00.000Z"
+  }
+]

@@ -1,0 +1,27 @@
+# Fixture registry for tests/integration/view_subcommand.test.ts (gs-241).
+# project.path is "." so state/ under this fixture dir serves as the project
+# state root when the test spawns the CLI with cwd=<fixture dir>.
+
+projects:
+  - id: gs-test
+    path: .
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: bot/work
+    auto_merge: true
+    hands_off:
+      - src/reviewer.ts
+
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_parallel_slots: 1
