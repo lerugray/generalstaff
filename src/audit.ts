@@ -454,6 +454,31 @@ const ANSI = {
   gray: "\x1b[90m",
 } as const;
 
+// gs-245: explicit override settable by the CLI when --no-color is present
+// in argv. Takes precedence over both NO_COLOR and TTY detection. `undefined`
+// means "no override; fall back to env + TTY".
+let colorOverride: boolean | undefined;
+
+export function setColorOverride(value: boolean | undefined): void {
+  colorOverride = value;
+}
+
+// Resolve the effective color setting. Priority: explicit override (set by
+// `--no-color` flag) > NO_COLOR env var (https://no-color.org) > TTY detection.
+// TTY detection is skipped when `tty` is provided (used in tests).
+export function shouldColorize(tty?: boolean): boolean {
+  if (colorOverride !== undefined) return colorOverride;
+  if (process.env.NO_COLOR && process.env.NO_COLOR.length > 0) return false;
+  return tty ?? Boolean(process.stdout.isTTY);
+}
+
+// Strip `--no-color` from an argv-style array so callers using parseArgs in
+// strict mode don't have to declare it on every subcommand. Returns a new
+// array — does not mutate input.
+export function stripNoColorArgs(args: readonly string[]): string[] {
+  return args.filter((a) => a !== "--no-color");
+}
+
 export function colorizeOutcome(outcome: string, useColor: boolean): string {
   if (!useColor) return outcome;
   switch (outcome) {
@@ -472,7 +497,7 @@ export function colorizeOutcome(outcome: string, useColor: boolean): string {
 
 export function printHistoryTable(
   rows: CycleHistoryRow[],
-  useColor: boolean = Boolean(process.stdout.isTTY),
+  useColor: boolean = shouldColorize(),
 ): void {
   if (rows.length === 0) {
     console.log("No cycle history found.");
@@ -510,7 +535,7 @@ export function printHistoryTable(
 
 export function printHistoryCompact(
   rows: CycleHistoryRow[],
-  useColor: boolean = Boolean(process.stdout.isTTY),
+  useColor: boolean = shouldColorize(),
   costs?: Record<string, CycleCostSummary>,
   byProject?: Record<string, ProjectCostSummary>,
 ): void {

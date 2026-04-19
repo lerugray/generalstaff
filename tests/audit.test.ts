@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag, setVerboseMode, isVerboseMode } from "../src/audit";
+import { appendProgress, tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, colorizeOutcome, summarizeCosts, parseDateFlag, isErrorEntry, loadProgressEvents, readJsonl, compileGrepPattern, matchesGrep, parseSinceFlag, setVerboseMode, isVerboseMode, shouldColorize, setColorOverride, stripNoColorArgs } from "../src/audit";
 import type { ProgressEntry } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -1411,5 +1411,95 @@ describe("setVerboseMode (gs-123)", () => {
     });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("cycle_start");
+  });
+});
+
+// gs-245: NO_COLOR env + --no-color flag (no-color.org). The shouldColorize
+// helper centralizes the policy; setColorOverride lets the CLI plug --no-color
+// into that policy without threading a flag through every print call.
+describe("shouldColorize / setColorOverride / stripNoColorArgs", () => {
+  const originalNoColor = process.env.NO_COLOR;
+
+  afterEach(() => {
+    setColorOverride(undefined);
+    if (originalNoColor === undefined) {
+      delete process.env.NO_COLOR;
+    } else {
+      process.env.NO_COLOR = originalNoColor;
+    }
+  });
+
+  it("returns false when NO_COLOR is set to a non-empty string", () => {
+    delete process.env.NO_COLOR;
+    process.env.NO_COLOR = "1";
+    expect(shouldColorize(true)).toBe(false);
+  });
+
+  it("ignores NO_COLOR when the value is empty (per no-color.org spec)", () => {
+    delete process.env.NO_COLOR;
+    process.env.NO_COLOR = "";
+    // With NO_COLOR empty and an explicit TTY=true, color should remain on.
+    expect(shouldColorize(true)).toBe(true);
+  });
+
+  it("falls back to TTY detection when no override and no NO_COLOR", () => {
+    delete process.env.NO_COLOR;
+    expect(shouldColorize(true)).toBe(true);
+    expect(shouldColorize(false)).toBe(false);
+  });
+
+  it("setColorOverride(false) wins over TTY and NO_COLOR-absent", () => {
+    delete process.env.NO_COLOR;
+    setColorOverride(false);
+    expect(shouldColorize(true)).toBe(false);
+  });
+
+  it("setColorOverride(true) wins over NO_COLOR (explicit user opt-in)", () => {
+    process.env.NO_COLOR = "1";
+    setColorOverride(true);
+    expect(shouldColorize(false)).toBe(true);
+  });
+
+  it("setColorOverride(undefined) clears the override", () => {
+    delete process.env.NO_COLOR;
+    setColorOverride(false);
+    expect(shouldColorize(true)).toBe(false);
+    setColorOverride(undefined);
+    expect(shouldColorize(true)).toBe(true);
+  });
+
+  it("stripNoColorArgs removes only --no-color and leaves order intact", () => {
+    expect(stripNoColorArgs(["status", "--no-color", "--json"])).toEqual([
+      "status",
+      "--json",
+    ]);
+    expect(stripNoColorArgs(["--no-color"])).toEqual([]);
+    expect(stripNoColorArgs(["status"])).toEqual(["status"]);
+    // --no-color-foo is not the same flag and must be preserved verbatim.
+    expect(stripNoColorArgs(["--no-color-foo"])).toEqual(["--no-color-foo"]);
+  });
+
+  it("printHistoryTable default param honors NO_COLOR via shouldColorize", async () => {
+    delete process.env.NO_COLOR;
+    process.env.NO_COLOR = "1";
+    const rows = [
+      { cycle_id: "c1", project: "p1", outcome: "verified", duration: "1m", sha_range: "a..b", timestamp: "2026-04-16 12:00:00Z" },
+    ];
+    const lines = await captureLog(() => Promise.resolve(printHistoryTable(rows)));
+    for (const line of lines) {
+      expect(line).not.toContain("\x1b[");
+    }
+  });
+
+  it("printHistoryCompact default param honors --no-color override via shouldColorize", async () => {
+    delete process.env.NO_COLOR;
+    setColorOverride(false);
+    const rows = [
+      { cycle_id: "c1", project: "p1", outcome: "verified", duration: "1m", sha_range: "a..b", timestamp: "2026-04-16 12:00:00Z" },
+    ];
+    const lines = await captureLog(() => Promise.resolve(printHistoryCompact(rows)));
+    for (const line of lines) {
+      expect(line).not.toContain("\x1b[");
+    }
   });
 });

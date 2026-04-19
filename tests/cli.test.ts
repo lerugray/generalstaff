@@ -645,6 +645,45 @@ dispatcher:
         "--verified-only and --outcome are mutually exclusive",
       );
     });
+
+    // gs-245: --no-color is a global flag, stripped before per-subcommand
+    // parseArgs runs. This guards against a regression where adding --no-color
+    // to a subcommand call would trip parseArgs's strict-mode rejection.
+    it("accepts --no-color without erroring on the history subcommand", async () => {
+      const result = await runCli(
+        ["history", "--no-color"],
+        HISTORY_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("CYCLE");
+      // Pipe-mode subprocess output already strips color; the meaningful
+      // assertion is "no escape sequences leaked through" and "no parse error".
+      expect(result.stdout).not.toContain("\x1b[");
+    });
+  });
+
+  // gs-245: NO_COLOR (no-color.org) and --no-color must never produce ANSI
+  // escapes in CLI output. The runCli subprocess pipes stdout (non-TTY) so
+  // color is already off by default; these tests are belt-and-braces for
+  // regressions where someone unconditionally emits escape sequences.
+  describe("--no-color and NO_COLOR env", () => {
+    it("--help mentions --no-color", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("--no-color");
+    });
+
+    it("NO_COLOR=1 env keeps the CLI from emitting ANSI escapes", async () => {
+      const proc = Bun.spawn(["bun", "run", CLI_PATH, "--help"], {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, NO_COLOR: "1" },
+      });
+      const stdout = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      expect(exitCode).toBe(0);
+      expect(stdout).not.toContain("\x1b[");
+    });
   });
 
   describe("log --lines", () => {
