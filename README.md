@@ -12,10 +12,12 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 
 > **Status.** Phases 1–4 shipped: sequential MVP, multi-provider LLM
 > routing, cross-project generality, opt-in parallel worktrees.
-> Phase 5 visual anchor closed; UI shell in progress. Over 1,000
-> passing tests; three managed projects cycling. Private repo,
-> preparing for public launch. Ships cross-platform (Windows,
-> macOS, Linux).
+> Phase 5 visual anchor closed; Phase 6 data contract + CLI shipped;
+> dashboard server next. **1,400+ passing tests across 45 test files**
+> — notable for a largely LLM-generated codebase, and itself a
+> cross-check on the verification gate (tests must pass for the gate
+> to mark a cycle verified). Three managed projects cycling.
+> Cross-platform (Windows, macOS, Linux).
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
