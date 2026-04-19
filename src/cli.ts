@@ -184,11 +184,14 @@ Usage:
     Example: generalstaff summary --format=json         # machine-readable output
     Example: generalstaff summary --project=myapp       # filter to a single project
 
-  generalstaff doctor [--fix] [--yes] [--verbose]         Check prerequisites + diagnose resolvable issues
+  generalstaff doctor [--fix] [--yes] [--verbose] [--json]
+                                                          Check prerequisites + diagnose resolvable issues
     Example: generalstaff doctor                        # diagnose only
     Example: generalstaff doctor --fix                  # prompt y/N for each fix
     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
     Example: generalstaff doctor --verbose              # add context under each passing sanity check
+    Example: generalstaff doctor --json                 # machine-readable {ok, checks[]} on stdout
+    Example: generalstaff doctor --json --fix --yes     # emit post-fix state as JSON
   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
@@ -1041,6 +1044,8 @@ switch (command) {
         // check. No short flag — top-level `-v` already means
         // --version and is consumed before the subcommand dispatch.
         verbose: { type: "boolean", default: false },
+        // gs-251: machine-readable output, pairs with --fix and --verbose.
+        json: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
@@ -1048,6 +1053,7 @@ switch (command) {
       fix: Boolean(doctorValues.fix),
       assumeYes: Boolean(doctorValues.yes),
       verbose: Boolean(doctorValues.verbose),
+      json: Boolean(doctorValues.json),
     });
     break;
   }

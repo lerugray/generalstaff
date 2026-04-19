@@ -1644,14 +1644,15 @@
   {
     "id": "gs-251",
     "title": "Add `--json` flag to `generalstaff doctor`. CREATE ONLY: extend the doctor subcommand handler in `src/cli.ts` with `--json` parsing (alongside the existing `--fix`, `--yes`, `--verbose` flags); thread it through to `runDoctor(options)` in `src/doctor.ts` so when `json: true` the function returns / emits a structured object instead of human-readable text. JSON shape: `{ ok: boolean, checks: [{ name, status: \"pass\"|\"fail\"|\"skipped\", detail?: string, fixable?: boolean }] }`. `--json` + `--fix` is allowed — emit the post-fix state in json; `--json` + `--verbose` is allowed and a no-op (verbose only affects text rendering). Exit 0 if all checks pass (ok: true), exit 1 if any fail (ok: false). Append tests to `tests/cli.test.ts` and/or `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `--json` emits valid JSON with ok + checks array shape; (b) all-pass exits 0 with ok:true; (c) at-least-one-fail exits 1 with ok:false; (d) `--json --fix` works and reflects post-fix state; (e) `--json --verbose` does not break the shape. Motivation: pairs with the existing --json flags on status/history/view for uniform machine-readable output across the CLI surface. Expected diff: ~120 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
       "src/doctor.ts",
       "tests/cli.test.ts",
       "tests/doctor.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T08:34:27.573Z"
   },
   {
     "id": "gs-252",

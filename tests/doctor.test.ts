@@ -262,3 +262,130 @@ describe("findProjectPathProblems", () => {
     expect(problems.some((s) => s.startsWith("notgit:"))).toBe(true);
   });
 });
+
+// gs-251: --json emits a structured {ok, checks[]} payload.
+describe("runDoctor --json", () => {
+  beforeEach(() => {
+    mkdirSync(FIXTURE, { recursive: true });
+    setRootDir(FIXTURE);
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  // Capture stdout from a single runDoctor invocation without
+  // leaking across tests. Mirrors the pattern other CLI tests use.
+  async function captureJson(
+    args: Parameters<typeof runDoctor>[0],
+  ): Promise<{ stdout: string; report: { ok: boolean; checks: unknown[] } }> {
+    const originalLog = console.log;
+    let buf = "";
+    console.log = (...parts: unknown[]) => {
+      buf += parts.map(String).join(" ") + "\n";
+    };
+    try {
+      await runDoctor(args);
+    } finally {
+      console.log = originalLog;
+    }
+    // First line containing a JSON object is our payload.
+    const line = buf.split("\n").find((l) => l.trim().startsWith("{"));
+    if (!line) {
+      throw new Error(`no JSON line in doctor --json output: ${buf}`);
+    }
+    const report = JSON.parse(line);
+    return { stdout: buf, report };
+  }
+
+  it("emits valid JSON with ok + checks array shape", async () => {
+    const { report } = await captureJson({
+      json: true,
+      loadProjects: async () => [],
+      exitOnFailure: false,
+    });
+    expect(typeof report.ok).toBe("boolean");
+    expect(Array.isArray(report.checks)).toBe(true);
+    expect(report.checks.length).toBeGreaterThan(0);
+    for (const c of report.checks as Array<{
+      name: string;
+      status: string;
+      detail?: string;
+      fixable?: boolean;
+    }>) {
+      expect(typeof c.name).toBe("string");
+      expect(["pass", "fail", "skipped"]).toContain(c.status);
+      if (c.detail !== undefined) expect(typeof c.detail).toBe("string");
+      if (c.fixable !== undefined) expect(typeof c.fixable).toBe("boolean");
+    }
+  });
+
+  it("exits 0 with ok:true when everything passes", async () => {
+    // No projects + clean FIXTURE ⇒ no fixable issues and sanity
+    // checks that iterate projects report "no projects registered".
+    const { report } = await captureJson({
+      json: true,
+      loadProjects: async () => [],
+      exitOnFailure: false,
+    });
+    expect(report.ok).toBe(true);
+    for (const c of report.checks as Array<{ status: string }>) {
+      expect(c.status).not.toBe("fail");
+    }
+  });
+
+  it("exits 1 with ok:false when any check fails", async () => {
+    // Plant an orphaned STOP file → orphaned-stop-file check fails.
+    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
+    const { report } = await captureJson({
+      json: true,
+      loadProjects: async () => [],
+      exitOnFailure: false,
+    });
+    expect(report.ok).toBe(false);
+    const failed = (report.checks as Array<{
+      name: string;
+      status: string;
+      fixable?: boolean;
+    }>).find((c) => c.name === "orphaned-stop-file" && c.status === "fail");
+    expect(failed).toBeDefined();
+    expect(failed!.fixable).toBe(true);
+  });
+
+  it("--json --fix reflects post-fix state", async () => {
+    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
+    const p = makeProject("alpha", "/tmp/doctor-alpha-nonexistent");
+    const { report } = await captureJson({
+      json: true,
+      fix: true,
+      assumeYes: true,
+      loadProjects: async () => [p],
+      exitOnFailure: false,
+    });
+    // STOP file should have been removed and the check should now pass.
+    expect(existsSync(join(FIXTURE, "STOP"))).toBe(false);
+    const stop = (report.checks as Array<{ name: string; status: string }>)
+      .find((c) => c.name === "orphaned-stop-file");
+    expect(stop?.status).toBe("pass");
+    // Missing state dir should have been created and the category row
+    // should now pass too (state/alpha/ was materialized by the fix).
+    expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(true);
+    const stateDir = (report.checks as Array<{ name: string; status: string }>)
+      .find((c) => c.name === "state-dir-missing");
+    expect(stateDir?.status).toBe("pass");
+  });
+
+  it("--json --verbose does not break the shape", async () => {
+    const { report } = await captureJson({
+      json: true,
+      verbose: true,
+      loadProjects: async () => [],
+      exitOnFailure: false,
+    });
+    expect(typeof report.ok).toBe("boolean");
+    expect(Array.isArray(report.checks)).toBe(true);
+    for (const c of report.checks as Array<{ status: string }>) {
+      expect(["pass", "fail", "skipped"]).toContain(c.status);
+    }
+  });
+});
