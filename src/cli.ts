@@ -2065,10 +2065,89 @@ switch (command) {
       break;
     }
 
-    // dispatch-detail, inbox are queued as gs-229..230.
-    // Recognise them as valid names (so they don't collide with the
+    if (viewName === "dispatch-detail") {
+      const { values: ddValues, positionals: ddPositionals } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const cycleId = ddPositionals[0];
+      if (!cycleId) {
+        console.error("Error: view dispatch-detail requires <cycle-id>");
+        process.exit(1);
+      }
+      const { getDispatchDetail, DispatchDetailError } = await import(
+        "./views/dispatch_detail"
+      );
+      let data;
+      try {
+        data = await getDispatchDetail(cycleId);
+      } catch (err) {
+        if (err instanceof DispatchDetailError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (ddValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else {
+        const fmtDur = (s: number | null) =>
+          s === null ? "n/a" : `${Math.round(s)}s`;
+        const taskLine =
+          data.task_id === null
+            ? "—"
+            : data.task_title
+              ? `${data.task_id} — ${data.task_title}`
+              : data.task_id;
+        console.log(`Cycle:    ${data.cycle_id}`);
+        console.log(`Task:     ${taskLine}`);
+        console.log(`Project:  ${data.project_id}`);
+        console.log(`Verdict:  ${data.verdict}`);
+        console.log(`Duration: ${Math.round(data.duration_seconds)}s`);
+        console.log("");
+        console.log("Phases:");
+        for (const [label, phase] of [
+          ["engineer", data.engineer],
+          ["verification", data.verification],
+          ["review", data.review],
+        ] as const) {
+          const detail = phase.detail ? `  ${phase.detail}` : "";
+          console.log(
+            `  ${label.padEnd(13)} ${fmtDur(phase.duration_seconds).padStart(5)}${detail}`,
+          );
+        }
+        console.log("");
+        console.log(`Diff: +${data.diff_added}/-${data.diff_removed}`);
+        if (data.files_touched.length === 0) {
+          console.log("Files touched: (none)");
+        } else {
+          console.log("Files touched:");
+          for (const f of data.files_touched) {
+            console.log(`  +${f.added}/-${f.removed}  ${f.path}`);
+          }
+        }
+        console.log("");
+        console.log("Checks:");
+        if (data.checks.length === 0) {
+          console.log("  (none recorded)");
+        } else {
+          for (const c of data.checks) {
+            const status = c.passed ? "pass" : "FAIL";
+            const detail = c.detail ? `  ${c.detail}` : "";
+            console.log(`  ${c.name.padEnd(16)} ${status}${detail}`);
+          }
+        }
+      }
+      break;
+    }
+
+    // inbox is queued as gs-230.
+    // Recognise it as a valid name (so it doesn't collide with the
     // "unknown view" branch) but surface a clear not-yet-wired message
-    // until their CLI shims land.
+    // until its CLI shim lands.
     console.error(
       `Error: view '${viewName}' is not yet wired up — queued as a follow-up task`,
     );

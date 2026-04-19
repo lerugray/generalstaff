@@ -1404,7 +1404,7 @@
   {
     "id": "gs-229",
     "title": "Phase 6 CLI wiring: `view dispatch-detail <cycle-id>` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with a `dispatch-detail` sub-view that calls `getDispatchDetail(cycleId)` from `src/views/dispatch_detail.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view dispatch-detail <cycle-id>` emits a structured text report — header (cycle_id, task_id + title, project_id, verdict, duration_seconds), phase breakdown (engineer / verification / review with per-phase durations and details), diff summary (diff_added / diff_removed, files_touched list with per-file add/del counts), and a checks block (scope / hands_off / silent_failures each with pass/fail + detail). `--json` emits the full DispatchDetailData. Missing cycle-id prints `Error: view dispatch-detail requires <cycle-id>` and exits 1. Unknown cycle-id surfaces the DispatchDetailError message and exits 1. Tests: (a) json output structure; (b) missing arg errors + exits 1; (c) unknown cycle errors + exits 1; (d) phase durations render as integers; (e) files_touched renders with +/− markers. Expected diff: ~180 lines. Depends on gs-226.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
