@@ -243,7 +243,10 @@ if (args.includes("--version") || args.includes("-v")) {
   process.exit(0);
 }
 
-if (args.includes("--help") || args.includes("-h") || args.length === 0) {
+if (
+  (args.includes("--help") || args.includes("-h") || args.length === 0) &&
+  args[0] !== "view"
+) {
   printUsage();
   process.exit(0);
 }
@@ -1881,8 +1884,8 @@ switch (command) {
     const viewName = args[1];
     const viewArgs = args.slice(2);
 
-    if (!viewName) {
-      console.error(
+    if (!viewName || viewName === "--help" || viewName === "help") {
+      console.log(
         "Usage: generalstaff view <name> [options]\n" +
           "\n" +
           "Available views:\n" +
@@ -1892,7 +1895,7 @@ switch (command) {
           "  dispatch-detail <cycle-id>  Full cycle report: phases, diff, checks (gs-229)\n" +
           "  inbox [--since=<iso>]       Fleet message inbox (gs-230)\n",
       );
-      process.exit(1);
+      process.exit(0);
     }
 
     if (!(VALID_VIEWS as readonly string[]).includes(viewName)) {
