@@ -1681,5 +1681,49 @@
       "src/cli.ts",
       "tests/cli.test.ts"
     ]
+  },
+  {
+    "id": "gs-254",
+    "title": "Session-end auto-merge flush. RETROACTIVE: shipped interactively 2026-04-19 to fix a friction the morning run surfaced — when a session ends on a verified cycle, bot/work commits sat unmerged until the NEXT session (cycle-start merge only fires when a later cycle runs). Adds `flushSessionEndMerges(projects, cyclesPerProject)` in `src/session.ts`, called before `session_complete`. For each auto_merge project touched, if bot/work has unmerged commits vs HEAD, merge with --no-ff; logs `session_end_auto_merge` event per project (ok/skipped/failed); never crashes on conflict or dirty tree. Adds `\"session_end_auto_merge\"` to ProgressEventType. 6 unit tests cover ok/skipped variants/failed-on-conflict/mixed-fleet. Interactive-only because src/session.ts isn't hands-off but the merge-logic correctness warranted human review.",
+    "status": "done",
+    "priority": 2,
+    "expected_touches": [
+      "src/session.ts",
+      "src/types.ts",
+      "tests/session.test.ts"
+    ],
+    "interactive_only": true,
+    "interactive_only_reason": "Shipped interactively on 2026-04-19 as a harness-improvement follow-up to the gs-252 stranded-merge friction. Retroactively logged for traceability.",
+    "completed_at": "2026-04-19T14:05:00.000Z"
+  },
+  {
+    "id": "gs-255",
+    "title": "Add doctor check for stranded bot/work commits. CREATE ONLY: modify `src/doctor.ts` to add a new sanity check that, for each registered project with auto_merge=true, runs `git -C <project.path> rev-list HEAD..<project.branch> --count` (or equivalent) and reports a warning if > 0. Warning text: `Project <id> has N unmerged commit(s) on <branch> — run \\`git -C <path> merge --no-ff <branch>\\` to land them, or re-run a session to trigger the gs-254 flush.` Not a fix (don't attempt the merge from doctor — that belongs to session or manual). Silent/pass if 0 unmerged or auto_merge=false. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) project with 0 unmerged passes; (b) project with 2 unmerged warns with the count; (c) auto_merge=false project is skipped regardless of branch state; (d) non-git path is skipped gracefully. Motivation: the gs-254 session-end flush handles the happy path, but if the flush itself fails (conflict / dirty tree), work sits stranded until the user notices. A doctor check surfaces the condition loudly. Expected diff: ~90 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/doctor.ts",
+      "tests/doctor.test.ts"
+    ]
+  },
+  {
+    "id": "gs-256",
+    "title": "Surface `session_end_auto_merge` events in `view session-tail` output. CREATE ONLY: modify `src/views/session_tail.ts` (and its types, if any) so each rendered session block includes a one-line summary of session_end_auto_merge events: `auto-merge: <projectA:ok(N)> <projectB:failed>` — list only projects that had a session_end_auto_merge event in that session window, with `ok(N)` showing merged commit count and `failed` showing the failure state. If no events, omit the line entirely (don't clutter). JSON shape: add an `auto_merges: Array<{project_id, branch, merged_commits, result, reason?}>` field to each session in the SessionTailData type. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) session with one ok merge renders the line + JSON field; (b) session with one failed merge shows `failed`; (c) session with no merge events omits the line; (d) mixed ok/failed renders both. Motivation: tonight's harness improvement (gs-254) makes the merge visible in PROGRESS.jsonl but the reference views don't yet surface it. Expected diff: ~120 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/views/session_tail.ts",
+      "tests/views/session_tail.test.ts"
+    ]
+  },
+  {
+    "id": "gs-257",
+    "title": "Add `generalstaff status --auto-merge-failed [--since=<iso>]` filter. CREATE ONLY: extend the `status` subcommand handler in `src/cli.ts` with an `--auto-merge-failed` flag that scans PROGRESS.jsonl files (use loadProgressEvents from src/audit.ts) for `session_end_auto_merge` events where `data.result === \"failed\"`, and prints a table: timestamp | project_id | branch | reason (truncated to 80 chars). Honors the existing `--since=<iso>` filter from gs-247 to bound the scan window; default since = 30 days ago. `--json` emits `{ failed: [{ timestamp, project_id, branch, reason }] }`. Exit 0 whether failures exist or not — this is an informational surface, not a gate. If no failures: text mode prints `No auto-merge failures in the last <N> day(s).`; JSON mode emits empty array. `--auto-merge-failed` is mutually exclusive with other `--sessions`/`--summary`/`--backlog` flags — add mutex validation per the existing pattern (gs-247). Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) no events → empty array + friendly text; (b) 2 failures render in table; (c) --since filters; (d) --json shape; (e) mutex with --sessions errors. Expected diff: ~150 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
