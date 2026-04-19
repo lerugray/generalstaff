@@ -1699,7 +1699,7 @@
   {
     "id": "gs-255",
     "title": "Add doctor check for stranded bot/work commits. CREATE ONLY: modify `src/doctor.ts` to add a new sanity check that, for each registered project with auto_merge=true, runs `git -C <project.path> rev-list HEAD..<project.branch> --count` (or equivalent) and reports a warning if > 0. Warning text: `Project <id> has N unmerged commit(s) on <branch> — run \\`git -C <path> merge --no-ff <branch>\\` to land them, or re-run a session to trigger the gs-254 flush.` Not a fix (don't attempt the merge from doctor — that belongs to session or manual). Silent/pass if 0 unmerged or auto_merge=false. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) project with 0 unmerged passes; (b) project with 2 unmerged warns with the count; (c) auto_merge=false project is skipped regardless of branch state; (d) non-git path is skipped gracefully. Motivation: the gs-254 session-end flush handles the happy path, but if the flush itself fails (conflict / dirty tree), work sits stranded until the user notices. A doctor check surfaces the condition loudly. Expected diff: ~90 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/doctor.ts",
