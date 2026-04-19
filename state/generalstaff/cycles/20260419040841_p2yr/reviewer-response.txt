@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task gs-238, no hands-off violations, and the verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-238",
+      "evidence": "Added project validation logic in src/cli.ts to reject unknown project IDs when projects.yaml exists, and added comprehensive tests in tests/cli.test.ts covering filtering, error cases, and back-compatibility.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' passed with exit code 0, confirming the tests are valid and the code compiles correctly."
+}
