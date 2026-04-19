@@ -84,7 +84,7 @@ import {
 import type { ProviderHealth, ProviderRole } from "./providers/types";
 import { appendFleetMessage } from "./fleet_messages";
 
-const VERSION = "0.0.1";
+const VERSION = "0.1.0";
 
 function printUsage() {
   console.log(`generalstaff v${VERSION}
