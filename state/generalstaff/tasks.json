@@ -1607,5 +1607,35 @@
       "tests/sessions.test.ts"
     ],
     "completed_at": "2026-04-19T05:48:41.616Z"
+  },
+  {
+    "id": "gs-248",
+    "title": "Add `generalstaff tasks validate [--project=<id>]` subcommand that runs GreenfieldTask schema validation across tasks.json files. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `validate` sub-subcommand that reuses the `TaskValidationError`-raising loadTasks path from `src/tasks.ts` (shipped in gs-218). Without `--project`, validate every registered project tasks.json; with `--project=<id>`, validate just that project. Report pass/fail per project with count of issues; exit 0 if all pass, exit 1 if any fail. `--json` emits { project_id: {ok, errors: [...]} } map. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) all-green passes exit 0; (b) malformed tasks.json in one project → exit 1 + named in output; (c) --project filters correctly; (d) unknown --project errors + exits 1; (e) --json shape. Expected diff: ~130 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-249",
+    "title": "Add `--provider=<claude|openrouter|ollama>` flag to `generalstaff session` overriding GENERALSTAFF_REVIEWER_PROVIDER env var for a single run. CREATE ONLY: extend the session subcommand handler in `src/cli.ts` with `--provider=<name>`. When set, this overrides the env var for the duration of that session — do NOT mutate process.env for the whole process; instead pass through as an explicit override to the reviewer module (inspect src/reviewer.ts to see how provider is currently resolved; wire the override param without touching safety.ts / prompts/). Invalid provider names error + exit 1. Precedence: CLI flag > env var > default (claude). Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT** if threading the override requires modifying src/reviewer.ts (a hands-off file), flag this task interactive-only (via the mechanism demonstrated in gs-237) — do not attempt to edit src/reviewer.ts. Tests: (a) --provider=openrouter overrides env; (b) unknown provider errors; (c) env var alone still works when --provider absent. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-250",
+    "title": "Add `generalstaff tasks next [--project=<id>]` subcommand to preview what the picker would select next. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `next` sub-subcommand that calls the same picker logic used by session.ts (pickNextProjects / chooseNextTask — inspect src/dispatcher.ts for the right entry point) but in a NON-MUTATING way — no state writes, no cycle starts, just report what would be picked. Output: project_id + task_id + task title (truncated) per slot, for up to max_parallel_slots slots. `--project=<id>` restricts the preview to just that project. `--json` emits { slots: [{project_id, task_id, title}] }. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. **IMPORTANT** if the existing picker mutates state as a side effect and cannot be called non-destructively, flag interactive-only (the refactor needed to split mutation from selection is a judgment call, not bot-safe). Tests: (a) pickable tasks appear; (b) empty queues → empty slots array; (c) --project filters. Expected diff: ~120 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
   }
 ]
