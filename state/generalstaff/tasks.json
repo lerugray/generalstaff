@@ -1740,14 +1740,15 @@
   {
     "id": "gs-259",
     "title": "Make `generalstaff register` validate the project path before writing projects.yaml. CREATE ONLY: modify the register subcommand handler in `src/cli.ts` (or src/register.ts if that's where the logic lives — inspect both) to run these checks BEFORE appending a new project entry: (a) path exists and is a directory; (b) path contains a `.git/` directory OR the user passed `--allow-non-git` (warning only, not a fail); (c) engineer_command refers to an executable the user can run (best-effort: if the command is a script like `run_bot.sh`, check it exists at path + is executable; if it's a binary, skip this check — don't break on PATH resolution). If any check fails, print a clear error and exit 1 WITHOUT mutating projects.yaml. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml (the real one, not test fixtures), or any hands_off path. Tests: (a) non-existent path fails; (b) non-git path fails unless --allow-non-git; (c) missing engineer_command script fails; (d) all-green path writes successfully. Motivation: today a typo in the path argument writes the bad entry and the first cycle fails with an opaque error — pre-write validation catches it at CLI time. Expected diff: ~140 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "src/register.ts",
       "tests/cli.test.ts",
       "tests/register.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T10:00:00.000Z"
   },
   {
     "id": "gs-260",

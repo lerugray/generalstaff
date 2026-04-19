@@ -54,6 +54,9 @@ function seedStateDir(projectDir: string, projectId: string): void {
 
 function seedProjectDir(projectDir: string): void {
   mkdirSync(projectDir, { recursive: true });
+  // gs-259: pre-write validation expects a git repo + engineer script.
+  mkdirSync(join(projectDir, ".git"), { recursive: true });
+  writeFileSync(join(projectDir, "engineer_command.sh"), "#!/usr/bin/env bash\n");
   writeFileSync(
     join(projectDir, "hands_off.yaml"),
     `patterns:
@@ -176,6 +179,60 @@ describe("register command", () => {
     expect(result.stderr).toContain("state/otherproj/tasks.json not found");
     // Error should point at the target project path, not GeneralStaff's.
     expect(result.stderr).toContain(OTHER_PROJECT);
+  });
+
+  // gs-259: pre-write validation tests.
+  it("rejects a non-existent --path", async () => {
+    const BAD_PATH = join(TEST_DIR, "does-not-exist");
+    const result = await runCli(
+      ["register", "myproj", `--path=${BAD_PATH}`, "--yes"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/does not exist/i);
+    expect(existsSync(join(TEST_DIR, "projects.yaml"))).toBe(false);
+  });
+
+  it("rejects a non-git project path without --allow-non-git", async () => {
+    const NON_GIT = join(TEST_DIR, "nongit");
+    seedProjectDir(NON_GIT);
+    rmSync(join(NON_GIT, ".git"), { recursive: true, force: true });
+    seedStateDir(NON_GIT, "nongit");
+    const result = await runCli(
+      ["register", "nongit", `--path=${NON_GIT}`, "--yes"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/not a git repository/i);
+    expect(result.stderr).toContain("--allow-non-git");
+    expect(existsSync(join(TEST_DIR, "projects.yaml"))).toBe(false);
+  });
+
+  it("accepts a non-git path when --allow-non-git is set (with warning)", async () => {
+    const NON_GIT = join(TEST_DIR, "nongit");
+    seedProjectDir(NON_GIT);
+    rmSync(join(NON_GIT, ".git"), { recursive: true, force: true });
+    seedStateDir(NON_GIT, "nongit");
+    const result = await runCli(
+      ["register", "nongit", `--path=${NON_GIT}`, "--yes", "--allow-non-git"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/warning/i);
+    const content = readFileSync(join(TEST_DIR, "projects.yaml"), "utf8");
+    expect(content).toContain("id: nongit");
+  });
+
+  it("rejects when engineer_command script is missing", async () => {
+    // Remove the script seeded by seedProjectDir; validation should fail.
+    rmSync(join(PROJECT_DIR, "engineer_command.sh"), { force: true });
+    const result = await runCli(
+      ["register", "myproj", `--path=${PROJECT_DIR}`, "--yes"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("engineer_command.sh");
+    expect(existsSync(join(TEST_DIR, "projects.yaml"))).toBe(false);
   });
 
   it("inserts new project above a `dispatcher:` section when present", async () => {
