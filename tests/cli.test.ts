@@ -4992,4 +4992,260 @@ dispatcher:
       expect(t.priority).toBe(2);
     });
   });
+
+  // gs-257: --auto-merge-failed lists session-end auto-merge failures
+  // across the fleet, honoring --since (default = 30 days ago).
+  describe("status --auto-merge-failed (gs-257)", () => {
+    const AMF_DIR = join(import.meta.dir, "fixtures", "status_amf_gs257");
+    const ALPHA_LOG = join(AMF_DIR, "state", "alpha", "PROGRESS.jsonl");
+    const BETA_LOG = join(AMF_DIR, "state", "beta", "PROGRESS.jsonl");
+
+    const AMF_YAML = `
+projects:
+  - id: alpha
+    path: ${AMF_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+  - id: beta
+    path: ${AMF_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      rmSync(AMF_DIR, { recursive: true, force: true });
+      mkdirSync(join(AMF_DIR, "state", "alpha"), { recursive: true });
+      mkdirSync(join(AMF_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(AMF_DIR, "projects.yaml"), AMF_YAML);
+    });
+
+    afterEach(() => {
+      rmSync(AMF_DIR, { recursive: true, force: true });
+    });
+
+    it("(a) no events → empty array + friendly text", async () => {
+      // No PROGRESS.jsonl at all.
+      const textResult = await runCli(
+        ["status", "--auto-merge-failed"],
+        AMF_DIR,
+      );
+      expect(textResult.exitCode).toBe(0);
+      expect(textResult.stdout).toContain(
+        "No auto-merge failures in the last 30 days.",
+      );
+
+      const jsonResult = await runCli(
+        ["status", "--auto-merge-failed", "--json"],
+        AMF_DIR,
+      );
+      expect(jsonResult.exitCode).toBe(0);
+      const parsed = JSON.parse(jsonResult.stdout);
+      expect(parsed).toEqual({ failed: [] });
+    });
+
+    it("(b) 2 failures render in the table", async () => {
+      // Use timestamps within the default 30-day window. Build relative
+      // to `now` so the test doesn't drift as time passes.
+      const now = Date.now();
+      const t1 = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+      const t2 = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString();
+      writeFileSync(
+        ALPHA_LOG,
+        JSON.stringify({
+          timestamp: t1,
+          event: "session_end_auto_merge",
+          project_id: "alpha",
+          data: {
+            branch: "bot/work",
+            merged_commits: 0,
+            result: "failed",
+            reason: "conflict on src/foo.ts",
+          },
+        }) + "\n",
+      );
+      writeFileSync(
+        BETA_LOG,
+        JSON.stringify({
+          timestamp: t2,
+          event: "session_end_auto_merge",
+          project_id: "beta",
+          data: {
+            branch: "bot/work",
+            merged_commits: 0,
+            result: "failed",
+            reason: "dirty working tree",
+          },
+        }) + "\n",
+      );
+      const result = await runCli(
+        ["status", "--auto-merge-failed"],
+        AMF_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Timestamp");
+      expect(result.stdout).toContain("Project");
+      expect(result.stdout).toContain("Branch");
+      expect(result.stdout).toContain("Reason");
+      expect(result.stdout).toContain("alpha");
+      expect(result.stdout).toContain("beta");
+      expect(result.stdout).toContain("conflict on src/foo.ts");
+      expect(result.stdout).toContain("dirty working tree");
+    });
+
+    it("(c) --since narrows the window", async () => {
+      // Two failures: one in-window, one out-of-window.
+      writeFileSync(
+        ALPHA_LOG,
+        [
+          JSON.stringify({
+            timestamp: "2026-04-10T10:00:00.000Z",
+            event: "session_end_auto_merge",
+            project_id: "alpha",
+            data: {
+              branch: "bot/work",
+              merged_commits: 0,
+              result: "failed",
+              reason: "old failure",
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-04-18T10:00:00.000Z",
+            event: "session_end_auto_merge",
+            project_id: "alpha",
+            data: {
+              branch: "bot/work",
+              merged_commits: 0,
+              result: "failed",
+              reason: "recent failure",
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+      const result = await runCli(
+        [
+          "status",
+          "--auto-merge-failed",
+          "--since=2026-04-15T00:00:00.000Z",
+          "--json",
+        ],
+        AMF_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.failed).toHaveLength(1);
+      expect(parsed.failed[0].reason).toBe("recent failure");
+    });
+
+    it("(d) --json emits { failed: [...] } with expected shape", async () => {
+      const now = Date.now();
+      const ts = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString();
+      writeFileSync(
+        ALPHA_LOG,
+        [
+          // A failed event — should be included.
+          JSON.stringify({
+            timestamp: ts,
+            event: "session_end_auto_merge",
+            project_id: "alpha",
+            data: {
+              branch: "bot/work",
+              merged_commits: 0,
+              result: "failed",
+              reason: "some conflict",
+            },
+          }),
+          // An ok event — should be excluded.
+          JSON.stringify({
+            timestamp: ts,
+            event: "session_end_auto_merge",
+            project_id: "alpha",
+            data: {
+              branch: "bot/work",
+              merged_commits: 3,
+              result: "ok",
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+      const result = await runCli(
+        ["status", "--auto-merge-failed", "--json"],
+        AMF_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("failed");
+      expect(parsed.failed).toHaveLength(1);
+      expect(Object.keys(parsed.failed[0]).sort()).toEqual([
+        "branch",
+        "project_id",
+        "reason",
+        "timestamp",
+      ]);
+      expect(parsed.failed[0]).toEqual({
+        timestamp: ts,
+        project_id: "alpha",
+        branch: "bot/work",
+        reason: "some conflict",
+      });
+    });
+
+    it("(e) --auto-merge-failed combined with --sessions errors", async () => {
+      const result = await runCli(
+        ["status", "--auto-merge-failed", "--sessions"],
+        AMF_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "--auto-merge-failed cannot be combined with --sessions/--summary/--backlog/--totals/--fleet/--watch",
+      );
+    });
+
+    it("truncates reasons longer than 80 chars in the text table", async () => {
+      const now = Date.now();
+      const ts = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString();
+      const longReason = "x".repeat(200);
+      writeFileSync(
+        ALPHA_LOG,
+        JSON.stringify({
+          timestamp: ts,
+          event: "session_end_auto_merge",
+          project_id: "alpha",
+          data: {
+            branch: "bot/work",
+            merged_commits: 0,
+            result: "failed",
+            reason: longReason,
+          },
+        }) + "\n",
+      );
+      const result = await runCli(
+        ["status", "--auto-merge-failed"],
+        AMF_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      // Reason was truncated to 80 chars (77 + "...").
+      expect(result.stdout).toContain("x".repeat(77) + "...");
+      // The untruncated 81-char string should NOT appear.
+      expect(result.stdout).not.toContain("x".repeat(81));
+    });
+  });
 });
