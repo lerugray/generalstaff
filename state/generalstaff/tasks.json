@@ -1487,6 +1487,8 @@
     "title": "Polish `projects.yaml.example` to prominently document `dispatcher.max_parallel_slots` and `GENERALSTAFF_REVIEWER_*` env vars. CREATE ONLY: modify `projects.yaml.example` — add a prominent commented section near the top of the `dispatcher:` block explaining max_parallel_slots (with the 2-slot default and the BYOK-spend tradeoff from CLAUDE.md §Parallel-mode); add a comment near the top of the file listing the key env vars (GENERALSTAFF_REVIEWER_PROVIDER, GENERALSTAFF_REVIEWER_MODEL, GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER, OPENROUTER_API_KEY, OLLAMA_HOST, GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>) with one-line descriptions. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml (the real one, not the example), or any hands_off path. Note: `projects.yaml.example` is NOT in the hands-off list (only the real `projects.yaml` is). Motivation: Phase 4 opt-in parallel mode is undocumented in the example config; a new user reading the example has no signal that the knob exists. Expected diff: ~50 lines of added comments.",
     "status": "pending",
     "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Task premise is incorrect: projects.yaml.example IS in the real projects.yaml hands_off list (line 49). Cycle 20260419035744 already attempted and failed verification with 'hands-off violation: projects.yaml.example'. Flagged interactive-only so the bot picker skips it; Ray should either (a) edit projects.yaml.example interactively, or (b) remove line 49 of projects.yaml and re-queue.",
     "expected_touches": [
       "projects.yaml.example"
     ]
