@@ -301,3 +301,59 @@ itself a voice signal competitors cannot match.
   v0.1.0, install one-liner end-to-end test, first non-Ray user
   runs it successfully — all still open, all outside the scope
   of tonight's close.
+
+## 2026-04-19 overnight — Phase 6 CLI surface + picker fix
+
+Autonomous reseed-loop arc (01:25 → 06:13 UTC, 10 waves, 27 tasks
+shipped). Full narrative in
+[`docs/sessions/2026-04-19-overnight.md`](docs/sessions/2026-04-19-overnight.md).
+
+**Launch-relevant deltas:**
+
+- **Phase 6 CLI surface shipped.** `generalstaff view <name>` works
+  end-to-end for all five reference views (fleet-overview,
+  task-queue, session-tail, dispatch-detail, inbox) via gs-221..230
+  (data contract + CLI wiring). The Phase 6 UI shell stack choice
+  (Tauri / local web server / other) is no longer gated on data
+  extraction work — the data is fully addressable from the CLI
+  today.
+- **Dispatcher picker efficiency fix (gs-232).** Parallel mode now
+  skips empty-queue projects rather than padding a slot with a
+  verified_weak cycle. Measured improvement:
+  `parallel_efficiency` 0.54 → 0.99 across the same fleet shape,
+  roughly doubling effective parallel throughput at the same reviewer
+  spend. This is a launch-messaging update: the "opt-in parallel
+  worktrees" claim is stronger now.
+- **Verification-gate self-correction demo material.** Two tasks
+  tonight (gs-237, gs-249) were spec-authored with hands-off
+  violations baked in by mistake. In both cases the verification
+  gate caught it, the bot flipped the task to `interactive_only` and
+  moved on — zero bad commits, zero retry-spin. Candidate for a
+  README screenshot or launch post quote: *"the system caught
+  itself trying to edit a hands-off file and stopped."* Real, in
+  the audit log, falsifiable.
+- **Ergonomics polish across the CLI.** `--help` alignment across
+  session/cycle/status/tasks/view (gs-233 + gs-244); `NO_COLOR` +
+  `--no-color` support (gs-245); `doctor` expanded + `--verbose`
+  (gs-242 + gs-246); `status --since=<iso>` filter (gs-247);
+  `tasks validate` + `tasks next` + `tasks interactive`
+  (gs-243/248/250); `message send` (gs-240); `digest last` (gs-239).
+  These individually aren't launch-gating but collectively move the
+  CLI from "MVP-functional" to "feels polished." Good for launch
+  screenshots.
+- **Operational hygiene:** `state/session.pid` now gitignored
+  (gs-236) — no more cleanup commits between sessions;
+  `.claude/*` blanket rule (commit `ae299aa`) — future harness
+  files won't trip the clean-tree preflight; regression test for
+  that (gs-235). Reduces setup friction for overnight runs and
+  first-time users.
+
+**Still pending post-overnight:**
+
+- Clone URL flip (launch day).
+- `v0.1.0` release tag.
+- Install one-liner end-to-end test on a clean machine.
+- First non-Ray user runs the install + a managed cycle end-to-end.
+- The 2 interactive-only tasks (gs-237, gs-249) that the bot
+  correctly refused to take — both need a human-taste review
+  before the underlying changes ship. Neither blocks launch.

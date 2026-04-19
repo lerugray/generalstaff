@@ -122,6 +122,13 @@ at `github.com/lerugray/generalstaff` (private) as of
   autonomous bot landed 2/5 (`gs-221` fleet_overview,
   `gs-222` task_queue) before hitting empty-cycles soft-stop.
   VOICE.md confirmed public-by-intent.
+- [[2026-04-19-overnight]] — autonomous reseed-loop arc (home PC,
+  Opus 4.7). 10 waves, ~5 hrs wall clock, 30 tasks queued / 27
+  shipped / 3 correctly flagged interactive-only. Full Phase 6
+  data contract + CLI wiring shipped (`gs-221..230`). Picker-
+  padding fix (`gs-232`) jumped `parallel_efficiency` from 0.54 →
+  0.99. Verification gate self-corrected twice on hands-off-
+  violating task specs (`gs-237`, `gs-249`) without retry-spin.
 
 ## Conventions for working in this folder
 
