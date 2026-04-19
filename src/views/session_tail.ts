@@ -25,6 +25,14 @@ export interface CycleRecord {
   diff_removed: number | null;
 }
 
+export interface AutoMergeRecord {
+  project_id: string;
+  branch: string;
+  merged_commits: number;
+  result: "ok" | "failed" | "skipped" | "other";
+  reason?: string;
+}
+
 export interface SessionRecord {
   session_id: string;
   started_at: string;
@@ -35,6 +43,7 @@ export interface SessionRecord {
   max_parallel_slots: number | null;
   stop_reason: string | null;
   cycles: CycleRecord[];
+  auto_merges: AutoMergeRecord[];
 }
 
 export interface EarlierSessionRow {
@@ -121,6 +130,7 @@ interface SessionBuilder {
   cycles: Map<string, CycleBuilder>;
   // cycles without a cycle_id (shouldn't happen, defensive)
   orphanCycles: CycleBuilder[];
+  auto_merges: AutoMergeRecord[];
 }
 
 interface CycleBuilder {
@@ -151,7 +161,15 @@ function newSessionBuilder(id: string): SessionBuilder {
     stop_reason: null,
     cycles: new Map(),
     orphanCycles: [],
+    auto_merges: [],
   };
+}
+
+function classifyAutoMergeResult(
+  v: unknown,
+): "ok" | "failed" | "skipped" | "other" {
+  if (v === "ok" || v === "failed" || v === "skipped") return v;
+  return "other";
 }
 
 function getOrCreateCycle(
@@ -279,6 +297,23 @@ function applyEvent(
       }
       return;
     }
+    case "session_end_auto_merge": {
+      const projectId =
+        asString(evt.data.project_id) ?? evt.project_id ?? "unknown";
+      const branch = asString(evt.data.branch) ?? "";
+      const mergedCommits = asNumber(evt.data.merged_commits) ?? 0;
+      const result = classifyAutoMergeResult(evt.data.result);
+      const reason = asString(evt.data.reason);
+      const record: AutoMergeRecord = {
+        project_id: projectId,
+        branch,
+        merged_commits: mergedCommits,
+        result,
+      };
+      if (reason !== null) record.reason = reason;
+      sb.auto_merges.push(record);
+      return;
+    }
     case "cycle_end": {
       const cid = evt.cycle_id ?? asString(evt.data.cycle_id) ?? undefined;
       const projectId =
@@ -381,7 +416,28 @@ function finalizeSession(
     max_parallel_slots: sb.max_parallel_slots,
     stop_reason: sb.stop_reason,
     cycles,
+    auto_merges: sb.auto_merges,
   };
+}
+
+// Formats a session's auto_merges as a one-line summary for CLI display.
+// Returns null if the session has no auto_merge events (caller should omit
+// the line entirely — no clutter for the common no-merge case).
+export function formatAutoMergeSummary(
+  session: SessionRecord,
+): string | null {
+  if (session.auto_merges.length === 0) return null;
+  const parts: string[] = [];
+  for (const m of session.auto_merges) {
+    if (m.result === "ok") {
+      parts.push(`${m.project_id}:ok(${m.merged_commits})`);
+    } else if (m.result === "failed") {
+      parts.push(`${m.project_id}:failed`);
+    } else {
+      parts.push(`${m.project_id}:${m.result}`);
+    }
+  }
+  return `auto-merge: ${parts.join(" ")}`;
 }
 
 function toEarlierRow(record: SessionRecord): EarlierSessionRow {
