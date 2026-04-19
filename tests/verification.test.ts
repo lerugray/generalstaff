@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { runVerification, isNoopCommand } from "../src/verification";
+import {
+  runVerification,
+  isNoopCommand,
+  isCommandNotFoundSignature,
+  formatCommandNotFoundHint,
+} from "../src/verification";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
@@ -168,6 +173,74 @@ describe("verification gate", () => {
     it("trims surrounding whitespace before matching", () => {
       expect(isNoopCommand("  true  ")).toBe(true);
       expect(isNoopCommand("\techo hello\n")).toBe(true);
+    });
+  });
+
+  describe("command-not-found hint (gs-261)", () => {
+    it("adds the hint when exit code is 127", async () => {
+      const project = makeProject({
+        verification_command: "exit 127",
+      });
+      const result = await runVerification(project, "cycle-cnf-1");
+
+      expect(result.outcome).toBe("failed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("not found");
+      expect(log).toContain(TEST_DIR);
+      expect(log).toContain("exit");
+    });
+
+    it("adds the hint when stderr contains 'command not found'", async () => {
+      // Use exit 1 so we exercise the stderr path, not the exit-127 path.
+      const project = makeProject({
+        verification_command:
+          "printf 'bash: bogusbinary: command not found\\n' >&2; exit 1",
+      });
+      const result = await runVerification(project, "cycle-cnf-2");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(1);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("not found");
+      expect(log).toContain(TEST_DIR);
+    });
+
+    it("does NOT add the hint for a normal non-zero exit", async () => {
+      const project = makeProject({ verification_command: "exit 1" });
+      const result = await runVerification(project, "cycle-cnf-3");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(1);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).not.toContain("Verification command");
+      expect(log).not.toContain("is the tool installed");
+    });
+
+    it("hint message includes project path and command head", async () => {
+      const hint = formatCommandNotFoundHint(
+        "bun test --coverage",
+        "/home/ray/proj",
+      );
+      expect(hint).toContain("bun");
+      expect(hint).toContain("/home/ray/proj");
+      expect(hint).toContain("(Try: cd /home/ray/proj && bun)");
+      expect(hint.startsWith("Verification command 'bun' not found")).toBe(true);
+    });
+
+    it("isCommandNotFoundSignature matches 127, substrings, not normal exits", () => {
+      expect(isCommandNotFoundSignature(127, "")).toBe(true);
+      expect(
+        isCommandNotFoundSignature(1, "bash: foo: command not found"),
+      ).toBe(true);
+      expect(
+        isCommandNotFoundSignature(
+          1,
+          "'foo' is not recognized as an internal or external command",
+        ),
+      ).toBe(true);
+      expect(isCommandNotFoundSignature(1, "cannot find 'foo'")).toBe(true);
+      expect(isCommandNotFoundSignature(1, "test failed")).toBe(false);
+      expect(isCommandNotFoundSignature(0, "")).toBe(false);
     });
   });
 

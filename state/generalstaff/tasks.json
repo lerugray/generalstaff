@@ -1765,7 +1765,7 @@
   {
     "id": "gs-261",
     "title": "Friendlier error when the verification_command exits with a 'command not found' signature. CREATE ONLY: modify `src/verification.ts` (or wherever the verification subprocess is spawned — inspect cycle.ts for the invocation) so when the command exits 127 (POSIX convention for command-not-found) OR stderr contains the shell's standard 'command not found' / 'is not recognized' / 'cannot find' strings, the returned error message adds a helpful one-liner: `Verification command '<cmd>' not found — is the tool installed in <project.path>? (Try: cd <path> && <cmd head>)`. Still treat it as verification_failed (don't change semantics) — just the error message surfacing. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) exit code 127 triggers the helpful message; (b) 'command not found' substring in stderr triggers it; (c) normal test failure (exit 1) does NOT trigger it (unchanged behavior); (d) message includes project path + command head. Motivation: a fresh user whose managed project is missing `bun` or a language runtime gets a cryptic exit-127 message today; this surfaces the real cause. Expected diff: ~110 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/verification.ts",

@@ -22,6 +22,35 @@ export function isNoopCommand(command: string): boolean {
   );
 }
 
+// Substrings shells emit when a command is missing. POSIX shells print
+// "command not found"; Windows cmd prints "is not recognized"; busybox
+// and some distros print "cannot find".
+const COMMAND_NOT_FOUND_PATTERNS = [
+  "command not found",
+  "is not recognized",
+  "cannot find",
+];
+
+export function isCommandNotFoundSignature(
+  exitCode: number | null,
+  stderr: string,
+): boolean {
+  if (exitCode === 127) return true;
+  const lower = stderr.toLowerCase();
+  return COMMAND_NOT_FOUND_PATTERNS.some((p) => lower.includes(p));
+}
+
+export function formatCommandNotFoundHint(
+  command: string,
+  projectPath: string,
+): string {
+  const head = command.trim().split(/\s+/)[0] ?? command.trim();
+  return (
+    `Verification command '${head}' not found — is the tool installed in ` +
+    `${projectPath}? (Try: cd ${projectPath} && ${head})`
+  );
+}
+
 export interface VerificationResult {
   outcome: VerificationOutcome;
   exitCode: number | null;
@@ -104,12 +133,15 @@ export async function runVerification(
       env: { ...process.env },
     });
 
+    let stderrBuf = "";
+
     child.stdout?.on("data", (chunk: Buffer) => {
       logStream.write(chunk);
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
       logStream.write(chunk);
+      stderrBuf += chunk.toString("utf8");
     });
 
     let timedOut = false;
@@ -130,6 +162,20 @@ export async function runVerification(
           `Duration: ${durationSeconds.toFixed(1)}s\n` +
           `Ended: ${new Date().toISOString()}\n`,
       );
+
+      // When the shell reports command-not-found, the exit-1 / exit-127
+      // surface is too cryptic for a fresh user whose project is missing
+      // a tool (bun, node, a language runtime). Surface a pointer at the
+      // real cause without changing semantics. See gs-261.
+      if (
+        !timedOut &&
+        code !== 0 &&
+        isCommandNotFoundSignature(code, stderrBuf)
+      ) {
+        logStream.write(
+          `\n${formatCommandNotFoundHint(project.verification_command, project.path)}\n`,
+        );
+      }
       logStream.end();
 
       const outcome: VerificationOutcome =
