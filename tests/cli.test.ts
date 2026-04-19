@@ -2397,4 +2397,174 @@ index 111..222 100644
       );
     });
   });
+
+  describe("view subcommand (gs-226)", () => {
+    const VIEW_DIR = join(import.meta.dir, "fixtures", "view_gs226_test");
+    const ALPHA_DIR = join(VIEW_DIR, "alpha");
+    const BETA_DIR = join(VIEW_DIR, "beta");
+
+    const PROJECTS_YAML = () => `
+projects:
+  - id: alpha
+    path: ${ALPHA_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: bot/work
+    auto_merge: true
+    hands_off:
+      - src/reviewer.ts
+  - id: beta
+    path: ${BETA_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: main
+    auto_merge: false
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
+      mkdirSync(join(BETA_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(VIEW_DIR, "projects.yaml"), PROJECTS_YAML());
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([
+          { id: "a-1", title: "t1", status: "pending", priority: 1 },
+          { id: "a-2", title: "t2", status: "pending", priority: 2 },
+        ]),
+      );
+      writeFileSync(
+        join(BETA_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([
+          { id: "b-1", title: "t1", status: "pending", priority: 1 },
+        ]),
+      );
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "STATE.json"),
+        JSON.stringify({
+          project_id: "alpha",
+          current_cycle_id: null,
+          last_cycle_id: "c1",
+          last_cycle_at: "2026-04-18T11:30:00.000Z",
+          last_cycle_outcome: "verified",
+          cycles_this_session: 0,
+        }),
+      );
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "PROGRESS.jsonl"),
+        [
+          {
+            timestamp: "2026-04-18T10:00:00Z",
+            event: "cycle_end",
+            cycle_id: "c1",
+            project_id: "alpha",
+            data: { outcome: "verified" },
+          },
+          {
+            timestamp: "2026-04-18T10:05:00Z",
+            event: "cycle_end",
+            cycle_id: "c2",
+            project_id: "alpha",
+            data: { outcome: "verified" },
+          },
+          {
+            timestamp: "2026-04-18T10:10:00Z",
+            event: "cycle_end",
+            cycle_id: "c3",
+            project_id: "alpha",
+            data: { outcome: "verification_failed" },
+          },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join("\n") + "\n",
+      );
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("view fleet-overview --json emits FleetOverviewData shape", async () => {
+      const result = await runCli(
+        ["view", "fleet-overview", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveProperty("projects");
+      expect(parsed).toHaveProperty("aggregates");
+      expect(parsed).toHaveProperty("rendered_at");
+      expect(Array.isArray(parsed.projects)).toBe(true);
+      expect(parsed.projects).toHaveLength(2);
+      const alpha = parsed.projects.find((p: { id: string }) => p.id === "alpha");
+      expect(alpha.cycles_total).toBe(3);
+      expect(alpha.verified).toBe(2);
+      expect(alpha.failed).toBe(1);
+      expect(alpha.branch).toBe("bot/work");
+      expect(alpha.auto_merge).toBe(true);
+      expect(parsed.aggregates.project_count).toBe(2);
+      expect(parsed.aggregates.total_cycles).toBe(3);
+    });
+
+    it("view with no sub-view prints usage and exits 1", async () => {
+      const result = await runCli(["view"], VIEW_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Usage: generalstaff view <name>");
+      expect(result.stderr).toContain("fleet-overview");
+      expect(result.stderr).toContain("task-queue");
+      expect(result.stderr).toContain("session-tail");
+      expect(result.stderr).toContain("dispatch-detail");
+      expect(result.stderr).toContain("inbox");
+    });
+
+    it("view unknown-name prints the valid-views list and exits 1", async () => {
+      const result = await runCli(["view", "unknown-name"], VIEW_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: unknown view 'unknown-name'. Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox",
+      );
+    });
+
+    it("view fleet-overview table includes all registered projects as rows", async () => {
+      const result = await runCli(["view", "fleet-overview"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("alpha");
+      expect(result.stdout).toContain("beta");
+      expect(result.stdout).toContain("bot/work");
+      expect(result.stdout).toContain("main");
+      // beta has no PROGRESS.jsonl / STATE.json, so last_cycle is "never"
+      expect(result.stdout).toContain("never");
+    });
+
+    it("view fleet-overview aggregates line renders pass_rate as a percentage", async () => {
+      const result = await runCli(["view", "fleet-overview"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      // 2 verified / 3 (2 verified + 1 failed) = 67%
+      expect(result.stdout).toMatch(/pass_rate:\s*67%/);
+      expect(result.stdout).toContain("Total cycles: 3");
+      expect(result.stdout).toContain("slot_efficiency_recent: n/a");
+    });
+
+    it("is listed in --help output", async () => {
+      const result = await runCli(["--help"]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff view <name>");
+    });
+  });
 });
