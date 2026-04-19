@@ -333,8 +333,7 @@ not motion, is what produces it.
 
 Full writeup of the framing and its empirical backing (5 experiments,
 22+ bot runs across Ray's other projects, 7 cited alignment papers)
-lives in the internal docs; see `docs/internal/` once the repo is
-public.
+lives in `docs/internal/`.
 
 ## Hard rules
 
@@ -399,7 +398,9 @@ root.
   reading the Phase 5 data contract (`src/views/*.ts`). Implementation
   stack (Tauri, local web server, or other) not yet chosen. Data to
   render (gs-188's parallel-efficiency metrics) is already live.
-- **Phase 5.5+:** Kriegspiel / command-room UI theme. See
+- **Phase 5.5+:** Command-room UI aesthetic (Kriegspiel-inspired —
+  high-density map/status layout, borrowed from 19th-century
+  Prussian wargaming). See
   [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
 - **Public launch:** gated on README polish, `SUPPORTERS.md`, and
   `LICENSE` — not on Phase 5 completion per
