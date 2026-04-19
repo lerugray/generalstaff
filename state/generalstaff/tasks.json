@@ -1382,12 +1382,13 @@
   {
     "id": "gs-227",
     "title": "Phase 6 CLI wiring: `view task-queue <project-id>` handler. CREATE ONLY: extend `case \"view\"` in `src/cli.ts` with a `task-queue` sub-view that calls `getProjectTaskQueue(projectId)` from `src/views/task_queue.ts`; append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Behavior: `generalstaff view task-queue <project-id>` emits four labeled sections (In-flight, Ready, Blocked, Shipped) each listing the tasks in that bucket with id, priority, truncated title, and any block_reason/age_label; `--json` emits the full TaskQueueData object. Missing project-id arg prints `Error: view task-queue requires <project-id>` and exits 1. Unknown project-id surfaces the TaskQueueError message (e.g. `unknown project: foo`) and exits 1. Tests: (a) json output structure; (b) missing arg errors + exits 1; (c) unknown project errors + exits 1; (d) 4-section labeled output; (e) empty-bucket rendering (e.g. 'In-flight: (none)'). Expected diff: ~150 lines. Depends on gs-226 shipping the view-subcommand scaffold first.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T02:43:36.819Z"
   },
   {
     "id": "gs-228",
