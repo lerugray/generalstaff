@@ -2144,13 +2144,64 @@ switch (command) {
       break;
     }
 
-    // inbox is queued as gs-230.
-    // Recognise it as a valid name (so it doesn't collide with the
-    // "unknown view" branch) but surface a clear not-yet-wired message
-    // until its CLI shim lands.
-    console.error(
-      `Error: view '${viewName}' is not yet wired up — queued as a follow-up task`,
-    );
+    if (viewName === "inbox") {
+      const { values: ibValues } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+          since: { type: "string" },
+        },
+        allowPositionals: true,
+      });
+      const { getInboxView, InboxError } = await import("./views/inbox");
+      let data;
+      try {
+        data = await getInboxView(ibValues.since);
+      } catch (err) {
+        if (err instanceof InboxError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (ibValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else if (data.groups.length === 0) {
+        console.log("No messages.");
+      } else {
+        const glyph = (t: string) =>
+          t === "human" ? "▪" : t === "bot" ? "○" : "—";
+        for (let gi = 0; gi < data.groups.length; gi++) {
+          const g = data.groups[gi];
+          if (gi > 0) console.log("");
+          console.log(`${g.date_label} (${g.date_iso})`);
+          for (const m of g.messages) {
+            const parts = [
+              `  ${m.timestamp}`,
+              glyph(m.from_type),
+              m.from,
+            ];
+            if (m.kind) parts.push(`[${m.kind}]`);
+            parts.push(m.body);
+            console.log(parts.join(" "));
+            if (m.refs.length > 0) {
+              const refStrs = m.refs.map((r) => {
+                const bits: string[] = [];
+                if (r.session_id) bits.push(`session=${r.session_id}`);
+                if (r.task_id) bits.push(`task=${r.task_id}`);
+                if (r.cycle_id) bits.push(`cycle=${r.cycle_id}`);
+                return bits.join(",");
+              });
+              console.log(`      refs: ${refStrs.join("; ")}`);
+            }
+          }
+        }
+      }
+      break;
+    }
+
+    // Unreachable — VALID_VIEWS guard above catches unknown names.
+    console.error(`Error: view '${viewName}' handler missing`);
     process.exit(1);
   }
 
