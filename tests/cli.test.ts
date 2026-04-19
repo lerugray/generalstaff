@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
-import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { $ } from "bun";
 
@@ -3350,6 +3350,195 @@ dispatcher:
       expect(humanLine).toContain("▪");
       expect(botLine).toContain("○");
       expect(systemLine).toContain("—");
+    });
+  });
+
+  describe("message send subcommand (gs-240)", () => {
+    const MSG_DIR = join(import.meta.dir, "fixtures", "message_send_test");
+    const FLEET_DIR = join(MSG_DIR, "state", "_fleet");
+    const MSG_FILE = join(FLEET_DIR, "messages.jsonl");
+
+    const readMessages = (): Array<Record<string, unknown>> => {
+      if (!existsSync(MSG_FILE)) return [];
+      return readFileSync(MSG_FILE, "utf8")
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+    };
+
+    beforeEach(() => {
+      rmSync(MSG_DIR, { recursive: true, force: true });
+      mkdirSync(MSG_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(MSG_DIR, { recursive: true, force: true });
+    });
+
+    it("appends an entry with --from and --body", async () => {
+      const result = await runCli(
+        ["message", "send", "--from=ray", "--body=hello there"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const msgs = readMessages();
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].from).toBe("ray");
+      expect(msgs[0].body).toBe("hello there");
+      expect(typeof msgs[0].timestamp).toBe("string");
+    });
+
+    it("accepts body as a positional final argument", async () => {
+      const result = await runCli(
+        ["message", "send", "--from=ray", "positional body text"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const msgs = readMessages();
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].body).toBe("positional body text");
+    });
+
+    it("errors and exits 1 when --from is missing", async () => {
+      const result = await runCli(
+        ["message", "send", "--body=orphan"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "message send requires --from=<str> and --body=<str>",
+      );
+      expect(readMessages().length).toBe(0);
+    });
+
+    it("errors and exits 1 when --body is missing", async () => {
+      const result = await runCli(
+        ["message", "send", "--from=ray"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "message send requires --from=<str> and --body=<str>",
+      );
+      expect(readMessages().length).toBe(0);
+    });
+
+    it("errors and exits 1 when --kind is invalid", async () => {
+      const result = await runCli(
+        [
+          "message",
+          "send",
+          "--from=ray",
+          "--body=hi",
+          "--kind=bogus",
+        ],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("invalid --kind");
+      expect(result.stderr).toContain("blocker");
+      expect(result.stderr).toContain("handoff");
+      expect(result.stderr).toContain("fyi");
+      expect(result.stderr).toContain("decision");
+      expect(readMessages().length).toBe(0);
+    });
+
+    it("accepts each valid --kind", async () => {
+      for (const kind of ["blocker", "handoff", "fyi", "decision"]) {
+        const result = await runCli(
+          [
+            "message",
+            "send",
+            "--from=ray",
+            `--body=${kind}-msg`,
+            `--kind=${kind}`,
+          ],
+          MSG_DIR,
+        );
+        expect(result.exitCode).toBe(0);
+      }
+      const msgs = readMessages();
+      expect(msgs.length).toBe(4);
+      const kinds = msgs.map((m) => m.kind);
+      expect(kinds).toEqual(["blocker", "handoff", "fyi", "decision"]);
+    });
+
+    it("collects --session-id / --task-id / --cycle-id into refs[0]", async () => {
+      const result = await runCli(
+        [
+          "message",
+          "send",
+          "--from=bot",
+          "--body=shipped",
+          "--session-id=sess-1",
+          "--task-id=gs-240",
+          "--cycle-id=cyc-9",
+        ],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const msgs = readMessages();
+      expect(msgs.length).toBe(1);
+      const refs = msgs[0].refs as Array<Record<string, string>>;
+      expect(Array.isArray(refs)).toBe(true);
+      expect(refs.length).toBe(1);
+      expect(refs[0].session_id).toBe("sess-1");
+      expect(refs[0].task_id).toBe("gs-240");
+      expect(refs[0].cycle_id).toBe("cyc-9");
+    });
+
+    it("omits refs when no reference flags are provided", async () => {
+      const result = await runCli(
+        ["message", "send", "--from=ray", "--body=naked"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const msgs = readMessages();
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].refs).toBeUndefined();
+      expect(msgs[0].kind).toBeUndefined();
+    });
+
+    it("--json emits the appended message object", async () => {
+      const result = await runCli(
+        [
+          "message",
+          "send",
+          "--from=ray",
+          "--body=jsonified",
+          "--kind=fyi",
+          "--task-id=gs-240",
+          "--json",
+        ],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.from).toBe("ray");
+      expect(parsed.body).toBe("jsonified");
+      expect(parsed.kind).toBe("fyi");
+      expect(typeof parsed.timestamp).toBe("string");
+      expect(parsed.refs).toEqual([{ task_id: "gs-240" }]);
+      const msgs = readMessages();
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].timestamp).toBe(parsed.timestamp);
+    });
+
+    it("errors on unknown message subcommand", async () => {
+      const result = await runCli(
+        ["message", "bogus", "--from=ray", "--body=hi"],
+        MSG_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("unknown message subcommand");
+    });
+
+    it("message --help prints usage and exits 0", async () => {
+      const result = await runCli(["message", "--help"], MSG_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("message send");
+      expect(result.stdout).toContain("--from");
+      expect(result.stdout).toContain("--body");
     });
   });
 

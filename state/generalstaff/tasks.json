@@ -1517,12 +1517,13 @@
   {
     "id": "gs-240",
     "title": "Add `generalstaff message send` CLI for posting to the fleet inbox. CREATE ONLY: add a `case \"message\"` handler in `src/cli.ts` with a `send` subcommand that calls `appendFleetMessage(from, body, extra)` from `src/fleet_messages.ts`. Flags: `--from=<str>` (required), `--body=<str>` (required, or positional final arg), `--kind=<blocker|handoff|fyi|decision>` (optional, passed into extra.kind), `--session-id=<id>`, `--task-id=<id>`, `--cycle-id=<id>` (optional refs, collected into extra.refs[0]). Missing --from or --body prints `Error: message send requires --from=<str> and --body=<str>` and exits 1. Invalid --kind prints the valid list and exits 1. `--json` emits the appended message object. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-219 shipped the read side (appendFleetMessage / readFleetMessagesSince); gs-225 + gs-230 shipped the view side. There is currently no CLI to POST a message — a human-originated handoff note requires editing messages.jsonl by hand. Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T04:35:14.418Z"
   },
   {
     "id": "gs-241",
