@@ -208,6 +208,63 @@ full REVIEW.md + diff view), inbox (state/_fleet/messages.jsonl
 shared channel). Both expected to follow the same hand-extension
 pattern.
 
+## 2026-04-18 — dispatch detail (hand-built, zero Design spend)
+
+`dispatch-detail-v1.html` is the fourth Phase 5 view. Per-cycle
+drill-in — what a user lands on after clicking a cycle from the
+fleet overview or session tail. Built around a real cycle (gs-220,
+session bc4nbrro5, 2026-04-18 21:27:05 → 21:36:36) with full
+PROGRESS.jsonl + tasks.json data grounding every field.
+
+**What carries over from prior views:** masthead, docline, palette,
+type stack, summary-band cell pattern, section-head with right-
+aligned metadata, afterword 3-col grid, colophon. Plus the cross-
+view rust-accent rule documented in the session-tail entry above.
+
+**New vocabulary this view adds:**
+- `.crest` — 54px Spectral display of the subject (task id) with
+  inline verdict chip. Replaces the usual summary-band headline
+  when one cycle IS the subject.
+- `.claim` with `.split` — 2×2 grid rendering a long tasks.json
+  title as four structured prose fields (create-only / do-not-
+  create / observed / expected touches). Demonstrates how to
+  humanize the dense task-spec format the bot consumes.
+- `.phase` + `.phase-line` — 3-col key/value/aside pattern for
+  event rows. Shared by the engineer, verification, and review
+  sections — one grammar, three applications.
+- `.diff` — framed code block with subtle paper-2 tint, hunk-head
+  (file + line range + add/del counts), code body (line number /
+  mark / source grid), hunk-foot with progressive-disclosure
+  "1 of 4 · subsequent hunks..." text.
+- `.diff .row.add/.del` — `+` / `−` marker treatment; added
+  lines in `--ink`, removed in `--ink-ghost` with
+  `text-decoration: line-through` (the one deliberate decoration
+  exception — strikethrough is so semantically strong for deleted
+  code it earns its place).
+- `.files-list` — compact 3-col per-file stat list.
+- `.review .verdict-prose` — larger pull-quote variant of session-
+  tail's treatment.
+- `.checks` — 3-cell grid with `✓` pass / `!` + rust fail pattern;
+  consolidates scope-drift, hands-off, silent-failures into one
+  scan.
+
+**Real data:** cycle id `20260418212705_qkbw`, SHAs ceeddcf →
+50a8da4, timings, byte counts, diff stats, hunk content pulled
+from `git show 50a8da4 -- src/session.ts` (lines 56-75), verdict
+prose from PROGRESS.jsonl.
+
+**Fabricated:** "1,110 tests" is rounded from real 1,099 at
+session close; the 62s/6s split of the 68s verification step is
+inferred (we have only the total); the check-detail explanation
+sentences were written because all three verdict arrays were
+empty in the real data.
+
+**What this validates:** anchor vocabulary covers the three
+distinct content types a Phase 5 dashboard needs — tabular data
+(fleet), structured records (queue), temporal streams (tail), and
+now **prose + code + structured checks** in a single deep-drill
+view. Four views, one brief, still-zero re-briefs.
+
 ## Conventions for this directory
 
 - One subdirectory or zipped artifact per design artifact.

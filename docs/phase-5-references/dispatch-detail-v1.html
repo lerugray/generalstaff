@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>generalstaff — dispatch detail · gs-220</title>
+<meta name="viewport" content="width=1280">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Archivo+Narrow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f1e7d3;
+    --paper-2:     #ede1c9;
+    --paper-edge:  #e4d5b7;
+    --ink:         #2a2418;
+    --ink-soft:    #4a4131;
+    --ink-faint:   #8a7f66;
+    --ink-ghost:   #b7ab8e;
+    --rule:        #3a3122;
+    --rule-soft:   #c9bb9b;
+    --rust:        #8a3a1c;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 60%, rgba(80,55,15,0.10) 100%),
+      radial-gradient(circle at 20% 10%, rgba(255,255,255,0.25), transparent 40%);
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(90,65,25,0.12) 1px, transparent 1px),
+      radial-gradient(rgba(90,65,25,0.08) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    z-index: 0;
+  }
+
+  .sheet {
+    position: relative;
+    z-index: 1;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  /* ——— masthead (unchanged) ——— */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+    gap: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+  .wordmark {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 32px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .wordmark .dot {
+    color: var(--rust);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 14px;
+    vertical-align: 6px;
+    margin-right: 10px;
+  }
+  .sub {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    color: var(--ink-soft);
+    justify-self: start;
+    align-self: center;
+    padding-left: 4px;
+    border-left: 1px solid var(--rule-soft);
+    padding: 4px 0 4px 14px;
+    line-height: 1.5;
+  }
+  .sub b { font-weight: 600; color: var(--ink); letter-spacing: 0.14em; }
+  .stamp {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+  }
+  .stamp .k { color: var(--ink-faint); }
+
+  .docline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0 36px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .docline .title {
+    font-family: 'Spectral', Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13.5px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* ——— NEW: cycle crest (big per-cycle header) ——— */
+
+  .crest {
+    margin-bottom: 30px;
+  }
+  .crest .over {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 8px;
+  }
+  .crest .tid {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 54px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin: 0;
+  }
+  .crest .tid .verdict {
+    display: inline-block;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    vertical-align: 14px;
+    margin-left: 20px;
+  }
+  .crest .tid .verdict::before {
+    content: "";
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: var(--ink);
+    margin-right: 10px;
+    vertical-align: 2px;
+  }
+  .crest .tid .verdict.failed { color: var(--rust); }
+  .crest .tid .verdict.failed::before { background: var(--rust); }
+
+  .crest .meta-row {
+    display: flex;
+    gap: 28px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 0.5px solid var(--rule-soft);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+    flex-wrap: wrap;
+  }
+  .crest .meta-row b {
+    color: var(--ink);
+    font-weight: 600;
+    margin-left: 8px;
+  }
+  .crest .meta-row .mono {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    font-weight: 500;
+  }
+
+  /* ——— summary band (reused, trimmed to 4 cells) ——— */
+
+  .summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0;
+    margin-bottom: 48px;
+    border-top: 0.5px solid var(--rule-soft);
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+  .cell {
+    padding: 22px 24px 20px;
+    border-right: 0.5px solid var(--rule-soft);
+  }
+  .cell:last-child { border-right: none; }
+  .cell:first-child { padding-left: 0; }
+  .cell:last-child { padding-right: 0; }
+  .lab {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 14px;
+  }
+  .big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 32px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1;
+  }
+  .big .slash { color: var(--ink-ghost); font-weight: 400; margin: 0 4px; }
+  .big .unit  { color: var(--ink-faint); font-weight: 400; font-size: 20px; margin-left: 4px; }
+  .note {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    line-height: 1.35;
+  }
+  .note .em {
+    font-style: normal;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+  }
+
+  /* ——— section head (unchanged) ——— */
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 44px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1.25px solid var(--rule);
+  }
+  .sec-head h2 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 20px;
+    letter-spacing: -0.003em;
+    color: var(--ink);
+  }
+  .sec-head h2 .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    color: var(--ink-faint);
+    font-size: 13px;
+    margin-left: 12px;
+    letter-spacing: 0.04em;
+  }
+  .sec-head .right {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .sec-head .right b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ——— NEW: claim block (prose-split task description) ——— */
+
+  .claim { padding: 8px 0 6px; }
+  .claim .lead {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 18.5px;
+    line-height: 1.4;
+    color: var(--ink);
+    margin: 0 0 18px;
+    max-width: 72ch;
+    text-wrap: pretty;
+  }
+  .claim .lead em {
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  .claim .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px 48px;
+    margin-top: 18px;
+  }
+  .claim .field h4 {
+    margin: 0 0 6px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .claim .field p {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .claim .field p .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink);
+  }
+  .claim .field p em {
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+  .claim .field .chips {
+    margin-top: 4px;
+  }
+  .claim .field .chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+    margin-right: 8px;
+  }
+  .claim .field .chip + .chip::before {
+    content: "· ";
+    color: var(--ink-ghost);
+  }
+
+  /* ——— NEW: phase block (engineer / verify / review as a shared structure) ——— */
+
+  .phase { padding: 10px 0 6px; }
+  .phase .phase-line {
+    display: grid;
+    grid-template-columns: 150px 1fr 140px;
+    column-gap: 24px;
+    padding: 10px 0 12px;
+    border-bottom: 0.5px solid var(--rule-soft);
+    align-items: baseline;
+  }
+  .phase .phase-line .k {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .phase .phase-line .v {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    word-break: break-all;
+    letter-spacing: 0.01em;
+  }
+  .phase .phase-line .v em {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+  .phase .phase-line .aside {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
+    font-feature-settings: "tnum" 1;
+  }
+  .phase .phase-line .aside .outcome-good {
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .phase .phase-line .aside .outcome-bad {
+    color: var(--rust);
+    font-weight: 500;
+  }
+
+  /* ——— NEW: diff block (hunk rendering) ——— */
+
+  .diff {
+    margin-top: 14px;
+    border: 1px solid var(--rule-soft);
+    border-radius: 0;
+    background: rgba(237, 225, 201, 0.4);
+  }
+  .diff .hunk-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 10px 16px 10px;
+    border-bottom: 0.5px solid var(--rule-soft);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .diff .hunk-head .file {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    font-size: 12.5px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .diff .hunk-head .range {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: var(--ink-faint);
+    font-size: 11.5px;
+  }
+  .diff .hunk-head .range .add { color: var(--ink); font-weight: 500; }
+  .diff .hunk-head .range .del { color: var(--ink-faint); font-weight: 500; }
+
+  .diff .code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    padding: 12px 0;
+    overflow-x: auto;
+  }
+  .diff .code .row {
+    display: grid;
+    grid-template-columns: 48px 20px 1fr;
+    padding: 0 16px;
+  }
+  .diff .code .row .ln {
+    color: var(--ink-ghost);
+    text-align: right;
+    padding-right: 14px;
+    user-select: none;
+  }
+  .diff .code .row .mark {
+    color: var(--ink-faint);
+    font-weight: 600;
+    text-align: left;
+  }
+  .diff .code .row .src {
+    color: var(--ink-soft);
+    white-space: pre;
+  }
+  .diff .code .row.add .mark { color: var(--ink); }
+  .diff .code .row.add .src  { color: var(--ink); background: transparent; }
+  .diff .code .row.del .mark { color: var(--ink-ghost); }
+  .diff .code .row.del .src  { color: var(--ink-ghost); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+  .diff .hunk-foot {
+    padding: 8px 16px;
+    border-top: 0.5px solid var(--rule-soft);
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+  }
+  .diff .hunk-foot .more {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+
+  /* files-stat list under the hunk */
+  .files-list {
+    margin-top: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.85;
+  }
+  .files-list .file {
+    display: grid;
+    grid-template-columns: 1fr 100px 100px;
+    column-gap: 12px;
+    border-bottom: 0.5px solid var(--rule-soft);
+    padding: 4px 0;
+  }
+  .files-list .file:last-child { border-bottom: none; }
+  .files-list .file .path { color: var(--ink); }
+  .files-list .file .add  { text-align: right; color: var(--ink); }
+  .files-list .file .del  { text-align: right; color: var(--ink-faint); }
+  .files-list .file .add.zero, .files-list .file .del.zero { color: var(--ink-ghost); }
+
+  /* ——— NEW: verdict / checks block ——— */
+
+  .review { padding: 10px 0 6px; }
+  .review .verdict-prose {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 17px;
+    font-style: italic;
+    line-height: 1.45;
+    color: var(--ink);
+    margin: 0 0 24px;
+    text-wrap: pretty;
+    padding-left: 18px;
+    border-left: 2px solid var(--rule-soft);
+    max-width: 72ch;
+  }
+  .review .verdict-prose::before {
+    content: "“";
+    color: var(--ink-ghost);
+    font-size: 26px;
+    vertical-align: -8px;
+    margin-right: 2px;
+  }
+  .review .verdict-prose::after {
+    content: "”";
+    color: var(--ink-ghost);
+    font-size: 26px;
+    vertical-align: -8px;
+    margin-left: 2px;
+  }
+
+  .checks {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border-top: 0.5px solid var(--rule-soft);
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+  .checks .chk {
+    padding: 18px 24px 18px;
+    border-right: 0.5px solid var(--rule-soft);
+  }
+  .checks .chk:last-child { border-right: none; }
+  .checks .chk:first-child { padding-left: 0; }
+  .checks .chk:last-child { padding-right: 0; }
+  .checks .chk .k {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  .checks .chk .v {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 17px;
+    color: var(--ink);
+    font-weight: 500;
+  }
+  .checks .chk .v.good::before {
+    content: "✓";
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--ink);
+    font-weight: 400;
+    margin-right: 10px;
+    font-size: 15px;
+  }
+  .checks .chk .v.bad {
+    color: var(--rust);
+  }
+  .checks .chk .v.bad::before {
+    content: "!";
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--rust);
+    font-weight: 700;
+    margin-right: 10px;
+    font-size: 15px;
+  }
+  .checks .chk .v.bad .list {
+    display: block;
+    font-style: italic;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    margin-top: 6px;
+    font-weight: 400;
+  }
+  .checks .chk .v .detail {
+    display: block;
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+    font-weight: 400;
+  }
+
+  /* ——— afterword / colophon ——— */
+
+  .afterword {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .afterword h3 {
+    margin: 0 0 10px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .afterword p {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .afterword p .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+
+  .colophon {
+    margin-top: 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+    padding-top: 16px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .colophon .run {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ——— masthead ——— -->
+  <header class="masthead">
+    <div class="wordmark"><span class="dot">●</span>generalstaff</div>
+    <div class="sub">Dispatch detail · <b>generalstaff</b></div>
+    <div class="stamp">
+      <span class="k">sheet</span>&nbsp;&nbsp;04 / cycle<br>
+      <span class="k">host</span>&nbsp;&nbsp;&nbsp;localhost:7823
+    </div>
+  </header>
+
+  <div class="docline">
+    <span>Cycle drill-in · one dispatch</span>
+    <span class="title">“The whole story of a single cycle.”</span>
+    <span>Rev. 0.4 · April 2026</span>
+  </div>
+
+  <!-- ——— cycle crest ——— -->
+  <section class="crest">
+    <div class="over">Cycle subject</div>
+    <h1 class="tid">gs-220<span class="verdict">Verified</span></h1>
+    <div class="meta-row">
+      <span>Project<b>generalstaff</b></span>
+      <span>Session<b class="mono">bc4nbrro5</b></span>
+      <span>Opened<b>21:27:05</b></span>
+      <span>Closed<b>21:36:36</b></span>
+      <span>Cycle id<b class="mono">20260418212705_qkbw</b></span>
+      <span>Branch<b class="mono">bot/work</b></span>
+    </div>
+  </section>
+
+  <!-- ——— summary band ——— -->
+  <section class="summary">
+    <div class="cell">
+      <div class="lab">Elapsed</div>
+      <div class="big">9m 31s</div>
+      <div class="note">Engineer accounted for 87% of wall time.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Diff</div>
+      <div class="big">+224<span class="slash">/</span><span style="color:var(--ink-faint);font-weight:400">−2</span></div>
+      <div class="note">Three files touched; all within scope.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Verification</div>
+      <div class="big" style="font-size:22px;padding-top:9px">passed</div>
+      <div class="note">Ran <span class="em">bun test &amp;&amp; tsc --noEmit</span>in 1m 08s.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Reviewer</div>
+      <div class="big" style="font-size:18px;padding-top:13px">openrouter</div>
+      <div class="note"><span class="em">qwen3-coder</span>returned in 6 seconds.</div>
+    </div>
+  </section>
+
+  <!-- ——— CLAIM ——— -->
+  <div class="sec-head">
+    <h2>Claim <span class="n">— what the task asked</span></h2>
+    <div class="right">Priority <b>P2</b> · Queued as <b>bot-pickable</b></div>
+  </div>
+  <section class="claim">
+    <p class="lead">
+      Extend gs-193's fast-fail backoff to catch <em>slow-crash</em> streaks — failures whose first-to-last span exceeds the existing 600-second window but whose symptom (zero-diff verification failures, one after another) is the same retry-loop pathology gs-193 was meant to halt.
+    </p>
+
+    <div class="split">
+      <div class="field">
+        <h4>Create only</h4>
+        <p>Modify <span class="mono">src/session.ts</span> to add a second soft-skip trigger alongside the gs-193 time-window check. Track a per-project <span class="mono">unproductiveStreak</span> counter that increments on every <span class="mono">verification_failed</span> with <span class="mono">files_changed === 0</span>, resets on any other outcome, and soft-skips at <span class="mono">DEFAULT_UNPRODUCTIVE_THRESHOLD = 3</span>.</p>
+      </div>
+      <div class="field">
+        <h4>Do not create</h4>
+        <p>No new files. Do not touch <span class="mono">src/safety.ts</span>, <span class="mono">src/reviewer.ts</span>, <span class="mono">src/prompts/</span>, <span class="mono">scripts/</span>, or any hands-off path.</p>
+      </div>
+      <div class="field">
+        <h4>Observed</h4>
+        <p>During session <span class="mono">bbjko8dw6</span> the engineer subprocess crashed three times from Bun/claude.exe OOM — but the third crash took 33 minutes to materialize. First-to-third span exceeded gs-193's 600-second window and the existing path never fired. Session wasted ~40 minutes on zero-diff cycles before the operator manually STOPped it.</p>
+      </div>
+      <div class="field">
+        <h4>Expected touches</h4>
+        <p class="chips">
+          <span class="chip">src/session.ts</span>
+          <span class="chip">tests/session.test.ts</span>
+        </p>
+        <p style="margin-top:10px;"><em>Expected diff: ~100 lines.</em></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ——— ENGINEER PHASE ——— -->
+  <div class="sec-head">
+    <h2>Engineer phase <span class="n">— 8m 17s</span></h2>
+    <div class="right">Exit <b>0</b> · Watchdog <b>not tripped</b></div>
+  </div>
+  <section class="phase">
+    <div class="phase-line">
+      <div class="k">Command</div>
+      <div class="v">bash scripts/run_bot.sh ${cycle_budget_minutes}</div>
+      <div class="aside">budget 30m</div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Started</div>
+      <div class="v">21:27:05.421 <em>against</em> ceeddcf</div>
+      <div class="aside">branch bot/work</div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Returned</div>
+      <div class="v">21:35:22.175 <em>with</em> 50a8da4</div>
+      <div class="aside"><span class="outcome-good">exit 0</span></div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Diff produced</div>
+      <div class="v">3 files · +224 insertions · −2 deletions · 15,779 bytes of unified diff</div>
+      <div class="aside">duration 497s</div>
+    </div>
+  </section>
+
+  <!-- ——— DIFF ——— -->
+  <div class="sec-head">
+    <h2>Diff <span class="n">— one hunk shown</span></h2>
+    <div class="right">Full diff in <b>git show 50a8da4</b></div>
+  </div>
+  <section>
+
+    <div class="diff">
+      <div class="hunk-head">
+        <span class="file">src/session.ts</span>
+        <span class="range">near line 56 · <span class="add">+20</span> <span class="del">−0</span> in hunk · <span class="add">+126</span> <span class="del">0</span> in file</span>
+      </div>
+      <div class="code">
+        <div class="row"><span class="ln">56</span><span class="mark"> </span><span class="src">export const WATCHDOG_MULTIPLIER = 2;</span></div>
+        <div class="row"><span class="ln">57</span><span class="mark"> </span><span class="src">export const DEFAULT_SOFT_SKIP_THRESHOLD = 3;</span></div>
+        <div class="row"><span class="ln">58</span><span class="mark"> </span><span class="src">export const DEFAULT_SOFT_SKIP_WINDOW_SECONDS = 600;</span></div>
+        <div class="row"><span class="ln">59</span><span class="mark"> </span><span class="src"></span></div>
+        <div class="row add"><span class="ln">60</span><span class="mark">+</span><span class="src">// gs-220: unproductive-streak backoff (time-window-agnostic escape hatch</span></div>
+        <div class="row add"><span class="ln">61</span><span class="mark">+</span><span class="src">// for gs-193). gs-193 soft-skips on N failures inside M seconds, which</span></div>
+        <div class="row add"><span class="ln">62</span><span class="mark">+</span><span class="src">// catches fast-crash loops but misses slow-crash-with-zero-progress</span></div>
+        <div class="row add"><span class="ln">63</span><span class="mark">+</span><span class="src">// streaks. A diff-producing failure resets the counter because</span></div>
+        <div class="row add"><span class="ln">64</span><span class="mark">+</span><span class="src">// that's a scope problem, not a retry-loop symptom.</span></div>
+        <div class="row add"><span class="ln">65</span><span class="mark">+</span><span class="src">export const DEFAULT_UNPRODUCTIVE_THRESHOLD = 3;</span></div>
+        <div class="row add"><span class="ln">66</span><span class="mark">+</span><span class="src"></span></div>
+        <div class="row add"><span class="ln">67</span><span class="mark">+</span><span class="src">export function updateUnproductiveStreak(</span></div>
+        <div class="row add"><span class="ln">68</span><span class="mark">+</span><span class="src">  prior: number,</span></div>
+        <div class="row add"><span class="ln">69</span><span class="mark">+</span><span class="src">  outcome: CycleOutcome,</span></div>
+        <div class="row add"><span class="ln">70</span><span class="mark">+</span><span class="src">  diffStats: DiffStats | undefined,</span></div>
+        <div class="row add"><span class="ln">71</span><span class="mark">+</span><span class="src">): number {</span></div>
+        <div class="row add"><span class="ln">72</span><span class="mark">+</span><span class="src">  if (outcome !== "verification_failed") return 0;</span></div>
+        <div class="row add"><span class="ln">73</span><span class="mark">+</span><span class="src">  if ((diffStats?.files_changed ?? 0) > 0) return 0;</span></div>
+        <div class="row add"><span class="ln">74</span><span class="mark">+</span><span class="src">  return prior + 1;</span></div>
+        <div class="row add"><span class="ln">75</span><span class="mark">+</span><span class="src">}</span></div>
+        <div class="row"><span class="ln">76</span><span class="mark"> </span><span class="src"></span></div>
+        <div class="row"><span class="ln">77</span><span class="mark"> </span><span class="src">export interface SessionOptions {</span></div>
+      </div>
+      <div class="hunk-foot">Hunk shown 1 of 4 · <span class="more">subsequent hunks add the streak-check to both session loops and cover the new counter in the digest event.</span></div>
+    </div>
+
+    <div class="files-list">
+      <div class="file">
+        <span class="path">src/session.ts</span>
+        <span class="add">+126</span>
+        <span class="del zero">−0</span>
+      </div>
+      <div class="file">
+        <span class="path">tests/session.test.ts</span>
+        <span class="add">+95</span>
+        <span class="del zero">−0</span>
+      </div>
+      <div class="file">
+        <span class="path">state/generalstaff/tasks.json</span>
+        <span class="add">+3</span>
+        <span class="del">−2</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ——— VERIFICATION ——— -->
+  <div class="sec-head">
+    <h2>Verification <span class="n">— 1m 08s</span></h2>
+    <div class="right">Exit <b>0</b> · Timed out <b>no</b></div>
+  </div>
+  <section class="phase">
+    <div class="phase-line">
+      <div class="k">Command</div>
+      <div class="v">bun test &amp;&amp; bun x tsc --noEmit</div>
+      <div class="aside">timeout 300s</div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Test run</div>
+      <div class="v">1,110 tests · 1,110 passed · 0 failed · 0 skipped</div>
+      <div class="aside">~62s</div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Type check</div>
+      <div class="v">tsc --noEmit · no errors</div>
+      <div class="aside">~6s</div>
+    </div>
+    <div class="phase-line">
+      <div class="k">Outcome</div>
+      <div class="v"><em>passed</em> — handed to reviewer for scope verdict</div>
+      <div class="aside"><span class="outcome-good">exit 0</span></div>
+    </div>
+  </section>
+
+  <!-- ——— REVIEW ——— -->
+  <div class="sec-head">
+    <h2>Review <span class="n">— openrouter · qwen3-coder · 6s</span></h2>
+    <div class="right">Prompt <b>31,203 bytes</b> · Response <b>876 bytes</b></div>
+  </div>
+  <section class="review">
+    <p class="verdict-prose">All changes align with the claimed task gs-220, no hands-off violations, and the verification command passed.</p>
+
+    <div class="checks">
+      <div class="chk">
+        <div class="k">Scope drift</div>
+        <div class="v good">None<span class="detail">All three touched files are declared in <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">expected_touches</span> or a reasonable adjacency.</span></div>
+      </div>
+      <div class="chk">
+        <div class="k">Hands-off violations</div>
+        <div class="v good">None<span class="detail">No files under <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">src/safety.ts</span>, <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">src/prompts/</span>, or other protected paths were touched.</span></div>
+      </div>
+      <div class="chk">
+        <div class="k">Silent failures</div>
+        <div class="v good">None<span class="detail">All added code paths are exercised by tests. No broad <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;">try/catch</span> swallows observed.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ——— afterword ——— -->
+  <section class="afterword">
+    <div>
+      <h3>Cycle anatomy</h3>
+      <p>A cycle is <span class="mono">claim → engineer → verify → review</span>. Each phase emits events into <span class="mono">PROGRESS.jsonl</span>; this sheet assembles the record for one cycle from those events plus the <span class="mono">tasks.json</span> entry.</p>
+    </div>
+    <div>
+      <h3>Diff rendering</h3>
+      <p>One hunk is shown inline. The full unified diff is always reachable via <span class="mono">git show &lt;end_sha&gt;</span>. This sheet favors comprehension over completeness — read the full diff when the claim and the hunk don't already tell the story.</p>
+    </div>
+    <div>
+      <h3>Review checks</h3>
+      <p>The reviewer's three structured checks (scope drift, hands-off violations, silent failures) are separate from its prose verdict. The prose can still catch something the checks miss — it usually doesn't, but the quote above is the final answer.</p>
+    </div>
+  </section>
+
+  <!-- ——— colophon ——— -->
+  <div class="colophon">
+    <span>generalstaff · open-source autonomous-bot dispatcher</span>
+    <span class="run">rendered 19:53 · pid 48213 · cycle 20260418212705_qkbw</span>
+    <span>page 1 of 1</span>
+  </div>
+
+</div>
+
+</body>
+</html>
