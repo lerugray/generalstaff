@@ -1,0 +1,93 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 7936946..74c6e79 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -534,6 +534,15 @@ switch (command) {
+           console.log(JSON.stringify(out, null, 2));
+         } else {
+           console.log(formatBacklogTable(rows));
++          // gs-234: friendly note when every project has zero bot-pickable
++          // work, so the operator sees a prompt to seed tasks instead of
++          // just a row of zeros.
++          const totals = computeBacklogTotals(rows);
++          if (totals.bot_pickable === 0) {
++            console.log(
++              "\nAll queues drained. Seed tasks with `generalstaff tasks add <project-id> --title=... --priority=N` or directly in `state/<project-id>/tasks.json`.",
++            );
++          }
+         }
+         return;
+       }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index e420be9..ccdf621 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1456,7 +1456,7 @@
+   {
+     "id": "gs-234",
+     "title": "Improve `status --backlog` to print a friendly summary line when every registered project has 0 bot-pickable work. CREATE ONLY: modify the `status --backlog` handler in `src/cli.ts` — after rendering the existing table, if TOTAL.pending_bot_pickable === 0, append a one-line note: `\\nAll queues drained. Seed tasks with \\`generalstaff tasks add <project-id> --title=... --priority=N\\` or directly in \\`state/<project-id>/tasks.json\\`.` (exact wording in the spec). If TOTAL.pending_bot_pickable > 0, do not print the note (existing behavior unchanged). `--json` output is NOT modified — friendly note is text-mode only. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: during wave-3/4 tonight the bot's empty-cycles soft-stop fired after all queues drained, but `status --backlog` gave no visual signal that seeding was needed — just a row of zeros. Expected diff: ~60 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 0ed18f0..607e9db 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -1903,6 +1903,55 @@ dispatcher:
+         "--backlog cannot be combined with --sessions/--summary/--watch",
+       );
+     });
++
++    // gs-234: friendly "queues drained" note surfaces the empty-fleet
++    // state in text mode so the operator sees a seed prompt instead of
++    // a silent row of zeros.
++    it("text mode appends the 'queues drained' note when every project has 0 bot-pickable work", async () => {
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
++        JSON.stringify([
++          { id: "a-1", title: "t1", status: "done", priority: 1 },
++          { id: "a-2", title: "t2", status: "pending", priority: 2, interactive_only: true },
++        ]),
++      );
++      writeFileSync(
++        join(BETA_DIR, "state", "beta", "tasks.json"),
++        JSON.stringify([
++          { id: "b-1", title: "t1", status: "in_progress", priority: 1 },
++        ]),
++      );
++      const result = await runCli(["status", "--backlog"], BACKLOG_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain(
++        "All queues drained. Seed tasks with `generalstaff tasks add <project-id> --title=... --priority=N` or directly in `state/<project-id>/tasks.json`.",
++      );
++    });
++
++    it("text mode omits the 'queues drained' note when at least one project has bot-pickable work", async () => {
++      const result = await runCli(["status", "--backlog"], BACKLOG_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).not.toContain("All queues drained");
++    });
++
++    it("--json never emits the friendly note, even when every project is drained", async () => {
++      writeFileSync(
++        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
++        JSON.stringify([]),
++      );
++      writeFileSync(
++        join(BETA_DIR, "state", "beta", "tasks.json"),
++        JSON.stringify([]),
++      );
++      const result = await runCli(
++        ["status", "--backlog", "--json"],
++        BACKLOG_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).not.toContain("All queues drained");
++      const parsed = JSON.parse(result.stdout);
++      expect(parsed.totals.bot_pickable).toBe(0);
++    });
+   });
+ 
+   describe("status --totals (gs-202)", () => {
