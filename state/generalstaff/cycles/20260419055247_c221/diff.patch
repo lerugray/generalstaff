@@ -1,0 +1,259 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index e041f64..e3861ea 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -1079,6 +1079,7 @@ switch (command) {
+           "  rm   --project=<id> --task=<task-id>               Delete a task\n" +
+           "  interactive --project=<id> <task-id> [--off]       Flip interactive_only flag\n" +
+           "  count [--project=<id>]                             Report pending vs done counts\n" +
++          "  validate [--project=<id>] [--json]                 Validate tasks.json schema across projects\n" +
+           "\n" +
+           "Examples:\n" +
+           "  generalstaff task list --project=myapp\n" +
+@@ -1393,15 +1394,89 @@ switch (command) {
+           `${id}: ${c.pending} pending, ${c.done} done (${c.total} total)`,
+         );
+       }
++    } else if (sub === "validate") {
++      // gs-248: schema-validate every project's tasks.json. Reuses the
++      // TaskValidationError-raising loadTasks path from src/tasks.ts so
++      // the validator and the runtime read the same schema. loadTasks
++      // throws on the first invalid entry, so a project's `errors` array
++      // contains at most one message; that's the granularity the existing
++      // validator exposes and is sufficient for pass/fail signalling.
++      const { values: valValues } = parseArgs({
++        args: args.slice(2),
++        options: {
++          project: { type: "string" },
++          json: { type: "boolean", default: false },
++        },
++        allowPositionals: false,
++      });
++      let targets: string[];
++      const yamlExists = existsSync(join(getRootDir(), "projects.yaml"));
++      if (valValues.project) {
++        if (yamlExists) {
++          const registered = await loadProjects();
++          if (!registered.find((p) => p.id === valValues.project)) {
++            const ids =
++              registered.map((p) => p.id).join(", ") || "(none)";
++            console.error(
++              `Error: project '${valValues.project}' not found. Registered: ${ids}`,
++            );
++            process.exit(1);
++          }
++        }
++        targets = [valValues.project];
++      } else {
++        const all = await loadProjects();
++        if (all.length === 0) {
++          if (valValues.json) {
++            console.log(JSON.stringify({}, null, 2));
++          } else {
++            console.log("No projects registered.");
++          }
++          break;
++        }
++        targets = all.map((p) => p.id);
++      }
++      const results: Record<string, { ok: boolean; errors: string[] }> = {};
++      let anyFail = false;
++      for (const id of targets) {
++        try {
++          await loadTasks(id);
++          results[id] = { ok: true, errors: [] };
++        } catch (err) {
++          anyFail = true;
++          const msg = err instanceof Error ? err.message : String(err);
++          results[id] = { ok: false, errors: [msg] };
++        }
++      }
++      if (valValues.json) {
++        console.log(JSON.stringify(results, null, 2));
++      } else {
++        for (const id of targets) {
++          const r = results[id]!;
++          if (r.ok) {
++            console.log(`${id}: ok (0 issues)`);
++          } else {
++            const n = r.errors.length;
++            console.log(
++              `${id}: FAIL (${n} issue${n === 1 ? "" : "s"})`,
++            );
++            for (const e of r.errors) {
++              console.log(`  - ${e}`);
++            }
++          }
++        }
++      }
++      if (anyFail) process.exit(1);
+     } else {
+       console.error(
+-        "Error: task subcommand required (list, add, done, rm, interactive, or count)\n" +
++        "Error: task subcommand required (list, add, done, rm, interactive, count, or validate)\n" +
+           "  Usage: generalstaff task list --project=<id>\n" +
+           "         generalstaff task add --project=<id> <title>\n" +
+           "         generalstaff task done --project=<id> --task=<task-id>\n" +
+           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
+           "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
+-          "         generalstaff task count [--project=<id>]",
++          "         generalstaff task count [--project=<id>]\n" +
++          "         generalstaff task validate [--project=<id>] [--json]",
+       );
+       process.exit(1);
+     }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 3c07041..5239baf 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1611,7 +1611,7 @@
+   {
+     "id": "gs-248",
+     "title": "Add `generalstaff tasks validate [--project=<id>]` subcommand that runs GreenfieldTask schema validation across tasks.json files. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `validate` sub-subcommand that reuses the `TaskValidationError`-raising loadTasks path from `src/tasks.ts` (shipped in gs-218). Without `--project`, validate every registered project tasks.json; with `--project=<id>`, validate just that project. Report pass/fail per project with count of issues; exit 0 if all pass, exit 1 if any fail. `--json` emits { project_id: {ok, errors: [...]} } map. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) all-green passes exit 0; (b) malformed tasks.json in one project → exit 1 + named in output; (c) --project filters correctly; (d) unknown --project errors + exits 1; (e) --json shape. Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/cli.ts",
+diff --git a/tests/cli.test.ts b/tests/cli.test.ts
+index 40038f9..90b3d81 100644
+--- a/tests/cli.test.ts
++++ b/tests/cli.test.ts
+@@ -3916,6 +3916,137 @@ dispatcher:
+       expect(after).toBe(before);
+     });
+   });
++
++  describe("task validate (gs-248)", () => {
++    const TV_DIR = join(import.meta.dir, "fixtures", "task_validate");
++
++    const TV_YAML = `
++projects:
++  - id: generalstaff
++    path: /tmp/gs
++    priority: 1
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    branch: bot/work
++    hands_off:
++      - CLAUDE.md
++  - id: beta
++    path: /tmp/beta
++    priority: 2
++    engineer_command: "echo hi"
++    verification_command: "echo ok"
++    cycle_budget_minutes: 30
++    branch: bot/work
++    hands_off:
++      - README.md
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++`;
++
++    beforeEach(() => {
++      rmSync(TV_DIR, { recursive: true, force: true });
++      mkdirSync(join(TV_DIR, "state", "generalstaff"), { recursive: true });
++      mkdirSync(join(TV_DIR, "state", "beta"), { recursive: true });
++      writeFileSync(join(TV_DIR, "projects.yaml"), TV_YAML);
++    });
++
++    afterEach(() => {
++      rmSync(TV_DIR, { recursive: true, force: true });
++    });
++
++    function writeTasks(projectId: string, body: unknown) {
++      writeFileSync(
++        join(TV_DIR, "state", projectId, "tasks.json"),
++        typeof body === "string" ? body : JSON.stringify(body),
++      );
++    }
++
++    it("(a) all-green passes exit 0 across every registered project", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "ok", status: "done", priority: 2 },
++      ]);
++      const result = await runCli(["task", "validate"], TV_DIR);
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff: ok");
++      expect(result.stdout).toContain("beta: ok");
++    });
++
++    it("(b) malformed tasks.json in one project → exit 1 and names that project", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [{ id: "bt-001", title: "no priority", status: "pending" }]);
++      const result = await runCli(["task", "validate"], TV_DIR);
++      expect(result.exitCode).toBe(1);
++      expect(result.stdout).toContain("generalstaff: ok");
++      expect(result.stdout).toContain("beta: FAIL");
++      expect(result.stdout.toLowerCase()).toContain("priority");
++    });
++
++    it("(c) --project=<id> filters to that project only", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      // beta has malformed tasks but should not be checked under --project filter
++      writeTasks("beta", "{not valid json");
++      const result = await runCli(
++        ["task", "validate", "--project=generalstaff"],
++        TV_DIR,
++      );
++      expect(result.exitCode).toBe(0);
++      expect(result.stdout).toContain("generalstaff: ok");
++      expect(result.stdout).not.toContain("beta");
++    });
++
++    it("(d) unknown --project errors and exits 1", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      const result = await runCli(
++        ["task", "validate", "--project=nosuch"],
++        TV_DIR,
++      );
++      expect(result.exitCode).toBe(1);
++      expect(result.stderr).toContain("project 'nosuch' not found");
++      expect(result.stderr).toContain("Registered:");
++    });
++
++    it("(e) --json emits { project_id: {ok, errors: [...]} } map", async () => {
++      writeTasks("generalstaff", [
++        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
++      ]);
++      writeTasks("beta", [
++        { id: "bt-001", title: "bad status", status: "weird", priority: 1 },
++      ]);
++      const result = await runCli(["task", "validate", "--json"], TV_DIR);
++      expect(result.exitCode).toBe(1);
++      const parsed = JSON.parse(result.stdout) as Record<
++        string,
++        { ok: boolean; errors: string[] }
++      >;
++      expect(parsed.generalstaff).toBeDefined();
++      expect(parsed.generalstaff!.ok).toBe(true);
++      expect(parsed.generalstaff!.errors).toEqual([]);
++      expect(parsed.beta).toBeDefined();
++      expect(parsed.beta!.ok).toBe(false);
++      expect(parsed.beta!.errors.length).toBeGreaterThan(0);
++      expect(parsed.beta!.errors[0]!.toLowerCase()).toContain("status");
++    });
++  });
+ });
+ 
+ // gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗
