@@ -450,8 +450,40 @@ export async function invokeOpenRouterReviewer(prompt: string): Promise<string> 
 // for self-hosted users of GeneralStaff. Qwen3 enables a thinking/reasoning
 // mode by default; num_predict is set high enough to cover both the
 // reasoning pass and the final JSON verdict output.
+// Validate OLLAMA_HOST before interpolating it into a fetch URL. Security
+// audit 2026-04-19 (HIGH) flagged this as an SSRF surface: an env var set
+// to something like http://169.254.169.254 (AWS IMDS) or an internal
+// service URL would cause every reviewer invocation to POST the full
+// prompt to that host. Fail loud rather than silently SSRF.
+//
+// Exported for tests. Throws on invalid input (caller should surface
+// [REVIEWER ERROR] rather than propagate).
+export function validateOllamaHost(raw: string): string {
+  const cleaned = raw.replace(/\/$/, "");
+  let url: URL;
+  try {
+    url = new URL(cleaned);
+  } catch {
+    throw new Error(
+      `OLLAMA_HOST is not a valid URL: ${raw}. Expected http://host:port or https://host:port.`,
+    );
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(
+      `OLLAMA_HOST must use http:// or https://, got ${url.protocol} (value: ${raw}).`,
+    );
+  }
+  return cleaned;
+}
+
 export async function invokeOllamaReviewer(prompt: string): Promise<string> {
-  const host = (process.env.OLLAMA_HOST ?? "http://localhost:11434").replace(/\/$/, "");
+  let host: string;
+  try {
+    host = validateOllamaHost(process.env.OLLAMA_HOST ?? "http://localhost:11434");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return `[REVIEWER ERROR] ${msg}`;
+  }
   const model = process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen3:8b";
 
   try {

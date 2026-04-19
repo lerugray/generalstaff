@@ -96,6 +96,52 @@ describe("matchesHandsOff", () => {
     expect(matchesHandsOff("README.md", handsOff)).toBeNull();
     expect(matchesHandsOff("tests/test_api.py", handsOff)).toBeNull();
   });
+
+  // Security audit 2026-04-19 (HIGH): Windows (NTFS) and macOS (default
+  // APFS) are case-insensitive filesystems. A bot that commits a file with
+  // non-canonical casing — Src/Reviewer.ts instead of src/reviewer.ts —
+  // would have evaded the hands-off check before this fix. Guarded per
+  // process.platform; on Linux (case-sensitive ext4 etc.) we keep strict
+  // matching. We cannot change process.platform at runtime, so the test
+  // asserts whichever mode the current platform should exhibit.
+  describe("case-insensitive hands-off on case-insensitive filesystems", () => {
+    const isCaseInsensitiveFs =
+      process.platform === "win32" || process.platform === "darwin";
+
+    it("src/reviewer.ts pattern catches Src/Reviewer.ts on case-insensitive FS", () => {
+      const result = matchesHandsOff("Src/Reviewer.ts", ["src/reviewer.ts"]);
+      if (isCaseInsensitiveFs) {
+        expect(result).toBe("src/reviewer.ts");
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+
+    it("CLAUDE.md pattern catches claude.md on case-insensitive FS", () => {
+      const result = matchesHandsOff("claude.md", ["CLAUDE.md"]);
+      if (isCaseInsensitiveFs) {
+        expect(result).toBe("CLAUDE.md");
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+
+    it("src/prompts/ directory glob catches Src/Prompts/foo.ts on case-insensitive FS", () => {
+      const result = matchesHandsOff("Src/Prompts/foo.ts", ["src/prompts/"]);
+      if (isCaseInsensitiveFs) {
+        expect(result).toBe("src/prompts/");
+      } else {
+        expect(result).toBeNull();
+      }
+    });
+
+    it("canonical case still matches regardless of platform", () => {
+      expect(matchesHandsOff("src/reviewer.ts", ["src/reviewer.ts"])).toBe(
+        "src/reviewer.ts",
+      );
+      expect(matchesHandsOff("CLAUDE.md", ["CLAUDE.md"])).toBe("CLAUDE.md");
+    });
+  });
 });
 
 describe("isBotRunning", () => {

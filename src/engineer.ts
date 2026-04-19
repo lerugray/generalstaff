@@ -64,6 +64,13 @@ export async function runEngineer(
   }
 
   // Expand ${cycle_budget_minutes} in the command
+  // SAFETY INVARIANT (security audit 2026-04-19): only numeric or
+  // otherwise shell-safe template variables may be substituted into
+  // engineer_command here. cycle_budget_minutes is a parsed integer so
+  // it's safe. If you add a new template variable whose value comes from
+  // user-facing string content (e.g. task title, free-text config), you
+  // MUST shell-quote it before substitution — unquoted interpolation
+  // into a shell command is a command-injection surface.
   const command = project.engineer_command.replace(
     /\$\{cycle_budget_minutes\}/g,
     String(project.cycle_budget_minutes),

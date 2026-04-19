@@ -23,6 +23,18 @@ STOP
 # that blocks the next launch's clean-tree preflight (gs-236).
 state/session.pid
 
+# Per-cycle detail artifacts (reviewer-prompt.txt, reviewer-response.txt,
+# diff.patch, etc.) — contain the FULL diff text which could embed a
+# secret if the engineer accidentally committed a .env or similar. The
+# canonical open audit log (Hard Rule 9) is state/<id>/PROGRESS.jsonl,
+# which records verdicts, reasons, hands_off_violations, and diff_length
+# — not the raw diff body. Pre-launch security audit 2026-04-19 (MEDIUM)
+# flagged committing the per-cycle files as a secret-exposure surface;
+# PROGRESS.jsonl alone is enough for the "count the rejections yourself"
+# audit story, and per-cycle files remain on disk for local inspection.
+state/*/cycles/
+state/_fleet/cycles/
+
 # Bun / Node
 node_modules/
 bun.lock

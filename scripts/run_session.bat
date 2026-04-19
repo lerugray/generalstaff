@@ -23,7 +23,12 @@ REM for the Task Scheduler setup notes once we validate a manual run).
 
 setlocal enabledelayedexpansion
 
-set "PROJECT_ROOT=C:\Users\rweis\OneDrive\Documents\GeneralStaff"
+REM Resolve PROJECT_ROOT relative to this script's location — %~dp0 is
+REM the directory containing the .bat, so scripts\..  is the repo root.
+REM Users can override by setting PROJECT_ROOT in their environment
+REM before launching this script.
+if "%PROJECT_ROOT%"=="" set "PROJECT_ROOT=%~dp0.."
+
 set "BUDGET=%~1"
 if "%BUDGET%"=="" set "BUDGET=360"
 
@@ -52,19 +57,35 @@ REM Export the log path so session.ts can include it in its end-of-session
 REM Telegram notification (see src/notify.ts).
 set "GENERALSTAFF_SESSION_LOG=%LOG%"
 
-REM Provider-specific credential loading. OpenRouter needs an API key
-REM from Ray's shared provider .env (stored under OPENAI_API_KEY — that
-REM field name predates this routing). Ollama and claude need nothing:
-REM ollama talks to localhost:11434, claude -p uses its own subscription
-REM auth. Scoped to this subprocess; not exported session-wide.
+REM Provider-specific credential loading. OpenRouter needs an API key;
+REM Ollama and claude need nothing (ollama talks to localhost:11434,
+REM claude -p uses its own subscription auth).
+REM
+REM Precedence for OPENROUTER_API_KEY:
+REM   1. Already set in the environment — used as-is
+REM   2. OPENROUTER_ENV_FILE points at a .env-style file containing
+REM      "OPENROUTER_API_KEY=..." or "OPENAI_API_KEY=..." — first match wins
+REM   3. Missing — loud warning, cycles fail-safe to verification_failed
+REM
+REM Scoped to this subprocess; not exported session-wide.
 if /i "%PROVIDER%"=="openrouter" (
-  set "PROVIDER_ENV=C:\Users\rweis\OneDrive\Documents\MiroShark\.env"
-  for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" "!PROVIDER_ENV!"`) do set "OPENROUTER_API_KEY=%%b"
   if "!OPENROUTER_API_KEY!"=="" (
-    echo WARNING: OPENROUTER_API_KEY not found at !PROVIDER_ENV! — reviewer
-    echo          will fall through to a 'REVIEWER ERROR' string and every
-    echo          cycle will fail-safe to verification_failed. Either
-    echo          provision the key or pass a different provider, e.g.:
+    if defined OPENROUTER_ENV_FILE (
+      if exist "!OPENROUTER_ENV_FILE!" (
+        for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENROUTER_API_KEY=" "!OPENROUTER_ENV_FILE!"`) do set "OPENROUTER_API_KEY=%%b"
+        if "!OPENROUTER_API_KEY!"=="" (
+          for /f "usebackq tokens=1,* delims==" %%a in (`findstr /b "OPENAI_API_KEY=" "!OPENROUTER_ENV_FILE!"`) do set "OPENROUTER_API_KEY=%%b"
+        )
+      )
+    )
+  )
+  if "!OPENROUTER_API_KEY!"=="" (
+    echo WARNING: OPENROUTER_API_KEY not set and not loadable from OPENROUTER_ENV_FILE.
+    echo          Reviewer will fall through to a 'REVIEWER ERROR' string and every
+    echo          cycle will fail-safe to verification_failed. Either:
+    echo            set OPENROUTER_API_KEY=sk-or-...
+    echo            set OPENROUTER_ENV_FILE=C:\path\to\.env    (must define OPENROUTER_API_KEY or OPENAI_API_KEY)
+    echo          Or pass a different provider:
     echo            scripts\run_session.bat %BUDGET% ollama
     echo            scripts\run_session.bat %BUDGET% claude
   )

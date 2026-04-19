@@ -6,6 +6,7 @@ import {
   parseReviewerResponse,
   reviewerConcurrencyLimit,
   withReviewerSemaphore,
+  validateOllamaHost,
   _resetReviewerSemaphoresForTests,
 } from "../src/reviewer";
 
@@ -993,6 +994,65 @@ describe("withReviewerSemaphore (gs-187)", () => {
     // openrouter was capped at 1; ollama was independent and capped at 1.
     expect(peakOpenrouter).toBe(1);
     expect(peakOllama).toBe(1);
+  });
+});
+
+// Security audit 2026-04-19 (HIGH): OLLAMA_HOST was interpolated directly
+// into a fetch URL. An env var set to an internal URL or a cloud metadata
+// endpoint would SSRF the reviewer prompt. validateOllamaHost fails loud.
+describe("validateOllamaHost (SSRF guard)", () => {
+  it("accepts http://localhost:11434 (default)", () => {
+    expect(validateOllamaHost("http://localhost:11434")).toBe(
+      "http://localhost:11434",
+    );
+  });
+
+  it("accepts http://127.0.0.1:11434", () => {
+    expect(validateOllamaHost("http://127.0.0.1:11434")).toBe(
+      "http://127.0.0.1:11434",
+    );
+  });
+
+  it("accepts https://ollama.example.internal", () => {
+    expect(validateOllamaHost("https://ollama.example.internal")).toBe(
+      "https://ollama.example.internal",
+    );
+  });
+
+  it("strips a single trailing slash", () => {
+    expect(validateOllamaHost("http://localhost:11434/")).toBe(
+      "http://localhost:11434",
+    );
+  });
+
+  it("rejects file:// scheme", () => {
+    expect(() => validateOllamaHost("file:///etc/passwd")).toThrow(
+      /must use http:\/\/ or https:\/\//,
+    );
+  });
+
+  it("rejects javascript: scheme", () => {
+    expect(() => validateOllamaHost("javascript:alert(1)")).toThrow(
+      /must use http:\/\/ or https:\/\//,
+    );
+  });
+
+  it("rejects gopher:// scheme (classic SSRF vector)", () => {
+    expect(() => validateOllamaHost("gopher://internal:70/exec")).toThrow(
+      /must use http:\/\/ or https:\/\//,
+    );
+  });
+
+  it("rejects a bare hostname (no scheme)", () => {
+    expect(() => validateOllamaHost("169.254.169.254")).toThrow(
+      /not a valid URL|must use http/,
+    );
+  });
+
+  it("rejects garbage input", () => {
+    expect(() => validateOllamaHost("not-a-url!!!")).toThrow(
+      /not a valid URL|must use http/,
+    );
   });
 });
 

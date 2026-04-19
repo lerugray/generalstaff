@@ -230,6 +230,13 @@ export async function isWorkingTreeClean(projectPath: string): Promise<{
 
 // --- Hands-off glob matching ---
 
+// Windows filesystems (NTFS, default) are case-insensitive, so a hands-off
+// pattern `src/reviewer.ts` would not match a diff path of `Src/Reviewer.ts`
+// using a case-sensitive regex — which is a hands-off-bypass surface on
+// every Windows-hosted install. Security audit 2026-04-19 (HIGH).
+// Detect once at module load; platform doesn't change during a process.
+const CASE_INSENSITIVE_FS = process.platform === "win32" || process.platform === "darwin";
+
 function globToRegex(pattern: string): RegExp {
   // Convert a simple glob pattern to a regex
   // Supports: * (any chars except /), ** (any chars including /), ? (one char)
@@ -261,7 +268,11 @@ function globToRegex(pattern: string): RegExp {
     regex += ".*";
   }
   regex += "$";
-  return new RegExp(regex);
+  // Case-insensitive match on case-insensitive filesystems (Win32, macOS
+  // default HFS+/APFS). On Linux we keep case-sensitive since the
+  // filesystem is. Prevents the bypass where a bot commits
+  // `Src/Reviewer.ts` past a `src/reviewer.ts` hands-off pattern.
+  return new RegExp(regex, CASE_INSENSITIVE_FS ? "i" : "");
 }
 
 export function matchesHandsOff(
