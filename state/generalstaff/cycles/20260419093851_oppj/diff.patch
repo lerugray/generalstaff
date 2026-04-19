@@ -1,0 +1,363 @@
+diff --git a/src/doctor.ts b/src/doctor.ts
+index b426e65..cc51bcc 100644
+--- a/src/doctor.ts
++++ b/src/doctor.ts
+@@ -367,6 +367,114 @@ export async function checkStrandedBotCommits(
+   };
+ }
+ 
++// gs-258: first-run sanity checks. Surface the three common footguns
++// a fresh-clone user hits before registering projects: an absent /
++// empty projects.yaml, a projects.yaml left byte-identical to the
++// shipped example, or a state_dir that the current user can't write
++// to. Each failure message points straight at the fix. These three
++// checks do NOT gate process.exit — they surface as sanity ✗ rows.
++
++// Check (gs-258a): at least one project is registered. Failure
++// triggers when projects.yaml is absent OR the loaded list is empty.
++// Kept independent from the projects.yaml loader's own errors so a
++// fresh-clone user without any projects.yaml still sees a pointed fix.
++export function checkProjectsYamlHasProject(
++  projects: ProjectConfig[],
++  projectsYamlPath: string,
++): SanityCheckResult {
++  const problems: string[] = [];
++  if (!existsSync(projectsYamlPath) || projects.length === 0) {
++    problems.push(
++      "No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.",
++    );
++  }
++  return {
++    name: "projects registered",
++    problems,
++    okDetail: `${projects.length} project(s) registered`,
++  };
++}
++
++// Check (gs-258b): projects.yaml is not byte-identical to the shipped
++// example. Detects the "copied the example and forgot to edit" case.
++// Passes silently when either file is absent — (a) surfaces a missing
++// projects.yaml and a missing example is unusual (repo state oddity,
++// not a user mistake).
++export function checkProjectsYamlCustomized(
++  projectsYamlPath: string,
++  examplePath: string,
++): SanityCheckResult {
++  const problems: string[] = [];
++  if (!existsSync(projectsYamlPath)) {
++    return {
++      name: "projects.yaml customized",
++      problems,
++      okDetail: "no projects.yaml present",
++    };
++  }
++  if (!existsSync(examplePath)) {
++    return {
++      name: "projects.yaml customized",
++      problems,
++      okDetail: "no example file to compare against",
++    };
++  }
++  try {
++    const yaml = readFileSync(projectsYamlPath);
++    const example = readFileSync(examplePath);
++    if (yaml.equals(example)) {
++      problems.push(
++        "projects.yaml is unmodified from the shipped example. Replace the placeholder project entries with real projects.",
++      );
++    }
++  } catch {
++    // Read errors don't block this check — checkProjectStateDirs etc.
++    // surface them with better context.
++  }
++  return {
++    name: "projects.yaml customized",
++    problems,
++    okDetail: "projects.yaml differs from shipped example",
++  };
++}
++
++// Check (gs-258c): state_dir exists and is writable, or is absent but
++// its parent is writable (auto-create on first write). Probes with a
++// throwaway file because accessSync on Windows sometimes reports W_OK
++// on paths that actually reject writes — same belt-and-braces approach
++// as checkDigestsWritable.
++export function checkStateDirWritable(): SanityCheckResult {
++  const stateDir = join(getRootDir(), "state");
++  const problems: string[] = [];
++  let okDetail = `state_dir writable — ${stateDir}`;
++  if (existsSync(stateDir)) {
++    try {
++      const st = statSync(stateDir);
++      if (!st.isDirectory()) {
++        throw new Error("state path is not a directory");
++      }
++      accessSync(stateDir, fsConstants.W_OK);
++      const probe = join(stateDir, `.doctor-probe-${process.pid}`);
++      writeFileSync(probe, "");
++      unlinkSync(probe);
++    } catch {
++      problems.push(
++        `state_dir not writable — check permissions on ${stateDir}`,
++      );
++    }
++  } else {
++    try {
++      accessSync(getRootDir(), fsConstants.W_OK);
++      okDetail = `state_dir will be created on first write — parent ${getRootDir()} is writable`;
++    } catch {
++      problems.push(
++        `state_dir not writable — check permissions on ${stateDir}`,
++      );
++    }
++  }
++  return { name: "state_dir", problems, okDetail };
++}
++
+ export function checkDigestsWritable(): SanityCheckResult {
+   const root = getRootDir();
+   const digests = join(root, "digests");
+@@ -600,7 +708,15 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+   // projectsLoadError (a missing projects.yaml simply means the
+   // project-scoped checks evaluate against an empty list).
+   console.log("\nSanity checks...\n");
++  const projectsYamlPath = join(getRootDir(), "projects.yaml");
++  const examplePath = join(getRootDir(), "projects.yaml.example");
+   const sanityChecks: SanityCheckResult[] = [
++    // gs-258: first-run checks go first so a fresh-clone user sees
++    // "no projects registered" at the top instead of buried below
++    // the project-iterating checks that have nothing to iterate.
++    checkProjectsYamlHasProject(projects, projectsYamlPath),
++    checkProjectsYamlCustomized(projectsYamlPath, examplePath),
++    checkStateDirWritable(),
+     checkProjectPaths(projects),
+     checkProjectStateDirs(projects),
+     checkProjectTasksJson(projects),
+@@ -612,13 +728,16 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+   // untouched — the failure detail is already printed.
+   const verboseDetails: string[][] = opts.verbose
+     ? [
++        [],
++        [],
++        [],
+         await projectPathsVerboseDetail(projects),
+         stateDirsVerboseDetail(projects),
+         tasksJsonVerboseDetail(projects),
+         digestsVerboseDetail(),
+         [],
+       ]
+-    : [[], [], [], [], []];
++    : [[], [], [], [], [], [], [], []];
+   for (let i = 0; i < sanityChecks.length; i++) {
+     const check = sanityChecks[i]!;
+     if (check.problems.length === 0) {
+@@ -741,6 +860,29 @@ async function collectDoctorJsonReport(
+     projectsLoadError = (e as Error).message;
+   }
+ 
++  // gs-258: always-on first-run checks. These run whether or not
++  // projects.yaml loaded — their whole point is to surface a missing
++  // or unmodified projects.yaml, so gating them on a successful load
++  // would hide the signal a first-run user needs.
++  const projectsYamlPath = join(getRootDir(), "projects.yaml");
++  const examplePath = join(getRootDir(), "projects.yaml.example");
++  const firstRun: SanityCheckResult[] = [
++    checkProjectsYamlHasProject(projects, projectsYamlPath),
++    checkProjectsYamlCustomized(projectsYamlPath, examplePath),
++    checkStateDirWritable(),
++  ];
++  for (const s of firstRun) {
++    if (s.problems.length === 0) {
++      checks.push({ name: s.name, status: "pass", detail: s.okDetail });
++    } else {
++      checks.push({
++        name: s.name,
++        status: "fail",
++        detail: s.problems.join("; "),
++      });
++    }
++  }
++
+   if (projectsLoadError !== null) {
+     for (const name of [
+       "project paths",
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index af57ad2..03c6963 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1729,12 +1729,13 @@
+   {
+     "id": "gs-258",
+     "title": "Add `generalstaff doctor` first-run sanity checks. CREATE ONLY: extend `src/doctor.ts` with three new pass/fail checks tuned for a fresh-clone user: (a) `projects.yaml exists and contains at least 1 project` (fail message: 'No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.'); (b) `projects.yaml is not the unmodified example` (detect by diffing against projects.yaml.example — fail only if byte-identical — message: 'projects.yaml is unmodified from the shipped example. Replace the placeholder project entries with real projects.'); (c) `state_dir exists and is writable` (fail message: 'state_dir not writable — check permissions on <path>'). All three are warnings/fails only when the condition applies — clean install with no projects yet should fail (a) but pass (b) and (c). Append tests to `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) empty projects list fails with right message; (b) projects identical to example file fails; (c) projects.yaml customized passes; (d) read-only state_dir fails with right message; (e) clean happy-path passes. Motivation: a fresh user cloning the repo hits `generalstaff doctor` first; those failures should point them at the fix. Expected diff: ~130 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/doctor.ts",
+       "tests/doctor.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-19T09:47:08.479Z"
+   },
+   {
+     "id": "gs-259",
+diff --git a/tests/doctor.test.ts b/tests/doctor.test.ts
+index 3410688..1b45e7f 100644
+--- a/tests/doctor.test.ts
++++ b/tests/doctor.test.ts
+@@ -10,6 +10,9 @@ import {
+   findOrphanedStopFileIssue,
+   findProjectPathProblems,
+   checkStrandedBotCommits,
++  checkProjectsYamlHasProject,
++  checkProjectsYamlCustomized,
++  checkStateDirWritable,
+ } from "../src/doctor";
+ import { setRootDir } from "../src/state";
+ import type { ProjectConfig } from "../src/types";
+@@ -324,11 +327,18 @@ describe("runDoctor --json", () => {
+   });
+ 
+   it("exits 0 with ok:true when everything passes", async () => {
+-    // No projects + clean FIXTURE ⇒ no fixable issues and sanity
+-    // checks that iterate projects report "no projects registered".
++    // Happy path requires the gs-258 first-run checks to pass too:
++    // projects.yaml present + differs from example + ≥1 project
++    // registered + state_dir writable.
++    const projectPath = join(FIXTURE, "real-repo");
++    mkdirSync(join(projectPath, ".git"), { recursive: true });
++    mkdirSync(join(FIXTURE, "state", "real"), { recursive: true });
++    writeFileSync(join(FIXTURE, "projects.yaml.example"), "# example\n");
++    writeFileSync(join(FIXTURE, "projects.yaml"), "# customized\n");
++    const p = makeProject("real", projectPath);
+     const { report } = await captureJson({
+       json: true,
+-      loadProjects: async () => [],
++      loadProjects: async () => [p],
+       exitOnFailure: false,
+     });
+     expect(report.ok).toBe(true);
+@@ -393,6 +403,123 @@ describe("runDoctor --json", () => {
+   });
+ });
+ 
++// gs-258: first-run sanity checks — empty projects.yaml, unmodified
++// example, and unwritable state_dir each map to a pointed fix hint.
++describe("gs-258 first-run sanity checks", () => {
++  beforeEach(() => {
++    mkdirSync(FIXTURE, { recursive: true });
++    setRootDir(FIXTURE);
++  });
++
++  afterEach(() => {
++    rmSync(FIXTURE, { recursive: true, force: true });
++  });
++
++  it("(a) empty projects list fails with register hint", () => {
++    // projects.yaml exists but loaded list is empty.
++    writeFileSync(join(FIXTURE, "projects.yaml"), "projects: []\n");
++    const result = checkProjectsYamlHasProject(
++      [],
++      join(FIXTURE, "projects.yaml"),
++    );
++    expect(result.problems).toHaveLength(1);
++    expect(result.problems[0]!).toContain("No projects registered");
++    expect(result.problems[0]!).toContain("generalstaff register");
++    expect(result.problems[0]!).toContain("projects.yaml.example");
++  });
++
++  it("(a) missing projects.yaml also fails with register hint", () => {
++    const result = checkProjectsYamlHasProject(
++      [],
++      join(FIXTURE, "does-not-exist.yaml"),
++    );
++    expect(result.problems).toHaveLength(1);
++    expect(result.problems[0]!).toContain("No projects registered");
++  });
++
++  it("(a) passes when at least one project is registered", () => {
++    writeFileSync(join(FIXTURE, "projects.yaml"), "projects: [...]\n");
++    const p = makeProject("alpha", "/tmp/ignored");
++    const result = checkProjectsYamlHasProject(
++      [p],
++      join(FIXTURE, "projects.yaml"),
++    );
++    expect(result.problems).toEqual([]);
++    expect(result.okDetail).toContain("1 project(s) registered");
++  });
++
++  it("(b) byte-identical projects.yaml fails with unmodified hint", () => {
++    const example = join(FIXTURE, "projects.yaml.example");
++    const yaml = join(FIXTURE, "projects.yaml");
++    writeFileSync(example, "# example content\nprojects: []\n");
++    writeFileSync(yaml, "# example content\nprojects: []\n");
++    const result = checkProjectsYamlCustomized(yaml, example);
++    expect(result.problems).toHaveLength(1);
++    expect(result.problems[0]!).toContain(
++      "projects.yaml is unmodified from the shipped example",
++    );
++  });
++
++  it("(c) customized projects.yaml passes", () => {
++    const example = join(FIXTURE, "projects.yaml.example");
++    const yaml = join(FIXTURE, "projects.yaml");
++    writeFileSync(example, "# example content\nprojects: []\n");
++    writeFileSync(yaml, "# real content\nprojects: [real]\n");
++    const result = checkProjectsYamlCustomized(yaml, example);
++    expect(result.problems).toEqual([]);
++    expect(result.okDetail).toContain("differs from shipped example");
++  });
++
++  it("(b/c) passes silently when projects.yaml is absent", () => {
++    // (a) surfaces the missing-file case; (b) should not pile on.
++    const example = join(FIXTURE, "projects.yaml.example");
++    writeFileSync(example, "# example\n");
++    const result = checkProjectsYamlCustomized(
++      join(FIXTURE, "projects.yaml"),
++      example,
++    );
++    expect(result.problems).toEqual([]);
++  });
++
++  it("(d) unwritable state_dir fails with permissions hint", () => {
++    // Plant a file at <root>/state so existsSync is true but any write
++    // probe underneath fails with ENOTDIR. Cross-platform equivalent of
++    // chmod 0 that works on Windows CI.
++    writeFileSync(join(FIXTURE, "state"), "not a directory");
++    const result = checkStateDirWritable();
++    expect(result.problems).toHaveLength(1);
++    expect(result.problems[0]!).toContain("state_dir not writable");
++    expect(result.problems[0]!).toContain("check permissions on");
++    expect(result.problems[0]!).toContain(join(FIXTURE, "state"));
++  });
++
++  it("(c) state_dir passes when writable or auto-creatable", () => {
++    mkdirSync(join(FIXTURE, "state"), { recursive: true });
++    const result = checkStateDirWritable();
++    expect(result.problems).toEqual([]);
++    expect(result.okDetail).toContain("state_dir writable");
++  });
++
++  it("(c) state_dir passes when missing but parent is writable", () => {
++    // Fresh FIXTURE — state/ doesn't exist but FIXTURE itself is writable.
++    const result = checkStateDirWritable();
++    expect(result.problems).toEqual([]);
++    expect(result.okDetail).toContain("will be created on first write");
++  });
++
++  it("(e) clean happy-path: all three checks pass together", () => {
++    const example = join(FIXTURE, "projects.yaml.example");
++    const yaml = join(FIXTURE, "projects.yaml");
++    writeFileSync(example, "# example\nprojects: []\n");
++    writeFileSync(yaml, "# real\nprojects: [real-entry]\n");
++    mkdirSync(join(FIXTURE, "state"), { recursive: true });
++    const p = makeProject("alpha", "/tmp/ignored");
++    expect(checkProjectsYamlHasProject([p], yaml).problems).toEqual([]);
++    expect(checkProjectsYamlCustomized(yaml, example).problems).toEqual([]);
++    expect(checkStateDirWritable().problems).toEqual([]);
++  });
++});
++
+ // gs-255: checkStrandedBotCommits surfaces auto_merge=true projects
+ // whose bot branch has commits ahead of HEAD — the gs-254 session-end
+ // flush's happy path handles this, but if it fails (conflict, dirty
