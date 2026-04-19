@@ -24,9 +24,9 @@ failure mode (Polsia's #1 Trustpilot complaint as of 2026-04).
 
 ## Title options (pick one)
 
-1. **Open-source self-hosted alternative to Polsia (v0.1.0, AGPL-3.0, runs entirely on your machine)**
-2. **I built a local-first alternative to Polsia — runs on your box, BYOK for the LLM, no SaaS layer**
-3. **Polsia alternative: GeneralStaff — open-source, local-first, with a verification gate that can't be prompted around**
+1. **Open-source self-hosted alternative to Polsia (AGPL-3.0, no SaaS, runs on your machine)**
+2. **I built a local-first alternative to Polsia: runs on your box, BYOK for the LLM, no SaaS layer**
+3. **Polsia alternative: GeneralStaff. Open-source, local-first, verification gate you can't prompt around**
 
 Recommendation: **#2** for Reddit (concrete on the specific Polsia
 frustrations: SaaS lock-in + opaque cost model). **#1** for
@@ -39,62 +39,64 @@ launch and would downvote a rerun but accept a different angle.
 
 ## Body draft
 
-Polsia is popular for a reason: unattended coding agents against
-your own projects is a genuinely useful workflow. The recurring
-complaints cluster around three things: (1) closed-source means
-you can't see the reviewer's prompts or verify what the gate
-actually checks; (2) the SaaS model sends your code to their
-servers; (3) the #1 Trustpilot complaint is confident false task
-completions — agents marking work "done" when tests still fail.
+Polsia solves a real workflow: unattended coding agents against
+your own projects. If you've used it, you've probably hit the
+complaints. Closed-source architecture hides what the reviewer
+actually checks. Your code leaves your machine. The top
+Trustpilot issue is false completions, where the agent marks a
+task done while tests still fail.
 
-I built an open-source local-first version with a different
-architecture. **GeneralStaff** is a dispatcher that runs Claude
-Code (or any shell-invoked coding agent) against your own
-projects, on your own machine, using your own LLM API key.
+I built an open-source local-first version with different
+architecture.
+
+**GeneralStaff** dispatches Claude Code (or any shell-invoked
+coding agent) against your own projects, on your own machine,
+using your own LLM API key.
 
 **Four architectural differences from Polsia:**
 
-1. **Local-first.** Runs entirely on your box. Your code never
-   leaves. No account, no server, no telemetry. `git clone` is
-   the install; `git pull` is the update. Hard Rule 10 in the
-   repo is "no SaaS tier, no managed offering" — this isn't the
-   pre-MVP version of a hosted product, it IS the product.
+1. **Local-first.** Runs on your box. Your code never leaves.
+   No account, no server, no telemetry. `git clone` installs
+   it; `git pull` updates it. Hard Rule 10 in the repo says no
+   SaaS tier, no managed offering. This is the product, not the
+   MVP of a hosted one.
 
 2. **BYOK for the LLM layer.** Your API key stays in your env.
-   The reviewer is pluggable between `claude -p` (subscription
-   quota), OpenRouter Qwen3 Coder (~$0.02/session, default for
-   unattended runs), or local Ollama (free, offline). Route the
-   reviewer to the cheap provider and reserve Claude quota for
-   the engineer. You see the per-session cost. You choose who
-   sees the prompt.
+   The reviewer runs against `claude -p` (subscription quota),
+   OpenRouter Qwen3 Coder (~$0.02/session, default for
+   unattended runs), or local Ollama (free, offline). Route
+   the reviewer to the cheap provider, reserve Claude quota
+   for the engineer. You see the per-session cost. You choose
+   who sees the prompt.
 
-3. **Structural verification gate — not an LLM reviewer's
+3. **Structural verification gate, not an LLM reviewer's
    judgment.** If the engineer's diff fails your `test &&
    typecheck`, the cycle rolls back. If the diff touches a
-   path on your hands-off list, it rolls back. Hands-off
-   matches happen on the filesystem path, not on the reviewer's
-   interpretation. Boolean exit codes can't be prompted around.
-   An LLM reviewer can hallucinate "verified" — that's the exact
-   Polsia failure mode; a green test gate cannot.
+   path on your hands-off list, it rolls back. The dispatcher
+   matches hands-off paths at the filesystem layer, not
+   through the reviewer's interpretation. Boolean exit codes
+   can't be prompted around. An LLM reviewer can hallucinate
+   "verified"; a green test gate cannot. That's the Polsia
+   failure mode the architecture rules out.
 
 4. **Open audit log.** Every prompt, response, tool call, and
-   diff lands in `PROGRESS.jsonl` inside your repo. Grep it for
-   what the bot tried, what got rejected, and why. No opaque
-   orchestration. You can reconstruct any cycle from the log.
+   diff lands in `PROGRESS.jsonl` inside your repo. Grep it
+   for what the bot tried, what got rejected, and why. You can
+   reconstruct any cycle from the log.
 
 **Built by itself.** I registered GeneralStaff as its own first
-managed project. Scaffold to v0.1.0 in 4 days, 1,441 passing
-tests, 9% self-rejection rate on its own proposed diffs (19 of
+managed project. Scaffold to v0.1.0 in 4 days. 1,441 passing
+tests. 9% self-rejection rate on its own proposed diffs (19 of
 210 reviewer verdicts came back `verification_failed`). Real
-catches: it tried to modify `src/safety.ts`, `src/reviewer.ts`,
-and `src/prompts/` at different points and the hands-off list
-blocked each. Grep `"verdict":"verification_failed"` in
-`state/generalstaff/PROGRESS.jsonl` and count. The audit log is
-the proof.
+catches: the bot tried to modify `src/safety.ts`,
+`src/reviewer.ts`, and `src/prompts/` at different points. The
+hands-off list blocked each. Grep `"verdict":"verification_failed"`
+in `state/generalstaff/PROGRESS.jsonl` and count. The audit log
+is the proof.
 
-**Stack:** Bun + TypeScript, AGPL-3.0, one runtime dep, cross-
-platform (Linux / macOS / Windows). Pre-launch security audit
-caught 2 HIGH + 3 MEDIUM findings; all fixed in v0.1.0.
+**Stack:** Bun + TypeScript, AGPL-3.0, one runtime dep,
+cross-platform (Linux / macOS / Windows). Pre-launch security
+audit caught 2 HIGH + 3 MEDIUM findings. All fixed in v0.1.0.
 
 **Install:**
 
@@ -105,12 +107,12 @@ irm https://raw.githubusercontent.com/lerugray/generalstaff/master/install.ps1 |
 
 **Repo:** https://github.com/lerugray/generalstaff
 
-Solo dev on a minimum-wage day job — 4 days of nights and
-weekends plus a lot of Claude-Code assistance. Feedback welcome,
-especially on the verification gate, the provider routing, or
-the reviewer's prompt structure. If you're running a bot loop in
-production (Polsia or otherwise), I'd want to know what catches
-you've seen and what slipped through.
+Solo dev, minimum-wage day job, 4 days of nights and weekends
+with a lot of Claude-Code assistance. Feedback welcome on the
+verification gate, the provider routing, or the reviewer's
+prompt structure. If you run a bot loop in production (Polsia
+or otherwise), I want to know what catches you've seen and
+what slipped through.
 
 ---
 

@@ -267,6 +267,33 @@ explicitly, don't proactively write.
   for defaults and the open measurement questions, lives in
   **PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
 
+- **Public-facing copy gets a stop-slop pass before Ray
+  reviews.** Any text meant for a public audience (launch posts,
+  landing page copy, README hero sections, Twitter threads,
+  anything that might show up on HN / Reddit / social feeds)
+  runs through `/stop-slop` before Ray sees a v1. Modern readers
+  pattern-match em-dashes, LLM cadence, and throat-clearing as
+  AI slop; the stop-slop skill catches them before they land.
+  Rationale captured 2026-04-19 after the first draft of
+  `docs/launch-posts/polsia-alternative.md` had 6+ em-dashes
+  and Ray flagged them as the modern LLM tell. The stop-slop
+  pass took ~30s and lifted the score from 30/50 to 40+.
+
+  **Exempt** (no slop-pass needed):
+  - Internal design docs (`DESIGN.md`, `PHASE-*.md`,
+    `research-notes.md`, `FUTURE-DIRECTIONS-*.md`). These
+    are for future Claude sessions, not public readers.
+  - `PROGRESS.jsonl` and other structured audit output.
+  - Git commit messages (Co-Authored-By still required).
+  - Error messages and CLI help text in code (separate
+    discipline; handled by code-review rules).
+
+  **Applies to** any managed project, not just GeneralStaff:
+  gamr's landing page copy, catalogdna's public-facing blurbs,
+  Retrogaze if it ever ships, etc. Ray does his own voice pass
+  after the slop-pass; the slop-pass is the floor, not the
+  ceiling.
+
 ### Reviewer provider configuration
 
 The verification-gate reviewer (`src/reviewer.ts`) is
