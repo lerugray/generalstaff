@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task gs-222, no hands-off violations, and the verification command passed with no errors.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-222",
+      "evidence": "The diff includes the creation of src/views/task_queue.ts with the required getProjectTaskQueue function and interfaces, and tests/views/task_queue.test.ts with comprehensive unit tests as specified in the task.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' returned exit code 0, indicating all tests passed and TypeScript compilation succeeded. The diff shows the exact files and changes required by task gs-222, including the implementation of the task queue view module and its corresponding tests."
+}
