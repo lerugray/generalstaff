@@ -300,6 +300,13 @@ export function formatSummary(
 
 // --- Today's session summary (gs-180) ---
 
+export interface CycleDurationPercentiles {
+  p50: number;
+  p90: number;
+  max: number;
+  count: number;
+}
+
 export interface TodaySessionSummary {
   date: string;                              // YYYY-MM-DD (UTC midnight cutoff)
   cycles_total: number;
@@ -308,6 +315,19 @@ export interface TodaySessionSummary {
   avg_cycle_duration_seconds: number;
   wall_clock_minutes: number;
   last_session_end: string | null;
+  // gs-252: percentiles over duration_seconds across the same filtered
+  // cycle_end pool that feeds avg_cycle_duration_seconds. null when no
+  // cycles match the window.
+  cycle_duration: CycleDurationPercentiles | null;
+}
+
+// gs-252: nearest-rank percentile (1-indexed). Sorted asc; for percentile p
+// (0..1) the rank is ceil(p * n), index is rank - 1 clamped to [0, n-1].
+function nearestRankPercentile(sortedAsc: number[], p: number): number {
+  const n = sortedAsc.length;
+  if (n === 0) return 0;
+  const rank = Math.max(1, Math.ceil(p * n));
+  return sortedAsc[Math.min(n - 1, rank - 1)];
 }
 
 export async function buildTodaySessionSummary(
@@ -336,6 +356,7 @@ export async function buildTodaySessionSummary(
     avg_cycle_duration_seconds: 0,
     wall_clock_minutes: 0,
     last_session_end: null,
+    cycle_duration: null,
   };
 
   const stateDir = join(getRootDir(), "state");
@@ -343,6 +364,7 @@ export async function buildTodaySessionSummary(
 
   let totalDurationSeconds = 0;
   let lastSessionEndMs = -Infinity;
+  const durations: number[] = [];
 
   let projectDirs: string[];
   try {
@@ -390,6 +412,7 @@ export async function buildTodaySessionSummary(
         const dur = value.data.duration_seconds;
         if (typeof dur === "number" && Number.isFinite(dur) && dur > 0) {
           totalDurationSeconds += dur;
+          durations.push(dur);
         }
       }
     }
@@ -398,6 +421,15 @@ export async function buildTodaySessionSummary(
   if (result.cycles_total > 0) {
     result.avg_cycle_duration_seconds =
       totalDurationSeconds / result.cycles_total;
+  }
+  if (durations.length > 0) {
+    durations.sort((a, b) => a - b);
+    result.cycle_duration = {
+      p50: nearestRankPercentile(durations, 0.5),
+      p90: nearestRankPercentile(durations, 0.9),
+      max: durations[durations.length - 1],
+      count: durations.length,
+    };
   }
   return result;
 }
@@ -415,5 +447,13 @@ export function formatTodaySessionSummary(s: TodaySessionSummary): string {
   );
   lines.push(`Total bot wall-clock:      ${s.wall_clock_minutes} min`);
   lines.push(`Last session end:          ${s.last_session_end ?? "n/a"}`);
+  if (s.cycle_duration) {
+    const cd = s.cycle_duration;
+    lines.push(
+      `cycle_duration:            p50=${Math.round(cd.p50)}s p90=${Math.round(cd.p90)}s max=${Math.round(cd.max)}s`,
+    );
+  } else {
+    lines.push(`cycle_duration:            (no cycles)`);
+  }
   return lines.join("\n");
 }

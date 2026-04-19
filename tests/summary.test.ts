@@ -523,6 +523,7 @@ describe("buildTodaySessionSummary", () => {
       avg_cycle_duration_seconds: 90,
       wall_clock_minutes: 60,
       last_session_end: "2026-04-18T14:00:00.000Z",
+      cycle_duration: null,
     };
     const out = formatTodaySessionSummary(s);
     const lines = out.split("\n");
@@ -543,9 +544,81 @@ describe("buildTodaySessionSummary", () => {
       avg_cycle_duration_seconds: 0,
       wall_clock_minutes: 0,
       last_session_end: null,
+      cycle_duration: null,
     };
     const out = formatTodaySessionSummary(s);
     expect(out).toContain("Average cycle duration:    n/a");
     expect(out).toContain("Last session end:          n/a");
+  });
+});
+
+describe("buildTodaySessionSummary cycle_duration percentiles (gs-252)", () => {
+  const NOW = new Date("2026-04-18T15:30:00.000Z");
+
+  it("computes p50/p90/max from a 3-cycle fixture (nearest-rank)", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    const log = [
+      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T10:00:00.000Z", outcome: "verified", durationSeconds: 60 }),
+      cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-18T10:05:00.000Z", outcome: "verified", durationSeconds: 120 }),
+      cycleEnd({ project: "alpha", cycleId: "c3", ts: "2026-04-18T10:10:00.000Z", outcome: "verified", durationSeconds: 180 }),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), log);
+
+    const s = await buildTodaySessionSummary(NOW);
+    // Sorted [60, 120, 180]: p50 → ceil(0.5*3)=2 → idx 1 → 120;
+    // p90 → ceil(0.9*3)=3 → idx 2 → 180; max = 180.
+    expect(s.cycle_duration).toEqual({ p50: 120, p90: 180, max: 180, count: 3 });
+  });
+
+  it("emits null cycle_duration when the pool is empty", async () => {
+    rmSync(join(TEST_DIR, "state"), { recursive: true, force: true });
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.cycle_duration).toBeNull();
+    const out = formatTodaySessionSummary(s);
+    expect(out).toContain("cycle_duration:            (no cycles)");
+  });
+
+  it("respects the --since cutoff: percentiles span only filtered events", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    const log = [
+      // Pre-cutoff — excluded.
+      cycleEnd({ project: "alpha", cycleId: "c0", ts: "2026-04-18T08:00:00.000Z", outcome: "verified", durationSeconds: 9999 }),
+      // Inside the window — counted.
+      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T11:00:00.000Z", outcome: "verified", durationSeconds: 30 }),
+      cycleEnd({ project: "alpha", cycleId: "c2", ts: "2026-04-18T11:05:00.000Z", outcome: "verified", durationSeconds: 90 }),
+    ].join("\n") + "\n";
+    writeFileSync(join(stateDir, "alpha", "PROGRESS.jsonl"), log);
+
+    const cutoffMs = Date.parse("2026-04-18T10:00:00.000Z");
+    const s = await buildTodaySessionSummary(NOW, cutoffMs);
+    expect(s.cycle_duration).toEqual({ p50: 30, p90: 90, max: 90, count: 2 });
+  });
+
+  it("single-cycle edge case: p50 = p90 = max equals that one duration", async () => {
+    const stateDir = join(TEST_DIR, "state");
+    mkdirSync(join(stateDir, "alpha"), { recursive: true });
+    writeFileSync(
+      join(stateDir, "alpha", "PROGRESS.jsonl"),
+      cycleEnd({ project: "alpha", cycleId: "c1", ts: "2026-04-18T10:00:00.000Z", outcome: "verified", durationSeconds: 77 }) + "\n",
+    );
+    const s = await buildTodaySessionSummary(NOW);
+    expect(s.cycle_duration).toEqual({ p50: 77, p90: 77, max: 77, count: 1 });
+  });
+
+  it("formatTodaySessionSummary renders p50/p90/max line", () => {
+    const s = {
+      date: "2026-04-18",
+      cycles_total: 3,
+      verified: 3,
+      verification_failed: 0,
+      avg_cycle_duration_seconds: 120,
+      wall_clock_minutes: 6,
+      last_session_end: "2026-04-18T11:00:00.000Z",
+      cycle_duration: { p50: 120, p90: 180, max: 180, count: 3 },
+    };
+    const out = formatTodaySessionSummary(s);
+    expect(out).toContain("cycle_duration:            p50=120s p90=180s max=180s");
   });
 });
