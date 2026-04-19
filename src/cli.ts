@@ -170,10 +170,11 @@ Usage:
     Example: generalstaff summary --format=json         # machine-readable output
     Example: generalstaff summary --project=myapp       # filter to a single project
 
-  generalstaff doctor [--fix] [--yes]                     Check prerequisites + diagnose resolvable issues
+  generalstaff doctor [--fix] [--yes] [--verbose]         Check prerequisites + diagnose resolvable issues
     Example: generalstaff doctor                        # diagnose only
     Example: generalstaff doctor --fix                  # prompt y/N for each fix
     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
+    Example: generalstaff doctor --verbose              # add context under each passing sanity check
   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
@@ -980,12 +981,17 @@ switch (command) {
       options: {
         fix: { type: "boolean", default: false },
         yes: { type: "boolean", short: "y", default: false },
+        // gs-246: opt-in context lines under each passing sanity
+        // check. No short flag — top-level `-v` already means
+        // --version and is consumed before the subcommand dispatch.
+        verbose: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
     await runDoctor({
       fix: Boolean(doctorValues.fix),
       assumeYes: Boolean(doctorValues.yes),
+      verbose: Boolean(doctorValues.verbose),
     });
     break;
   }
