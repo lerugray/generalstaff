@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GeneralStaff — Command Center</title>
+<style>
+  :root {
+    --ink: #1a1814;
+    --paper: #f5f1e8;
+    --line: #c9bfa9;
+    --muted: #6b655a;
+    --accent: #2a4c6b;
+    --ok: #2e6b3a;
+    --warn: #8b5a1e;
+    --fail: #8b2e2e;
+    --radius: 4px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  code, kbd, .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; font-size: 13px; }
+  a { color: var(--accent); }
+  h1, h2, h3 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; letter-spacing: 0.01em; }
+  h1 { font-size: 1.45rem; margin: 0; font-weight: 600; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.5rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; }
+  h3 { font-size: 1rem; margin: 0; font-weight: 600; }
+  .page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 1.5rem 1.75rem 3rem;
+  }
+  header.masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 0.75rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  header.masthead .meta { font-size: 0.85rem; color: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  section { margin-bottom: 1.75rem; }
+
+  /* Situation strip */
+  .situation {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+  }
+  .situation .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+  }
+  .situation .card .label { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.15rem; }
+  .situation .card .value { font-size: 1.1rem; font-weight: 600; }
+  .situation .card .detail { font-size: 0.85rem; color: var(--muted); margin-top: 0.2rem; }
+
+  /* Attention */
+  .attention ul { list-style: none; padding: 0; margin: 0; }
+  .attention li {
+    background: #faf3e3;
+    border-left: 3px solid var(--warn);
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 0.4rem;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 0.95rem;
+  }
+  .attention li.fail { border-left-color: var(--fail); background: #f6e9e5; }
+  .attention .empty { color: var(--muted); font-style: italic; padding: 0.5rem 0; }
+
+  /* Fleet */
+  .fleet {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 0.75rem;
+  }
+  .project {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .project header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .project header h3 { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1rem; }
+  .project .chip {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    background: #ece3c9;
+    color: var(--ink);
+    text-transform: uppercase;
+  }
+  .project .chip.live { background: var(--ok); color: #fff; }
+  .project .chip.paused { background: var(--muted); color: #fff; }
+  .project .row { display: flex; justify-content: space-between; font-size: 0.88rem; }
+  .project .row .k { color: var(--muted); }
+  .project .row .v { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .project .row .v.ok { color: var(--ok); }
+  .project .row .v.fail { color: var(--fail); }
+  .project .last-cycle { font-size: 0.85rem; color: var(--muted); font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* Bottom row */
+  .bottom {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+  }
+  @media (max-width: 720px) { .bottom, .situation { grid-template-columns: 1fr; } }
+
+  /* Forms */
+  form.action {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  form.action h3 { font-size: 0.95rem; margin-bottom: 0.6rem; }
+  form.action .fields { display: grid; grid-template-columns: auto 1fr; gap: 0.4rem 0.75rem; align-items: center; }
+  form.action label { font-size: 0.85rem; color: var(--muted); }
+  form.action input, form.action select, form.action textarea {
+    font-family: inherit;
+    font-size: 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.4rem 0.55rem;
+    background: var(--paper);
+    color: var(--ink);
+    width: 100%;
+  }
+  form.action button {
+    margin-top: 0.6rem;
+    padding: 0.45rem 0.9rem;
+    background: var(--ink);
+    color: var(--paper);
+    border: 0;
+    border-radius: var(--radius);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  form.action button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  form.action button:hover { background: var(--accent); }
+
+  /* Usage sidebar */
+  aside.usage {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+    font-size: 0.9rem;
+  }
+  aside.usage .row { display: flex; justify-content: space-between; margin: 0.25rem 0; }
+  aside.usage .row .k { color: var(--muted); }
+  aside.usage .row .v { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  aside.usage .note { color: var(--muted); font-size: 0.78rem; margin-top: 0.6rem; font-style: italic; }
+
+  footer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
+  footer a { color: inherit; }
+
+  /* Sparkline-ish text art */
+  .spark { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.88rem; letter-spacing: 0; color: var(--muted); }
+  .spark .ok { color: var(--ok); }
+  .spark .fail { color: var(--fail); }
+
+  /* Skip link for a11y */
+  .skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.5rem 0.75rem;
+    z-index: 100;
+  }
+  .skip-link:focus { top: 0; }
+</style>
+</head>
+<body>
+<a href="#main" class="skip-link">Skip to main content</a>
+<div class="page">
+  <header class="masthead">
+    <h1>GeneralStaff <span style="font-weight:400; color:var(--muted);">· Command Center</span></h1>
+    <div class="meta" aria-label="Dashboard last rendered">
+      Mockup · 2026-04-19 · static data
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- 1. SITUATION -->
+    <section aria-labelledby="situation-h">
+      <h2 id="situation-h">Situation</h2>
+      <div class="situation">
+        <article class="card" aria-label="Current session">
+          <div class="label">Session</div>
+          <div class="value" id="session-value">No session running</div>
+          <div class="detail" id="session-detail">
+            Last session finished <strong>17 min</strong> · 3 cycles · 2 verified ·
+            stopped because <span class="mono">no-project</span> (queue drained)
+          </div>
+        </article>
+        <article class="card" aria-label="Fleet status">
+          <div class="label">Fleet</div>
+          <div class="value">3 projects · 3 tasks ready for the bot</div>
+          <div class="detail">
+            325 cycles total · 290 verified · 35 failed
+            (<strong>89% pass rate</strong>)
+            · recent slot efficiency 82%
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 2. ATTENTION -->
+    <section class="attention" aria-labelledby="attention-h">
+      <h2 id="attention-h">Attention</h2>
+      <ul id="attention-list">
+        <li>
+          <strong>gamr</strong> and <strong>raybrain</strong> queues are drained —
+          they need new tasks before the bot can run on them.
+        </li>
+        <li>
+          No unmerged <span class="mono">bot/work</span> commits stranded.
+          <span style="color:var(--muted);">(Session-end flush worked last run.)</span>
+        </li>
+      </ul>
+    </section>
+
+    <!-- 3. FLEET -->
+    <section aria-labelledby="fleet-h">
+      <h2 id="fleet-h">Fleet</h2>
+      <div class="fleet" id="fleet-grid">
+
+        <article class="project" aria-labelledby="p-generalstaff">
+          <header>
+            <h3 id="p-generalstaff">generalstaff</h3>
+            <span class="chip" aria-label="Lifecycle: development">dev · priority 1</span>
+          </header>
+          <div class="row"><span class="k">Tasks ready for bot</span><span class="v">3</span></div>
+          <div class="row"><span class="k">Awaiting your decision</span><span class="v">0</span></div>
+          <div class="row"><span class="k">Total shipped</span><span class="v">238</span></div>
+          <div class="row">
+            <span class="k">Pass rate (all time)</span>
+            <span class="v ok">89%</span>
+          </div>
+          <div class="last-cycle">
+            Last cycle <strong>verified</strong> · gs-252 · about 25 min ago
+          </div>
+          <div class="spark" aria-label="Last 10 cycle outcomes">
+            Last 10: <span class="ok">✓✓✓✓✓✓·✓✓✓</span>
+          </div>
+        </article>
+
+        <article class="project" aria-labelledby="p-gamr">
+          <header>
+            <h3 id="p-gamr">gamr</h3>
+            <span class="chip" aria-label="Lifecycle: development">dev · priority 2</span>
+          </header>
+          <div class="row"><span class="k">Tasks ready for bot</span><span class="v">0</span></div>
+          <div class="row"><span class="k">Awaiting your decision</span><span class="v">0</span></div>
+          <div class="row"><span class="k">Total shipped</span><span class="v">5</span></div>
+          <div class="row"><span class="k">Pass rate (all time)</span><span class="v ok">100%</span></div>
+          <div class="last-cycle">No recent cycles. Queue is empty.</div>
+        </article>
+
+        <article class="project" aria-labelledby="p-raybrain">
+          <header>
+            <h3 id="p-raybrain">raybrain</h3>
+            <span class="chip" aria-label="Lifecycle: development">dev · priority 2</span>
+          </header>
+          <div class="row"><span class="k">Tasks ready for bot</span><span class="v">0</span></div>
+          <div class="row"><span class="k">Awaiting your decision</span><span class="v">0</span></div>
+          <div class="row"><span class="k">Total shipped</span><span class="v">11</span></div>
+          <div class="row"><span class="k">Pass rate (all time)</span><span class="v ok">100%</span></div>
+          <div class="last-cycle">No recent cycles. Queue is empty.</div>
+        </article>
+
+        <!-- Illustrative live-mode card (not real data) — kept in the mockup
+             to preview what a post-launch project would look like. Will be
+             gated by lifecycle flag when wired for real. -->
+        <article class="project" aria-labelledby="p-live-demo" style="opacity:0.55;">
+          <header>
+            <h3 id="p-live-demo">example-live-project</h3>
+            <span class="chip live" aria-label="Lifecycle: live (illustrative)">live · illustrative</span>
+          </header>
+          <div class="row"><span class="k">Revenue (7d)</span><span class="v ok">$1,240</span></div>
+          <div class="row"><span class="k">Active customers</span><span class="v">94</span></div>
+          <div class="row"><span class="k">Ad spend (7d)</span><span class="v">$310 / $500</span></div>
+          <div class="row"><span class="k">Uptime (30d)</span><span class="v ok">99.94%</span></div>
+          <div class="last-cycle">
+            Dev cycles still running in background — 4 shipped this week.
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 4. ACTIONS + 5. USAGE -->
+    <div class="bottom">
+      <section aria-labelledby="actions-h">
+        <h2 id="actions-h">Dispatch Orders</h2>
+
+        <form class="action" action="#" method="post" aria-labelledby="f-queue">
+          <h3 id="f-queue">Queue a new task</h3>
+          <div class="fields">
+            <label for="qt-project">Project</label>
+            <select id="qt-project" name="project" required>
+              <option value="generalstaff">generalstaff</option>
+              <option value="gamr">gamr</option>
+              <option value="raybrain">raybrain</option>
+            </select>
+            <label for="qt-title">Title</label>
+            <input id="qt-title" name="title" type="text" required placeholder="Short task title…">
+            <label for="qt-priority">Priority</label>
+            <select id="qt-priority" name="priority">
+              <option value="1">1 — highest</option>
+              <option value="2">2</option>
+              <option value="3" selected>3 — default</option>
+            </select>
+          </div>
+          <button type="submit">Queue task</button>
+        </form>
+
+        <form class="action" action="#" method="post" aria-labelledby="f-launch">
+          <h3 id="f-launch">Launch a session</h3>
+          <div class="fields">
+            <label for="ls-budget">Budget (min)</label>
+            <input id="ls-budget" name="budget" type="number" value="60" min="1" max="600">
+            <label for="ls-provider">Reviewer</label>
+            <select id="ls-provider" name="provider">
+              <option value="openrouter" selected>openrouter (paid ~$0.02/session)</option>
+              <option value="ollama">ollama (local, free)</option>
+              <option value="claude">claude (uses subscription quota)</option>
+            </select>
+            <label for="ls-project">Only this project</label>
+            <select id="ls-project" name="project">
+              <option value="">(pick any with work)</option>
+              <option value="generalstaff">generalstaff</option>
+              <option value="gamr">gamr</option>
+              <option value="raybrain">raybrain</option>
+            </select>
+          </div>
+          <button type="submit">Dispatch session</button>
+        </form>
+      </section>
+
+      <aside class="usage" aria-labelledby="usage-h">
+        <h2 id="usage-h" style="border:0; padding:0; font-size: 0.75rem; letter-spacing: 0.1em;">Usage</h2>
+        <div class="row"><span class="k">Reviewer spend today</span><span class="v">~$0.03</span></div>
+        <div class="row"><span class="k">This week</span><span class="v">~$0.19</span></div>
+        <div class="row"><span class="k">This month</span><span class="v">~$0.42</span></div>
+        <div class="row"><span class="k">Claude quota today</span><span class="v">unused</span></div>
+        <div class="row"><span class="k">Ollama hits today</span><span class="v">0</span></div>
+        <div class="note">
+          Estimated from PROGRESS.jsonl reviewer_invoked events. No budget cap set.
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <footer>
+    Static mockup · backed by a snapshot of <span class="mono">view fleet-overview</span>,
+    <span class="mono">view task-queue generalstaff</span>, and
+    <span class="mono">status --backlog</span> captured on 2026-04-19.
+    Nothing here is wired to a live server yet — the forms are placeholders.
+    Swap the inline data for <span class="mono">fetch('/api/...')</span> calls once
+    <span class="mono">generalstaff serve</span> exists.
+  </footer>
+</div>
+</body>
+</html>
