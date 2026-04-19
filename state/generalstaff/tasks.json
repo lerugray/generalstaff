@@ -1506,11 +1506,12 @@
   {
     "id": "gs-239",
     "title": "Add `generalstaff digest last [--json]` CLI subcommand printing the most recent digest file. CREATE ONLY: add a `case \"digest\"` handler in `src/cli.ts` with a `last` subcommand that reads the digests/ directory (path from dispatcher.digest_dir in projects.yaml, defaults to `./digests/`), finds the most recent file by mtime, and prints its contents to stdout. `--json` wraps the file path + content + timestamp in a JSON object. If digests/ is missing or empty, print `No digests found.` and exit 0 (not an error). Append tests to `tests/cli.test.ts` covering: (a) happy path prints file contents; (b) empty digests/ prints friendly message; (c) --json output shape. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: digests are the human-readable session narratives but there's no CLI shortcut to read the latest — current flow requires `ls digests/` + `cat <file>`. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T04:22:35.578Z"
   }
 ]

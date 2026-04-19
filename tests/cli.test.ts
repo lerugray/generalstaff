@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { $ } from "bun";
 
@@ -1215,6 +1215,45 @@ routes:
     it("is listed in --help output", async () => {
       const result = await runCli(["--help"]);
       expect(result.stdout).toContain("generalstaff digest");
+    });
+
+    describe("last subcommand", () => {
+      it("prints most recent digest contents (by mtime)", async () => {
+        const oldPath = join(DIGEST_DIR, "digest_20260415_100000.md");
+        const newPath = join(DIGEST_DIR, "digest_20260416_150000.md");
+        writeFileSync(oldPath, "OLD\n");
+        writeFileSync(newPath, "NEWEST\n");
+        utimesSync(oldPath, new Date("2026-04-15T10:00:00Z"), new Date("2026-04-15T10:00:00Z"));
+        utimesSync(newPath, new Date("2026-04-16T15:00:00Z"), new Date("2026-04-16T15:00:00Z"));
+        const result = await runCli(["digest", "last"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("NEWEST");
+        expect(result.stdout).not.toContain("OLD");
+      });
+
+      it("prints friendly message when digests dir is empty", async () => {
+        const result = await runCli(["digest", "last"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("prints friendly message when digests dir does not exist", async () => {
+        rmSync(DIGEST_DIR, { recursive: true, force: true });
+        const result = await runCli(["digest", "last"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No digests found");
+      });
+
+      it("--json emits object with path, content, and timestamp", async () => {
+        writeFileSync(join(DIGEST_DIR, "digest_20260416_150000.md"), "HELLO\n");
+        const result = await runCli(["digest", "last", "--json"], DIGEST_TEST_DIR);
+        expect(result.exitCode).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.path).toContain("digest_20260416_150000.md");
+        expect(parsed.content).toBe("HELLO\n");
+        expect(typeof parsed.timestamp).toBe("string");
+        expect(parsed.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      });
     });
 
     describe("--list", () => {
