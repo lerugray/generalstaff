@@ -4138,3 +4138,143 @@ describe("doctor sanity checks (gs-242)", () => {
     }
   });
 });
+
+// gs-246: --verbose adds per-check context lines under each passing
+// sanity check. Default output is unchanged; failing checks are not
+// decorated.
+describe("doctor --verbose (gs-246)", () => {
+  const FIXTURE = join(tmpdir(), "gs-246-doctor-verbose");
+
+  beforeEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+    mkdirSync(FIXTURE, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  function makeProject(id: string, path: string) {
+    return {
+      id,
+      path,
+      priority: 1,
+      engineer_command: "echo hi",
+      verification_command: "echo ok",
+      cycle_budget_minutes: 30,
+      hands_off: ["CLAUDE.md"],
+    } as unknown as import("../src/types").ProjectConfig;
+  }
+
+  async function runDoctorCapture(
+    verbose: boolean,
+    setup: (fixture: string) => Promise<void> | void,
+    projects: () => import("../src/types").ProjectConfig[],
+  ): Promise<string> {
+    const { runDoctor } = await import("../src/doctor");
+    const { setRootDir, getRootDir } = await import("../src/state");
+    const originalRoot = getRootDir();
+    setRootDir(FIXTURE);
+    const originalLog = console.log;
+    const out: string[] = [];
+    console.log = (...args: unknown[]) => {
+      out.push(args.map((a) => String(a)).join(" "));
+    };
+    try {
+      await setup(FIXTURE);
+      await runDoctor({
+        loadProjects: async () => projects(),
+        exitOnFailure: false,
+        verbose,
+      });
+    } finally {
+      console.log = originalLog;
+      setRootDir(originalRoot);
+    }
+    return out.join("\n");
+  }
+
+  function sanityBlock(joined: string): string {
+    const idx = joined.indexOf("Sanity checks");
+    return idx < 0 ? "" : joined.slice(idx);
+  }
+
+  it("default (no --verbose) output contains no per-check context lines", async () => {
+    const repo = join(FIXTURE, "repo");
+    const joined = await runDoctorCapture(
+      false,
+      () => {
+        mkdirSync(join(repo, ".git"), { recursive: true });
+        mkdirSync(join(FIXTURE, "state", "solo"), { recursive: true });
+        mkdirSync(join(FIXTURE, "digests"), { recursive: true });
+      },
+      () => [makeProject("solo", repo)],
+    );
+    const block = sanityBlock(joined);
+    expect(block).toMatch(/✓\s+project paths/);
+    // No indented "solo: <path> @ <sha>" detail line in default mode.
+    expect(block).not.toMatch(/^\s{6}solo:/m);
+    // No digests absolute-path detail line in default mode (the
+    // okDetail already mentions the path, so we specifically check
+    // there's no standalone indented line).
+    expect(block).not.toMatch(/^\s{6}[A-Za-z]:[\\/]/m);
+  });
+
+  it("--verbose adds context lines under each passing sanity check", async () => {
+    const repo = join(FIXTURE, "repo");
+    const joined = await runDoctorCapture(
+      true,
+      async () => {
+        mkdirSync(repo, { recursive: true });
+        // Real git repo so rev-parse --short HEAD produces a SHA.
+        await $`git -C ${repo} init -q`.nothrow();
+        await $`git -C ${repo} -c user.email=t@t -c user.name=t commit -q --allow-empty -m init`
+          .nothrow();
+        const stateDir = join(FIXTURE, "state", "solo");
+        mkdirSync(stateDir, { recursive: true });
+        writeFileSync(join(stateDir, "PROGRESS.jsonl"), '{"event":"t"}\n');
+        writeFileSync(
+          join(stateDir, "tasks.json"),
+          JSON.stringify([{ id: "a-1" }, { id: "a-2" }, { id: "a-3" }]),
+        );
+        mkdirSync(join(FIXTURE, "digests"), { recursive: true });
+      },
+      () => [makeProject("solo", repo)],
+    );
+    const block = sanityBlock(joined);
+    // project paths: resolved path + SHA (7-char short hash or unknown)
+    expect(block).toMatch(/solo: .*repo @ (?:[0-9a-f]{7,}|unknown)/);
+    // state dirs: PROGRESS.jsonl byte size
+    expect(block).toMatch(/solo: PROGRESS\.jsonl \d+ bytes/);
+    // tasks.json: task count
+    expect(block).toMatch(/solo: 3 task\(s\)/);
+    // digests/: absolute path line
+    expect(block).toContain(join(FIXTURE, "digests"));
+  });
+
+  it("--verbose leaves failing check output unchanged (no extra context)", async () => {
+    // ghost project has a missing path — the project paths check
+    // fails, and so does state dirs (no state/ghost) and tasks.json
+    // absent isn't a failure. We assert that the ghost id does NOT
+    // appear under an indented ✓ verbose line for project paths.
+    const joined = await runDoctorCapture(
+      true,
+      () => { /* no setup — ghost path will be absent */ },
+      () => [makeProject("ghost", join(FIXTURE, "does-not-exist"))],
+    );
+    const block = sanityBlock(joined);
+    expect(block).toMatch(/✗\s+project paths.*ghost/);
+    // The verbose detail line format starts with 6 spaces + id + ":".
+    // We want no such line for the failing project path check.
+    expect(block).not.toMatch(/^\s{6}ghost: .* @ /m);
+  });
+
+  it("CLI integration: generalstaff doctor --verbose runs end-to-end", async () => {
+    // End-to-end smoke: the flag is parsed without error. The exit
+    // code may be non-zero if the host repo's doctor flags anything
+    // (e.g. missing claude binary) — we only assert no parser error.
+    const result = await runCli(["doctor", "--verbose"]);
+    expect(result.stderr).not.toContain("Unknown option");
+    expect(result.stdout).toContain("GeneralStaff Doctor");
+  });
+});

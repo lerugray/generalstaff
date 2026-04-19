@@ -67,6 +67,10 @@ export interface DoctorOptions {
   // process.exit(1). Tests use this to run doctor in-process with
   // synthetic project configs whose paths don't exist.
   exitOnFailure?: boolean;
+  // gs-246: when true, each passing sanity check prints additional
+  // indented context lines (resolved paths, git HEAD SHAs, byte sizes,
+  // task counts). Failing checks print the same detail as without it.
+  verbose?: boolean;
 }
 
 async function checkCommand(
@@ -345,6 +349,95 @@ export async function findOrphanedStopFileIssue(): Promise<DiagnosticIssue[]> {
   ];
 }
 
+// gs-246: verbose-detail helpers. Each returns the per-check extra
+// lines rendered under a passing ✓ sanity check. Lines are indented
+// 6 spaces to sit under the 3-space ✓ marker plus the 3-space check
+// name indent already used by the non-verbose renderer.
+
+async function gitHeadSha(repoPath: string): Promise<string> {
+  try {
+    const proc = Bun.spawn(
+      ["git", "-C", repoPath, "rev-parse", "--short", "HEAD"],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    const stdout = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) return "unknown";
+    const sha = stdout.trim();
+    return sha.length > 0 ? sha : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+export async function projectPathsVerboseDetail(
+  projects: ProjectConfig[],
+): Promise<string[]> {
+  const lines: string[] = [];
+  for (const p of projects) {
+    const sha = await gitHeadSha(p.path);
+    lines.push(`      ${p.id}: ${p.path} @ ${sha}`);
+  }
+  return lines;
+}
+
+export function stateDirsVerboseDetail(
+  projects: ProjectConfig[],
+): string[] {
+  const lines: string[] = [];
+  const stateRoot = join(getRootDir(), "state");
+  for (const p of projects) {
+    const progress = join(stateRoot, p.id, "PROGRESS.jsonl");
+    if (existsSync(progress)) {
+      let size = 0;
+      try {
+        size = statSync(progress).size;
+      } catch { /* leave size as 0 */ }
+      lines.push(`      ${p.id}: PROGRESS.jsonl ${size} bytes`);
+    } else {
+      lines.push(`      ${p.id}: PROGRESS.jsonl absent`);
+    }
+  }
+  return lines;
+}
+
+export function tasksJsonVerboseDetail(
+  projects: ProjectConfig[],
+): string[] {
+  const lines: string[] = [];
+  const stateRoot = join(getRootDir(), "state");
+  for (const p of projects) {
+    const path = join(stateRoot, p.id, "tasks.json");
+    if (!existsSync(path)) {
+      lines.push(`      ${p.id}: tasks.json absent`);
+      continue;
+    }
+    try {
+      const raw = readFileSync(path, "utf-8");
+      const parsed = JSON.parse(raw);
+      let count = 0;
+      if (Array.isArray(parsed)) {
+        count = parsed.length;
+      } else if (
+        parsed && typeof parsed === "object" &&
+        Array.isArray((parsed as { tasks?: unknown }).tasks)
+      ) {
+        count = (parsed as { tasks: unknown[] }).tasks.length;
+      }
+      lines.push(`      ${p.id}: ${count} task(s)`);
+    } catch {
+      // Parse failure would make this a failing check; the ok branch
+      // only runs when every tasks.json parsed, so this is defensive.
+      lines.push(`      ${p.id}: tasks.json unreadable`);
+    }
+  }
+  return lines;
+}
+
+export function digestsVerboseDetail(): string[] {
+  return [`      ${join(getRootDir(), "digests")}`];
+}
+
 async function defaultPrompt(question: string): Promise<boolean> {
   // Simple y/N reader. Default (empty) answer is "no" — destructive
   // actions should require explicit consent.
@@ -442,9 +535,26 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     checkProjectTasksJson(projects),
     checkDigestsWritable(),
   ];
-  for (const check of sanityChecks) {
+  // gs-246: precompute verbose detail lines per passing sanity check.
+  // Failing checks skip their verbose block so existing ✗ output is
+  // untouched — the failure detail is already printed.
+  const verboseDetails: string[][] = opts.verbose
+    ? [
+        await projectPathsVerboseDetail(projects),
+        stateDirsVerboseDetail(projects),
+        tasksJsonVerboseDetail(projects),
+        digestsVerboseDetail(),
+      ]
+    : [[], [], [], []];
+  for (let i = 0; i < sanityChecks.length; i++) {
+    const check = sanityChecks[i]!;
     if (check.problems.length === 0) {
       console.log(`  ✓  ${check.name} — ${check.okDetail}`);
+      if (opts.verbose) {
+        for (const line of verboseDetails[i]!) {
+          console.log(line);
+        }
+      }
     } else {
       for (const problem of check.problems) {
         console.log(`  ✗  ${check.name} — ${problem}`);

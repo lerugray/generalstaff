@@ -1588,7 +1588,7 @@
   {
     "id": "gs-246",
     "title": "Add `--verbose` flag to `generalstaff doctor`. CREATE ONLY: extend the `doctor` handler in `src/cli.ts` with a `--verbose` (or `-v`) flag. When set, each passing check prints one extra indented line with context (e.g. for project.path check: the actual resolved path + its git HEAD SHA; for state dir check: the size of PROGRESS.jsonl in bytes; for tasks.json check: the task count; for digests/ writable: the absolute path). Failing checks already print detail per gs-242; --verbose does not change their output. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) default doctor output unchanged; (b) --verbose adds context lines to passing checks; (c) failing checks still print same detail with or without --verbose. Expected diff: ~100 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
