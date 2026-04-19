@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task gs-230, no hands-off violations, and the verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-230",
+      "evidence": "The diff implements the inbox view CLI handler in src/cli.ts, imports and uses getInboxView from src/views/inbox.ts, adds comprehensive tests in tests/cli.test.ts covering json output, default since, --since flag, invalid --since error handling, empty messages, and from_type glyph rendering.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' returned exit code 0, confirming all tests pass and typescript compiles correctly."
+}
