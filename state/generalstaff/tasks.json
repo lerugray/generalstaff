@@ -1816,5 +1816,17 @@
       "src/cli.ts",
       "tests/cli.test.ts"
     ]
+  },
+  {
+    "id": "gs-266",
+    "title": "Add `--summary` flag to `generalstaff doctor`. CREATE ONLY: extend the doctor subcommand handler in `src/cli.ts` and `src/doctor.ts` so that `generalstaff doctor --summary` prints a single-line summary like `doctor: 12 checks, 10 PASS, 1 WARN, 1 FAIL — run \\`generalstaff doctor\\` for details` instead of the full verbose output. Exit code still reflects severity (0 if no FAIL, 1 if any FAIL). `--summary --json` emits `{ total: 12, pass: 10, warn: 1, fail: 1 }`. Mutex: `--summary` is incompatible with `--verbose` (they ask for opposite things) — error + exit 1 if both are set. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --summary renders one-line output; (b) exit 0 when no FAIL; (c) exit 1 when any FAIL; (d) --summary --json emits valid object with 4 numeric fields; (e) --summary --verbose errors + exits 1. Motivation: useful for scripts, dashboards, and CI checks that just want a one-line health signal without parsing the full output. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/doctor.ts",
+      "tests/cli.test.ts",
+      "tests/doctor.test.ts"
+    ]
   }
 ]
