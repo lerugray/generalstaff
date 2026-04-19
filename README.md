@@ -1,6 +1,6 @@
 # GeneralStaff
 
-**Open-source autonomous engineering for solo founders.**
+**Open-source autonomous engineering that refuses to ship slop.**
 **Your code. Your keys. Your control.**
 
 A meta-dispatcher that runs Claude Code agents on your local projects
@@ -8,18 +8,20 @@ with a verification gate that cannot be prompted around, mandatory
 hands-off lists, and a full audit log of every prompt, response, and
 diff. The principled alternative to closed-source SaaS bot platforms.
 
-> **Status (2026-04-18):** Phases 1-4 shipped. Over 1,000 passing
-> tests across sequential and parallel dispatcher paths, 15+ CLI
-> commands, three managed projects cycling (generalstaff self-dogfood
-> + gamr + raybrain). Phase 4 lands **opt-in parallel worktrees** —
-> set `dispatcher.max_parallel_slots: N` in `projects.yaml` to run N
-> cycles per round; default 1 keeps the sequential behaviour from
-> Phases 1-3 bit-for-bit unchanged. **Phase 5 visual anchor shipped
-> tonight:** five dashboard reference views in
-> `docs/phase-5-references/` establish the UI's look and information
-> layout. One Claude Design brief anchored the vocabulary; four
-> hand-built views extended it. Private repo, preparing for public launch.
-> Ships cross-platform (Windows, macOS, Linux).
+> **Status.** Phases 1–4 shipped: sequential MVP, multi-provider LLM
+> routing, cross-project generality, opt-in parallel worktrees.
+> Phase 5 visual anchor closed; UI shell in progress. Over 1,000
+> passing tests; three managed projects cycling. Private repo,
+> preparing for public launch. Ships cross-platform (Windows,
+> macOS, Linux).
+
+> **Built by itself.** GeneralStaff is registered as its own first
+> managed project. Every verified commit in this repo passed the
+> same verification gate, scope-match reviewer, and hands-off check
+> the tool ships with. Read
+> [`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl)
+> to count the rejections yourself — including the cycles the system
+> caught itself being wrong.
 
 ## The problem
 
@@ -30,6 +32,14 @@ fail, diffs are empty, or scope was hallucinated. Polsia's #1 one-star
 review complaint on Trustpilot is false task completions. The damage
 compounds quietly because nobody is checking the bot's work against
 reality.
+
+The economic shape compounds the technical failure. Closed-SaaS tools
+charge per credit for confident slop and capture the value whether
+the project ships or not. The slop isn't a bug in the pricing model;
+it's what the pricing model rewards — the tool wins whether your
+project works or not. GeneralStaff is structured to refuse
+participation in that equilibrium: local-first, BYOK, open audit log,
+no platform middleman.
 
 ## The approach
 
@@ -55,6 +65,12 @@ reality.
 - **Open audit log** (Hard Rule #9): every prompt, response, tool call,
   and diff in `state/<project>/PROGRESS.jsonl`. Fully reviewable after
   the fact.
+
+Every item above is falsifiable from this repo's own git history. On
+2026-04-17 the verification gate caught an autonomous cycle trying to
+edit `src/reviewer.ts` — a file on its own hands-off list — and
+rejected the commit. That rejection is in `PROGRESS.jsonl`. Closed
+SaaS tools can't show you theirs.
 
 ## What it looks like
 
@@ -123,6 +139,14 @@ The bot only pushes to `bot/work` on your own remote. Export equals
 
 ## Who this is for
 
+The thesis underneath the whole project is that AI tools should make
+work more human, not less. The bot grinds the correctness work —
+tests, bugs, scaffolds, small features with clear specs. You keep the
+judgment work — what to build, what it should feel like, what the
+project is actually for. The line between them is what Hard Rule 1
+draws, and why the audit log matters: you can see exactly where the
+bot stopped.
+
 GeneralStaff is **neutral on project motivation**. It runs whatever you
 point it at -- a commercial SaaS, a research tool, an art project, a
 satirical anti-startup, a blog four people read, a fake company that
@@ -157,8 +181,19 @@ quadrant: confident officers without judgment. He argued they must be
 dismissed at once because they cause unbounded damage. Autonomous
 coding agents without verification gates live in that quadrant.
 GeneralStaff's architecture -- verification gate, hands-off lists,
-default-off creative roles, open audit log -- structurally prevents it.
-The architecture is the philosophy.
+default-off creative roles, open audit log -- structurally prevents
+it. The architecture is the philosophy.
+
+The typology's more interesting move is ranking **lazy+clever** above
+clever+industrious for strategic command. The staff get the
+clever-industrious quadrant because execution rewards diligence paired
+with judgment; strategy goes to those who do the minimum work that
+produces the right answer, because motion-for-its-own-sake is itself a
+failure mode. That ranking is the intellectual backbone of Hard
+Rule 1: correctness work (tests, bugs, scope) compounds well under
+autonomy because diligence and judgment align; creative work (what
+to build, how it should feel) breaks when delegated because judgment,
+not motion, is what produces it.
 
 Full writeup of the framing and its empirical backing (5 experiments,
 22+ bot runs across Ray's other projects, 7 cited alignment papers)
@@ -217,15 +252,23 @@ root.
   observability in the digest and `status --sessions` table. Default
   `max_parallel_slots: 1` preserves Phase 1-3 behaviour. See
   [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md).
-- **Phase 5** (in progress): local UI shell for control and audit.
-  **Visual anchor shipped 2026-04-18.** Five reference views in
-  [`docs/phase-5-references/`](docs/phase-5-references/) establish
-  the dashboard's look and information layout. Implementation stack
-  (Tauri, local web server, or other) is not yet chosen; the data
-  to render (gs-188's parallel-efficiency metrics) is already there.
+- ✓ **Phase 5 visual anchor** (closed 2026-04-18 evening): five
+  hand-built dashboard reference views in
+  [`docs/phase-5-references/`](docs/phase-5-references/). Establishes
+  palette, type stack, and component vocabulary for the UI shell
+  without committing to an implementation stack. One Claude Design
+  brief anchored the visual system; four hand-built views extended
+  it with zero additional design spend.
+- **Phase 5 UI shell** (in progress): local dashboard implementation
+  reading the Phase 5 data contract (`src/views/*.ts`). Implementation
+  stack (Tauri, local web server, or other) not yet chosen. Data to
+  render (gs-188's parallel-efficiency metrics) is already live.
 - **Phase 5.5+:** Kriegspiel / command-room UI theme. See
   [`UI-VISION-2026-04-15.md`](UI-VISION-2026-04-15.md).
-- **Phase 7:** Public launch.
+- **Public launch:** gated on README polish, `SUPPORTERS.md`, and
+  `LICENSE` — not on Phase 5 completion per
+  [`LAUNCH-PLAN.md`](LAUNCH-PLAN.md). The CLI surface is feature-
+  complete for the MVP value proposition; the UI is an enhancement.
 
 ## Documentation
 
@@ -238,6 +281,8 @@ root.
 - [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md)
   -- parallel worktrees closure narrative, including the three
   design-decision resolutions and the gs-188 observability surface
+- [`LAUNCH-PLAN.md`](LAUNCH-PLAN.md) -- pre-launch gates, positioning,
+  narrative hooks, and the append-only launch retrospective
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
   reference, including the `max_parallel_slots` opt-in
 - [`docs/phase-5-references/`](docs/phase-5-references/) -- Phase 5
@@ -251,9 +296,22 @@ root.
 
 ## Contributing
 
-Pre-public; issues and PRs welcome once the repo goes public. Until
-then, the fastest way to give feedback is via the audit log of a
-session you ran yourself -- `PROGRESS.jsonl` is designed to be
-diff-friendly so you can show exactly what broke.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the short version: correctness
+PRs are welcome, taste-work PRs need a conversation first (Hard Rule 1
+applies to contributors too), and the best bug report is a snippet of
+your own `PROGRESS.jsonl` showing the cycle that failed.
 
-License: MIT.
+## Support
+
+GeneralStaff is maintained by one person alongside a minimum-wage day
+job. Per Hard Rule 10, there is no company layer. Support goes to the
+maintainer directly through
+[GitHub Sponsors](https://github.com/sponsors/lerugray). See
+[`SUPPORTERS.md`](SUPPORTERS.md).
+
+## License
+
+[AGPL-3.0-or-later](LICENSE). Running GeneralStaff as a hosted service
+requires offering the corresponding source to users of that service —
+the license is chosen deliberately to prevent the SaaS-fork attack
+the project positions against.
