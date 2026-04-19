@@ -1,0 +1,616 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/doctor.ts b/src/doctor.ts
+index 262393e..b426e65 100644
+--- a/src/doctor.ts
++++ b/src/doctor.ts
+@@ -319,6 +319,54 @@ export function checkProjectTasksJson(
+ // and is writable, or it's missing but the parent dir is writable so
+ // it can be created. We do NOT create it here — doctor without --fix
+ // is read-only.
++// gs-255: for each registered project with auto_merge=true, count
++// commits on the bot branch that haven't been merged into HEAD yet.
++// Warns (but does not fix) when > 0 — the fix either re-runs a session
++// (so gs-254's session-end flush lands them) or runs the manual merge.
++// Skipped for auto_merge=false projects (bot/work is source-of-truth
++// by design there) and for paths that aren't git repos.
++export async function checkStrandedBotCommits(
++  projects: ProjectConfig[],
++): Promise<SanityCheckResult> {
++  const problems: string[] = [];
++  let relevantCount = 0;
++  for (const p of projects) {
++    if (!p.auto_merge) continue;
++    if (!existsSync(p.path)) continue;
++    if (!existsSync(join(p.path, ".git"))) continue;
++    relevantCount++;
++    let count = 0;
++    try {
++      const proc = Bun.spawn(
++        ["git", "-C", p.path, "rev-list", `HEAD..${p.branch}`, "--count"],
++        { stdout: "pipe", stderr: "pipe" },
++      );
++      const stdout = await new Response(proc.stdout).text();
++      const exitCode = await proc.exited;
++      if (exitCode !== 0) continue;
++      const parsed = parseInt(stdout.trim(), 10);
++      count = Number.isFinite(parsed) ? parsed : 0;
++    } catch {
++      continue;
++    }
++    if (count > 0) {
++      problems.push(
++        `Project ${p.id} has ${count} unmerged commit(s) on ${p.branch} — ` +
++          `run \`git -C ${p.path} merge --no-ff ${p.branch}\` to land them, ` +
++          `or re-run a session to trigger the gs-254 flush.`,
++      );
++    }
++  }
++  return {
++    name: "stranded bot/work commits",
++    problems,
++    okDetail:
++      relevantCount === 0
++        ? "no auto_merge=true projects registered"
++        : `${relevantCount} auto_merge=true project(s), 0 stranded commits`,
++  };
++}
++
+ export function checkDigestsWritable(): SanityCheckResult {
+   const root = getRootDir();
+   const digests = join(root, "digests");
+@@ -557,6 +605,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+     checkProjectStateDirs(projects),
+     checkProjectTasksJson(projects),
+     checkDigestsWritable(),
++    await checkStrandedBotCommits(projects),
+   ];
+   // gs-246: precompute verbose detail lines per passing sanity check.
+   // Failing checks skip their verbose block so existing ✗ output is
+@@ -567,8 +616,9 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+         stateDirsVerboseDetail(projects),
+         tasksJsonVerboseDetail(projects),
+         digestsVerboseDetail(),
++        [],
+       ]
+-    : [[], [], [], []];
++    : [[], [], [], [], []];
+   for (let i = 0; i < sanityChecks.length; i++) {
+     const check = sanityChecks[i]!;
+     if (check.problems.length === 0) {
+@@ -692,7 +742,12 @@ async function collectDoctorJsonReport(
+   }
+ 
+   if (projectsLoadError !== null) {
+-    for (const name of ["project paths", "state dirs", "tasks.json"]) {
++    for (const name of [
++      "project paths",
++      "state dirs",
++      "tasks.json",
++      "stranded bot/work commits",
++    ]) {
+       checks.push({
+         name,
+         status: "skipped",
+@@ -704,6 +759,7 @@ async function collectDoctorJsonReport(
+       checkProjectPaths(projects),
+       checkProjectStateDirs(projects),
+       checkProjectTasksJson(projects),
++      await checkStrandedBotCommits(projects),
+     ];
+     for (const s of sanity) {
+       if (s.problems.length === 0) {
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 5bcafd3..71924d6 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1699,7 +1699,7 @@
+   {
+     "id": "gs-255",
+     "title": "Add doctor check for stranded bot/work commits. CREATE ONLY: modify `src/doctor.ts` to add a new sanity check that, for each registered project with auto_merge=true, runs `git -C <project.path> rev-list HEAD..<project.branch> --count` (or equivalent) and reports a warning if > 0. Warning text: `Project <id> has N unmerged commit(s) on <branch> — run \\`git -C <path> merge --no-ff <branch>\\` to land them, or re-run a session to trigger the gs-254 flush.` Not a fix (don't attempt the merge from doctor — that belongs to session or manual). Silent/pass if 0 unmerged or auto_merge=false. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) project with 0 unmerged passes; (b) project with 2 unmerged warns with the count; (c) auto_merge=false project is skipped regardless of branch state; (d) non-git path is skipped gracefully. Motivation: the gs-254 session-end flush handles the happy path, but if the flush itself fails (conflict / dirty tree), work sits stranded until the user notices. A doctor check surfaces the condition loudly. Expected diff: ~90 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/doctor.ts",
+diff --git a/tests/doctor.test.ts b/tests/doctor.test.ts
+index 625b330..3410688 100644
+--- a/tests/doctor.test.ts
++++ b/tests/doctor.test.ts
+@@ -1,12 +1,15 @@
+ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+ import { existsSync, mkdirSync, rmSync, writeFileSync, utimesSync } from "fs";
+ import { join } from "path";
++import { tmpdir } from "os";
++import { $ } from "bun";
+ import {
+   runDoctor,
+   findStateDirIssues,
+   findStaleWorktreeIssues,
+   findOrphanedStopFileIssue,
+   findProjectPathProblems,
++  checkStrandedBotCommits,
+ } from "../src/doctor";
+ import { setRootDir } from "../src/state";
+ import type { ProjectConfig } from "../src/types";
+@@ -389,3 +392,110 @@ describe("runDoctor --json", () => {
+     }
+   });
+ });
++
++// gs-255: checkStrandedBotCommits surfaces auto_merge=true projects
++// whose bot branch has commits ahead of HEAD — the gs-254 session-end
++// flush's happy path handles this, but if it fails (conflict, dirty
++// tree) work sits stranded until the user notices.
++describe("checkStrandedBotCommits", () => {
++  async function initRepoWithBranch(
++    path: string,
++    branch: string,
++    extraCommits: number,
++  ): Promise<void> {
++    mkdirSync(path, { recursive: true });
++    await $`git -C ${path} init -b master`.quiet();
++    await $`git -C ${path} config user.email test@example.com`.quiet();
++    await $`git -C ${path} config user.name test`.quiet();
++    await $`git -C ${path} config commit.gpgsign false`.quiet();
++    writeFileSync(join(path, "a.txt"), "one", "utf8");
++    await $`git -C ${path} add a.txt`.quiet();
++    await $`git -C ${path} commit -m initial`.quiet();
++    await $`git -C ${path} checkout -b ${branch}`.quiet();
++    for (let i = 0; i < extraCommits; i++) {
++      writeFileSync(join(path, `b${i}.txt`), String(i), "utf8");
++      await $`git -C ${path} add ${`b${i}.txt`}`.quiet();
++      await $`git -C ${path} commit -m ${`branch work ${i}`}`.quiet();
++    }
++    await $`git -C ${path} checkout master`.quiet();
++  }
++
++  function makeAutoMergeProject(
++    id: string,
++    path: string,
++    branch: string,
++    autoMerge: boolean,
++  ): ProjectConfig {
++    return {
++      id,
++      path,
++      priority: 1,
++      engineer_command: "echo hi",
++      verification_command: "echo ok",
++      cycle_budget_minutes: 30,
++      hands_off: [],
++      branch,
++      auto_merge: autoMerge,
++    } as unknown as ProjectConfig;
++  }
++
++  it("passes when auto_merge=true project has 0 unmerged commits", async () => {
++    const repo = join(tmpdir(), "gs-stranded-zero-" + Date.now());
++    try {
++      await initRepoWithBranch(repo, "bot/work", 0);
++      const p = makeAutoMergeProject("zero", repo, "bot/work", true);
++      const result = await checkStrandedBotCommits([p]);
++      expect(result.problems).toEqual([]);
++      expect(result.okDetail).toContain("1 auto_merge=true project(s)");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("warns with the count when project has 2 unmerged commits", async () => {
++    const repo = join(tmpdir(), "gs-stranded-two-" + Date.now());
++    try {
++      await initRepoWithBranch(repo, "bot/work", 2);
++      const p = makeAutoMergeProject("two", repo, "bot/work", true);
++      const result = await checkStrandedBotCommits([p]);
++      expect(result.problems).toHaveLength(1);
++      expect(result.problems[0]!).toContain("Project two has 2 unmerged commit(s) on bot/work");
++      expect(result.problems[0]!).toContain("merge --no-ff bot/work");
++      expect(result.problems[0]!).toContain("gs-254 flush");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("skips auto_merge=false projects regardless of branch state", async () => {
++    const repo = join(tmpdir(), "gs-stranded-off-" + Date.now());
++    try {
++      // Even with 5 unmerged commits on the bot branch, auto_merge=false
++      // means bot/work is the source of truth — not a stranded state.
++      await initRepoWithBranch(repo, "bot/work", 5);
++      const p = makeAutoMergeProject("off", repo, "bot/work", false);
++      const result = await checkStrandedBotCommits([p]);
++      expect(result.problems).toEqual([]);
++      expect(result.okDetail).toContain("no auto_merge=true projects");
++    } finally {
++      rmSync(repo, { recursive: true, force: true });
++    }
++  });
++
++  it("skips non-git paths gracefully", async () => {
++    const missingPath = join(tmpdir(), "gs-stranded-missing-" + Date.now());
++    const notGitPath = join(tmpdir(), "gs-stranded-notgit-" + Date.now());
++    mkdirSync(notGitPath, { recursive: true });
++    try {
++      const missing = makeAutoMergeProject("missing", missingPath, "bot/work", true);
++      const notGit = makeAutoMergeProject("notgit", notGitPath, "bot/work", true);
++      const result = await checkStrandedBotCommits([missing, notGit]);
++      // Both paths are skipped before git is invoked, so no problems
++      // are reported and neither project counts toward relevantCount.
++      expect(result.problems).toEqual([]);
++      expect(result.okDetail).toContain("no auto_merge=true projects");
++    } finally {
++      rmSync(notGitPath, { recursive: true, force: true });
++    }
++  });
++});
+
+
+Diff summary: src/doctor.ts                 |  60 ++++++++++++++++++++++-
+ state/generalstaff/tasks.json |   2 +-
+ tests/doctor.test.ts          | 110 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 169 insertions(+), 3 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T09:18:20.523Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+  ✓  stranded bot/work commits — no auto_merge=true projects registered
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve 4b4f0b3e after 2 attempts (status=128, stderr=fatal: bad object 4b4f0b3e2268842d88a30c5221ac95439bc193e7)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091933.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091933.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091933.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091933.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091934.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_091934.md
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.
