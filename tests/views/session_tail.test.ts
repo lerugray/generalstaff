@@ -3,7 +3,10 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { setRootDir } from "../../src/state";
-import { getRecentSessions } from "../../src/views/session_tail";
+import {
+  formatAutoMergeSummary,
+  getRecentSessions,
+} from "../../src/views/session_tail";
 
 const FIXTURE_DIR = join(tmpdir(), `gs-session-tail-${process.pid}`);
 
@@ -225,6 +228,124 @@ describe("getRecentSessions", () => {
     expect(s.ended_at).toBeNull();
     expect(s.duration_minutes).toBe(20);
     expect(s.cycles).toHaveLength(1);
+  });
+
+  it("parses session_end_auto_merge events into the auto_merges array and formats the summary line (ok)", async () => {
+    writeFleetLog([
+      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
+      {
+        timestamp: "2026-04-18T10:09:00Z",
+        event: "session_end_auto_merge",
+        project_id: "generalstaff",
+        data: {
+          session_id: "sess-a",
+          project_id: "generalstaff",
+          branch: "bot/work",
+          merged_commits: 3,
+          result: "ok",
+        },
+      },
+      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
+    ]);
+
+    const data = await getRecentSessions();
+    expect(data.sessions).toHaveLength(1);
+    expect(data.sessions[0].auto_merges).toEqual([
+      {
+        project_id: "generalstaff",
+        branch: "bot/work",
+        merged_commits: 3,
+        result: "ok",
+      },
+    ]);
+    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
+      "auto-merge: generalstaff:ok(3)",
+    );
+  });
+
+  it("renders 'failed' for a failed session_end_auto_merge and keeps the reason", async () => {
+    writeFleetLog([
+      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
+      {
+        timestamp: "2026-04-18T10:09:00Z",
+        event: "session_end_auto_merge",
+        project_id: "generalstaff",
+        data: {
+          session_id: "sess-a",
+          project_id: "generalstaff",
+          branch: "bot/work",
+          merged_commits: 0,
+          result: "failed",
+          reason: "dirty working tree",
+        },
+      },
+      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
+    ]);
+
+    const data = await getRecentSessions();
+    expect(data.sessions[0].auto_merges).toEqual([
+      {
+        project_id: "generalstaff",
+        branch: "bot/work",
+        merged_commits: 0,
+        result: "failed",
+        reason: "dirty working tree",
+      },
+    ]);
+    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
+      "auto-merge: generalstaff:failed",
+    );
+  });
+
+  it("omits the auto-merge line when a session has no merge events", async () => {
+    writeFleetLog([
+      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
+      cycleStart("sess-a", "c1", "2026-04-18T10:01:00Z"),
+      cycleEnd("sess-a", "c1", "2026-04-18T10:02:00Z", "verified"),
+      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
+    ]);
+
+    const data = await getRecentSessions();
+    expect(data.sessions[0].auto_merges).toEqual([]);
+    expect(formatAutoMergeSummary(data.sessions[0])).toBeNull();
+  });
+
+  it("renders both projects when a session has mixed ok/failed auto-merges", async () => {
+    writeFleetLog([
+      sessionStart("sess-a", "2026-04-18T10:00:00Z"),
+      {
+        timestamp: "2026-04-18T10:09:00Z",
+        event: "session_end_auto_merge",
+        project_id: "generalstaff",
+        data: {
+          session_id: "sess-a",
+          project_id: "generalstaff",
+          branch: "bot/work",
+          merged_commits: 2,
+          result: "ok",
+        },
+      },
+      {
+        timestamp: "2026-04-18T10:09:30Z",
+        event: "session_end_auto_merge",
+        project_id: "gamr",
+        data: {
+          session_id: "sess-a",
+          project_id: "gamr",
+          branch: "bot/work",
+          merged_commits: 0,
+          result: "failed",
+          reason: "conflict",
+        },
+      },
+      sessionEnd("sess-a", "2026-04-18T10:10:00Z"),
+    ]);
+
+    const data = await getRecentSessions();
+    expect(data.sessions[0].auto_merges).toHaveLength(2);
+    expect(formatAutoMergeSummary(data.sessions[0])).toBe(
+      "auto-merge: generalstaff:ok(2) gamr:failed",
+    );
   });
 
   it("classifies verified_weak as 'verified' and unknown outcome as 'other'", async () => {

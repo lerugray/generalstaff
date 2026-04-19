@@ -2603,7 +2603,9 @@ switch (command) {
         }
         limit = parsed;
       }
-      const { getRecentSessions } = await import("./views/session_tail");
+      const { getRecentSessions, formatAutoMergeSummary } = await import(
+        "./views/session_tail"
+      );
       const data = await getRecentSessions(limit);
       if (stValues.json) {
         console.log(JSON.stringify(data, null, 2));
@@ -2620,6 +2622,10 @@ switch (command) {
           console.log(`  duration_minutes: ${s.duration_minutes}`);
           console.log(`  reviewer:         ${s.reviewer ?? "(unknown)"}`);
           console.log(`  stop_reason:      ${s.stop_reason ?? "(in-progress)"}`);
+          const autoMergeLine = formatAutoMergeSummary(s);
+          if (autoMergeLine !== null) {
+            console.log(`  ${autoMergeLine}`);
+          }
           if (s.cycles.length === 0) {
             console.log("  cycles: (none)");
           } else {
