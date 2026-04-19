@@ -1456,7 +1456,7 @@
   {
     "id": "gs-234",
     "title": "Improve `status --backlog` to print a friendly summary line when every registered project has 0 bot-pickable work. CREATE ONLY: modify the `status --backlog` handler in `src/cli.ts` — after rendering the existing table, if TOTAL.pending_bot_pickable === 0, append a one-line note: `\\nAll queues drained. Seed tasks with \\`generalstaff tasks add <project-id> --title=... --priority=N\\` or directly in \\`state/<project-id>/tasks.json\\`.` (exact wording in the spec). If TOTAL.pending_bot_pickable > 0, do not print the note (existing behavior unchanged). `--json` output is NOT modified — friendly note is text-mode only. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: during wave-3/4 tonight the bot's empty-cycles soft-stop fired after all queues drained, but `status --backlog` gave no visual signal that seeding was needed — just a row of zeros. Expected diff: ~60 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",

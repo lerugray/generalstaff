@@ -534,6 +534,15 @@ switch (command) {
           console.log(JSON.stringify(out, null, 2));
         } else {
           console.log(formatBacklogTable(rows));
+          // gs-234: friendly note when every project has zero bot-pickable
+          // work, so the operator sees a prompt to seed tasks instead of
+          // just a row of zeros.
+          const totals = computeBacklogTotals(rows);
+          if (totals.bot_pickable === 0) {
+            console.log(
+              "\nAll queues drained. Seed tasks with `generalstaff tasks add <project-id> --title=... --priority=N` or directly in `state/<project-id>/tasks.json`.",
+            );
+          }
         }
         return;
       }

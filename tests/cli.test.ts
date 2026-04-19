@@ -1903,6 +1903,55 @@ dispatcher:
         "--backlog cannot be combined with --sessions/--summary/--watch",
       );
     });
+
+    // gs-234: friendly "queues drained" note surfaces the empty-fleet
+    // state in text mode so the operator sees a seed prompt instead of
+    // a silent row of zeros.
+    it("text mode appends the 'queues drained' note when every project has 0 bot-pickable work", async () => {
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([
+          { id: "a-1", title: "t1", status: "done", priority: 1 },
+          { id: "a-2", title: "t2", status: "pending", priority: 2, interactive_only: true },
+        ]),
+      );
+      writeFileSync(
+        join(BETA_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([
+          { id: "b-1", title: "t1", status: "in_progress", priority: 1 },
+        ]),
+      );
+      const result = await runCli(["status", "--backlog"], BACKLOG_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(
+        "All queues drained. Seed tasks with `generalstaff tasks add <project-id> --title=... --priority=N` or directly in `state/<project-id>/tasks.json`.",
+      );
+    });
+
+    it("text mode omits the 'queues drained' note when at least one project has bot-pickable work", async () => {
+      const result = await runCli(["status", "--backlog"], BACKLOG_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain("All queues drained");
+    });
+
+    it("--json never emits the friendly note, even when every project is drained", async () => {
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([]),
+      );
+      writeFileSync(
+        join(BETA_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([]),
+      );
+      const result = await runCli(
+        ["status", "--backlog", "--json"],
+        BACKLOG_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain("All queues drained");
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.totals.bot_pickable).toBe(0);
+    });
   });
 
   describe("status --totals (gs-202)", () => {
