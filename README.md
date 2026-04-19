@@ -1,5 +1,9 @@
 # GeneralStaff
 
+<!-- TODO(launch): hero image — screenshot of web/index.html dashboard
+     mockup, cropped to the Situation + Attention + Fleet sections.
+     Replace this comment with: ![GeneralStaff dashboard](docs/images/dashboard-hero.png) -->
+
 **Open-source autonomous engineering that refuses to ship slop.**
 **Your code. Your keys. Your control.**
 
@@ -22,6 +26,24 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 > [`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl)
 > to count the rejections yourself — including the cycles the system
 > caught itself being wrong.
+
+## Contents
+
+- [The problem](#the-problem)
+- [The approach](#the-approach)
+- [What it actually catches](#what-it-actually-catches)
+- [What it looks like](#what-it-looks-like)
+- [Quickstart](#quickstart)
+- [Why this over the alternatives](#why-this-over-the-alternatives)
+- [Works alongside](#works-alongside)
+- [Who this is for](#who-this-is-for)
+- [The Hammerstein framing](#the-hammerstein-framing)
+- [Hard rules](#hard-rules)
+- [Roadmap](#roadmap)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Support](#support)
+- [License](#license)
 
 ## The problem
 
@@ -71,6 +93,35 @@ Every item above is falsifiable from this repo's own git history. On
 edit `src/reviewer.ts` — a file on its own hands-off list — and
 rejected the commit. That rejection is in `PROGRESS.jsonl`. Closed
 SaaS tools can't show you theirs.
+
+## What it actually catches
+
+The verification gate is not decorative. Here's a real rejection
+from this repo's own audit log — the bot produced a diff modifying
+three safety-critical files, and the reviewer caught all three:
+
+```json
+{
+  "event": "reviewer_verdict",
+  "cycle_id": "20260417161301_juzs",
+  "data": {
+    "verdict": "verification_failed",
+    "reason": "The diff contains hands-off violations by modifying src/safety.ts and src/reviewer.ts which are explicitly restricted.",
+    "hands_off_violations": [
+      "src/safety.ts",
+      "src/reviewer.ts",
+      "src/prompts/"
+    ]
+  }
+}
+```
+
+Cycle rolled back. No commit to `master`. The entry above is a
+literal line from
+[`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl)
+— grep for `"verdict":"verification_failed"` and count for yourself.
+A closed-SaaS tool could not show you this log even if they wanted
+to; the log doesn't exist outside their ops.
 
 ## What it looks like
 
