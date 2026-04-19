@@ -1,12 +1,15 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync, utimesSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
+import { $ } from "bun";
 import {
   runDoctor,
   findStateDirIssues,
   findStaleWorktreeIssues,
   findOrphanedStopFileIssue,
   findProjectPathProblems,
+  checkStrandedBotCommits,
 } from "../src/doctor";
 import { setRootDir } from "../src/state";
 import type { ProjectConfig } from "../src/types";
@@ -386,6 +389,113 @@ describe("runDoctor --json", () => {
     expect(Array.isArray(report.checks)).toBe(true);
     for (const c of report.checks as Array<{ status: string }>) {
       expect(["pass", "fail", "skipped"]).toContain(c.status);
+    }
+  });
+});
+
+// gs-255: checkStrandedBotCommits surfaces auto_merge=true projects
+// whose bot branch has commits ahead of HEAD — the gs-254 session-end
+// flush's happy path handles this, but if it fails (conflict, dirty
+// tree) work sits stranded until the user notices.
+describe("checkStrandedBotCommits", () => {
+  async function initRepoWithBranch(
+    path: string,
+    branch: string,
+    extraCommits: number,
+  ): Promise<void> {
+    mkdirSync(path, { recursive: true });
+    await $`git -C ${path} init -b master`.quiet();
+    await $`git -C ${path} config user.email test@example.com`.quiet();
+    await $`git -C ${path} config user.name test`.quiet();
+    await $`git -C ${path} config commit.gpgsign false`.quiet();
+    writeFileSync(join(path, "a.txt"), "one", "utf8");
+    await $`git -C ${path} add a.txt`.quiet();
+    await $`git -C ${path} commit -m initial`.quiet();
+    await $`git -C ${path} checkout -b ${branch}`.quiet();
+    for (let i = 0; i < extraCommits; i++) {
+      writeFileSync(join(path, `b${i}.txt`), String(i), "utf8");
+      await $`git -C ${path} add ${`b${i}.txt`}`.quiet();
+      await $`git -C ${path} commit -m ${`branch work ${i}`}`.quiet();
+    }
+    await $`git -C ${path} checkout master`.quiet();
+  }
+
+  function makeAutoMergeProject(
+    id: string,
+    path: string,
+    branch: string,
+    autoMerge: boolean,
+  ): ProjectConfig {
+    return {
+      id,
+      path,
+      priority: 1,
+      engineer_command: "echo hi",
+      verification_command: "echo ok",
+      cycle_budget_minutes: 30,
+      hands_off: [],
+      branch,
+      auto_merge: autoMerge,
+    } as unknown as ProjectConfig;
+  }
+
+  it("passes when auto_merge=true project has 0 unmerged commits", async () => {
+    const repo = join(tmpdir(), "gs-stranded-zero-" + Date.now());
+    try {
+      await initRepoWithBranch(repo, "bot/work", 0);
+      const p = makeAutoMergeProject("zero", repo, "bot/work", true);
+      const result = await checkStrandedBotCommits([p]);
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("1 auto_merge=true project(s)");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("warns with the count when project has 2 unmerged commits", async () => {
+    const repo = join(tmpdir(), "gs-stranded-two-" + Date.now());
+    try {
+      await initRepoWithBranch(repo, "bot/work", 2);
+      const p = makeAutoMergeProject("two", repo, "bot/work", true);
+      const result = await checkStrandedBotCommits([p]);
+      expect(result.problems).toHaveLength(1);
+      expect(result.problems[0]!).toContain("Project two has 2 unmerged commit(s) on bot/work");
+      expect(result.problems[0]!).toContain("merge --no-ff bot/work");
+      expect(result.problems[0]!).toContain("gs-254 flush");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips auto_merge=false projects regardless of branch state", async () => {
+    const repo = join(tmpdir(), "gs-stranded-off-" + Date.now());
+    try {
+      // Even with 5 unmerged commits on the bot branch, auto_merge=false
+      // means bot/work is the source of truth — not a stranded state.
+      await initRepoWithBranch(repo, "bot/work", 5);
+      const p = makeAutoMergeProject("off", repo, "bot/work", false);
+      const result = await checkStrandedBotCommits([p]);
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("no auto_merge=true projects");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips non-git paths gracefully", async () => {
+    const missingPath = join(tmpdir(), "gs-stranded-missing-" + Date.now());
+    const notGitPath = join(tmpdir(), "gs-stranded-notgit-" + Date.now());
+    mkdirSync(notGitPath, { recursive: true });
+    try {
+      const missing = makeAutoMergeProject("missing", missingPath, "bot/work", true);
+      const notGit = makeAutoMergeProject("notgit", notGitPath, "bot/work", true);
+      const result = await checkStrandedBotCommits([missing, notGit]);
+      // Both paths are skipped before git is invoked, so no problems
+      // are reported and neither project counts toward relevantCount.
+      expect(result.problems).toEqual([]);
+      expect(result.okDetail).toContain("no auto_merge=true projects");
+    } finally {
+      rmSync(notGitPath, { recursive: true, force: true });
     }
   });
 });

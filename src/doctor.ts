@@ -319,6 +319,54 @@ export function checkProjectTasksJson(
 // and is writable, or it's missing but the parent dir is writable so
 // it can be created. We do NOT create it here — doctor without --fix
 // is read-only.
+// gs-255: for each registered project with auto_merge=true, count
+// commits on the bot branch that haven't been merged into HEAD yet.
+// Warns (but does not fix) when > 0 — the fix either re-runs a session
+// (so gs-254's session-end flush lands them) or runs the manual merge.
+// Skipped for auto_merge=false projects (bot/work is source-of-truth
+// by design there) and for paths that aren't git repos.
+export async function checkStrandedBotCommits(
+  projects: ProjectConfig[],
+): Promise<SanityCheckResult> {
+  const problems: string[] = [];
+  let relevantCount = 0;
+  for (const p of projects) {
+    if (!p.auto_merge) continue;
+    if (!existsSync(p.path)) continue;
+    if (!existsSync(join(p.path, ".git"))) continue;
+    relevantCount++;
+    let count = 0;
+    try {
+      const proc = Bun.spawn(
+        ["git", "-C", p.path, "rev-list", `HEAD..${p.branch}`, "--count"],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      const stdout = await new Response(proc.stdout).text();
+      const exitCode = await proc.exited;
+      if (exitCode !== 0) continue;
+      const parsed = parseInt(stdout.trim(), 10);
+      count = Number.isFinite(parsed) ? parsed : 0;
+    } catch {
+      continue;
+    }
+    if (count > 0) {
+      problems.push(
+        `Project ${p.id} has ${count} unmerged commit(s) on ${p.branch} — ` +
+          `run \`git -C ${p.path} merge --no-ff ${p.branch}\` to land them, ` +
+          `or re-run a session to trigger the gs-254 flush.`,
+      );
+    }
+  }
+  return {
+    name: "stranded bot/work commits",
+    problems,
+    okDetail:
+      relevantCount === 0
+        ? "no auto_merge=true projects registered"
+        : `${relevantCount} auto_merge=true project(s), 0 stranded commits`,
+  };
+}
+
 export function checkDigestsWritable(): SanityCheckResult {
   const root = getRootDir();
   const digests = join(root, "digests");
@@ -557,6 +605,7 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
     checkProjectStateDirs(projects),
     checkProjectTasksJson(projects),
     checkDigestsWritable(),
+    await checkStrandedBotCommits(projects),
   ];
   // gs-246: precompute verbose detail lines per passing sanity check.
   // Failing checks skip their verbose block so existing ✗ output is
@@ -567,8 +616,9 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
         stateDirsVerboseDetail(projects),
         tasksJsonVerboseDetail(projects),
         digestsVerboseDetail(),
+        [],
       ]
-    : [[], [], [], []];
+    : [[], [], [], [], []];
   for (let i = 0; i < sanityChecks.length; i++) {
     const check = sanityChecks[i]!;
     if (check.problems.length === 0) {
@@ -692,7 +742,12 @@ async function collectDoctorJsonReport(
   }
 
   if (projectsLoadError !== null) {
-    for (const name of ["project paths", "state dirs", "tasks.json"]) {
+    for (const name of [
+      "project paths",
+      "state dirs",
+      "tasks.json",
+      "stranded bot/work commits",
+    ]) {
       checks.push({
         name,
         status: "skipped",
@@ -704,6 +759,7 @@ async function collectDoctorJsonReport(
       checkProjectPaths(projects),
       checkProjectStateDirs(projects),
       checkProjectTasksJson(projects),
+      await checkStrandedBotCommits(projects),
     ];
     for (const s of sanity) {
       if (s.problems.length === 0) {
