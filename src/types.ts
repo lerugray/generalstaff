@@ -147,7 +147,8 @@ export type ProgressEventType =
   | "project_soft_skipped"
   | "session_start"
   | "session_end"
-  | "session_complete";
+  | "session_complete"
+  | "session_end_auto_merge";
 
 export interface ProgressEntry {
   timestamp: string;

@@ -1012,6 +1012,16 @@ export async function runSession(options: SessionOptions) {
 
   // Write session summary
   const elapsed = elapsedMinutes();
+  // Session-end auto-merge flush (gs-254). The cycle-start merge
+  // (cycle.ts §gs-177) only fires when a later cycle runs, so when a
+  // session ends on a verified cycle its bot/work commits sit unmerged
+  // until the NEXT session. That confused the 2026-04-19 morning run
+  // (gs-252 shipped, verified, but didn't appear on master because no
+  // follow-up cycle ran to trigger the merge). Flushing here guarantees
+  // "verified work that the user already saw in PROGRESS.jsonl is on
+  // master before we close the session."
+  await flushSessionEndMerges(projects, cyclesPerProject);
+
   console.log(`\n=== Session Complete ===`);
   console.log(`Duration: ${elapsed.toFixed(1)} min`);
   console.log(`Cycles: ${allResults.length}`);
@@ -1742,4 +1752,110 @@ function resultFromDigestCycle(c: ParsedDigestCycle): CycleResult | null {
     reason: c.reason ?? "",
     diff_stats: c.diff_stats ?? undefined,
   };
+}
+
+// gs-254: session-end auto-merge flush. Extracted for testability. For
+// each auto_merge project the session touched, if bot/work has commits
+// ahead of HEAD, merge them into HEAD. On conflict or dirty-tree
+// failure, log plainly and emit an audit event — never crash the
+// session. Returns per-project results so tests can assert behavior
+// without grepping stdout.
+export interface SessionEndMergeResult {
+  project_id: string;
+  branch: string;
+  merged_commits: number;
+  result: "ok" | "skipped" | "failed";
+  reason?: string;
+}
+
+export async function flushSessionEndMerges(
+  projects: ProjectConfig[],
+  cyclesPerProject: Map<string, number>,
+): Promise<SessionEndMergeResult[]> {
+  const results: SessionEndMergeResult[] = [];
+  for (const p of projects) {
+    if (!p.auto_merge) {
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "skipped",
+        reason: "auto_merge=false",
+      });
+      continue;
+    }
+    if (!cyclesPerProject.has(p.id)) {
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "skipped",
+        reason: "no cycles this session",
+      });
+      continue;
+    }
+    let unmerged = 0;
+    try {
+      unmerged = await countCommitsAhead(p.path, p.branch, "HEAD");
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "skipped",
+        reason: `countCommitsAhead failed: ${reason.slice(0, 200)}`,
+      });
+      continue;
+    }
+    if (unmerged <= 0) {
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "skipped",
+        reason: "no unmerged commits",
+      });
+      continue;
+    }
+    console.log(
+      `\nSession-end auto-merge: ${unmerged} commit(s) from ${p.branch} into HEAD for ${p.id}...`,
+    );
+    try {
+      const msg = `Merge branch '${p.branch}' (session-end auto, ${unmerged} cycle-commit(s))`;
+      await $`git -C ${p.path} merge --no-ff ${p.branch} -m ${msg}`.quiet();
+      console.log(`  Merged ${p.branch} into HEAD.`);
+      await appendProgress(p.id, "session_end_auto_merge", {
+        branch: p.branch,
+        merged_commits: unmerged,
+        result: "ok",
+      });
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: unmerged,
+        result: "ok",
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.log(
+        `  WARNING: session-end merge of ${p.branch} failed — manual intervention required ` +
+          `(likely a dirty working tree or a conflict with interactive work on master).`,
+      );
+      await appendProgress(p.id, "session_end_auto_merge", {
+        branch: p.branch,
+        merged_commits: 0,
+        result: "failed",
+        reason: reason.slice(0, 500),
+      });
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "failed",
+        reason: reason.slice(0, 500),
+      });
+    }
+  }
+  return results;
 }

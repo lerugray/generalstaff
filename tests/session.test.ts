@@ -17,7 +17,10 @@ import {
   hotReloadProjects,
   computeParallelEfficiency,
   estimateReviewerSpendUSD,
+  flushSessionEndMerges,
 } from "../src/session";
+import { $ } from "bun";
+import { tmpdir } from "os";
 import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
@@ -1962,5 +1965,165 @@ describe("hotReloadProjects (gs-191)", () => {
     expect(result.added).toEqual([]);
     expect(result.removed).toEqual([]);
     expect(result.projects[0].hands_off).toEqual(["src/**"]);
+  });
+});
+
+describe("flushSessionEndMerges (gs-254)", () => {
+  async function makeRepo(autoMerge: boolean): Promise<{
+    repo: string;
+    project: ProjectConfig;
+  }> {
+    const repo = join(tmpdir(), `gs-sem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(repo, { recursive: true });
+    await $`git -C ${repo} init -b master`.quiet();
+    await $`git -C ${repo} config user.email test@example.com`.quiet();
+    await $`git -C ${repo} config user.name test`.quiet();
+    await $`git -C ${repo} config commit.gpgsign false`.quiet();
+    writeFileSync(join(repo, "seed.txt"), "seed", "utf8");
+    await $`git -C ${repo} add seed.txt`.quiet();
+    await $`git -C ${repo} commit -m ${"initial"}`.quiet();
+    const project: ProjectConfig = {
+      id: "testproj",
+      path: repo,
+      branch: "bot/work",
+      engineer_command: "noop",
+      verification_command: "true",
+      cycle_budget_minutes: 1,
+      work_detection: "tasks_json",
+      concurrency_detection: "none",
+      priority: 1,
+      auto_merge: autoMerge,
+      hands_off: [],
+    };
+    return { repo, project };
+  }
+
+  async function addBotWorkCommit(repo: string, file: string, content: string, msg: string): Promise<void> {
+    const existed = (await $`git -C ${repo} branch --list bot/work`.quiet()).stdout
+      .toString()
+      .trim()
+      .length > 0;
+    if (!existed) {
+      await $`git -C ${repo} branch bot/work master`.quiet();
+    }
+    await $`git -C ${repo} checkout bot/work`.quiet();
+    writeFileSync(join(repo, file), content, "utf8");
+    await $`git -C ${repo} add ${file}`.quiet();
+    await $`git -C ${repo} commit -m ${msg}`.quiet();
+    await $`git -C ${repo} checkout master`.quiet();
+  }
+
+  async function headSubject(repo: string): Promise<string> {
+    const out = (await $`git -C ${repo} log -1 --format=%s`.quiet()).stdout.toString().trim();
+    return out;
+  }
+
+  it("merges unmerged bot/work commits when auto_merge=true and project was touched", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "task.txt", "done", "gs-XXX: landed");
+      const cyclesPerProject = new Map<string, number>([[project.id, 1]]);
+      const results = await flushSessionEndMerges([project], cyclesPerProject);
+      expect(results).toHaveLength(1);
+      expect(results[0].result).toBe("ok");
+      expect(results[0].merged_commits).toBe(1);
+      expect(await headSubject(repo)).toContain("Merge branch 'bot/work' (session-end auto");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when auto_merge=false", async () => {
+    const { repo, project } = await makeRepo(false);
+    try {
+      await addBotWorkCommit(repo, "task.txt", "done", "gs-XXX");
+      const cyclesPerProject = new Map<string, number>([[project.id, 1]]);
+      const results = await flushSessionEndMerges([project], cyclesPerProject);
+      expect(results[0].result).toBe("skipped");
+      expect(results[0].reason).toBe("auto_merge=false");
+      expect(await headSubject(repo)).toBe("initial");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when the project had no cycles this session", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "task.txt", "done", "gs-XXX");
+      const cyclesPerProject = new Map<string, number>();
+      const results = await flushSessionEndMerges([project], cyclesPerProject);
+      expect(results[0].result).toBe("skipped");
+      expect(results[0].reason).toBe("no cycles this session");
+      expect(await headSubject(repo)).toBe("initial");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("skips when bot/work has no unmerged commits", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await $`git -C ${repo} branch bot/work master`.quiet();
+      const cyclesPerProject = new Map<string, number>([[project.id, 1]]);
+      const results = await flushSessionEndMerges([project], cyclesPerProject);
+      expect(results[0].result).toBe("skipped");
+      expect(results[0].reason).toBe("no unmerged commits");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("reports failure without crashing when merge conflicts with interactive work", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "shared.txt", "from-bot", "gs-bot: edit shared");
+      writeFileSync(join(repo, "shared.txt"), "from-interactive", "utf8");
+      await $`git -C ${repo} add shared.txt`.quiet();
+      await $`git -C ${repo} commit -m ${"interactive edit conflicting"}`.quiet();
+      const cyclesPerProject = new Map<string, number>([[project.id, 1]]);
+      const results = await flushSessionEndMerges([project], cyclesPerProject);
+      expect(results[0].result).toBe("failed");
+      expect(results[0].merged_commits).toBe(0);
+      // Working tree is left in the conflict state; clean it up so the
+      // temp-dir rmSync doesn't race a lock.
+      await $`git -C ${repo} merge --abort`.quiet().nothrow();
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("handles mix of projects (one auto_merge, one not, one untouched)", async () => {
+    const a = await makeRepo(true);
+    const b = await makeRepo(false);
+    const c = await makeRepo(true);
+    try {
+      await addBotWorkCommit(a.repo, "a.txt", "a", "a");
+      await addBotWorkCommit(b.repo, "b.txt", "b", "b");
+      await addBotWorkCommit(c.repo, "c.txt", "c", "c");
+      const cyclesPerProject = new Map<string, number>([
+        [a.project.id, 1],
+        [b.project.id, 1],
+        // c is not in the map — untouched this session
+      ]);
+      // Rename project IDs so results are distinguishable
+      a.project.id = "a";
+      b.project.id = "b";
+      c.project.id = "c";
+      cyclesPerProject.set("a", 1);
+      cyclesPerProject.set("b", 1);
+      const results = await flushSessionEndMerges(
+        [a.project, b.project, c.project],
+        cyclesPerProject,
+      );
+      expect(results.map((r) => r.project_id)).toEqual(["a", "b", "c"]);
+      expect(results[0].result).toBe("ok");
+      expect(results[1].result).toBe("skipped"); // auto_merge=false
+      expect(results[2].result).toBe("skipped"); // no cycles
+    } finally {
+      rmSync(a.repo, { recursive: true, force: true });
+      rmSync(b.repo, { recursive: true, force: true });
+      rmSync(c.repo, { recursive: true, force: true });
+    }
   });
 });
