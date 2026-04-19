@@ -1,0 +1,366 @@
+diff --git a/.gitignore b/.gitignore
+index 35b7bde..d818d53 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,5 +1,7 @@
+ # Real projects.yaml may contain absolute paths Ray prefers private
+ projects.yaml
++# Tracked fixture registry — synthetic paths, safe to commit (gs-241).
++!tests/fixtures/view_integration/projects.yaml
+ 
+ # Logs from dispatcher runs
+ logs/
+@@ -34,6 +36,7 @@ tests/fixtures/*
+ !tests/fixtures/reviewer_calibration/
+ !tests/fixtures/provider_config_malformed/
+ !tests/fixtures/fake_project/
++!tests/fixtures/view_integration/
+ 
+ # Bot worktree (created by scripts/run_bot.sh, cleaned on exit)
+ .bot-worktree/
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index b9783cb..cddaef9 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1528,7 +1528,7 @@
+   {
+     "id": "gs-241",
+     "title": "Add end-to-end integration tests exercising the `view` subcommand against a minimal fixture repo. CREATE ONLY: `tests/integration/view_subcommand.test.ts` that sets up a temporary fixture directory (under `tests/fixtures/view_integration/` via per-test tmpdir or existing fixture helpers) containing a minimal projects.yaml + state/<id>/PROGRESS.jsonl + state/<id>/tasks.json + state/_fleet/PROGRESS.jsonl + state/_fleet/messages.jsonl covering the shapes each view module consumes. Spawn `bun src/cli.ts view <name> --json` via child_process (or the existing Bun $ / spawnSync pattern used elsewhere in tests/), capture stdout, parse as JSON, assert shape invariants for each of: fleet-overview, task-queue, session-tail, dispatch-detail, inbox. DO NOT CREATE: new files outside tests/integration/ and tests/fixtures/view_integration/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) view fleet-overview --json returns projects[] with expected ids; (b) view task-queue <project-id> --json returns 4-bucket structure; (c) view session-tail --json returns sessions[] with the fixture session id; (d) view dispatch-detail <cycle-id> --json returns the expected cycle; (e) view inbox --json returns groups[] with the fixture message. Fixtures can be synthetic — do NOT import real project state. Expected diff: ~300 lines (~150 fixtures + ~150 test cases).",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "tests/integration/view_subcommand.test.ts",
+@@ -1537,6 +1537,7 @@
+       "tests/fixtures/view_integration/state/gs-test/tasks.json",
+       "tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl",
+       "tests/fixtures/view_integration/state/_fleet/messages.jsonl"
+-    ]
++    ],
++    "completed_at": "2026-04-19T04:44:52.660Z"
+   }
+ ]
+diff --git a/tests/fixtures/view_integration/projects.yaml b/tests/fixtures/view_integration/projects.yaml
+new file mode 100644
+index 0000000..ebafa38
+--- /dev/null
++++ b/tests/fixtures/view_integration/projects.yaml
+@@ -0,0 +1,27 @@
++# Fixture registry for tests/integration/view_subcommand.test.ts (gs-241).
++# project.path is "." so state/ under this fixture dir serves as the project
++# state root when the test spawns the CLI with cwd=<fixture dir>.
++
++projects:
++  - id: gs-test
++    path: .
++    priority: 1
++    engineer_command: "echo engineer"
++    verification_command: "echo verify"
++    cycle_budget_minutes: 30
++    work_detection: tasks_json
++    branch: bot/work
++    auto_merge: true
++    hands_off:
++      - src/reviewer.ts
++
++dispatcher:
++  state_dir: ./state
++  fleet_state_file: ./fleet_state.json
++  stop_file: ./STOP
++  override_file: ./next_project.txt
++  picker: priority_x_staleness
++  max_cycles_per_project_per_session: 3
++  log_dir: ./logs
++  digest_dir: ./digests
++  max_parallel_slots: 1
+diff --git a/tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl b/tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl
+new file mode 100644
+index 0000000..6e1ad8a
+--- /dev/null
++++ b/tests/fixtures/view_integration/state/_fleet/PROGRESS.jsonl
+@@ -0,0 +1,4 @@
++{"timestamp":"2026-04-18T11:00:00.000Z","event":"session_start","data":{"session_id":"sess-int-001","budget_minutes":30}}
++{"timestamp":"2026-04-18T11:00:30.000Z","event":"cycle_start","cycle_id":"cyc-int-001","project_id":"gs-test","data":{"session_id":"sess-int-001","task_id":"t-2","sha_before":"aaa111"}}
++{"timestamp":"2026-04-18T11:02:30.000Z","event":"cycle_end","cycle_id":"cyc-int-001","project_id":"gs-test","data":{"session_id":"sess-int-001","task_id":"t-2","outcome":"verified","duration_seconds":120,"files_touched":["src/foo.ts"],"sha_after":"bbb222","diff_stats":{"additions":12,"deletions":3}}}
++{"timestamp":"2026-04-18T11:10:00.000Z","event":"session_end","data":{"session_id":"sess-int-001","duration_minutes":10,"stop_reason":"max-cycles","reviewer":"openrouter"}}
+diff --git a/tests/fixtures/view_integration/state/_fleet/messages.jsonl b/tests/fixtures/view_integration/state/_fleet/messages.jsonl
+new file mode 100644
+index 0000000..9ed2d9a
+--- /dev/null
++++ b/tests/fixtures/view_integration/state/_fleet/messages.jsonl
+@@ -0,0 +1 @@
++{"timestamp":"2026-04-18T11:15:00.000Z","from":"generalstaff-bot","body":"integration fixture message — inbox smoke","kind":"fyi","refs":[{"session_id":"sess-int-001","task_id":"t-2","cycle_id":"cyc-int-001"}]}
+diff --git a/tests/fixtures/view_integration/state/gs-test/PROGRESS.jsonl b/tests/fixtures/view_integration/state/gs-test/PROGRESS.jsonl
+new file mode 100644
+index 0000000..de1301b
+--- /dev/null
++++ b/tests/fixtures/view_integration/state/gs-test/PROGRESS.jsonl
+@@ -0,0 +1,3 @@
++{"timestamp":"2026-04-18T10:00:00.000Z","event":"cycle_end","cycle_id":"c-prior-01","project_id":"gs-test","data":{"outcome":"verified"}}
++{"timestamp":"2026-04-18T10:05:00.000Z","event":"cycle_end","cycle_id":"c-prior-02","project_id":"gs-test","data":{"outcome":"verified"}}
++{"timestamp":"2026-04-18T10:10:00.000Z","event":"cycle_end","cycle_id":"c-prior-03","project_id":"gs-test","data":{"outcome":"verification_failed"}}
+diff --git a/tests/fixtures/view_integration/state/gs-test/tasks.json b/tests/fixtures/view_integration/state/gs-test/tasks.json
+new file mode 100644
+index 0000000..39e5aa8
+--- /dev/null
++++ b/tests/fixtures/view_integration/state/gs-test/tasks.json
+@@ -0,0 +1,35 @@
++[
++  {
++    "id": "t-1",
++    "title": "in-flight task",
++    "status": "in_progress",
++    "priority": 1
++  },
++  {
++    "id": "t-2",
++    "title": "ready pickable task",
++    "status": "pending",
++    "priority": 2
++  },
++  {
++    "id": "t-3",
++    "title": "interactive blocked task",
++    "status": "pending",
++    "priority": 3,
++    "interactive_only": true
++  },
++  {
++    "id": "t-4",
++    "title": "hands-off blocked task",
++    "status": "pending",
++    "priority": 4,
++    "expected_touches": ["src/reviewer.ts"]
++  },
++  {
++    "id": "t-5",
++    "title": "shipped task",
++    "status": "done",
++    "priority": 5,
++    "completed_at": "2026-04-17T10:00:00.000Z"
++  }
++]
+diff --git a/tests/integration/view_subcommand.test.ts b/tests/integration/view_subcommand.test.ts
+new file mode 100644
+index 0000000..477123c
+--- /dev/null
++++ b/tests/integration/view_subcommand.test.ts
+@@ -0,0 +1,218 @@
++// GeneralStaff — Phase 6 integration test: `view` subcommand end-to-end (gs-241).
++//
++// Spawns `bun src/cli.ts view <name> --json` against the checked-in fixture
++// registry under tests/fixtures/view_integration/ and asserts each view
++// returns the shape expected by downstream HTML / UI consumers. Regression
++// guard for the data contract the Phase 5 reference renderers depend on.
++
++import { describe, expect, it } from "bun:test";
++import { join } from "path";
++
++const CLI_PATH = join(import.meta.dir, "..", "..", "src", "cli.ts");
++const FIXTURE_DIR = join(
++  import.meta.dir,
++  "..",
++  "fixtures",
++  "view_integration",
++);
++
++// Force inbox --since to a date well before the fixture messages so the
++// view returns them regardless of when the test runs.
++const FIXTURE_SINCE = "2020-01-01T00:00:00.000Z";
++
++async function runView(
++  args: string[],
++): Promise<{ stdout: string; stderr: string; exitCode: number }> {
++  const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
++    stdout: "pipe",
++    stderr: "pipe",
++    env: { ...process.env },
++    cwd: FIXTURE_DIR,
++  });
++  const [stdout, stderr] = await Promise.all([
++    new Response(proc.stdout).text(),
++    new Response(proc.stderr).text(),
++  ]);
++  const exitCode = await proc.exited;
++  return { stdout, stderr, exitCode };
++}
++
++describe("view subcommand integration (gs-241)", () => {
++  it("fleet-overview --json returns projects[] with expected ids", async () => {
++    const result = await runView(["view", "fleet-overview", "--json"]);
++    expect(result.exitCode).toBe(0);
++    const parsed = JSON.parse(result.stdout);
++    expect(parsed).toHaveProperty("projects");
++    expect(parsed).toHaveProperty("aggregates");
++    expect(parsed).toHaveProperty("rendered_at");
++    expect(Array.isArray(parsed.projects)).toBe(true);
++    expect(parsed.projects).toHaveLength(1);
++    const row = parsed.projects[0];
++    expect(row.id).toBe("gs-test");
++    expect(row.branch).toBe("bot/work");
++    expect(row.auto_merge).toBe(true);
++    expect(row.priority).toBe(1);
++    // 2 verified + 1 verification_failed from the project PROGRESS.jsonl.
++    expect(row.cycles_total).toBe(3);
++    expect(row.verified).toBe(2);
++    expect(row.failed).toBe(1);
++    // bot_pickable: t-2 is the only ready task (t-3 interactive_only,
++    // t-4 hands_off_intersect, t-1 in_progress, t-5 done).
++    expect(row.bot_pickable).toBe(1);
++    // No STATE.json fixture → last_cycle fields are null.
++    expect(row.last_cycle_at).toBeNull();
++    expect(row.last_cycle_outcome).toBeNull();
++    expect(parsed.aggregates.project_count).toBe(1);
++    expect(parsed.aggregates.total_cycles).toBe(3);
++    expect(parsed.aggregates.total_verified).toBe(2);
++    expect(parsed.aggregates.total_failed).toBe(1);
++    // pass_rate = 2 / (2 + 1) ≈ 0.6666…
++    expect(parsed.aggregates.pass_rate).toBeGreaterThan(0.66);
++    expect(parsed.aggregates.pass_rate).toBeLessThan(0.67);
++  });
++
++  it("task-queue gs-test --json returns 4-bucket structure", async () => {
++    const result = await runView([
++      "view",
++      "task-queue",
++      "gs-test",
++      "--json",
++    ]);
++    expect(result.exitCode).toBe(0);
++    const parsed = JSON.parse(result.stdout);
++    expect(parsed.project_id).toBe("gs-test");
++    expect(Array.isArray(parsed.in_flight)).toBe(true);
++    expect(Array.isArray(parsed.ready)).toBe(true);
++    expect(Array.isArray(parsed.blocked)).toBe(true);
++    expect(Array.isArray(parsed.shipped)).toBe(true);
++    expect(parsed.in_flight).toHaveLength(1);
++    expect(parsed.in_flight[0].id).toBe("t-1");
++    expect(parsed.ready).toHaveLength(1);
++    expect(parsed.ready[0].id).toBe("t-2");
++    expect(parsed.blocked).toHaveLength(2);
++    const blockedIds = parsed.blocked.map(
++      (e: { id: string }) => e.id,
++    ) as string[];
++    expect(blockedIds).toContain("t-3");
++    expect(blockedIds).toContain("t-4");
++    const interactive = parsed.blocked.find(
++      (e: { id: string }) => e.id === "t-3",
++    );
++    expect(interactive.block_reason).toBe("interactive_only");
++    const handsOff = parsed.blocked.find(
++      (e: { id: string }) => e.id === "t-4",
++    );
++    expect(handsOff.block_reason).toBe("hands_off_intersect");
++    expect(parsed.shipped).toHaveLength(1);
++    expect(parsed.shipped[0].id).toBe("t-5");
++    expect(parsed.shipped[0].completed_at).toBe(
++      "2026-04-17T10:00:00.000Z",
++    );
++  });
++
++  it("session-tail --json returns sessions[] with the fixture session id", async () => {
++    const result = await runView(["view", "session-tail", "--json"]);
++    expect(result.exitCode).toBe(0);
++    const parsed = JSON.parse(result.stdout);
++    expect(parsed).toHaveProperty("sessions");
++    expect(parsed).toHaveProperty("earlier_rail");
++    expect(parsed).toHaveProperty("rendered_at");
++    expect(Array.isArray(parsed.sessions)).toBe(true);
++    expect(parsed.sessions).toHaveLength(1);
++    const session = parsed.sessions[0];
++    expect(session.session_id).toBe("sess-int-001");
++    expect(session.budget_minutes).toBe(30);
++    expect(session.reviewer).toBe("openrouter");
++    expect(session.stop_reason).toBe("max-cycles");
++    expect(session.duration_minutes).toBe(10);
++    expect(Array.isArray(session.cycles)).toBe(true);
++    expect(session.cycles).toHaveLength(1);
++    const cycle = session.cycles[0];
++    expect(cycle.cycle_id).toBe("cyc-int-001");
++    expect(cycle.project_id).toBe("gs-test");
++    expect(cycle.task_id).toBe("t-2");
++    expect(cycle.verdict).toBe("verified");
++    expect(cycle.duration_seconds).toBe(120);
++    expect(cycle.diff_added).toBe(12);
++    expect(cycle.diff_removed).toBe(3);
++    expect(cycle.files_touched).toEqual(["src/foo.ts"]);
++    // Only one session in the fixture → earlier_rail is empty.
++    expect(parsed.earlier_rail).toEqual([]);
++  });
++
++  it("dispatch-detail cyc-int-001 --json returns the expected cycle", async () => {
++    const result = await runView([
++      "view",
++      "dispatch-detail",
++      "cyc-int-001",
++      "--json",
++    ]);
++    expect(result.exitCode).toBe(0);
++    const parsed = JSON.parse(result.stdout);
++    expect(parsed.cycle_id).toBe("cyc-int-001");
++    expect(parsed.project_id).toBe("gs-test");
++    expect(parsed.session_id).toBe("sess-int-001");
++    expect(parsed.task_id).toBe("t-2");
++    // Task-title lookup resolves via projects.yaml → tasks.json.
++    expect(parsed.task_title).toBe("ready pickable task");
++    expect(parsed.verdict).toBe("verified");
++    expect(parsed.duration_seconds).toBe(120);
++    expect(parsed.sha_before).toBe("aaa111");
++    expect(parsed.sha_after).toBe("bbb222");
++    expect(parsed.diff_added).toBe(12);
++    expect(parsed.diff_removed).toBe(3);
++    expect(Array.isArray(parsed.files_touched)).toBe(true);
++    expect(parsed.files_touched).toHaveLength(1);
++    expect(parsed.files_touched[0].path).toBe("src/foo.ts");
++    // No reviewer_verdict event in the fixture → checks[] is empty.
++    expect(parsed.checks).toEqual([]);
++    // Phases without dedicated events stay null-skeleton.
++    expect(parsed.engineer.started_at).toBeNull();
++    expect(parsed.verification.started_at).toBeNull();
++    expect(parsed.review.started_at).toBeNull();
++  });
++
++  it("dispatch-detail unknown-cycle exits 1 with DispatchDetailError", async () => {
++    const result = await runView([
++      "view",
++      "dispatch-detail",
++      "cyc-does-not-exist",
++      "--json",
++    ]);
++    expect(result.exitCode).toBe(1);
++    expect(result.stderr).toContain("cycle not found: cyc-does-not-exist");
++  });
++
++  it("inbox --json returns groups[] with the fixture message", async () => {
++    const result = await runView([
++      "view",
++      "inbox",
++      `--since=${FIXTURE_SINCE}`,
++      "--json",
++    ]);
++    expect(result.exitCode).toBe(0);
++    const parsed = JSON.parse(result.stdout);
++    expect(parsed).toHaveProperty("groups");
++    expect(parsed).toHaveProperty("unread_count");
++    expect(parsed).toHaveProperty("oldest_shown");
++    expect(parsed).toHaveProperty("rendered_at");
++    expect(parsed.unread_count).toBe(1);
++    expect(Array.isArray(parsed.groups)).toBe(true);
++    expect(parsed.groups).toHaveLength(1);
++    const group = parsed.groups[0];
++    expect(Array.isArray(group.messages)).toBe(true);
++    expect(group.messages).toHaveLength(1);
++    const msg = group.messages[0];
++    expect(msg.from).toBe("generalstaff-bot");
++    expect(msg.from_type).toBe("bot");
++    expect(msg.kind).toBe("fyi");
++    expect(msg.body).toContain("integration fixture message");
++    expect(Array.isArray(msg.refs)).toBe(true);
++    expect(msg.refs).toHaveLength(1);
++    expect(msg.refs[0]).toMatchObject({
++      session_id: "sess-int-001",
++      task_id: "t-2",
++      cycle_id: "cyc-int-001",
++    });
++  });
++});
