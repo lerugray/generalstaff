@@ -350,6 +350,51 @@ export async function removeTask(
   return { kind: "removed", task };
 }
 
+export type MarkTaskInteractiveResult =
+  | { kind: "set"; task: GreenfieldTask; previous: boolean }
+  | { kind: "unchanged"; task: GreenfieldTask; value: boolean }
+  | { kind: "task_not_found"; availableIds: string[] }
+  | { kind: "project_not_found"; path: string };
+
+// gs-243: toggle a task's `interactive_only` flag from the CLI, so
+// operators don't have to hand-edit tasks.json. `value=true` marks the
+// task interactive-only (the bot picker will skip it); `value=false`
+// clears the flag. When the flag is already in the requested state we
+// short-circuit without rewriting the file — mirrors the
+// already_done / already_pending pattern used elsewhere in this module.
+export async function markTaskInteractive(
+  projectId: string,
+  taskId: string,
+  value: boolean,
+): Promise<MarkTaskInteractiveResult> {
+  const path = tasksPath(projectId);
+  if (!existsSync(path)) {
+    return { kind: "project_not_found", path };
+  }
+  const tasks = await loadTasks(projectId);
+  const idx = tasks.findIndex((t) => t.id === taskId);
+  if (idx === -1) {
+    return { kind: "task_not_found", availableIds: tasks.map((t) => t.id) };
+  }
+  const task = tasks[idx]!;
+  const current = task.interactive_only === true;
+  if (current === value) {
+    return { kind: "unchanged", task, value };
+  }
+  const updated = [...tasks];
+  if (value) {
+    updated[idx] = { ...task, interactive_only: true };
+  } else {
+    // Strip the field entirely when clearing so tasks.json stays clean
+    // for tasks that never needed the flag in the first place.
+    const { interactive_only: _omit, ...rest } = task;
+    void _omit;
+    updated[idx] = rest as GreenfieldTask;
+  }
+  await writeFile(path, JSON.stringify(updated, null, 2) + "\n", "utf8");
+  return { kind: "set", task: updated[idx]!, previous: current };
+}
+
 export type MarkTaskPendingResult =
   | { kind: "reopened"; task: GreenfieldTask }
   | { kind: "already_pending"; task: GreenfieldTask }

@@ -3640,6 +3640,170 @@ dispatcher:
       expect(line).toContain("beta work");
     });
   });
+
+  describe("task interactive (gs-243)", () => {
+    const TI_DIR = join(import.meta.dir, "fixtures", "task_interactive");
+
+    const TI_YAML = `
+projects:
+  - id: generalstaff
+    path: /tmp/gs
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    const TASKS_PATH = join(TI_DIR, "state", "generalstaff", "tasks.json");
+
+    beforeEach(() => {
+      rmSync(TI_DIR, { recursive: true, force: true });
+      mkdirSync(join(TI_DIR, "state", "generalstaff"), { recursive: true });
+      writeFileSync(join(TI_DIR, "projects.yaml"), TI_YAML);
+      writeFileSync(
+        TASKS_PATH,
+        JSON.stringify(
+          [
+            {
+              id: "gs-001",
+              title: "first task",
+              status: "pending",
+              priority: 2,
+              expected_touches: ["src/app.ts"],
+            },
+            {
+              id: "gs-002",
+              title: "already interactive",
+              status: "pending",
+              priority: 3,
+              interactive_only: true,
+              interactive_only_reason: "seeded flag",
+            },
+          ],
+          null,
+          2,
+        ) + "\n",
+      );
+    });
+
+    afterEach(() => {
+      rmSync(TI_DIR, { recursive: true, force: true });
+    });
+
+    it("sets interactive_only=true on a pending task", async () => {
+      const result = await runCli(
+        ["task", "interactive", "--project=generalstaff", "gs-001"],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("gs-001");
+      expect(result.stdout.toLowerCase()).toContain("interactive_only");
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect(saved[0].interactive_only).toBe(true);
+      // Pre-existing fields on the same task must be preserved.
+      expect(saved[0].id).toBe("gs-001");
+      expect(saved[0].title).toBe("first task");
+      expect(saved[0].status).toBe("pending");
+      expect(saved[0].priority).toBe(2);
+      expect(saved[0].expected_touches).toEqual(["src/app.ts"]);
+      // Other tasks must be untouched.
+      expect(saved[1].id).toBe("gs-002");
+      expect(saved[1].interactive_only).toBe(true);
+      expect(saved[1].interactive_only_reason).toBe("seeded flag");
+    });
+
+    it("--off clears interactive_only and strips the field", async () => {
+      const result = await runCli(
+        [
+          "task",
+          "interactive",
+          "--project=generalstaff",
+          "gs-002",
+          "--off",
+        ],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("gs-002");
+      const saved = JSON.parse(readFileSync(TASKS_PATH, "utf8"));
+      expect("interactive_only" in saved[1]).toBe(false);
+      // Unrelated fields preserved.
+      expect(saved[1].id).toBe("gs-002");
+      expect(saved[1].title).toBe("already interactive");
+      expect(saved[1].status).toBe("pending");
+      expect(saved[1].priority).toBe(3);
+    });
+
+    it("errors and exits 1 when task-id is unknown", async () => {
+      const result = await runCli(
+        ["task", "interactive", "--project=generalstaff", "gs-999"],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("gs-999");
+      expect(result.stderr).toContain("not found");
+      // File must not be rewritten on error paths.
+      const raw = readFileSync(TASKS_PATH, "utf8");
+      const saved = JSON.parse(raw);
+      expect(saved[0].interactive_only).toBeUndefined();
+      expect(saved[1].interactive_only).toBe(true);
+    });
+
+    it("errors and exits 1 when --project is missing", async () => {
+      const result = await runCli(
+        ["task", "interactive", "gs-001"],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("--project");
+    });
+
+    it("preserves JSON formatting (2-space indent, trailing newline)", async () => {
+      const result = await runCli(
+        ["task", "interactive", "--project=generalstaff", "gs-001"],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const raw = readFileSync(TASKS_PATH, "utf8");
+      expect(raw.endsWith("\n")).toBe(true);
+      // 2-space indent — every indented line starts with an even
+      // count of leading spaces; check one concrete sample line.
+      expect(raw).toContain('  {\n');
+      expect(raw).toContain('    "id": "gs-001"');
+      // Task order preserved.
+      const saved = JSON.parse(raw);
+      expect(saved.map((t: { id: string }) => t.id)).toEqual([
+        "gs-001",
+        "gs-002",
+      ]);
+    });
+
+    it("is a no-op with a friendly message when flag already matches target", async () => {
+      // gs-002 is already interactive_only=true; setting it again should
+      // print an 'already' notice and not rewrite the file content.
+      const before = readFileSync(TASKS_PATH, "utf8");
+      const result = await runCli(
+        ["task", "interactive", "--project=generalstaff", "gs-002"],
+        TI_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toLowerCase()).toContain("already");
+      const after = readFileSync(TASKS_PATH, "utf8");
+      expect(after).toBe(before);
+    });
+  });
 });
 
 // gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗

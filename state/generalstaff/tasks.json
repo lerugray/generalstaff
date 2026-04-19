@@ -1554,7 +1554,7 @@
   {
     "id": "gs-243",
     "title": "Add `generalstaff tasks interactive <task-id>` subcommand to flip a task interactive_only flag. CREATE ONLY: extend the existing `tasks` subcommand handler in `src/cli.ts` with an `interactive` sub-subcommand that accepts a task-id and toggles (or sets) the `interactive_only` field on that task in the appropriate state/<id>/tasks.json. Flags: `--project=<id>` required (which project the task belongs to); `--off` flag to set interactive_only=false (default: set true). Find the task by id, mutate, write back with stable JSON formatting. Error if task-id not found. Append tests to `tests/cli.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: currently the only way to mark a task interactive_only is to edit tasks.json by hand (as the bot did in gs-237 via a tasks-file modification that the reviewer happened to accept). A dedicated CLI makes this first-class. Tests: (a) setting interactive_only on a pending task; (b) --off flips it back; (c) unknown task-id errors + exit 1; (d) missing --project errors + exit 1; (e) existing fields preserved; (f) JSON formatting stable (no unintended reordering). Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
