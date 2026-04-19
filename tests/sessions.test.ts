@@ -12,6 +12,8 @@ import {
   computeSessionTotals,
   formatSessionTotals,
   formatFleetTable,
+  parseSinceIso,
+  filterSessionsSince,
   type SessionSummary,
   type BacklogRow,
   type FleetRow,
@@ -591,5 +593,74 @@ describe("formatFleetTable (gs-217)", () => {
     expect(totalCells[5]).toBe("7"); // bot_pickable sum 3+4
     expect(totalCells[6]).toBe("-");
     expect(totalCells[7]).toBe("-");
+  });
+});
+
+// gs-247: --since=<iso> filters the --sessions/--summary subviews to
+// events at or after a caller-supplied ISO timestamp. parseSinceIso
+// only accepts absolute timestamps; the audit log's --since allows
+// relative durations but the status surface keeps a narrower contract.
+describe("parseSinceIso (gs-247)", () => {
+  it("parses an ISO-8601 timestamp", () => {
+    expect(parseSinceIso("2026-04-17T10:00:00.000Z")).toBe(
+      Date.parse("2026-04-17T10:00:00.000Z"),
+    );
+  });
+
+  it("parses a date-only ISO string", () => {
+    expect(parseSinceIso("2026-04-17")).toBe(Date.parse("2026-04-17"));
+  });
+
+  it("returns null for empty / unparseable input", () => {
+    expect(parseSinceIso("")).toBeNull();
+    expect(parseSinceIso("   ")).toBeNull();
+    expect(parseSinceIso("not-a-date")).toBeNull();
+    // Relative durations are rejected — those live in audit's parseSinceFlag.
+    expect(parseSinceIso("30m")).toBeNull();
+  });
+});
+
+describe("filterSessionsSince (gs-247)", () => {
+  const mk = (started_at: string): SessionSummary => ({
+    started_at,
+    duration_minutes: 10,
+    total_cycles: 1,
+    total_verified: 1,
+    total_failed: 0,
+    stop_reason: "budget",
+    reviewer: "claude",
+  });
+
+  it("keeps sessions with started_at strictly after the cutoff", () => {
+    const sessions = [
+      mk("2026-04-17T09:00:00.000Z"),
+      mk("2026-04-17T12:00:00.000Z"),
+      mk("2026-04-17T15:00:00.000Z"),
+    ];
+    const cutoff = Date.parse("2026-04-17T10:00:00.000Z");
+    const filtered = filterSessionsSince(sessions, cutoff);
+    expect(filtered).toHaveLength(2);
+    expect(filtered.map((s) => s.started_at)).toEqual([
+      "2026-04-17T12:00:00.000Z",
+      "2026-04-17T15:00:00.000Z",
+    ]);
+  });
+
+  it("includes sessions whose started_at equals the cutoff (inclusive boundary)", () => {
+    const sessions = [
+      mk("2026-04-17T10:00:00.000Z"),
+      mk("2026-04-17T09:59:59.999Z"),
+    ];
+    const cutoff = Date.parse("2026-04-17T10:00:00.000Z");
+    const filtered = filterSessionsSince(sessions, cutoff);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]!.started_at).toBe("2026-04-17T10:00:00.000Z");
+  });
+
+  it("drops sessions whose started_at is unparseable", () => {
+    const sessions = [mk("not-a-date"), mk("2026-04-17T10:00:00.000Z")];
+    const filtered = filterSessionsSince(sessions, 0);
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]!.started_at).toBe("2026-04-17T10:00:00.000Z");
   });
 });

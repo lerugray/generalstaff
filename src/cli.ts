@@ -58,8 +58,11 @@ import {
   formatFleetTable,
   parseSessionsFlag,
   stripSessionsArgs,
+  parseSinceIso,
+  filterSessionsSince,
   type BacklogRow,
   type FleetRow,
+  type SessionSummary,
 } from "./sessions";
 import { countRemainingWorkDetailed } from "./work_detection";
 import {
@@ -475,6 +478,7 @@ switch (command) {
           "  --backlog           Per-project backlog buckets\n" +
           "  --totals            All-time aggregate session metrics\n" +
           "  --fleet             One-row-per-project fleet snapshot\n" +
+          "  --since=<iso>       Filter --sessions/--summary to events at or after an ISO-8601 timestamp\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff status                           # default fleet state view\n" +
@@ -496,9 +500,30 @@ switch (command) {
         backlog: { type: "boolean", default: false },
         totals: { type: "boolean", default: false },
         fleet: { type: "boolean", default: false },
+        since: { type: "string" },
       },
       allowPositionals: false,
     });
+
+    // gs-247: --since narrows --sessions / --summary to events at or
+    // after an ISO-8601 timestamp. Only ISO is accepted (relative
+    // durations live in the audit log's --since, not here). Validate
+    // before the render so operators get a single clear error.
+    let sinceMs: number | undefined;
+    if (statusValues.since !== undefined) {
+      const parsed = parseSinceIso(statusValues.since);
+      if (parsed === null) {
+        console.error("Error: --since requires an ISO timestamp");
+        process.exit(1);
+      }
+      if (!sessionsFlag.enabled && !statusValues.summary) {
+        console.error(
+          "Error: --since requires --sessions or --summary",
+        );
+        process.exit(1);
+      }
+      sinceMs = parsed;
+    }
 
     // gs-199: --backlog is mutually exclusive with the other status
     // subviews. Detect the clash early so the user gets a single clear
@@ -655,7 +680,10 @@ switch (command) {
         return;
       }
       if (statusValues.summary) {
-        const todaySummary = await buildTodaySessionSummary();
+        const todaySummary = await buildTodaySessionSummary(
+          new Date(),
+          sinceMs,
+        );
         if (statusValues.json) {
           console.log(JSON.stringify(todaySummary, null, 2));
         } else {
@@ -669,7 +697,20 @@ switch (command) {
       const stopped = await isStopFilePresent();
 
       if (sessionsFlag.enabled) {
-        const sessions = await loadRecentSessions(sessionsFlag.limit);
+        // gs-247: when --since is set, pull the full history and filter
+        // client-side so the requested limit applies to the filtered
+        // window, not the raw tail. loadRecentSessions already sorts
+        // newest-first, so slicing after the filter preserves ordering.
+        let sessions: SessionSummary[];
+        if (sinceMs !== undefined) {
+          const all = await loadRecentSessions(Number.MAX_SAFE_INTEGER);
+          sessions = filterSessionsSince(all, sinceMs).slice(
+            0,
+            sessionsFlag.limit,
+          );
+        } else {
+          sessions = await loadRecentSessions(sessionsFlag.limit);
+        }
         if (statusValues.json) {
           console.log(JSON.stringify(sessions, null, 2));
         } else {
