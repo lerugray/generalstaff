@@ -1,0 +1,8 @@
+# GitHub Sponsors config — points to Ray's personal sponsor account
+# per Hard Rule 10 (no company layer; support goes to Ray personally).
+#
+# Once Ray activates GitHub Sponsors at https://github.com/sponsors,
+# this file renders a "Sponsor" button on the repo page pointing at
+# his profile. SUPPORTERS.md explains why there are no tiers.
+
+github: [lerugray]
