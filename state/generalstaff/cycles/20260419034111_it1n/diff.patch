@@ -1,0 +1,57 @@
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index ccdf621..28d91c7 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1466,7 +1466,7 @@
+   {
+     "id": "gs-235",
+     "title": "Regression test: verify `.gitignore` covers `.claude/` transient files so safety.ts clean-tree preflight doesn't trip on harness artifacts. CREATE ONLY: append a new test to `tests/gitignore.test.ts` (create the file if it doesn't exist yet, adjacent to other tests/ files) that reads the project `.gitignore` from the repo root and asserts: (a) the pattern `.claude/*` is present; (b) the exception `!.claude/settings.json` is present; (c) the pre-existing `.claude/settings.local.json` rule either stays present OR is subsumed under the broader pattern (test accepts both). DO NOT CREATE: any source modifications; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Test runner: bun test. Motivation: tonight's wave-2 spin was caused by `.claude/scheduled_tasks.lock` (ScheduleWakeup artifact) showing as untracked and blocking 8 cycles' preflight. Commit `ae299aa` broadened the rule; this test prevents silent regression if a future .gitignore edit strips it. Expected diff: ~40 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "tests/gitignore.test.ts"
+diff --git a/tests/gitignore.test.ts b/tests/gitignore.test.ts
+new file mode 100644
+index 0000000..2ffcb9b
+--- /dev/null
++++ b/tests/gitignore.test.ts
+@@ -0,0 +1,38 @@
++import { describe, expect, it } from "bun:test";
++import { readFileSync } from "fs";
++import { join } from "path";
++
++// Motivation (gs-235): a wave-2 spin was caused by `.claude/scheduled_tasks.lock`
++// (a ScheduleWakeup harness artifact) showing up as untracked and tripping
++// safety.ts's clean-tree preflight. Commit ae299aa broadened the .gitignore rule
++// from `.claude/settings.local.json` to `.claude/*` (with an allow-exception for
++// `.claude/settings.json`). This regression test pins those patterns so a future
++// edit cannot silently strip them.
++
++const GITIGNORE_PATH = join(import.meta.dir, "..", ".gitignore");
++
++function readGitignoreLines(): string[] {
++  return readFileSync(GITIGNORE_PATH, "utf8")
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter((line) => line.length > 0 && !line.startsWith("#"));
++}
++
++describe(".gitignore coverage for .claude/ transient files", () => {
++  it("ignores everything under .claude/ via the broad `.claude/*` pattern", () => {
++    const lines = readGitignoreLines();
++    expect(lines).toContain(".claude/*");
++  });
++
++  it("keeps `.claude/settings.json` tracked via a negation rule", () => {
++    const lines = readGitignoreLines();
++    expect(lines).toContain("!.claude/settings.json");
++  });
++
++  it("covers `.claude/settings.local.json` either explicitly or via the broad pattern", () => {
++    const lines = readGitignoreLines();
++    const explicit = lines.includes(".claude/settings.local.json");
++    const subsumed = lines.includes(".claude/*");
++    expect(explicit || subsumed).toBe(true);
++  });
++});
