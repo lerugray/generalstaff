@@ -1079,6 +1079,7 @@ switch (command) {
           "  rm   --project=<id> --task=<task-id>               Delete a task\n" +
           "  interactive --project=<id> <task-id> [--off]       Flip interactive_only flag\n" +
           "  count [--project=<id>]                             Report pending vs done counts\n" +
+          "  validate [--project=<id>] [--json]                 Validate tasks.json schema across projects\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff task list --project=myapp\n" +
@@ -1393,15 +1394,89 @@ switch (command) {
           `${id}: ${c.pending} pending, ${c.done} done (${c.total} total)`,
         );
       }
+    } else if (sub === "validate") {
+      // gs-248: schema-validate every project's tasks.json. Reuses the
+      // TaskValidationError-raising loadTasks path from src/tasks.ts so
+      // the validator and the runtime read the same schema. loadTasks
+      // throws on the first invalid entry, so a project's `errors` array
+      // contains at most one message; that's the granularity the existing
+      // validator exposes and is sufficient for pass/fail signalling.
+      const { values: valValues } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      let targets: string[];
+      const yamlExists = existsSync(join(getRootDir(), "projects.yaml"));
+      if (valValues.project) {
+        if (yamlExists) {
+          const registered = await loadProjects();
+          if (!registered.find((p) => p.id === valValues.project)) {
+            const ids =
+              registered.map((p) => p.id).join(", ") || "(none)";
+            console.error(
+              `Error: project '${valValues.project}' not found. Registered: ${ids}`,
+            );
+            process.exit(1);
+          }
+        }
+        targets = [valValues.project];
+      } else {
+        const all = await loadProjects();
+        if (all.length === 0) {
+          if (valValues.json) {
+            console.log(JSON.stringify({}, null, 2));
+          } else {
+            console.log("No projects registered.");
+          }
+          break;
+        }
+        targets = all.map((p) => p.id);
+      }
+      const results: Record<string, { ok: boolean; errors: string[] }> = {};
+      let anyFail = false;
+      for (const id of targets) {
+        try {
+          await loadTasks(id);
+          results[id] = { ok: true, errors: [] };
+        } catch (err) {
+          anyFail = true;
+          const msg = err instanceof Error ? err.message : String(err);
+          results[id] = { ok: false, errors: [msg] };
+        }
+      }
+      if (valValues.json) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        for (const id of targets) {
+          const r = results[id]!;
+          if (r.ok) {
+            console.log(`${id}: ok (0 issues)`);
+          } else {
+            const n = r.errors.length;
+            console.log(
+              `${id}: FAIL (${n} issue${n === 1 ? "" : "s"})`,
+            );
+            for (const e of r.errors) {
+              console.log(`  - ${e}`);
+            }
+          }
+        }
+      }
+      if (anyFail) process.exit(1);
     } else {
       console.error(
-        "Error: task subcommand required (list, add, done, rm, interactive, or count)\n" +
+        "Error: task subcommand required (list, add, done, rm, interactive, count, or validate)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
           "         generalstaff task done --project=<id> --task=<task-id>\n" +
           "         generalstaff task rm --project=<id> --task=<task-id>\n" +
           "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
-          "         generalstaff task count [--project=<id>]",
+          "         generalstaff task count [--project=<id>]\n" +
+          "         generalstaff task validate [--project=<id>] [--json]",
       );
       process.exit(1);
     }

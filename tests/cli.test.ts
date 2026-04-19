@@ -3916,6 +3916,137 @@ dispatcher:
       expect(after).toBe(before);
     });
   });
+
+  describe("task validate (gs-248)", () => {
+    const TV_DIR = join(import.meta.dir, "fixtures", "task_validate");
+
+    const TV_YAML = `
+projects:
+  - id: generalstaff
+    path: /tmp/gs
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+  - id: beta
+    path: /tmp/beta
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - README.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      rmSync(TV_DIR, { recursive: true, force: true });
+      mkdirSync(join(TV_DIR, "state", "generalstaff"), { recursive: true });
+      mkdirSync(join(TV_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(TV_DIR, "projects.yaml"), TV_YAML);
+    });
+
+    afterEach(() => {
+      rmSync(TV_DIR, { recursive: true, force: true });
+    });
+
+    function writeTasks(projectId: string, body: unknown) {
+      writeFileSync(
+        join(TV_DIR, "state", projectId, "tasks.json"),
+        typeof body === "string" ? body : JSON.stringify(body),
+      );
+    }
+
+    it("(a) all-green passes exit 0 across every registered project", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "ok", status: "done", priority: 2 },
+      ]);
+      const result = await runCli(["task", "validate"], TV_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff: ok");
+      expect(result.stdout).toContain("beta: ok");
+    });
+
+    it("(b) malformed tasks.json in one project → exit 1 and names that project", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [{ id: "bt-001", title: "no priority", status: "pending" }]);
+      const result = await runCli(["task", "validate"], TV_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain("generalstaff: ok");
+      expect(result.stdout).toContain("beta: FAIL");
+      expect(result.stdout.toLowerCase()).toContain("priority");
+    });
+
+    it("(c) --project=<id> filters to that project only", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      // beta has malformed tasks but should not be checked under --project filter
+      writeTasks("beta", "{not valid json");
+      const result = await runCli(
+        ["task", "validate", "--project=generalstaff"],
+        TV_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("generalstaff: ok");
+      expect(result.stdout).not.toContain("beta");
+    });
+
+    it("(d) unknown --project errors and exits 1", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      const result = await runCli(
+        ["task", "validate", "--project=nosuch"],
+        TV_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("project 'nosuch' not found");
+      expect(result.stderr).toContain("Registered:");
+    });
+
+    it("(e) --json emits { project_id: {ok, errors: [...]} } map", async () => {
+      writeTasks("generalstaff", [
+        { id: "gs-001", title: "ok", status: "pending", priority: 1 },
+      ]);
+      writeTasks("beta", [
+        { id: "bt-001", title: "bad status", status: "weird", priority: 1 },
+      ]);
+      const result = await runCli(["task", "validate", "--json"], TV_DIR);
+      expect(result.exitCode).toBe(1);
+      const parsed = JSON.parse(result.stdout) as Record<
+        string,
+        { ok: boolean; errors: string[] }
+      >;
+      expect(parsed.generalstaff).toBeDefined();
+      expect(parsed.generalstaff!.ok).toBe(true);
+      expect(parsed.generalstaff!.errors).toEqual([]);
+      expect(parsed.beta).toBeDefined();
+      expect(parsed.beta!.ok).toBe(false);
+      expect(parsed.beta!.errors.length).toBeGreaterThan(0);
+      expect(parsed.beta!.errors[0]!.toLowerCase()).toContain("status");
+    });
+  });
 });
 
 // gs-242: new sanity-check helpers surfaced by `doctor` with ✓/✗

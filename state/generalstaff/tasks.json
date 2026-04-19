@@ -1611,7 +1611,7 @@
   {
     "id": "gs-248",
     "title": "Add `generalstaff tasks validate [--project=<id>]` subcommand that runs GreenfieldTask schema validation across tasks.json files. CREATE ONLY: extend the `tasks` subcommand handler in `src/cli.ts` with a `validate` sub-subcommand that reuses the `TaskValidationError`-raising loadTasks path from `src/tasks.ts` (shipped in gs-218). Without `--project`, validate every registered project tasks.json; with `--project=<id>`, validate just that project. Report pass/fail per project with count of issues; exit 0 if all pass, exit 1 if any fail. `--json` emits { project_id: {ok, errors: [...]} } map. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) all-green passes exit 0; (b) malformed tasks.json in one project → exit 1 + named in output; (c) --project filters correctly; (d) unknown --project errors + exits 1; (e) --json shape. Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/cli.ts",
