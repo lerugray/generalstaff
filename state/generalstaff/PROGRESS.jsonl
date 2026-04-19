@@ -2987,3 +2987,6 @@
 {"timestamp":"2026-04-19T11:41:03.565Z","event":"cycle_skipped","cycle_id":"20260419114017_9s7u","project_id":"generalstaff","data":{"reason":"STOP file triggered during engineer"}}
 {"timestamp":"2026-04-19T11:41:03.738Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":1,"total_cycles":1,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-19T11:43:07.291Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
+{"timestamp":"2026-04-19T11:43:07.634Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":0,"total_cycles":0,"total_verified":0,"total_failed":0}}
+{"timestamp":"2026-04-19T11:44:59.811Z","event":"cycle_skipped","cycle_id":"20260419114459_nkvd","project_id":"generalstaff","data":{"reason":".bot-worktree exists, modified 5 min ago"}}
+{"timestamp":"2026-04-19T11:45:31.149Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
