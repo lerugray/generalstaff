@@ -227,6 +227,11 @@ Usage:
     Example: generalstaff diff myapp 20260416125750_8w9n
     Example: generalstaff diff myapp 20260416125750_8w9n --stat
 
+  generalstaff view <name> [options]                      Structured fleet views (Phase 6)
+    Example: generalstaff view fleet-overview            # one row per project + aggregates
+    Example: generalstaff view fleet-overview --json     # same, as JSON
+    # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
+
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help`);
 }
@@ -1863,6 +1868,100 @@ switch (command) {
     console.log(`  2. Fill in <FILL IN> sections of CLAUDE-AUTONOMOUS.md`);
     console.log(`  3. Move files into place + register in projects.yaml`);
     break;
+  }
+
+  case "view": {
+    const VALID_VIEWS = [
+      "fleet-overview",
+      "task-queue",
+      "session-tail",
+      "dispatch-detail",
+      "inbox",
+    ] as const;
+    const viewName = args[1];
+    const viewArgs = args.slice(2);
+
+    if (!viewName) {
+      console.error(
+        "Usage: generalstaff view <name> [options]\n" +
+          "\n" +
+          "Available views:\n" +
+          "  fleet-overview              One row per project + aggregates\n" +
+          "  task-queue <project-id>     Task buckets (In-flight/Ready/Blocked/Shipped) (gs-227)\n" +
+          "  session-tail [--limit=N]    Newest sessions with per-cycle breakdown (gs-228)\n" +
+          "  dispatch-detail <cycle-id>  Full cycle report: phases, diff, checks (gs-229)\n" +
+          "  inbox [--since=<iso>]       Fleet message inbox (gs-230)\n",
+      );
+      process.exit(1);
+    }
+
+    if (!(VALID_VIEWS as readonly string[]).includes(viewName)) {
+      console.error(
+        `Error: unknown view '${viewName}'. Valid views: ${VALID_VIEWS.join(", ")}`,
+      );
+      process.exit(1);
+    }
+
+    if (viewName === "fleet-overview") {
+      const { values: viewValues } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const { getFleetOverview } = await import("./views/fleet_overview");
+      const data = await getFleetOverview();
+      if (viewValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else {
+        const headers = [
+          "project",
+          "last_cycle",
+          "cycles",
+          "verified",
+          "failed",
+          "pickable",
+          "auto_merge",
+          "branch",
+        ];
+        const cells = data.projects.map((p) => [
+          p.id,
+          p.last_cycle_at ? formatRelativeTime(p.last_cycle_at) : "never",
+          String(p.cycles_total),
+          String(p.verified),
+          String(p.failed),
+          String(p.bot_pickable),
+          p.auto_merge ? "yes" : "no",
+          p.branch,
+        ]);
+        const widths = headers.map((h, i) =>
+          Math.max(h.length, ...cells.map((row) => row[i].length), 0),
+        );
+        const fmtRow = (row: string[]) =>
+          row.map((v, i) => v.padEnd(widths[i])).join("  ");
+        console.log(fmtRow(headers));
+        for (const row of cells) console.log(fmtRow(row));
+        const passRatePct = `${Math.round(data.aggregates.pass_rate * 100)}%`;
+        const slotEff =
+          data.aggregates.slot_efficiency_recent === null
+            ? "n/a"
+            : data.aggregates.slot_efficiency_recent.toFixed(2);
+        console.log(
+          `\nTotal cycles: ${data.aggregates.total_cycles}  pass_rate: ${passRatePct}  slot_efficiency_recent: ${slotEff}`,
+        );
+      }
+      break;
+    }
+
+    // task-queue, session-tail, dispatch-detail, inbox are queued as
+    // gs-227..230. Recognise them as valid names (so they don't collide
+    // with the "unknown view" branch) but surface a clear not-yet-wired
+    // message until their CLI shims land.
+    console.error(
+      `Error: view '${viewName}' is not yet wired up — queued as a follow-up task`,
+    );
+    process.exit(1);
   }
 
   default:
