@@ -13,6 +13,7 @@ import {
   checkProjectsYamlHasProject,
   checkProjectsYamlCustomized,
   checkStateDirWritable,
+  checkReviewerProvider,
 } from "../src/doctor";
 import { setRootDir } from "../src/state";
 import type { ProjectConfig } from "../src/types";
@@ -624,5 +625,80 @@ describe("checkStrandedBotCommits", () => {
     } finally {
       rmSync(notGitPath, { recursive: true, force: true });
     }
+  });
+});
+
+describe("checkReviewerProvider (gs-263)", () => {
+  it("reports claude provider as PASS when no env is set", () => {
+    const result = checkReviewerProvider({});
+    expect(result.status).toBe("pass");
+    expect(result.provider).toBe("claude");
+    expect(result.detail).toBe("reviewer: claude");
+  });
+
+  it("reports openrouter with model as PASS when key is set", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "openrouter",
+      OPENROUTER_API_KEY: "sk-or-test",
+    });
+    expect(result.status).toBe("pass");
+    expect(result.provider).toBe("openrouter");
+    expect(result.detail).toContain("reviewer: openrouter");
+    expect(result.detail).toContain("model:");
+    expect(result.detail).toContain("qwen/qwen3-coder-30b-a3b-instruct");
+    expect(result.detail).not.toContain("OPENROUTER_API_KEY");
+  });
+
+  it("honors GENERALSTAFF_REVIEWER_MODEL override for openrouter", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "openrouter",
+      OPENROUTER_API_KEY: "sk-or-test",
+      GENERALSTAFF_REVIEWER_MODEL: "qwen/qwen3-coder-plus",
+    });
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("qwen/qwen3-coder-plus");
+  });
+
+  it("reports openrouter without key as WARN", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "openrouter",
+    });
+    expect(result.status).toBe("warn");
+    expect(result.provider).toBe("openrouter");
+    expect(result.detail).toContain("OPENROUTER_API_KEY not set");
+    expect(result.detail).toContain("verification_failed");
+  });
+
+  it("reports ollama as PASS with OLLAMA_HOST default", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "ollama",
+    });
+    expect(result.status).toBe("pass");
+    expect(result.provider).toBe("ollama");
+    expect(result.detail).toContain("reviewer: ollama");
+    expect(result.detail).toContain("OLLAMA_HOST:");
+    expect(result.detail).toContain("http://localhost:11434");
+    expect(result.detail).toContain("model:");
+    expect(result.detail).toContain("qwen3:8b");
+  });
+
+  it("reports ollama with custom OLLAMA_HOST and model override", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "ollama",
+      OLLAMA_HOST: "http://10.0.0.5:11434",
+      GENERALSTAFF_REVIEWER_MODEL: "llama3:70b",
+    });
+    expect(result.status).toBe("pass");
+    expect(result.detail).toContain("http://10.0.0.5:11434");
+    expect(result.detail).toContain("llama3:70b");
+  });
+
+  it("normalizes uppercase provider to lowercase", () => {
+    const result = checkReviewerProvider({
+      GENERALSTAFF_REVIEWER_PROVIDER: "OpenRouter",
+      OPENROUTER_API_KEY: "sk-or-test",
+    });
+    expect(result.provider).toBe("openrouter");
+    expect(result.status).toBe("pass");
   });
 });
