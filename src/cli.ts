@@ -930,6 +930,21 @@ switch (command) {
         }
         priorityFilter = parsed;
       }
+      // gs-238: when a projects.yaml is present, reject --project=<unknown-id>
+      // eagerly so operators get a clear error instead of a silent empty list
+      // (loadTasks returns [] for a missing state/<id>/tasks.json). Legacy
+      // behaviour is preserved when projects.yaml is absent.
+      if (existsSync(join(getRootDir(), "projects.yaml"))) {
+        const registered = await loadProjects();
+        if (!registered.find((p) => p.id === values.project)) {
+          const ids =
+            registered.map((p) => p.id).join(", ") || "(none)";
+          console.error(
+            `Error: project '${values.project}' not found. Registered: ${ids}`,
+          );
+          process.exit(1);
+        }
+      }
       let tasks;
       try {
         tasks = await loadTasks(values.project);

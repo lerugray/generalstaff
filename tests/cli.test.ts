@@ -3313,4 +3313,103 @@ dispatcher:
       expect(systemLine).toContain("—");
     });
   });
+
+  describe("task list --project validation (gs-238)", () => {
+    const TL_DIR = join(import.meta.dir, "fixtures", "task_list_validate");
+
+    const TL_YAML = `
+projects:
+  - id: generalstaff
+    path: /tmp/gs
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - CLAUDE.md
+  - id: beta
+    path: /tmp/beta
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    branch: bot/work
+    hands_off:
+      - README.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      rmSync(TL_DIR, { recursive: true, force: true });
+      mkdirSync(join(TL_DIR, "state", "generalstaff"), { recursive: true });
+      mkdirSync(join(TL_DIR, "state", "beta"), { recursive: true });
+      writeFileSync(join(TL_DIR, "projects.yaml"), TL_YAML);
+      writeFileSync(
+        join(TL_DIR, "state", "generalstaff", "tasks.json"),
+        JSON.stringify([
+          { id: "gs-001", title: "gs work", status: "pending", priority: 1 },
+        ]),
+      );
+      writeFileSync(
+        join(TL_DIR, "state", "beta", "tasks.json"),
+        JSON.stringify([
+          { id: "bt-001", title: "beta work", status: "pending", priority: 1 },
+        ]),
+      );
+    });
+
+    afterEach(() => {
+      rmSync(TL_DIR, { recursive: true, force: true });
+    });
+
+    it("filters output to the named project when --project=<valid-id>", async () => {
+      const result = await runCli(
+        ["task", "list", "--project=generalstaff"],
+        TL_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("gs-001");
+      expect(result.stdout).toContain("gs work");
+      expect(result.stdout).not.toContain("bt-001");
+      expect(result.stdout).not.toContain("beta work");
+    });
+
+    it("errors and exits 1 when --project=<unknown-id>", async () => {
+      const result = await runCli(
+        ["task", "list", "--project=nosuch"],
+        TL_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("project 'nosuch' not found");
+      expect(result.stderr).toContain("Registered:");
+      expect(result.stderr).toContain("generalstaff");
+      expect(result.stderr).toContain("beta");
+    });
+
+    it("back-compat: default behavior unchanged for a valid --project", async () => {
+      // Row format is "<id>  p<priority>  <status>  <title>" — unchanged by gs-238.
+      const result = await runCli(
+        ["task", "list", "--project=beta"],
+        TL_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const line = result.stdout
+        .split("\n")
+        .find((l) => l.includes("bt-001"));
+      expect(line).toBeDefined();
+      expect(line).toContain("bt-001");
+      expect(line).toContain("p1");
+      expect(line).toContain("pending");
+      expect(line).toContain("beta work");
+    });
+  });
 });
