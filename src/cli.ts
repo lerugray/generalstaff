@@ -22,7 +22,7 @@ import {
   writeSessionPid,
   removeSessionPid,
 } from "./safety";
-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, loadProgressEvents, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
 import { initProject } from "./init";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
@@ -107,7 +107,7 @@ Usage:
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
 
-  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet]
+  generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet] [--auto-merge-failed]
                                                           Show fleet state
     Example: generalstaff status
     Example: generalstaff status --json                 # machine-readable output
@@ -517,7 +517,8 @@ switch (command) {
           "  --backlog           Per-project backlog buckets\n" +
           "  --totals            All-time aggregate session metrics\n" +
           "  --fleet             One-row-per-project fleet snapshot\n" +
-          "  --since=<iso>       Filter --sessions/--summary to events at or after an ISO-8601 timestamp\n" +
+          "  --auto-merge-failed List session-end auto-merge failures (last 30 days by default)\n" +
+          "  --since=<iso>       Filter --sessions/--summary/--auto-merge-failed to events at or after an ISO-8601 timestamp\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff status                           # default fleet state view\n" +
@@ -539,6 +540,7 @@ switch (command) {
         backlog: { type: "boolean", default: false },
         totals: { type: "boolean", default: false },
         fleet: { type: "boolean", default: false },
+        "auto-merge-failed": { type: "boolean", default: false },
         since: { type: "string" },
       },
       allowPositionals: false,
@@ -548,6 +550,7 @@ switch (command) {
     // after an ISO-8601 timestamp. Only ISO is accepted (relative
     // durations live in the audit log's --since, not here). Validate
     // before the render so operators get a single clear error.
+    // gs-257: --since also narrows --auto-merge-failed.
     let sinceMs: number | undefined;
     if (statusValues.since !== undefined) {
       const parsed = parseSinceIso(statusValues.since);
@@ -555,7 +558,11 @@ switch (command) {
         console.error("Error: --since requires an ISO timestamp");
         process.exit(1);
       }
-      if (!sessionsFlag.enabled && !statusValues.summary) {
+      if (
+        !sessionsFlag.enabled &&
+        !statusValues.summary &&
+        !statusValues["auto-merge-failed"]
+      ) {
         console.error(
           "Error: --since requires --sessions or --summary",
         );
@@ -608,7 +615,99 @@ switch (command) {
       process.exit(1);
     }
 
+    // gs-257: --auto-merge-failed scans PROGRESS.jsonl for session-end
+    // auto-merge failures; it's its own subview, mutually exclusive with
+    // every other one.
+    if (
+      statusValues["auto-merge-failed"] &&
+      (sessionsFlag.enabled ||
+        statusValues.summary ||
+        statusValues.backlog ||
+        statusValues.totals ||
+        statusValues.fleet ||
+        watch.enabled)
+    ) {
+      console.error(
+        "Error: --auto-merge-failed cannot be combined with --sessions/--summary/--backlog/--totals/--fleet/--watch",
+      );
+      process.exit(1);
+    }
+
     const renderStatus = async () => {
+      // gs-257: --auto-merge-failed scans PROGRESS.jsonl across all
+      // registered projects for `session_end_auto_merge` events where
+      // data.result === "failed". Informational — exit 0 whether or not
+      // failures exist. Default since = 30 days ago; --since=<iso>
+      // overrides.
+      if (statusValues["auto-merge-failed"]) {
+        const DEFAULT_DAYS = 30;
+        const nowMs = Date.now();
+        const windowMs =
+          sinceMs ?? nowMs - DEFAULT_DAYS * 24 * 60 * 60 * 1000;
+        const days = Math.max(
+          1,
+          Math.round((nowMs - windowMs) / (24 * 60 * 60 * 1000)),
+        );
+        const projects = await loadProjects();
+        const failed: Array<{
+          timestamp: string;
+          project_id: string;
+          branch: string;
+          reason: string;
+        }> = [];
+        for (const p of projects) {
+          const events = await loadProgressEvents(
+            p.id,
+            (e) =>
+              e.event === "session_end_auto_merge" &&
+              e.data.result === "failed",
+          );
+          for (const e of events) {
+            const ts = Date.parse(e.timestamp);
+            if (Number.isNaN(ts) || ts < windowMs) continue;
+            const branch =
+              typeof e.data.branch === "string" ? e.data.branch : "";
+            const rawReason =
+              typeof e.data.reason === "string" ? e.data.reason : "";
+            failed.push({
+              timestamp: e.timestamp,
+              project_id: e.project_id ?? p.id,
+              branch,
+              reason: rawReason,
+            });
+          }
+        }
+        failed.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        if (statusValues.json) {
+          console.log(JSON.stringify({ failed }, null, 2));
+          return;
+        }
+        if (failed.length === 0) {
+          console.log(
+            `No auto-merge failures in the last ${days} day${days === 1 ? "" : "s"}.`,
+          );
+          return;
+        }
+        const rows = failed.map((f) => [
+          f.timestamp,
+          f.project_id,
+          f.branch,
+          f.reason.length > 80 ? f.reason.slice(0, 77) + "..." : f.reason,
+        ]);
+        const header = ["Timestamp", "Project", "Branch", "Reason"];
+        const widths = header.map((h, i) =>
+          Math.max(h.length, ...rows.map((r) => r[i]!.length)),
+        );
+        const pad = (cells: string[]) =>
+          cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
+        const lines = [
+          pad(header),
+          widths.map((w) => "-".repeat(w)).join("  "),
+        ];
+        for (const r of rows) lines.push(pad(r));
+        console.log(lines.join("\n"));
+        return;
+      }
       if (statusValues.fleet) {
         const projects = await loadProjects();
         const fleet = await loadFleetState();

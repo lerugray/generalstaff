@@ -1719,7 +1719,7 @@
   {
     "id": "gs-257",
     "title": "Add `generalstaff status --auto-merge-failed [--since=<iso>]` filter. CREATE ONLY: extend the `status` subcommand handler in `src/cli.ts` with an `--auto-merge-failed` flag that scans PROGRESS.jsonl files (use loadProgressEvents from src/audit.ts) for `session_end_auto_merge` events where `data.result === \"failed\"`, and prints a table: timestamp | project_id | branch | reason (truncated to 80 chars). Honors the existing `--since=<iso>` filter from gs-247 to bound the scan window; default since = 30 days ago. `--json` emits `{ failed: [{ timestamp, project_id, branch, reason }] }`. Exit 0 whether failures exist or not — this is an informational surface, not a gate. If no failures: text mode prints `No auto-merge failures in the last <N> day(s).`; JSON mode emits empty array. `--auto-merge-failed` is mutually exclusive with other `--sessions`/`--summary`/`--backlog` flags — add mutex validation per the existing pattern (gs-247). Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) no events → empty array + friendly text; (b) 2 failures render in table; (c) --since filters; (d) --json shape; (e) mutex with --sessions errors. Expected diff: ~150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
