@@ -1,0 +1,813 @@
+You are the Reviewer agent for GeneralStaff, reviewing one cycle
+of work on the generalstaff project.
+
+Your job is SCOPE MATCH. Given the diff produced by this cycle
+and the tasks the Engineer agent claims to have completed,
+confirm that the diff actually matches the claimed work. This is
+the final gate before a cycle is marked done — if you cannot
+confirm the match, the cycle does NOT get marked done.
+
+You have read-only access. You cannot edit files. You CAN run
+git commands and read any file in the project.
+
+## The cycle's claimed work
+
+The Engineer marked these tasks as done during this cycle:
+
+"status": "done",
+],
+"completed_at": "2026-04-19T08:34:27.573Z"
+]
+
+The Engineer's session note (if one was written during the
+cycle):
+
+(No session note found)
+
+## The diff
+
+Full diff between cycle start and cycle end:
+
+diff --git a/src/cli.ts b/src/cli.ts
+index 2bb04a3..a1baad4 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -184,11 +184,14 @@ Usage:
+     Example: generalstaff summary --format=json         # machine-readable output
+     Example: generalstaff summary --project=myapp       # filter to a single project
+ 
+-  generalstaff doctor [--fix] [--yes] [--verbose]         Check prerequisites + diagnose resolvable issues
++  generalstaff doctor [--fix] [--yes] [--verbose] [--json]
++                                                          Check prerequisites + diagnose resolvable issues
+     Example: generalstaff doctor                        # diagnose only
+     Example: generalstaff doctor --fix                  # prompt y/N for each fix
+     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
+     Example: generalstaff doctor --verbose              # add context under each passing sanity check
++    Example: generalstaff doctor --json                 # machine-readable {ok, checks[]} on stdout
++    Example: generalstaff doctor --json --fix --yes     # emit post-fix state as JSON
+   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
+     Example: generalstaff clean --keep=10
+     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
+@@ -1041,6 +1044,8 @@ switch (command) {
+         // check. No short flag — top-level `-v` already means
+         // --version and is consumed before the subcommand dispatch.
+         verbose: { type: "boolean", default: false },
++        // gs-251: machine-readable output, pairs with --fix and --verbose.
++        json: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -1048,6 +1053,7 @@ switch (command) {
+       fix: Boolean(doctorValues.fix),
+       assumeYes: Boolean(doctorValues.yes),
+       verbose: Boolean(doctorValues.verbose),
++      json: Boolean(doctorValues.json),
+     });
+     break;
+   }
+diff --git a/src/doctor.ts b/src/doctor.ts
+index f5691d1..262393e 100644
+--- a/src/doctor.ts
++++ b/src/doctor.ts
+@@ -71,6 +71,25 @@ export interface DoctorOptions {
+   // indented context lines (resolved paths, git HEAD SHAs, byte sizes,
+   // task counts). Failing checks print the same detail as without it.
+   verbose?: boolean;
++  // gs-251: when true, emit a single structured JSON object on stdout
++  // instead of the usual human-readable text. --json + --fix emits the
++  // post-fix state; --json + --verbose is accepted but a no-op (verbose
++  // only affects text rendering).
++  json?: boolean;
++}
++
++// gs-251: shape of a single check in --json output.
++export interface DoctorJsonCheck {
++  name: string;
++  status: "pass" | "fail" | "skipped";
++  detail?: string;
++  fixable?: boolean;
++}
++
++// gs-251: shape of the overall --json payload.
++export interface DoctorJsonReport {
++  ok: boolean;
++  checks: DoctorJsonCheck[];
+ }
+ 
+ async function checkCommand(
+@@ -451,6 +470,10 @@ async function defaultPrompt(question: string): Promise<boolean> {
+ }
+ 
+ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
++  if (opts.json) {
++    await runDoctorJson(opts);
++    return;
++  }
+   const exitOnFailure = opts.exitOnFailure ?? true;
+   console.log("GeneralStaff Doctor\n");
+   console.log("Checking prerequisites...\n");
+@@ -619,3 +642,194 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+     if (exitOnFailure) process.exit(1);
+   }
+ }
++
++// gs-251: collect the doctor state as structured data. Does not print.
++// Shared between the initial scan and the post-fix re-scan in JSON mode.
++async function collectDoctorJsonReport(
++  opts: DoctorOptions,
++): Promise<DoctorJsonReport> {
++  const checks: DoctorJsonCheck[] = [];
++
++  // Prerequisites.
++  for (const prereq of PREREQUISITES) {
++    const result = await checkCommand(
++      prereq.name,
++      prereq.versionArg,
++      prereq.minVersion,
++    );
++    if (!result.found) {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "fail",
++        detail: "not found on PATH",
++      });
++    } else if (result.belowMinimum) {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "fail",
++        detail: `${result.version} (need >=${result.belowMinimum.required})`,
++      });
++    } else {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "pass",
++        detail: result.version ?? undefined,
++      });
++    }
++  }
++
++  // Load projects. If unavailable, emit skipped entries for the
++  // project-scoped checks so the consumer sees they were not run.
++  let projects: ProjectConfig[] = [];
++  let projectsLoadError: string | null = null;
++  try {
++    const loader =
++      opts.loadProjects ??
++      (async () => (await import("./projects")).loadProjects());
++    projects = await loader();
++  } catch (e) {
++    projectsLoadError = (e as Error).message;
++  }
++
++  if (projectsLoadError !== null) {
++    for (const name of ["project paths", "state dirs", "tasks.json"]) {
++      checks.push({
++        name,
++        status: "skipped",
++        detail: `projects.yaml not loaded: ${projectsLoadError}`,
++      });
++    }
++  } else {
++    const sanity: SanityCheckResult[] = [
++      checkProjectPaths(projects),
++      checkProjectStateDirs(projects),
++      checkProjectTasksJson(projects),
++    ];
++    for (const s of sanity) {
++      if (s.problems.length === 0) {
++        checks.push({ name: s.name, status: "pass", detail: s.okDetail });
++      } else {
++        checks.push({
++          name: s.name,
++          status: "fail",
++          detail: s.problems.join("; "),
++        });
++      }
++    }
++  }
++
++  const digests = checkDigestsWritable();
++  if (digests.problems.length === 0) {
++    checks.push({ name: digests.name, status: "pass", detail: digests.okDetail });
++  } else {
++    checks.push({
++      name: digests.name,
++      status: "fail",
++      detail: digests.problems.join("; "),
++    });
++  }
++
++  // Fixable issues — one check row per issue so the consumer can
++  // iterate them and act. Absence of issues is reported as a single
++  // pass row per category to keep the output stable.
++  if (projectsLoadError === null) {
++    const stateDirIssues = await findStateDirIssues(projects);
++    if (stateDirIssues.length === 0) {
++      checks.push({
++        name: "state-dir-missing",
++        status: "pass",
++        detail: "no missing state/<id>/ dirs",
++        fixable: true,
++      });
++    } else {
++      for (const issue of stateDirIssues) {
++        checks.push({
++          name: issue.id,
++          status: "fail",
++          detail: issue.description,
++          fixable: true,
++        });
++      }
++    }
++
++    const staleIssues = await findStaleWorktreeIssues(projects);
++    if (staleIssues.length === 0) {
++      checks.push({
++        name: "stale-worktree",
++        status: "pass",
++        detail: "no stale worktrees",
++        fixable: true,
++      });
++    } else {
++      for (const issue of staleIssues) {
++        checks.push({
++          name: issue.id,
++          status: "fail",
++          detail: issue.description,
++          fixable: true,
++        });
++      }
++    }
++  }
++
++  const stopIssues = await findOrphanedStopFileIssue();
++  if (stopIssues.length === 0) {
++    checks.push({
++      name: "orphaned-stop-file",
++      status: "pass",
++      detail: "no STOP file present",
++      fixable: true,
++    });
++  } else {
++    for (const issue of stopIssues) {
++      checks.push({
++        name: issue.id,
++        status: "fail",
++        detail: issue.description,
++        fixable: true,
++      });
++    }
++  }
++
++  const ok = !checks.some((c) => c.status === "fail");
++  return { ok, checks };
++}
++
++async function runDoctorJson(opts: DoctorOptions): Promise<void> {
++  const exitOnFailure = opts.exitOnFailure ?? true;
++
++  // In --fix mode, collect issues, apply approved ones, then re-scan
++  // so the emitted report reflects post-fix state (per task spec).
++  if (opts.fix) {
++    let projects: ProjectConfig[] = [];
++    try {
++      const loader =
++        opts.loadProjects ??
++        (async () => (await import("./projects")).loadProjects());
++      projects = await loader();
++    } catch {
++      // If projects.yaml won't load we still attempt the orphan-STOP fix.
++    }
++    const issues: DiagnosticIssue[] = [];
++    issues.push(...(await findStateDirIssues(projects)));
++    issues.push(...(await findStaleWorktreeIssues(projects)));
++    issues.push(...(await findOrphanedStopFileIssue()));
++    const promptFn = opts.prompt ?? defaultPrompt;
++    for (const issue of issues) {
++      const approve =
++        opts.assumeYes === true
++          ? true
++          : await promptFn(`Fix: ${issue.description}?`);
++      if (!approve) continue;
++      try {
++        await issue.fix();
++      } catch {
++        // Swallow — post-fix re-scan will surface the remaining failure.
++      }
++    }
++  }
++
++  const report = await collectDoctorJsonReport(opts);
++  console.log(JSON.stringify(report));
++  if (!report.ok && exitOnFailure) process.exit(1);
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 72a500a..be31589 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1643,14 +1643,15 @@
+   {
+     "id": "gs-251",
+     "title": "Add `--json` flag to `generalstaff doctor`. CREATE ONLY: extend the doctor subcommand handler in `src/cli.ts` with `--json` parsing (alongside the existing `--fix`, `--yes`, `--verbose` flags); thread it through to `runDoctor(options)` in `src/doctor.ts` so when `json: true` the function returns / emits a structured object instead of human-readable text. JSON shape: `{ ok: boolean, checks: [{ name, status: \"pass\"|\"fail\"|\"skipped\", detail?: string, fixable?: boolean }] }`. `--json` + `--fix` is allowed — emit the post-fix state in json; `--json` + `--verbose` is allowed and a no-op (verbose only affects text rendering). Exit 0 if all checks pass (ok: true), exit 1 if any fail (ok: false). Append tests to `tests/cli.test.ts` and/or `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `--json` emits valid JSON with ok + checks array shape; (b) all-pass exits 0 with ok:true; (c) at-least-one-fail exits 1 with ok:false; (d) `--json --fix` works and reflects post-fix state; (e) `--json --verbose` does not break the shape. Motivation: pairs with the existing --json flags on status/history/view for uniform machine-readable output across the CLI surface. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+       "src/doctor.ts",
+       "tests/cli.test.ts",
+       "tests/doctor.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-19T08:34:27.573Z"
+   },
+   {
+     "id": "gs-252",
+@@ -1674,4 +1675,4 @@
+       "tests/cli.test.ts"
+     ]
+   }
+-]
+\ No newline at end of file
++]
+diff --git a/tests/doctor.test.ts b/tests/doctor.test.ts
+index d40caeb..625b330 100644
+--- a/tests/doctor.test.ts
++++ b/tests/doctor.test.ts
+@@ -262,3 +262,130 @@ describe("findProjectPathProblems", () => {
+     expect(problems.some((s) => s.startsWith("notgit:"))).toBe(true);
+   });
+ });
++
++// gs-251: --json emits a structured {ok, checks[]} payload.
++describe("runDoctor --json", () => {
++  beforeEach(() => {
++    mkdirSync(FIXTURE, { recursive: true });
++    setRootDir(FIXTURE);
++  });
++
++  afterEach(() => {
++    rmSync(FIXTURE, { recursive: true, force: true });
++  });
++
++  // Capture stdout from a single runDoctor invocation without
++  // leaking across tests. Mirrors the pattern other CLI tests use.
++  async function captureJson(
++    args: Parameters<typeof runDoctor>[0],
++  ): Promise<{ stdout: string; report: { ok: boolean; checks: unknown[] } }> {
++    const originalLog = console.log;
++    let buf = "";
++    console.log = (...parts: unknown[]) => {
++      buf += parts.map(String).join(" ") + "\n";
++    };
++    try {
++      await runDoctor(args);
++    } finally {
++      console.log = originalLog;
++    }
++    // First line containing a JSON object is our payload.
++    const line = buf.split("\n").find((l) => l.trim().startsWith("{"));
++    if (!line) {
++      throw new Error(`no JSON line in doctor --json output: ${buf}`);
++    }
++    const report = JSON.parse(line);
++    return { stdout: buf, report };
++  }
++
++  it("emits valid JSON with ok + checks array shape", async () => {
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(typeof report.ok).toBe("boolean");
++    expect(Array.isArray(report.checks)).toBe(true);
++    expect(report.checks.length).toBeGreaterThan(0);
++    for (const c of report.checks as Array<{
++      name: string;
++      status: string;
++      detail?: string;
++      fixable?: boolean;
++    }>) {
++      expect(typeof c.name).toBe("string");
++      expect(["pass", "fail", "skipped"]).toContain(c.status);
++      if (c.detail !== undefined) expect(typeof c.detail).toBe("string");
++      if (c.fixable !== undefined) expect(typeof c.fixable).toBe("boolean");
++    }
++  });
++
++  it("exits 0 with ok:true when everything passes", async () => {
++    // No projects + clean FIXTURE ⇒ no fixable issues and sanity
++    // checks that iterate projects report "no projects registered".
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(report.ok).toBe(true);
++    for (const c of report.checks as Array<{ status: string }>) {
++      expect(c.status).not.toBe("fail");
++    }
++  });
++
++  it("exits 1 with ok:false when any check fails", async () => {
++    // Plant an orphaned STOP file → orphaned-stop-file check fails.
++    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(report.ok).toBe(false);
++    const failed = (report.checks as Array<{
++      name: string;
++      status: string;
++      fixable?: boolean;
++    }>).find((c) => c.name === "orphaned-stop-file" && c.status === "fail");
++    expect(failed).toBeDefined();
++    expect(failed!.fixable).toBe(true);
++  });
++
++  it("--json --fix reflects post-fix state", async () => {
++    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
++    const p = makeProject("alpha", "/tmp/doctor-alpha-nonexistent");
++    const { report } = await captureJson({
++      json: true,
++      fix: true,
++      assumeYes: true,
++      loadProjects: async () => [p],
++      exitOnFailure: false,
++    });
++    // STOP file should have been removed and the check should now pass.
++    expect(existsSync(join(FIXTURE, "STOP"))).toBe(false);
++    const stop = (report.checks as Array<{ name: string; status: string }>)
++      .find((c) => c.name === "orphaned-stop-file");
++    expect(stop?.status).toBe("pass");
++    // Missing state dir should have been created and the category row
++    // should now pass too (state/alpha/ was materialized by the fix).
++    expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(true);
++    const stateDir = (report.checks as Array<{ name: string; status: string }>)
++      .find((c) => c.name === "state-dir-missing");
++    expect(stateDir?.status).toBe("pass");
++  });
++
++  it("--json --verbose does not break the shape", async () => {
++    const { report } = await captureJson({
++      json: true,
++      verbose: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(typeof report.ok).toBe("boolean");
++    expect(Array.isArray(report.checks)).toBe(true);
++    for (const c of report.checks as Array<{ status: string }>) {
++      expect(["pass", "fail", "skipped"]).toContain(c.status);
++    }
++  });
++});
+
+
+Diff summary: src/cli.ts                    |   8 +-
+ src/doctor.ts                 | 214 ++++++++++++++++++++++++++++++++++++++++++
+ state/generalstaff/tasks.json |   7 +-
+ tests/doctor.test.ts          | 127 +++++++++++++++++++++++++
+ 4 files changed, 352 insertions(+), 4 deletions(-)
+
+## Independent verification output
+
+The dispatcher ran the verification command after the Engineer
+finished, independently of whatever the Engineer ran internally:
+
+Command: `bun test && bun x tsc --noEmit`
+Exit code: 0
+
+Output:
+
+=== GeneralStaff Verification Gate ===
+Command: bun test && bun x tsc --noEmit
+CWD: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree
+Started: 2026-04-19T08:34:55.013Z
+========================================
+
+bun test v1.3.11 (af24e281)
+
+tests\clean.test.ts:
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 30 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+  Deleted 1 log file(s) older than 7 day(s)
+
+Cleaned 1 item(s).
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+Nothing to clean.
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+[generalstaff] warning: project "alpha": path "/tmp/clean-alpha-nonexistent" does not exist on this machine — skipping git check
+
+tests\doctor.test.ts:
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  SKIP  state-dir-missing:alpha
+
+Fix summary: 0 applied, 1 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  FAIL  alpha: path does not exist — /tmp/doctor-alpha-nonexistent. Fix: update projects.yaml or re-clone the repo at that path.
+  WARN  Missing state directory: state/alpha/
+
+Sanity checks...
+
+  ✗  project paths — alpha: path does not exist — /tmp/doctor-alpha-nonexistent
+  ✗  state dirs — alpha: missing state dir — C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\state\alpha
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED state-dir-missing:alpha
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+Fix project-path failures before using GeneralStaff.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  WARN  STOP file present at C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test\STOP — if no session is paused, this is likely orphaned from a crashed run
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+  FIXED orphaned-stop-file
+
+Fix summary: 1 applied, 0 skipped, 0 errored.
+GeneralStaff Doctor
+
+Checking prerequisites...
+
+  PASS  bun — 1.3.11
+  PASS  git — git version 2.53.0.windows.1
+  PASS  claude — 2.1.114 (Claude Code)
+
+Checking runtime state...
+
+  PASS  no fixable issues detected
+
+Sanity checks...
+
+  ✓  project paths — 0 project(s) point at valid git repos
+  ✓  state dirs — no projects registered
+  ✓  tasks.json — no tasks.json files present
+  ✓  digests/ — digests/ will be created on first write — parent C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\doctor_test is writable
+
+Applying fixes...
+
+
+Fix summary: 0 applied, 0 skipped, 0 errored.
+hello
+test output
+budget=25
+
+tests\git.test.ts:
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+[fetchCommitSubject] warning: could not resolve f7049e0c after 2 attempts (status=128, stderr=fatal: bad object f7049e0c1ebf5d46b66d7c2c0acbaf0ca3cdab43)
+[fetchCommitSubject] warning: could not resolve deadbeef after 2 attempts (status=128, stderr=fatal: bad object deadbeefdeadbeefdeadbeefdeadbeefdeadbeef)
+
+tests\projects.test.ts:
+[generalstaff] warning: project "test-project": path "/tmp/test" does not exist on this machine — skipping git check
+[generalstaff] warning: project "ghost": path "/this/path/does/not/exist/anywhere" does not exist on this machine — skipping git check
+
+tests\providers.calibration.test.ts:
+[calibration:verified_simple] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:hands_off_violation] skip: no claude binary (CLAUDE_BINARY env not set)
+[calibration:verification_failed_scope_drift] skip: no claude binary (CLAUDE_BINARY env not set)
+
+tests\session.test.ts:
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\.bot-worktree\tests\fixtures\digest_test\digests\digest_20260419_083557.md
+[fetchCommitSubject] warning: could not resolve 12345678 after 2 attempts (status=128, stderr=fatal: ambiguous argument '1234567890abcdef': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]')
+
+Digest written to: C:\Users\rweis\OneDrive\Documents\GeneralStaff\
+
+[... truncated at 10000 chars]
+
+## Hands-off list
+
+These files (or glob patterns) must NOT appear in the diff. A
+single match means the cycle failed.
+
+- `DESIGN.md`
+- `PIVOT-*.md`
+- `PHASE-*.md`
+- `RULE-RELAXATION-*.md`
+- `FUTURE-DIRECTIONS-*.md`
+- `UI-VISION-*.md`
+- `LAUNCH-PLAN.md`
+- `VOICE.md`
+- `CLAUDE.md`
+- `INDEX.md`
+- `README.md`
+- `src/safety.ts`
+- `src/reviewer.ts`
+- `src/prompts/`
+- `scripts/`
+- `run_bot*`
+- `run_session*`
+- `docs/internal/`
+- `docs/sessions/`
+- `projects.yaml`
+- `projects.yaml.example`
+
+## Your task
+
+Examine the diff and answer these questions:
+
+1. **Scope match:** Does every file changed in the diff relate
+   to one of the marked-done tasks? Any files changed that
+   don't correspond to any claimed work? Touching a test file
+   to support a claimed bug fix IS fine; touching an unrelated
+   module is scope drift.
+
+2. **Hands-off violations:** Does the diff touch any file
+   matching a pattern in the hands-off list? Glob patterns
+   should be matched (e.g., `run_bot*.sh` matches
+   `run_bot_publish.sh`).
+
+3. **Task completion evidence:** For each marked-done task,
+   does the diff contain changes that plausibly complete it?
+   You are NOT grading correctness — just checking that the
+   claimed work has corresponding evidence.
+
+4. **Silent failures:** Did the Engineer mark something done
+   that the diff doesn't reflect? Did it claim to fix a test
+   that's still failing in the verification output?
+
+## Verdict format
+
+Respond with a JSON object only. No prose before or after the
+JSON. No markdown code fences around the JSON.
+
+**STRICT FORMATTING RULES (the parser is strict — malformed
+responses get rolled back as verification_failed even when your
+verdict is "verified"):**
+
+1. The whole response MUST be a single valid JSON object that
+   passes `JSON.parse` without modification.
+2. Every string value MUST be a single well-formed JSON string.
+   Do NOT embed raw quotes or colons that would look like a
+   nested key. For example, NEVER emit
+   `"task": "status": "done"` — that is two colons in what
+   should be one string value, and the strict parser sees it
+   as broken JSON.
+3. Inside string values, escape any inner quote as `\"` and
+   any inner backslash as `\\`. Do not include raw newlines
+   inside string values.
+4. For `"task"` values, use a **bare task identifier** like
+   `"gs-170"` or `"gamr-001"` — not the full task title and
+   not a natural-language status summary. The task ID alone is
+   enough; the human reviewer reads the title from tasks.json.
+5. For `"reason"`, `"evidence"`, and `"notes"`, use plain
+   one-line prose. Keep them short.
+
+{
+  "verdict": "verified" | "verified_weak" | "verification_failed",
+  "reason": "one sentence explaining the verdict",
+  "scope_drift_files": [
+    "list of files in diff that don't match any claimed task"
+  ],
+  "hands_off_violations": [
+    "list of files in diff that match a hands_off pattern"
+  ],
+  "task_evidence": [
+    {
+      "task": "bare task ID, e.g. gs-170 — NOT a natural-language summary",
+      "evidence": "how the diff supports this",
+      "confidence": "high" | "medium" | "low"
+    }
+  ],
+  "silent_failures": [
+    "list of claimed-done items with no diff evidence"
+  ],
+  "notes": "anything else the human reviewer should see"
+}
+
+## Verdict rules
+
+- **verified**: verification exit code is 0 AND no scope drift
+  AND no hands_off violations AND every marked-done task has at
+  least medium-confidence evidence
+- **verified_weak**: everything is verified EXCEPT the
+  verification command was effectively a no-op (empty, `true`,
+  `:`), OR your task evidence is entirely low-confidence (no
+  strong evidence for any claimed task)
+- **verification_failed**: anything else — verification exit
+  non-zero, scope drift detected, hands_off violation detected,
+  claimed task has no diff evidence, or silent failure detected
+
+When in doubt, err on the side of `verification_failed`. The
+cost of a false `verified` is much higher than the cost of a
+false `verification_failed`. False verified is the Polsia
+failure mode; false failed just means a human looks at the
+diff.

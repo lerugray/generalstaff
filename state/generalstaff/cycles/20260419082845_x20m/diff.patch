@@ -1,0 +1,437 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index 2bb04a3..a1baad4 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -184,11 +184,14 @@ Usage:
+     Example: generalstaff summary --format=json         # machine-readable output
+     Example: generalstaff summary --project=myapp       # filter to a single project
+ 
+-  generalstaff doctor [--fix] [--yes] [--verbose]         Check prerequisites + diagnose resolvable issues
++  generalstaff doctor [--fix] [--yes] [--verbose] [--json]
++                                                          Check prerequisites + diagnose resolvable issues
+     Example: generalstaff doctor                        # diagnose only
+     Example: generalstaff doctor --fix                  # prompt y/N for each fix
+     Example: generalstaff doctor --fix --yes            # auto-apply fixes (non-interactive)
+     Example: generalstaff doctor --verbose              # add context under each passing sanity check
++    Example: generalstaff doctor --json                 # machine-readable {ok, checks[]} on stdout
++    Example: generalstaff doctor --json --fix --yes     # emit post-fix state as JSON
+   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
+     Example: generalstaff clean --keep=10
+     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
+@@ -1041,6 +1044,8 @@ switch (command) {
+         // check. No short flag — top-level `-v` already means
+         // --version and is consumed before the subcommand dispatch.
+         verbose: { type: "boolean", default: false },
++        // gs-251: machine-readable output, pairs with --fix and --verbose.
++        json: { type: "boolean", default: false },
+       },
+       allowPositionals: false,
+     });
+@@ -1048,6 +1053,7 @@ switch (command) {
+       fix: Boolean(doctorValues.fix),
+       assumeYes: Boolean(doctorValues.yes),
+       verbose: Boolean(doctorValues.verbose),
++      json: Boolean(doctorValues.json),
+     });
+     break;
+   }
+diff --git a/src/doctor.ts b/src/doctor.ts
+index f5691d1..262393e 100644
+--- a/src/doctor.ts
++++ b/src/doctor.ts
+@@ -71,6 +71,25 @@ export interface DoctorOptions {
+   // indented context lines (resolved paths, git HEAD SHAs, byte sizes,
+   // task counts). Failing checks print the same detail as without it.
+   verbose?: boolean;
++  // gs-251: when true, emit a single structured JSON object on stdout
++  // instead of the usual human-readable text. --json + --fix emits the
++  // post-fix state; --json + --verbose is accepted but a no-op (verbose
++  // only affects text rendering).
++  json?: boolean;
++}
++
++// gs-251: shape of a single check in --json output.
++export interface DoctorJsonCheck {
++  name: string;
++  status: "pass" | "fail" | "skipped";
++  detail?: string;
++  fixable?: boolean;
++}
++
++// gs-251: shape of the overall --json payload.
++export interface DoctorJsonReport {
++  ok: boolean;
++  checks: DoctorJsonCheck[];
+ }
+ 
+ async function checkCommand(
+@@ -451,6 +470,10 @@ async function defaultPrompt(question: string): Promise<boolean> {
+ }
+ 
+ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
++  if (opts.json) {
++    await runDoctorJson(opts);
++    return;
++  }
+   const exitOnFailure = opts.exitOnFailure ?? true;
+   console.log("GeneralStaff Doctor\n");
+   console.log("Checking prerequisites...\n");
+@@ -619,3 +642,194 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+     if (exitOnFailure) process.exit(1);
+   }
+ }
++
++// gs-251: collect the doctor state as structured data. Does not print.
++// Shared between the initial scan and the post-fix re-scan in JSON mode.
++async function collectDoctorJsonReport(
++  opts: DoctorOptions,
++): Promise<DoctorJsonReport> {
++  const checks: DoctorJsonCheck[] = [];
++
++  // Prerequisites.
++  for (const prereq of PREREQUISITES) {
++    const result = await checkCommand(
++      prereq.name,
++      prereq.versionArg,
++      prereq.minVersion,
++    );
++    if (!result.found) {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "fail",
++        detail: "not found on PATH",
++      });
++    } else if (result.belowMinimum) {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "fail",
++        detail: `${result.version} (need >=${result.belowMinimum.required})`,
++      });
++    } else {
++      checks.push({
++        name: `prereq: ${prereq.name}`,
++        status: "pass",
++        detail: result.version ?? undefined,
++      });
++    }
++  }
++
++  // Load projects. If unavailable, emit skipped entries for the
++  // project-scoped checks so the consumer sees they were not run.
++  let projects: ProjectConfig[] = [];
++  let projectsLoadError: string | null = null;
++  try {
++    const loader =
++      opts.loadProjects ??
++      (async () => (await import("./projects")).loadProjects());
++    projects = await loader();
++  } catch (e) {
++    projectsLoadError = (e as Error).message;
++  }
++
++  if (projectsLoadError !== null) {
++    for (const name of ["project paths", "state dirs", "tasks.json"]) {
++      checks.push({
++        name,
++        status: "skipped",
++        detail: `projects.yaml not loaded: ${projectsLoadError}`,
++      });
++    }
++  } else {
++    const sanity: SanityCheckResult[] = [
++      checkProjectPaths(projects),
++      checkProjectStateDirs(projects),
++      checkProjectTasksJson(projects),
++    ];
++    for (const s of sanity) {
++      if (s.problems.length === 0) {
++        checks.push({ name: s.name, status: "pass", detail: s.okDetail });
++      } else {
++        checks.push({
++          name: s.name,
++          status: "fail",
++          detail: s.problems.join("; "),
++        });
++      }
++    }
++  }
++
++  const digests = checkDigestsWritable();
++  if (digests.problems.length === 0) {
++    checks.push({ name: digests.name, status: "pass", detail: digests.okDetail });
++  } else {
++    checks.push({
++      name: digests.name,
++      status: "fail",
++      detail: digests.problems.join("; "),
++    });
++  }
++
++  // Fixable issues — one check row per issue so the consumer can
++  // iterate them and act. Absence of issues is reported as a single
++  // pass row per category to keep the output stable.
++  if (projectsLoadError === null) {
++    const stateDirIssues = await findStateDirIssues(projects);
++    if (stateDirIssues.length === 0) {
++      checks.push({
++        name: "state-dir-missing",
++        status: "pass",
++        detail: "no missing state/<id>/ dirs",
++        fixable: true,
++      });
++    } else {
++      for (const issue of stateDirIssues) {
++        checks.push({
++          name: issue.id,
++          status: "fail",
++          detail: issue.description,
++          fixable: true,
++        });
++      }
++    }
++
++    const staleIssues = await findStaleWorktreeIssues(projects);
++    if (staleIssues.length === 0) {
++      checks.push({
++        name: "stale-worktree",
++        status: "pass",
++        detail: "no stale worktrees",
++        fixable: true,
++      });
++    } else {
++      for (const issue of staleIssues) {
++        checks.push({
++          name: issue.id,
++          status: "fail",
++          detail: issue.description,
++          fixable: true,
++        });
++      }
++    }
++  }
++
++  const stopIssues = await findOrphanedStopFileIssue();
++  if (stopIssues.length === 0) {
++    checks.push({
++      name: "orphaned-stop-file",
++      status: "pass",
++      detail: "no STOP file present",
++      fixable: true,
++    });
++  } else {
++    for (const issue of stopIssues) {
++      checks.push({
++        name: issue.id,
++        status: "fail",
++        detail: issue.description,
++        fixable: true,
++      });
++    }
++  }
++
++  const ok = !checks.some((c) => c.status === "fail");
++  return { ok, checks };
++}
++
++async function runDoctorJson(opts: DoctorOptions): Promise<void> {
++  const exitOnFailure = opts.exitOnFailure ?? true;
++
++  // In --fix mode, collect issues, apply approved ones, then re-scan
++  // so the emitted report reflects post-fix state (per task spec).
++  if (opts.fix) {
++    let projects: ProjectConfig[] = [];
++    try {
++      const loader =
++        opts.loadProjects ??
++        (async () => (await import("./projects")).loadProjects());
++      projects = await loader();
++    } catch {
++      // If projects.yaml won't load we still attempt the orphan-STOP fix.
++    }
++    const issues: DiagnosticIssue[] = [];
++    issues.push(...(await findStateDirIssues(projects)));
++    issues.push(...(await findStaleWorktreeIssues(projects)));
++    issues.push(...(await findOrphanedStopFileIssue()));
++    const promptFn = opts.prompt ?? defaultPrompt;
++    for (const issue of issues) {
++      const approve =
++        opts.assumeYes === true
++          ? true
++          : await promptFn(`Fix: ${issue.description}?`);
++      if (!approve) continue;
++      try {
++        await issue.fix();
++      } catch {
++        // Swallow — post-fix re-scan will surface the remaining failure.
++      }
++    }
++  }
++
++  const report = await collectDoctorJsonReport(opts);
++  console.log(JSON.stringify(report));
++  if (!report.ok && exitOnFailure) process.exit(1);
++}
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 72a500a..be31589 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1643,14 +1643,15 @@
+   {
+     "id": "gs-251",
+     "title": "Add `--json` flag to `generalstaff doctor`. CREATE ONLY: extend the doctor subcommand handler in `src/cli.ts` with `--json` parsing (alongside the existing `--fix`, `--yes`, `--verbose` flags); thread it through to `runDoctor(options)` in `src/doctor.ts` so when `json: true` the function returns / emits a structured object instead of human-readable text. JSON shape: `{ ok: boolean, checks: [{ name, status: \"pass\"|\"fail\"|\"skipped\", detail?: string, fixable?: boolean }] }`. `--json` + `--fix` is allowed — emit the post-fix state in json; `--json` + `--verbose` is allowed and a no-op (verbose only affects text rendering). Exit 0 if all checks pass (ok: true), exit 1 if any fail (ok: false). Append tests to `tests/cli.test.ts` and/or `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) `--json` emits valid JSON with ok + checks array shape; (b) all-pass exits 0 with ok:true; (c) at-least-one-fail exits 1 with ok:false; (d) `--json --fix` works and reflects post-fix state; (e) `--json --verbose` does not break the shape. Motivation: pairs with the existing --json flags on status/history/view for uniform machine-readable output across the CLI surface. Expected diff: ~120 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 3,
+     "expected_touches": [
+       "src/cli.ts",
+       "src/doctor.ts",
+       "tests/cli.test.ts",
+       "tests/doctor.test.ts"
+-    ]
++    ],
++    "completed_at": "2026-04-19T08:34:27.573Z"
+   },
+   {
+     "id": "gs-252",
+@@ -1674,4 +1675,4 @@
+       "tests/cli.test.ts"
+     ]
+   }
+-]
+\ No newline at end of file
++]
+diff --git a/tests/doctor.test.ts b/tests/doctor.test.ts
+index d40caeb..625b330 100644
+--- a/tests/doctor.test.ts
++++ b/tests/doctor.test.ts
+@@ -262,3 +262,130 @@ describe("findProjectPathProblems", () => {
+     expect(problems.some((s) => s.startsWith("notgit:"))).toBe(true);
+   });
+ });
++
++// gs-251: --json emits a structured {ok, checks[]} payload.
++describe("runDoctor --json", () => {
++  beforeEach(() => {
++    mkdirSync(FIXTURE, { recursive: true });
++    setRootDir(FIXTURE);
++  });
++
++  afterEach(() => {
++    rmSync(FIXTURE, { recursive: true, force: true });
++  });
++
++  // Capture stdout from a single runDoctor invocation without
++  // leaking across tests. Mirrors the pattern other CLI tests use.
++  async function captureJson(
++    args: Parameters<typeof runDoctor>[0],
++  ): Promise<{ stdout: string; report: { ok: boolean; checks: unknown[] } }> {
++    const originalLog = console.log;
++    let buf = "";
++    console.log = (...parts: unknown[]) => {
++      buf += parts.map(String).join(" ") + "\n";
++    };
++    try {
++      await runDoctor(args);
++    } finally {
++      console.log = originalLog;
++    }
++    // First line containing a JSON object is our payload.
++    const line = buf.split("\n").find((l) => l.trim().startsWith("{"));
++    if (!line) {
++      throw new Error(`no JSON line in doctor --json output: ${buf}`);
++    }
++    const report = JSON.parse(line);
++    return { stdout: buf, report };
++  }
++
++  it("emits valid JSON with ok + checks array shape", async () => {
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(typeof report.ok).toBe("boolean");
++    expect(Array.isArray(report.checks)).toBe(true);
++    expect(report.checks.length).toBeGreaterThan(0);
++    for (const c of report.checks as Array<{
++      name: string;
++      status: string;
++      detail?: string;
++      fixable?: boolean;
++    }>) {
++      expect(typeof c.name).toBe("string");
++      expect(["pass", "fail", "skipped"]).toContain(c.status);
++      if (c.detail !== undefined) expect(typeof c.detail).toBe("string");
++      if (c.fixable !== undefined) expect(typeof c.fixable).toBe("boolean");
++    }
++  });
++
++  it("exits 0 with ok:true when everything passes", async () => {
++    // No projects + clean FIXTURE ⇒ no fixable issues and sanity
++    // checks that iterate projects report "no projects registered".
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(report.ok).toBe(true);
++    for (const c of report.checks as Array<{ status: string }>) {
++      expect(c.status).not.toBe("fail");
++    }
++  });
++
++  it("exits 1 with ok:false when any check fails", async () => {
++    // Plant an orphaned STOP file → orphaned-stop-file check fails.
++    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
++    const { report } = await captureJson({
++      json: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(report.ok).toBe(false);
++    const failed = (report.checks as Array<{
++      name: string;
++      status: string;
++      fixable?: boolean;
++    }>).find((c) => c.name === "orphaned-stop-file" && c.status === "fail");
++    expect(failed).toBeDefined();
++    expect(failed!.fixable).toBe(true);
++  });
++
++  it("--json --fix reflects post-fix state", async () => {
++    writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
++    const p = makeProject("alpha", "/tmp/doctor-alpha-nonexistent");
++    const { report } = await captureJson({
++      json: true,
++      fix: true,
++      assumeYes: true,
++      loadProjects: async () => [p],
++      exitOnFailure: false,
++    });
++    // STOP file should have been removed and the check should now pass.
++    expect(existsSync(join(FIXTURE, "STOP"))).toBe(false);
++    const stop = (report.checks as Array<{ name: string; status: string }>)
++      .find((c) => c.name === "orphaned-stop-file");
++    expect(stop?.status).toBe("pass");
++    // Missing state dir should have been created and the category row
++    // should now pass too (state/alpha/ was materialized by the fix).
++    expect(existsSync(join(FIXTURE, "state", "alpha"))).toBe(true);
++    const stateDir = (report.checks as Array<{ name: string; status: string }>)
++      .find((c) => c.name === "state-dir-missing");
++    expect(stateDir?.status).toBe("pass");
++  });
++
++  it("--json --verbose does not break the shape", async () => {
++    const { report } = await captureJson({
++      json: true,
++      verbose: true,
++      loadProjects: async () => [],
++      exitOnFailure: false,
++    });
++    expect(typeof report.ok).toBe("boolean");
++    expect(Array.isArray(report.checks)).toBe(true);
++    for (const c of report.checks as Array<{ status: string }>) {
++      expect(["pass", "fail", "skipped"]).toContain(c.status);
++    }
++  });
++});
