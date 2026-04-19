@@ -4277,4 +4277,192 @@ describe("doctor --verbose (gs-246)", () => {
     expect(result.stderr).not.toContain("Unknown option");
     expect(result.stdout).toContain("GeneralStaff Doctor");
   });
+
+  // gs-247: --since=<iso> narrows --sessions / --summary to
+  // PROGRESS.jsonl events at or after a caller-supplied ISO timestamp.
+  describe("status --since (gs-247)", () => {
+    const SINCE_DIR = join(import.meta.dir, "fixtures", "status_since_test");
+    const FLEET_LOG = join(SINCE_DIR, "state", "_fleet", "PROGRESS.jsonl");
+    const ALPHA_LOG = join(SINCE_DIR, "state", "alpha", "PROGRESS.jsonl");
+
+    const PROJECTS_YAML = `
+projects:
+  - id: alpha
+    path: ${SINCE_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    const sessionEvents = [
+      {
+        timestamp: "2026-04-17T10:30:00.000Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: {
+          duration_minutes: 30,
+          total_cycles: 3,
+          total_verified: 3,
+          total_failed: 0,
+          stop_reason: "budget",
+          reviewer: "claude",
+        },
+      },
+      {
+        timestamp: "2026-04-17T13:00:00.000Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: {
+          duration_minutes: 60,
+          total_cycles: 5,
+          total_verified: 4,
+          total_failed: 1,
+          stop_reason: "max-cycles",
+          reviewer: "openrouter",
+        },
+      },
+      {
+        timestamp: "2026-04-17T18:15:00.000Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: {
+          duration_minutes: 15,
+          total_cycles: 1,
+          total_verified: 1,
+          total_failed: 0,
+          stop_reason: "budget",
+          reviewer: "claude",
+        },
+      },
+    ];
+
+    beforeEach(() => {
+      mkdirSync(join(SINCE_DIR, "state", "_fleet"), { recursive: true });
+      mkdirSync(join(SINCE_DIR, "state", "alpha"), { recursive: true });
+      writeFileSync(join(SINCE_DIR, "projects.yaml"), PROJECTS_YAML);
+      writeFileSync(
+        FLEET_LOG,
+        sessionEvents.map((l) => JSON.stringify(l)).join("\n") + "\n",
+      );
+      const cycleEvents = [
+        {
+          timestamp: "2026-04-17T10:15:00.000Z",
+          event: "cycle_end",
+          project_id: "alpha",
+          data: { outcome: "verified", duration_seconds: 120 },
+        },
+        {
+          timestamp: "2026-04-17T12:30:00.000Z",
+          event: "cycle_end",
+          project_id: "alpha",
+          data: { outcome: "verified", duration_seconds: 240 },
+        },
+        {
+          timestamp: "2026-04-17T18:00:00.000Z",
+          event: "cycle_end",
+          project_id: "alpha",
+          data: { outcome: "verification_failed", duration_seconds: 60 },
+        },
+      ];
+      writeFileSync(
+        ALPHA_LOG,
+        cycleEvents.map((l) => JSON.stringify(l)).join("\n") + "\n",
+      );
+    });
+
+    afterEach(() => {
+      rmSync(SINCE_DIR, { recursive: true, force: true });
+    });
+
+    it("--sessions --since=<valid> filters the sessions list", async () => {
+      const result = await runCli(
+        ["status", "--sessions", "--since=2026-04-17T12:00:00.000Z", "--json"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed).toHaveLength(2);
+      // Newest first — 18:00 session, then 12:00 session. The 10:00 one is excluded.
+      expect(parsed[0].started_at).toBe("2026-04-17T18:00:00.000Z");
+      expect(parsed[1].started_at).toBe("2026-04-17T12:00:00.000Z");
+    });
+
+    it("--summary --since=<valid> filters today's-style summary to the window", async () => {
+      const result = await runCli(
+        ["status", "--summary", "--since=2026-04-17T12:00:00.000Z", "--json"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      // Only cycle_end events at/after 12:00 count: the 12:30 verified
+      // and the 18:00 failed. The 10:15 event is outside the window.
+      expect(parsed.cycles_total).toBe(2);
+      expect(parsed.verified).toBe(1);
+      expect(parsed.verification_failed).toBe(1);
+      // session_complete windowing: only the 13:00 (60min) + 18:15
+      // (15min) sessions land inside the window. 10:30 session falls
+      // outside.
+      expect(parsed.wall_clock_minutes).toBe(75);
+      expect(parsed.last_session_end).toBe("2026-04-17T18:15:00.000Z");
+    });
+
+    it("rejects an unparseable --since value with a clear error", async () => {
+      const result = await runCli(
+        ["status", "--sessions", "--since=not-a-date"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --since requires an ISO timestamp",
+      );
+    });
+
+    it("rejects relative durations (those belong to audit's --since, not status's)", async () => {
+      const result = await runCli(
+        ["status", "--summary", "--since=30m"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --since requires an ISO timestamp",
+      );
+    });
+
+    it("rejects --since without --sessions or --summary", async () => {
+      const result = await runCli(
+        ["status", "--since=2026-04-17T12:00:00.000Z"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: --since requires --sessions or --summary",
+      );
+    });
+
+    it("inclusive boundary: --sessions --since=<ts> includes a session that started exactly at <ts>", async () => {
+      // The 13:00 session was computed from a 14:00 timestamp minus 60min duration
+      // so --since=2026-04-17T12:00:00.000Z should include it on the boundary.
+      const result = await runCli(
+        ["status", "--sessions", "--since=2026-04-17T12:00:00.000Z", "--json"],
+        SINCE_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      const startedAts = parsed.map((s: { started_at: string }) => s.started_at);
+      expect(startedAts).toContain("2026-04-17T12:00:00.000Z");
+    });
+  });
 });

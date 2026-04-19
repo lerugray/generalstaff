@@ -113,6 +113,32 @@ export function stripSessionsArgs(rawArgs: string[]): string[] {
   );
 }
 
+// gs-247: parse a `--since=<iso>` status-flag value. Unlike the audit
+// `parseSinceFlag` (which also accepts relative durations), the status
+// handler only accepts absolute ISO-8601 timestamps so session history
+// queries have a stable, machine-generatable contract. Returns epoch ms
+// on success, null when the input is not a parseable timestamp.
+export function parseSinceIso(input: string): number | null {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return null;
+  const ms = Date.parse(trimmed);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+// gs-247: return only sessions whose started_at is at or after sinceMs.
+// Boundary is inclusive — sessions that started exactly at the cutoff
+// are kept. Malformed started_at timestamps are dropped, matching the
+// fail-closed stance used elsewhere in this file.
+export function filterSessionsSince(
+  sessions: SessionSummary[],
+  sinceMs: number,
+): SessionSummary[] {
+  return sessions.filter((s) => {
+    const ms = Date.parse(s.started_at);
+    return !Number.isNaN(ms) && ms >= sinceMs;
+  });
+}
+
 // gs-199: backlog subview. One row per project with the four
 // pending-bucket counts plus in_progress + done. Data shape mirrors
 // WorkBreakdown from src/work_detection.ts but flattened and renamed

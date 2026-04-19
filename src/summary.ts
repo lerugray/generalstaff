@@ -312,14 +312,21 @@ export interface TodaySessionSummary {
 
 export async function buildTodaySessionSummary(
   now: Date = new Date(),
+  sinceMs?: number,
 ): Promise<TodaySessionSummary> {
-  const todayStartMs = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-    0, 0, 0, 0,
-  );
-  const date = new Date(todayStartMs).toISOString().slice(0, 10);
+  // gs-247: `--since=<iso>` replaces the default "today UTC midnight"
+  // cutoff so operators can scope the summary to an arbitrary window
+  // (e.g. the last overnight run). The cutoff remains inclusive.
+  const cutoffMs =
+    typeof sinceMs === "number" && Number.isFinite(sinceMs)
+      ? sinceMs
+      : Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate(),
+          0, 0, 0, 0,
+        );
+  const date = new Date(cutoffMs).toISOString().slice(0, 10);
 
   const result: TodaySessionSummary = {
     date,
@@ -356,7 +363,7 @@ export async function buildTodaySessionSummary(
     for (const value of await readJsonl(logPath)) {
       if (!isProgressEntry(value)) continue;
       const ts = Date.parse(value.timestamp);
-      if (Number.isNaN(ts) || ts < todayStartMs) continue;
+      if (Number.isNaN(ts) || ts < cutoffMs) continue;
 
       if (dir === "_fleet") {
         if (

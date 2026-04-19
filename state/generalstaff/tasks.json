@@ -1598,13 +1598,14 @@
   {
     "id": "gs-247",
     "title": "Add `--since=<iso>` filter to `generalstaff status --sessions` + `status --summary`. CREATE ONLY: extend the status handler in `src/cli.ts` to accept `--since=<iso>` and, when combined with `--sessions` or `--summary`, filter the PROGRESS.jsonl session_complete events to those at or after the given timestamp. Unparseable --since prints `Error: --since requires an ISO timestamp` and exits 1. `--since` by itself (without --sessions / --summary) is invalid — print a mutex-style error. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --sessions --since=<valid> filters correctly; (b) --summary --since=<valid> filters correctly; (c) invalid --since errors; (d) --since without subfilter errors; (e) timestamps equal to --since are included (>=). Expected diff: ~120 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cli.ts",
       "src/sessions.ts",
       "tests/cli.test.ts",
       "tests/sessions.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T05:48:41.616Z"
   }
 ]
