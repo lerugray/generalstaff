@@ -5540,3 +5540,104 @@ dispatcher:
     });
   });
 });
+
+// gs-266: --summary collapses doctor output to one line. Verbose
+// output is suppressed; exit code reflects FAIL count only (WARN
+// alone keeps exit 0). --summary --verbose is rejected at the parser.
+describe("doctor --summary (gs-266)", () => {
+  it("(a) renders a single-line summary", async () => {
+    const result = await runCli(["doctor", "--summary"]);
+    // The full verbose checklist is suppressed.
+    expect(result.stdout).not.toContain("Checking prerequisites");
+    expect(result.stdout).not.toContain("Sanity checks");
+    // The summary line is present and well-formed.
+    expect(result.stdout).toMatch(
+      /doctor: \d+ checks, \d+ PASS, \d+ WARN, \d+ FAIL/,
+    );
+    expect(result.stdout).toContain(
+      "run `generalstaff doctor` for details",
+    );
+    // One-line means the summary line is the only non-empty line of stdout.
+    const lines = result.stdout.split("\n").filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(1);
+  });
+
+  it("(b) exits 0 when no FAIL is reported", async () => {
+    // The host repo's doctor should not currently report FAILs in CI;
+    // this asserts the exit-code semantics, not the absolute counts.
+    const result = await runCli(["doctor", "--summary", "--json"]);
+    const parsed = JSON.parse(result.stdout.trim());
+    if (parsed.fail === 0) {
+      expect(result.exitCode).toBe(0);
+    } else {
+      expect(result.exitCode).toBe(1);
+    }
+  });
+
+  it("(c) exits 1 when --summary reports any FAIL", async () => {
+    // Simulate a hard fail by pointing the generalstaff state root
+    // at a path where one of the prereq tools is missing — easier to
+    // observe by relying on a synthetic scenario through the unit
+    // helper. The CLI integration lane just needs to confirm that the
+    // exit code wiring honors `summary.fail > 0` → exit 1.
+    const fixture = join(tmpdir(), `gs-266-fail-${Date.now()}`);
+    mkdirSync(fixture, { recursive: true });
+    try {
+      // Plant a projects.yaml whose only project points at a non-git path.
+      writeFileSync(
+        join(fixture, "projects.yaml"),
+        `projects:
+  - id: ghost
+    path: ${join(fixture, "does-not-exist").replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`,
+      );
+      const result = await runCli(["doctor", "--summary", "--json"], fixture);
+      // The "ghost" project's missing path surfaces as a non-fixable
+      // FAIL in the project paths sanity check, so summary.fail >= 1.
+      const parsed = JSON.parse(result.stdout.trim());
+      expect(parsed.fail).toBeGreaterThan(0);
+      expect(result.exitCode).toBe(1);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("(d) --summary --json emits {total, pass, warn, fail} as numbers", async () => {
+    const result = await runCli(["doctor", "--summary", "--json"]);
+    const parsed = JSON.parse(result.stdout.trim());
+    expect(typeof parsed.total).toBe("number");
+    expect(typeof parsed.pass).toBe("number");
+    expect(typeof parsed.warn).toBe("number");
+    expect(typeof parsed.fail).toBe("number");
+    expect(parsed.total).toBe(parsed.pass + parsed.warn + parsed.fail);
+    // Only the four count fields — no leftover ok/checks shape.
+    expect(Object.keys(parsed).sort()).toEqual(
+      ["fail", "pass", "total", "warn"],
+    );
+  });
+
+  it("(e) --summary --verbose errors and exits 1", async () => {
+    const result = await runCli(["doctor", "--summary", "--verbose"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--summary and --verbose");
+    // Mutex check fires before runDoctor, so no doctor output appears.
+    expect(result.stdout).not.toContain("GeneralStaff Doctor");
+    expect(result.stdout).not.toMatch(/doctor: \d+ checks/);
+  });
+});
