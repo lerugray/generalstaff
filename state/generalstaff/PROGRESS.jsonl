@@ -2497,3 +2497,4 @@
 {"timestamp":"2026-04-19T01:40:56.551Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":16,"total_cycles":3,"total_verified":2,"total_failed":0}}
 {"timestamp":"2026-04-19T01:50:06.762Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":360,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
 {"timestamp":"2026-04-19T01:50:07.287Z","event":"cycle_skipped","cycle_id":"20260419015007_lnci","project_id":"generalstaff","data":{"reason":"Uncommitted changes in C:/Users/rweis/OneDrive/Documents/GeneralStaff:\n?? .claude/"}}
+{"timestamp":"2026-04-19T01:52:57.257Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":3,"total_cycles":1,"total_verified":0,"total_failed":0}}
