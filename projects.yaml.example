@@ -15,6 +15,49 @@
 # under state/<project_id>/. Nothing is written to the managed
 # project's working tree by the dispatcher. See PHASE-1-RESOLUTIONS
 # §Q5 for rationale.
+#
+# -------------------------------------------------------------------
+# Key environment variables (set in your shell, a .env loader, or the
+# launcher script — NOT committed here).
+# -------------------------------------------------------------------
+#
+#   GENERALSTAFF_REVIEWER_PROVIDER
+#       Which provider runs the verification-gate reviewer. One of
+#       `claude` (uses `claude -p` and your Claude subscription
+#       quota), `openrouter` (paid per-token, ~$0.02/session on
+#       Qwen3 Coder), or `ollama` (local, free, offline). Default:
+#       `claude`. For unattended / high-volume runs, prefer
+#       `openrouter` to keep pressure off your Claude quota.
+#
+#   GENERALSTAFF_REVIEWER_MODEL
+#       Optional model override. Only meaningful when the provider
+#       exposes a model knob (e.g. `qwen/qwen3-coder-plus` on
+#       openrouter, `qwen3:8b` on ollama). Each provider picks a
+#       sensible default when unset.
+#
+#   GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER
+#       Optional single-shot fallback. If the primary returns a
+#       `[REVIEWER ERROR]`, the reviewer retries once using this
+#       provider. Skipped when unset or equal to the primary.
+#
+#   OPENROUTER_API_KEY
+#       Required when the primary or fallback provider is
+#       `openrouter`. No default; if unset at launch, every cycle
+#       fail-safes to `verification_failed` (by design — better a
+#       loud skip than a silent pass).
+#
+#   OLLAMA_HOST
+#       Optional. Defaults to `http://localhost:11434`. Used by the
+#       ollama reviewer and its pre-flight reachability check.
+#
+#   GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>
+#       Integer, optional. Overrides the per-provider semaphore the
+#       parallel session loop uses. Defaults: claude=∞, openrouter=2,
+#       ollama=1. Raise on a paid tier (e.g. `=8` on OpenRouter);
+#       lower to throttle. Only binds when `max_parallel_slots > 1`.
+#
+# Hard Rule 8 (BYOK): every credential above comes from your own
+# environment. Nothing is shipped, nothing is hosted on your behalf.
 
 projects:
   - id: catalogdna
@@ -94,11 +137,30 @@ dispatcher:
   max_cycles_per_project_per_session: 3      # Q1: chaining cap
   log_dir: ./logs
   digest_dir: ./digests
-  # gs-186 (Phase 4): run N cycles in parallel per round. Default 1
-  # preserves the sequential dispatcher from Phases 1-3 (chaining,
-  # STOP mid-cycle, no concurrent reviewer calls). Opting in above 1
-  # doubles/triples/etc. your reviewer API usage for that session —
-  # Hard Rule 8 (BYOK) means the cost shows up on your bill. Start
-  # with 2 for a small fleet; watch slot_idle_seconds in
-  # session_complete to decide whether to bump further.
+
+  # -----------------------------------------------------------------
+  # Parallel mode — Phase 4 opt-in (gs-186)
+  # -----------------------------------------------------------------
+  #
+  # Run N cycles in parallel per round. Default 1 preserves the
+  # sequential dispatcher from Phases 1-3 (chaining, STOP mid-cycle,
+  # no concurrent reviewer calls) bit-for-bit.
+  #
+  # When to turn it on: your fleet has 2+ projects with real
+  # backlogs each AND session wall-clock is the bottleneck. Round-
+  # based strict-wait — all slots in a round finish before the next
+  # round starts. Chaining is disabled in parallel mode (each round
+  # picks fresh projects); an empty-queue project gets skipped
+  # rather than padded into an idle slot (gs-232).
+  #
+  # Cost: parallel N roughly multiplies reviewer-step API spend by
+  # N on external providers. Hard Rule 8 (BYOK) applies — the cost
+  # shows up on your bill. Per-provider semaphores (default
+  # claude=∞, openrouter=2, ollama=1) prevent reviewer stampedes;
+  # tune via GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>.
+  #
+  # Recommended: start at 2 on a 3-project fleet, watch
+  # `slot_idle_seconds` in session_complete + `status --sessions`,
+  # bump only if utilization stays high. Drop back to 1 if
+  # reviewer-spend or UX feedback warrants.
   max_parallel_slots: 1
