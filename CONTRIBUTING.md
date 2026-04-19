@@ -35,14 +35,15 @@ is Ray + the autonomous bot only.
 ## What stays off-limits for PRs
 
 Hard Rules cannot be relaxed without an explicit
-`RULE-RELAXATION-<date>.md` file committed alongside the change. PRs
+`docs/internal/RULE-RELAXATION-<date>.md` file committed alongside the change. PRs
 that relax a Hard Rule without this log will be asked to add one. See
-[`RULE-RELAXATION-2026-04-15.md`](RULE-RELAXATION-2026-04-15.md) for
+[`docs/internal/RULE-RELAXATION-2026-04-15.md`](docs/internal/RULE-RELAXATION-2026-04-15.md) for
 the shape.
 
-Design documents (`DESIGN.md`, `PIVOT-*.md`, `PHASE-*.md`,
-`FUTURE-DIRECTIONS-*.md`, `UI-VISION-*.md`, `VOICE.md`,
-`LAUNCH-PLAN.md`) are append-only. New sections with date headers are
+Design documents (`DESIGN.md`, `docs/internal/PIVOT-*.md`,
+`docs/internal/PHASE-*.md`, `docs/internal/FUTURE-DIRECTIONS-*.md`,
+`docs/internal/UI-VISION-*.md`, `docs/internal/VOICE.md`,
+`docs/internal/LAUNCH-PLAN.md`) are append-only. New sections with date headers are
 the right shape; rewrites of earlier sections are not.
 
 ## Filing issues
@@ -55,7 +56,7 @@ For bug reports:
   if the bug is dispatcher-level.
 
 For feature requests:
-- Check [`FUTURE-DIRECTIONS-2026-04-15.md`](FUTURE-DIRECTIONS-2026-04-15.md)
+- Check [`docs/internal/FUTURE-DIRECTIONS-2026-04-15.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-15.md)
   first — many ideas are already captured there.
 - Describe the problem, not the solution. The solution shape is
   Ray's judgment call.

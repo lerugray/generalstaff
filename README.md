@@ -49,7 +49,7 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 ## Built in 4 days
 
 On 2026-04-15 this repo was scaffold + Phase 0 design docs with no
-executable code (see `PIVOT-2026-04-15.md` for the day it was
+executable code (see `docs/internal/PIVOT-2026-04-15.md` for the day it was
 rescoped from "personal nightly dispatcher" to "open-source
 alternative to Polsia"). On 2026-04-19 it tagged v0.1.0.
 
@@ -165,7 +165,7 @@ that need your attention, per-project fleet cards, dispatch controls,
 and a usage sidebar. The dimmed card at the bottom previews how a
 post-launch project's card will render once live-mode ingestion lands
 (revenue, active users, ad spend, uptime — see
-[`UI-VISION-2026-04-19.md`](UI-VISION-2026-04-19.md)).
+[`docs/internal/UI-VISION-2026-04-19.md`](docs/internal/UI-VISION-2026-04-19.md)).
 
 **What's shipped today:** the data contract — five JSON view modules
 (`fleet-overview`, `task-queue`, `session-tail`, `dispatch-detail`,
@@ -362,7 +362,7 @@ file committed alongside the rule change.
 10. **Local-first.** No SaaS tier, no managed offering, no
     GeneralStaff-the-company hosting.
 
-Details and rationale for each: [`RULE-RELAXATION-2026-04-15.md`](RULE-RELAXATION-2026-04-15.md).
+Details and rationale for each: [`docs/internal/RULE-RELAXATION-2026-04-15.md`](docs/internal/RULE-RELAXATION-2026-04-15.md).
 
 ## Roadmap
 
@@ -373,21 +373,21 @@ root.
 
 - ✓ **Phase 1** (closed 2026-04-17): sequential MVP, independent
   verification gate, reviewer, open audit log. See
-  [`PHASE-1-COMPLETE-2026-04-17.md`](PHASE-1-COMPLETE-2026-04-17.md).
+  [`docs/internal/PHASE-1-COMPLETE-2026-04-17.md`](docs/internal/PHASE-1-COMPLETE-2026-04-17.md).
 - ✓ **Phase 2** (closed 2026-04-17): multi-provider LLM routing
   (Ollama + OpenRouter + Claude), digest narrative, provider registry.
-  See [`PHASE-2-COMPLETE-2026-04-17.md`](PHASE-2-COMPLETE-2026-04-17.md).
+  See [`docs/internal/PHASE-2-COMPLETE-2026-04-17.md`](docs/internal/PHASE-2-COMPLETE-2026-04-17.md).
 - ✓ **Phase 3** (closed 2026-04-18 morning): dispatcher generality
   across non-dogfood projects; `gamr` became the first second managed
   project. Five generality gaps surfaced and catalogued; the
   afternoon closure-tail shipped them same-day. See
-  [`PHASE-3-COMPLETE-2026-04-18.md`](PHASE-3-COMPLETE-2026-04-18.md).
+  [`docs/internal/PHASE-3-COMPLETE-2026-04-18.md`](docs/internal/PHASE-3-COMPLETE-2026-04-18.md).
 - ✓ **Phase 4** (closed 2026-04-18 afternoon): parallel worktrees.
   `pickNextProjects(N)` + round-based Promise.all session loop +
   per-provider reviewer concurrency semaphore + efficiency
   observability in the digest and `status --sessions` table. Default
   `max_parallel_slots: 1` preserves Phase 1-3 behaviour. See
-  [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md).
+  [`docs/internal/PHASE-4-COMPLETE-2026-04-18.md`](docs/internal/PHASE-4-COMPLETE-2026-04-18.md).
 - ✓ **Phase 5 visual anchor** (closed 2026-04-18 evening): five
   hand-built dashboard reference views in
   [`docs/phase-5-references/`](docs/phase-5-references/). Establishes
@@ -400,24 +400,24 @@ root.
   stack (Tauri, local web server, or other) not yet chosen. Data to
   render (gs-188's parallel-efficiency metrics) is already live.
 - **Phase 5.5+:** Kriegspiel / command-room UI theme. See
-  [`UI-VISION-2026-04-15.md`](UI-VISION-2026-04-15.md).
+  [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
 - **Public launch:** gated on README polish, `SUPPORTERS.md`, and
   `LICENSE` — not on Phase 5 completion per
-  [`LAUNCH-PLAN.md`](LAUNCH-PLAN.md). The CLI surface is feature-
+  [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md). The CLI surface is feature-
   complete for the MVP value proposition; the UI is an enhancement.
 
 ## Documentation
 
 - [`DESIGN.md`](DESIGN.md) -- full architecture sketch (v1 through
   v6, append-only; v6 = Phase 4 parallel worktrees)
-- [`PIVOT-2026-04-15.md`](PIVOT-2026-04-15.md) -- the open-source
+- [`docs/internal/PIVOT-2026-04-15.md`](docs/internal/PIVOT-2026-04-15.md) -- the open-source
   pivot decision and original 12-phase plan
-- [`PHASE-1-PLAN-2026-04-15.md`](PHASE-1-PLAN-2026-04-15.md) -- the
+- [`docs/internal/PHASE-1-PLAN-2026-04-15.md`](docs/internal/PHASE-1-PLAN-2026-04-15.md) -- the
   Phase 1 plan that shipped
-- [`PHASE-4-COMPLETE-2026-04-18.md`](PHASE-4-COMPLETE-2026-04-18.md)
+- [`docs/internal/PHASE-4-COMPLETE-2026-04-18.md`](docs/internal/PHASE-4-COMPLETE-2026-04-18.md)
   -- parallel worktrees closure narrative, including the three
   design-decision resolutions and the gs-188 observability surface
-- [`LAUNCH-PLAN.md`](LAUNCH-PLAN.md) -- pre-launch gates, positioning,
+- [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md) -- pre-launch gates, positioning,
   narrative hooks, and the append-only launch retrospective
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
   reference, including the `max_parallel_slots` opt-in
@@ -427,7 +427,7 @@ root.
   carries across views
 - [`CLAUDE.md`](CLAUDE.md) -- instructions for Claude Code sessions
   operating in this repo
-- [`research-notes.md`](research-notes.md) -- research on prior art
+- [`docs/internal/research-notes.md`](docs/internal/research-notes.md) -- research on prior art
   (nightcrawler, parallel-cc, Polsia, Continuous-Claude-v3)
 
 ## Contributing

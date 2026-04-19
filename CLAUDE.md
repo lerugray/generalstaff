@@ -6,26 +6,27 @@ scaffold + Phase 0 design docs — no executable code yet.**
 
 The project was **pivoted on 2026-04-15** from "personal nightly
 meta-dispatcher" to "open-source product alternative to Polsia." See
-`PIVOT-2026-04-15.md` for the decision and `RULE-RELAXATION-2026-
-04-15.md` for the rule changes that came with it. Future sessions
+`docs/internal/PIVOT-2026-04-15.md` for the decision and
+`docs/internal/RULE-RELAXATION-2026-04-15.md` for the rule
+changes that came with it. Future sessions
 must read both before making structural changes.
 
 ## Read first (in this order)
 
 1. `README.md` — project overview and the new mission
-2. `PIVOT-2026-04-15.md` — the strategic pivot from personal infra
+2. `docs/internal/PIVOT-2026-04-15.md` — the strategic pivot from personal infra
    to open-source product
-3. `RULE-RELAXATION-2026-04-15.md` — current Hard Rules (10 total
+3. `docs/internal/RULE-RELAXATION-2026-04-15.md` — current Hard Rules (10 total
    after the pivot) with rationale for each change
 4. `DESIGN.md` — architecture sketch (v1 + v2 sections, append-only;
    v2 was added 2026-04-15 as part of the pivot)
-5. `research-notes.md` — verbatim findings from background research
+5. `docs/internal/research-notes.md` — verbatim findings from background research
    on nightcrawler, parallel-cc, Polsia, Continuous-Claude-v3
 6. `projects.yaml.example` — the project registry schema
 
 ## Hard rules
 
-The canonical list is in `RULE-RELAXATION-2026-04-15.md`. There are
+The canonical list is in `docs/internal/RULE-RELAXATION-2026-04-15.md`. There are
 **10 Hard Rules** as of 2026-04-15:
 
 1. **No creative work delegation by default.** Bots get correctness
@@ -51,10 +52,10 @@ The canonical list is in `RULE-RELAXATION-2026-04-15.md`. There are
 10. **NEW (2026-04-15): Local-first by default.** No SaaS tier, no
     managed offering, no GeneralStaff-the-company hosting.
 
-Read `RULE-RELAXATION-2026-04-15.md` for the full text and
+Read `docs/internal/RULE-RELAXATION-2026-04-15.md` for the full text and
 rationale of each rule before modifying any of them. The relaxation
 protocol still applies: **existing rules cannot be relaxed without
-an explicit `RULE-RELAXATION-<date>.md` log file documenting why.**
+an explicit `docs/internal/RULE-RELAXATION-<date>.md` log file documenting why.**
 
 ## Working with this folder
 
@@ -67,11 +68,11 @@ an explicit `RULE-RELAXATION-<date>.md` log file documenting why.**
 - Each design decision goes into `DESIGN.md` (append-only — v1
   is preserved at the top, v2+ goes below).
 - Each open question goes into the "Open questions" section of
-  `DESIGN.md` or `RULE-RELAXATION-2026-04-15.md` §4 until it's
+  `DESIGN.md` or `docs/internal/RULE-RELAXATION-2026-04-15.md` §4 until it's
   answered.
-- Research that informs the design goes into `research-notes.md`
+- Research that informs the design goes into `docs/internal/research-notes.md`
   (append with date headers — don't rewrite history).
-- The folder is also an **Obsidian vault** — see `INDEX.md` for
+- The folder is also an **Obsidian vault** — see `docs/internal/INDEX.md` for
   the map of content. Cross-PC sync uses **git** (the folder lives
   in a OneDrive path but OneDrive sync is not relied on). The
   repo is at `github.com/lerugray/generalstaff` (private) as of
@@ -109,11 +110,11 @@ committed doc) instead.
 
 ### End-of-session Ingest obligation (Ray, 2026-04-17)
 
-The project vault (this file + `research-notes.md` + `DESIGN.md`
-+ `FUTURE-DIRECTIONS-*.md` + `PHASE-*.md`) is an **LLM-maintained
+The project vault (this file + `docs/internal/research-notes.md` + `DESIGN.md`
++ `docs/internal/FUTURE-DIRECTIONS-*.md` + `docs/internal/PHASE-*.md`) is an **LLM-maintained
 wiki** in the pattern Karpathy formalized in
 https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
-(captured in `research-notes.md` 2026-04-17). The interactive
+(captured in `docs/internal/research-notes.md` 2026-04-17). The interactive
 Claude session is the wiki's maintainer.
 
 Before ending any working session, perform an **Ingest pass**:
@@ -124,10 +125,10 @@ Before ending any working session, perform an **Ingest pass**:
    session couldn't reconstruct from `git log` + `PROGRESS.jsonl`
    alone.
 2. **Update the relevant pages** — new external refs into
-   `research-notes.md`, new conventions into this file, new
+   `docs/internal/research-notes.md`, new conventions into this file, new
    design decisions into `DESIGN.md` (append-only), new
-   strategic direction into the relevant `PHASE-*.md` or
-   `FUTURE-DIRECTIONS-*.md`.
+   strategic direction into the relevant `docs/internal/PHASE-*.md` or
+   `docs/internal/FUTURE-DIRECTIONS-*.md`.
 3. **Cross-reference** — if a new note updates an old one,
    link explicitly so a future session following the old note
    sees the addendum.
@@ -181,7 +182,7 @@ explicitly, don't proactively write.
   for code delegation, Ollama for tiny tasks, Claude for
   high-stakes work). GeneralStaff Phase 2+ inherits these rules
   via `provider_config.yaml` per
-  `FUTURE-DIRECTIONS-2026-04-15.md` §2.
+  `docs/internal/FUTURE-DIRECTIONS-2026-04-15.md` §2.
 - **Report fidelity — read the full relevant span, not just the
   tail.** When summarizing `PROGRESS.jsonl`, commit history, or
   any sequence of events for Ray, read enough of the source to
@@ -265,7 +266,7 @@ explicitly, don't proactively write.
 
   The full Phase 4 narrative, including the decision rationale
   for defaults and the open measurement questions, lives in
-  **PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
+  **docs/internal/PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
 
 - **Public-facing copy gets a stop-slop pass before Ray
   reviews.** Any text meant for a public audience (launch posts,
@@ -280,8 +281,8 @@ explicitly, don't proactively write.
   pass took ~30s and lifted the score from 30/50 to 40+.
 
   **Exempt** (no slop-pass needed):
-  - Internal design docs (`DESIGN.md`, `PHASE-*.md`,
-    `research-notes.md`, `FUTURE-DIRECTIONS-*.md`). These
+  - Internal design docs (`DESIGN.md`, `docs/internal/PHASE-*.md`,
+    `docs/internal/research-notes.md`, `docs/internal/FUTURE-DIRECTIONS-*.md`). These
     are for future Claude sessions, not public readers.
   - `PROGRESS.jsonl` and other structured audit output.
   - Git commit messages (Co-Authored-By still required).
@@ -463,10 +464,10 @@ candidate set is narrow:
   launching it serves dual purposes: (a) Ray's portfolio /
   career upside (per "Project stakes" above), (b) first
   real-live-project test case for GeneralStaff's Phase 7+
-  validation (ties to UI-VISION-2026-04-19.md's dev-mode /
+  validation (ties to docs/internal/UI-VISION-2026-04-19.md's dev-mode /
   live-mode split). Phased launch plan lives at
   `../gamr/LAUNCH-PLAN.md`; phase-progression architecture at
-  `FUTURE-DIRECTIONS-2026-04-19.md`. Web version preferred over
+  `docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`. Web version preferred over
   mobile for scaffolding simplicity. This reversal does NOT
   relax any Hard Rule — the Hammerstein principle (bots handle
   execution where industriousness compounds; commander keeps

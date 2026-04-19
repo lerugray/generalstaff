@@ -162,7 +162,7 @@ Docs:
   README.md                ${COLOR_DIM}# overview + quickstart${COLOR_RESET}
   CLAUDE.md                ${COLOR_DIM}# project conventions${COLOR_RESET}
   DESIGN.md                ${COLOR_DIM}# architecture${COLOR_RESET}
-  LAUNCH-PLAN.md           ${COLOR_DIM}# pre-launch gates${COLOR_RESET}
+  docs/internal/           ${COLOR_DIM}# phase history, rule-relaxations, launch plan${COLOR_RESET}
 
 The bot only ever pushes to ${COLOR_BLUE}bot/work${COLOR_RESET} on your own git remote.
 Your code stays local; your API keys stay local. See Hard Rules in

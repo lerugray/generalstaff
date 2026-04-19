@@ -269,7 +269,7 @@ the model remember to update state?" as a failure mode.
 
 ## References
 
-See `research-notes.md` for verbatim findings from the background research
+See `docs/internal/research-notes.md` for verbatim findings from the background research
 agent on nightcrawler, parallel-cc, Polsia, and Continuous-Claude-v3.
 The top 3 design decisions there (file-based state per project,
 git-as-source-of-truth verification ritual, hooks for state I/O) are
@@ -280,8 +280,8 @@ load-bearing for this design.
 ## v2 — Open-source pivot extensions (2026-04-15)
 
 This section extends v1 above. **Nothing in v1 is removed.** The pivot
-to an open-source product is documented in `PIVOT-2026-04-15.md`; the
-rule changes are in `RULE-RELAXATION-2026-04-15.md`. Read those first
+to an open-source product is documented in `docs/internal/PIVOT-2026-04-15.md`; the
+rule changes are in `docs/internal/RULE-RELAXATION-2026-04-15.md`. Read those first
 — this section assumes you have.
 
 The v2 architecture adds three things to v1:
@@ -386,7 +386,7 @@ paths the CLI uses (Hard Rule #2 relaxation constraint).
 > catalogdna's `bot/work` branch — that's catalogdna's own bot
 > doing its own thing — but GeneralStaff itself doesn't.
 >
-> See `PHASE-1-RESOLUTIONS-2026-04-15.md` §Q5 for the full
+> See `docs/internal/PHASE-1-RESOLUTIONS-2026-04-15.md` §Q5 for the full
 > rationale and the new layout. The v1 layout above is preserved
 > as historical context (per the append-only design convention);
 > the `state/${project_id}/` layout supersedes it for
@@ -434,7 +434,7 @@ A `verification_failed` cycle:
 
 The dispatcher refuses to enable `auto_merge: true` for projects
 whose `verification_command` is empty, `true`, or otherwise a no-op.
-(See open question #6 in `RULE-RELAXATION-2026-04-15.md` §4.)
+(See open question #6 in `docs/internal/RULE-RELAXATION-2026-04-15.md` §4.)
 
 ### Local UI spec (high level)
 
@@ -498,7 +498,7 @@ took on the user's code is recorded with the prompt that caused it.
 
 ### Updated phased build plan
 
-See `PIVOT-2026-04-15.md` for the full 12-phase plan with rationale.
+See `docs/internal/PIVOT-2026-04-15.md` for the full 12-phase plan with rationale.
 Headlines:
 
 - Phase 0: design docs (this conversation, 2026-04-15)
@@ -516,7 +516,7 @@ Headlines:
 
 ### v2 open questions
 
-See `RULE-RELAXATION-2026-04-15.md` §4 for the canonical list:
+See `docs/internal/RULE-RELAXATION-2026-04-15.md` §4 for the canonical list:
 
 1. UI framework choice (Tauri vs. Electron vs. Bun browser tab)
 2. Anthropic ToS clarification for subscription quota
@@ -723,7 +723,7 @@ reads as boring on purpose. The reservation model itself stays.
 **Status:** observational, not yet addressed in code. Captured
 after the 2026-04-18 overnight session revealed a systematic
 false-negative pattern in the verification gate. A fix is queued
-as **gs-171**. Full technical detail is in research-notes.md
+as **gs-171**. Full technical detail is in docs/internal/research-notes.md
 §"2026-04-18 — Verification-gate reviewer-JSON false-negatives";
 this section captures the design-level conclusion.
 
@@ -810,7 +810,7 @@ Qwen from emitting unescaped inner content, as belt-and-braces.
 **Status:** design only. Implementation is queued as **gs-177**.
 This section is the design discussion that gs-177's code should
 land against, written 2026-04-18 after the morning gamr-cycle
-test (PHASE-3-COMPLETE-2026-04-18.md §"Generality gaps surfaced")
+test (docs/internal/PHASE-3-COMPLETE-2026-04-18.md §"Generality gaps surfaced")
 exposed that the current dispatcher caps every project at one
 cycle per session when `auto_merge: false`, which is the
 default per Hard Rule #4.
@@ -1025,7 +1025,7 @@ accumulator.
   - gs-188 (observability) — `parallel_efficiency` in
     `session_complete`, dedicated digest section, sessions-table
     Parallel column; sequential sessions are bit-for-bit unchanged
-See **PHASE-4-COMPLETE-2026-04-18.md** for the shipped-state
+See **docs/internal/PHASE-4-COMPLETE-2026-04-18.md** for the shipped-state
 narrative. The design text below is preserved as-written because
 the pattern and the open questions it called out are the right
 long-run reference; the "shipped" markers above just supersede the
