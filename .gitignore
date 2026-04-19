@@ -46,9 +46,12 @@ __pycache__/
 .vscode/
 .idea/
 
-# Claude Code per-machine settings (allow-lists, etc.)
-# Shared settings would go in .claude/settings.json, which IS tracked
-.claude/settings.local.json
+# Claude Code per-machine state (allow-lists, scheduled-task locks, etc.)
+# Shared settings live in .claude/settings.json, which IS tracked.
+# Everything else under .claude/ is per-machine / transient — including
+# settings.local.json, scheduled_tasks.lock, and any future harness files.
+.claude/*
+!.claude/settings.json
 
 # Obsidian per-machine vault state
 # Shared settings would be in .obsidian/app.json etc., which can be tracked
