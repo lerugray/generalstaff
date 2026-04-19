@@ -1571,5 +1571,39 @@
       "tests/cli.test.ts"
     ],
     "completed_at": "2026-04-19T05:18:00.557Z"
+  },
+  {
+    "id": "gs-245",
+    "title": "Respect `NO_COLOR` env var + add `--no-color` flag across CLI output. CREATE ONLY: modify the ANSI-color-emitting helpers in `src/audit.ts` (colorizeOutcome etc.) and any other CLI-output-side coloring in `src/cli.ts` — when `process.env.NO_COLOR` is truthy OR when `--no-color` is present in argv, short-circuit the ANSI wrappers to emit plain text. Apply across all subcommands that use color (status, tasks, history, view, doctor, digest). Centralize via a single `shouldColorize(): boolean` helper exported from `src/audit.ts` (or a tiny new module if that avoids an ugly cycle). Append tests covering: (a) NO_COLOR=1 disables color; (b) --no-color flag disables color; (c) TTY detection logic unchanged. DO NOT CREATE: big new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Follow the https://no-color.org convention. Expected diff: ~120 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/audit.ts",
+      "src/cli.ts",
+      "tests/audit.test.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-246",
+    "title": "Add `--verbose` flag to `generalstaff doctor`. CREATE ONLY: extend the `doctor` handler in `src/cli.ts` with a `--verbose` (or `-v`) flag. When set, each passing check prints one extra indented line with context (e.g. for project.path check: the actual resolved path + its git HEAD SHA; for state dir check: the size of PROGRESS.jsonl in bytes; for tasks.json check: the task count; for digests/ writable: the absolute path). Failing checks already print detail per gs-242; --verbose does not change their output. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) default doctor output unchanged; (b) --verbose adds context lines to passing checks; (c) failing checks still print same detail with or without --verbose. Expected diff: ~100 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "tests/cli.test.ts"
+    ]
+  },
+  {
+    "id": "gs-247",
+    "title": "Add `--since=<iso>` filter to `generalstaff status --sessions` + `status --summary`. CREATE ONLY: extend the status handler in `src/cli.ts` to accept `--since=<iso>` and, when combined with `--sessions` or `--summary`, filter the PROGRESS.jsonl session_complete events to those at or after the given timestamp. Unparseable --since prints `Error: --since requires an ISO timestamp` and exits 1. `--since` by itself (without --sessions / --summary) is invalid — print a mutex-style error. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) --sessions --since=<valid> filters correctly; (b) --summary --since=<valid> filters correctly; (c) invalid --since errors; (d) --since without subfilter errors; (e) timestamps equal to --since are included (>=). Expected diff: ~120 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cli.ts",
+      "src/sessions.ts",
+      "tests/cli.test.ts",
+      "tests/sessions.test.ts"
+    ]
   }
 ]
