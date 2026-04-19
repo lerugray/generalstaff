@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "fs";
 import { createInterface } from "readline";
 import { join, resolve } from "path";
 import { parse as parseYaml } from "yaml";
@@ -11,7 +11,28 @@ export interface RegisterOptions {
   assumeYes?: boolean;
   priority?: number;
   stack?: StackKind;
+  allowNonGit?: boolean;
   promptFn?: (question: string) => Promise<boolean>;
+  warnFn?: (message: string) => void;
+}
+
+// gs-259: extract the script filename from an engineer_command string.
+// Handles typical forms: `bash engineer_command.sh ${budget}`,
+// `./run_bot.sh`, `sh launcher.sh 30`, `python runner.py`. Returns
+// null for bare binaries (e.g. `make test`) — see isBinaryLikeCommand.
+function extractScriptName(cmd: string): string | null {
+  const tokens = cmd.trim().split(/\s+/).filter((t) => !t.startsWith("${"));
+  if (tokens.length === 0) return null;
+  const first = tokens[0];
+  const interpreters = new Set(["bash", "sh", "zsh", "python", "python3", "node", "bun"]);
+  if (interpreters.has(first)) {
+    return tokens[1] ?? null;
+  }
+  // Direct script invocation: ./foo.sh, foo.sh, scripts/launcher.py
+  if (/\.(sh|bash|py|js|ts|mjs|cjs)$/i.test(first)) {
+    return first.replace(/^\.\//, "");
+  }
+  return null;
 }
 
 export interface RegisterResult {
@@ -46,6 +67,50 @@ export async function runRegister(
   }
 
   const resolvedProjectPath = resolve(opts.projectPath);
+
+  // gs-259: pre-write validation. Catch bad --path / engineer_command
+  // at CLI time instead of letting the first cycle fail opaquely.
+  if (!existsSync(resolvedProjectPath)) {
+    return {
+      ok: false,
+      reason: `Project path "${resolvedProjectPath}" does not exist.`,
+    };
+  }
+  let pathStat;
+  try {
+    pathStat = statSync(resolvedProjectPath);
+  } catch (e) {
+    return {
+      ok: false,
+      reason: `Failed to stat project path "${resolvedProjectPath}": ${(e as Error).message}`,
+    };
+  }
+  if (!pathStat.isDirectory()) {
+    return {
+      ok: false,
+      reason: `Project path "${resolvedProjectPath}" is not a directory.`,
+    };
+  }
+
+  const gitDir = join(resolvedProjectPath, ".git");
+  const isGitRepo = existsSync(gitDir);
+  if (!isGitRepo) {
+    if (!opts.allowNonGit) {
+      return {
+        ok: false,
+        reason:
+          `Project path "${resolvedProjectPath}" is not a git repository ` +
+          `(no .git/ directory found). Pass --allow-non-git if you intend ` +
+          `to register a non-git project.`,
+      };
+    }
+    const warn = opts.warnFn ?? ((m) => console.warn(m));
+    warn(
+      `Warning: "${resolvedProjectPath}" is not a git repository; ` +
+        `registering anyway because --allow-non-git was passed.`,
+    );
+  }
+
   const stateDir = join(resolvedProjectPath, "state", projectId);
   const tasksPath = join(stateDir, "tasks.json");
   if (!existsSync(stateDir) || !existsSync(tasksPath)) {
@@ -130,6 +195,24 @@ export async function runRegister(
 
   const stack = detectStack(resolvedProjectPath, opts.stack);
   const priority = opts.priority ?? 2;
+
+  // gs-259: best-effort engineer_command validation. If the command
+  // references a script file (e.g. `bash engineer_command.sh`), check
+  // the script exists inside the project path. For bare binaries
+  // (e.g. `make test`) we skip — PATH resolution is out of scope.
+  const scriptName = extractScriptName(stack.engineerCommand);
+  if (scriptName !== null) {
+    const scriptPath = join(resolvedProjectPath, scriptName);
+    if (!existsSync(scriptPath)) {
+      return {
+        ok: false,
+        reason:
+          `engineer_command script "${scriptName}" not found at ` +
+          `${scriptPath}. Run 'generalstaff bootstrap' first, or place ` +
+          `the launcher script in the project root before registering.`,
+      };
+    }
+  }
 
   const snippetLines = [
     `  - id: ${projectId}`,

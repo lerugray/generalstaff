@@ -140,12 +140,13 @@ Usage:
     # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-uv, python-poetry, python-pip, go-mod
     # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
 
-  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes]
+  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git]
                                                           Append a bootstrapped project to projects.yaml (after review)
     Example: generalstaff register gamr --path=../gamr
     Example: generalstaff register gamr --path=../gamr --priority=3 --yes
     Example: generalstaff register raybrain --path=../raybrain --stack=python-uv
     # Reads state/<id>/tasks.json + hands_off.yaml (from project root or .generalstaff-proposal/).
+    # Validates path exists + is git (use --allow-non-git to skip) + engineer_command script is present.
     # Rejects duplicates; prompts y/N before editing. projects.yaml IS in hands_off for the bot,
     # but 'register' is the tool's own write path to its own config — equivalent to 'init'.
 
@@ -2326,6 +2327,7 @@ switch (command) {
         priority: { type: "string" },
         stack: { type: "string" },
         yes: { type: "boolean", short: "y", default: false },
+        "allow-non-git": { type: "boolean", default: false },
       },
       allowPositionals: true,
     });
@@ -2333,7 +2335,7 @@ switch (command) {
     if (!regProjectId) {
       console.error(
         "Error: project-id is required\n" +
-          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes]",
+          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git]",
       );
       process.exit(1);
     }
@@ -2373,6 +2375,7 @@ switch (command) {
       assumeYes: Boolean(regValues.yes),
       priority: regPriority,
       stack: regValues.stack as (typeof REG_STACKS)[number] | undefined,
+      allowNonGit: Boolean(regValues["allow-non-git"]),
     });
     if (!regResult.ok) {
       console.error(`Error: ${regResult.reason}`);
