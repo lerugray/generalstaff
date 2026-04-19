@@ -1729,12 +1729,13 @@
   {
     "id": "gs-258",
     "title": "Add `generalstaff doctor` first-run sanity checks. CREATE ONLY: extend `src/doctor.ts` with three new pass/fail checks tuned for a fresh-clone user: (a) `projects.yaml exists and contains at least 1 project` (fail message: 'No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.'); (b) `projects.yaml is not the unmodified example` (detect by diffing against projects.yaml.example — fail only if byte-identical — message: 'projects.yaml is unmodified from the shipped example. Replace the placeholder project entries with real projects.'); (c) `state_dir exists and is writable` (fail message: 'state_dir not writable — check permissions on <path>'). All three are warnings/fails only when the condition applies — clean install with no projects yet should fail (a) but pass (b) and (c). Append tests to `tests/doctor.test.ts`. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) empty projects list fails with right message; (b) projects identical to example file fails; (c) projects.yaml customized passes; (d) read-only state_dir fails with right message; (e) clean happy-path passes. Motivation: a fresh user cloning the repo hits `generalstaff doctor` first; those failures should point them at the fix. Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/doctor.ts",
       "tests/doctor.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T09:47:08.479Z"
   },
   {
     "id": "gs-259",

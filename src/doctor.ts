@@ -367,6 +367,114 @@ export async function checkStrandedBotCommits(
   };
 }
 
+// gs-258: first-run sanity checks. Surface the three common footguns
+// a fresh-clone user hits before registering projects: an absent /
+// empty projects.yaml, a projects.yaml left byte-identical to the
+// shipped example, or a state_dir that the current user can't write
+// to. Each failure message points straight at the fix. These three
+// checks do NOT gate process.exit — they surface as sanity ✗ rows.
+
+// Check (gs-258a): at least one project is registered. Failure
+// triggers when projects.yaml is absent OR the loaded list is empty.
+// Kept independent from the projects.yaml loader's own errors so a
+// fresh-clone user without any projects.yaml still sees a pointed fix.
+export function checkProjectsYamlHasProject(
+  projects: ProjectConfig[],
+  projectsYamlPath: string,
+): SanityCheckResult {
+  const problems: string[] = [];
+  if (!existsSync(projectsYamlPath) || projects.length === 0) {
+    problems.push(
+      "No projects registered. Run `generalstaff register` or copy projects.yaml.example and edit.",
+    );
+  }
+  return {
+    name: "projects registered",
+    problems,
+    okDetail: `${projects.length} project(s) registered`,
+  };
+}
+
+// Check (gs-258b): projects.yaml is not byte-identical to the shipped
+// example. Detects the "copied the example and forgot to edit" case.
+// Passes silently when either file is absent — (a) surfaces a missing
+// projects.yaml and a missing example is unusual (repo state oddity,
+// not a user mistake).
+export function checkProjectsYamlCustomized(
+  projectsYamlPath: string,
+  examplePath: string,
+): SanityCheckResult {
+  const problems: string[] = [];
+  if (!existsSync(projectsYamlPath)) {
+    return {
+      name: "projects.yaml customized",
+      problems,
+      okDetail: "no projects.yaml present",
+    };
+  }
+  if (!existsSync(examplePath)) {
+    return {
+      name: "projects.yaml customized",
+      problems,
+      okDetail: "no example file to compare against",
+    };
+  }
+  try {
+    const yaml = readFileSync(projectsYamlPath);
+    const example = readFileSync(examplePath);
+    if (yaml.equals(example)) {
+      problems.push(
+        "projects.yaml is unmodified from the shipped example. Replace the placeholder project entries with real projects.",
+      );
+    }
+  } catch {
+    // Read errors don't block this check — checkProjectStateDirs etc.
+    // surface them with better context.
+  }
+  return {
+    name: "projects.yaml customized",
+    problems,
+    okDetail: "projects.yaml differs from shipped example",
+  };
+}
+
+// Check (gs-258c): state_dir exists and is writable, or is absent but
+// its parent is writable (auto-create on first write). Probes with a
+// throwaway file because accessSync on Windows sometimes reports W_OK
+// on paths that actually reject writes — same belt-and-braces approach
+// as checkDigestsWritable.
+export function checkStateDirWritable(): SanityCheckResult {
+  const stateDir = join(getRootDir(), "state");
+  const problems: string[] = [];
+  let okDetail = `state_dir writable — ${stateDir}`;
+  if (existsSync(stateDir)) {
+    try {
+      const st = statSync(stateDir);
+      if (!st.isDirectory()) {
+        throw new Error("state path is not a directory");
+      }
+      accessSync(stateDir, fsConstants.W_OK);
+      const probe = join(stateDir, `.doctor-probe-${process.pid}`);
+      writeFileSync(probe, "");
+      unlinkSync(probe);
+    } catch {
+      problems.push(
+        `state_dir not writable — check permissions on ${stateDir}`,
+      );
+    }
+  } else {
+    try {
+      accessSync(getRootDir(), fsConstants.W_OK);
+      okDetail = `state_dir will be created on first write — parent ${getRootDir()} is writable`;
+    } catch {
+      problems.push(
+        `state_dir not writable — check permissions on ${stateDir}`,
+      );
+    }
+  }
+  return { name: "state_dir", problems, okDetail };
+}
+
 export function checkDigestsWritable(): SanityCheckResult {
   const root = getRootDir();
   const digests = join(root, "digests");
@@ -600,7 +708,15 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // projectsLoadError (a missing projects.yaml simply means the
   // project-scoped checks evaluate against an empty list).
   console.log("\nSanity checks...\n");
+  const projectsYamlPath = join(getRootDir(), "projects.yaml");
+  const examplePath = join(getRootDir(), "projects.yaml.example");
   const sanityChecks: SanityCheckResult[] = [
+    // gs-258: first-run checks go first so a fresh-clone user sees
+    // "no projects registered" at the top instead of buried below
+    // the project-iterating checks that have nothing to iterate.
+    checkProjectsYamlHasProject(projects, projectsYamlPath),
+    checkProjectsYamlCustomized(projectsYamlPath, examplePath),
+    checkStateDirWritable(),
     checkProjectPaths(projects),
     checkProjectStateDirs(projects),
     checkProjectTasksJson(projects),
@@ -612,13 +728,16 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
   // untouched — the failure detail is already printed.
   const verboseDetails: string[][] = opts.verbose
     ? [
+        [],
+        [],
+        [],
         await projectPathsVerboseDetail(projects),
         stateDirsVerboseDetail(projects),
         tasksJsonVerboseDetail(projects),
         digestsVerboseDetail(),
         [],
       ]
-    : [[], [], [], [], []];
+    : [[], [], [], [], [], [], [], []];
   for (let i = 0; i < sanityChecks.length; i++) {
     const check = sanityChecks[i]!;
     if (check.problems.length === 0) {
@@ -739,6 +858,29 @@ async function collectDoctorJsonReport(
     projects = await loader();
   } catch (e) {
     projectsLoadError = (e as Error).message;
+  }
+
+  // gs-258: always-on first-run checks. These run whether or not
+  // projects.yaml loaded — their whole point is to surface a missing
+  // or unmodified projects.yaml, so gating them on a successful load
+  // would hide the signal a first-run user needs.
+  const projectsYamlPath = join(getRootDir(), "projects.yaml");
+  const examplePath = join(getRootDir(), "projects.yaml.example");
+  const firstRun: SanityCheckResult[] = [
+    checkProjectsYamlHasProject(projects, projectsYamlPath),
+    checkProjectsYamlCustomized(projectsYamlPath, examplePath),
+    checkStateDirWritable(),
+  ];
+  for (const s of firstRun) {
+    if (s.problems.length === 0) {
+      checks.push({ name: s.name, status: "pass", detail: s.okDetail });
+    } else {
+      checks.push({
+        name: s.name,
+        status: "fail",
+        detail: s.problems.join("; "),
+      });
+    }
   }
 
   if (projectsLoadError !== null) {
