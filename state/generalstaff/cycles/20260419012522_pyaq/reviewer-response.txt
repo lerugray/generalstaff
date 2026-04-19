@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All files in the diff correspond to the claimed task gs-221, no hands-off violations, and the verification command passed with comprehensive test coverage.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-221",
+      "evidence": "The diff includes the creation of src/views/fleet_overview.ts with the required interfaces and getFleetOverview function, and tests/views/fleet_overview.test.ts with comprehensive unit tests as specified in the task.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' returned exit code 0, indicating all tests passed and TypeScript compilation succeeded. The test suite covers all required scenarios including happy path, empty fleet, zero cycles, pass rate calculation, and slot efficiency computation."
+}
