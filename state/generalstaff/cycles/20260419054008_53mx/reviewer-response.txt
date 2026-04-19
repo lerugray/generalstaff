@@ -1,0 +1,15 @@
+{
+  "verdict": "verified",
+  "reason": "All changes align with the claimed task gs-247, no hands-off violations, and the verification command passed.",
+  "scope_drift_files": [],
+  "hands_off_violations": [],
+  "task_evidence": [
+    {
+      "task": "gs-247",
+      "evidence": "Added --since flag parsing and filtering logic in cli.ts, sessions.ts, and summary.ts; included comprehensive tests in cli.test.ts and sessions.test.ts.",
+      "confidence": "high"
+    }
+  ],
+  "silent_failures": [],
+  "notes": "The verification command 'bun test && bun x tsc --noEmit' passed with exit code 0, confirming the changes are syntactically and semantically correct."
+}
