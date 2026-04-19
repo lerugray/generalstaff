@@ -613,6 +613,71 @@ export function digestsVerboseDetail(): string[] {
   return [`      ${join(getRootDir(), "digests")}`];
 }
 
+// gs-263: informational check that reports which reviewer provider
+// would run based on current env. Mirrors the resolution logic in
+// src/reviewer.ts (GENERALSTAFF_REVIEWER_PROVIDER default 'claude',
+// model + host defaults matching reviewer.ts). A user asking "what
+// happens if I run `session` right now" should see the answer here
+// without reading code.
+//
+// Warn — not fail — when openrouter is selected without an API key:
+// the cycle would fail-safe to verification_failed, so this is a
+// misconfiguration surface, not a hard doctor failure.
+
+export interface ReviewerProviderCheck {
+  status: "pass" | "warn";
+  provider: string;
+  detail: string;
+}
+
+export function checkReviewerProvider(
+  env: Record<string, string | undefined> = process.env as Record<
+    string,
+    string | undefined
+  >,
+): ReviewerProviderCheck {
+  const provider = (
+    env.GENERALSTAFF_REVIEWER_PROVIDER ?? "claude"
+  ).toLowerCase();
+  const modelOverride = env.GENERALSTAFF_REVIEWER_MODEL;
+
+  if (provider === "openrouter") {
+    const model = modelOverride ?? "qwen/qwen3-coder-30b-a3b-instruct";
+    if (!env.OPENROUTER_API_KEY) {
+      return {
+        status: "warn",
+        provider,
+        detail:
+          `reviewer: openrouter (model: ${model}) — ` +
+          `OPENROUTER_API_KEY not set; cycles will fail-safe to verification_failed`,
+      };
+    }
+    return {
+      status: "pass",
+      provider,
+      detail: `reviewer: openrouter (model: ${model})`,
+    };
+  }
+
+  if (provider === "ollama") {
+    const model = modelOverride ?? "qwen3:8b";
+    const host = env.OLLAMA_HOST ?? "http://localhost:11434";
+    return {
+      status: "pass",
+      provider,
+      detail: `reviewer: ollama (model: ${model}, OLLAMA_HOST: ${host})`,
+    };
+  }
+
+  // claude (default) uses `claude -p` + subscription auth; no env
+  // plumbing to surface beyond the provider name itself.
+  return {
+    status: "pass",
+    provider,
+    detail: `reviewer: ${provider}`,
+  };
+}
+
 async function defaultPrompt(question: string): Promise<boolean> {
   // Simple y/N reader. Default (empty) answer is "no" — destructive
   // actions should require explicit consent.
@@ -752,6 +817,16 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
         console.log(`  ✗  ${check.name} — ${problem}`);
       }
     }
+  }
+
+  // gs-263: reviewer-provider informational check. Rendered below the
+  // sanity list because it's env-driven, not state-driven: a ✓ here
+  // only means "this is what would run", not "this project is healthy".
+  const reviewerCheck = checkReviewerProvider();
+  if (reviewerCheck.status === "pass") {
+    console.log(`  ✓  ${reviewerCheck.detail}`);
+  } else {
+    console.log(`  ⚠  ${reviewerCheck.detail}`);
   }
 
   if (!opts.fix) {
