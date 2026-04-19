@@ -1,0 +1,20 @@
+# Keep shell scripts in LF line endings regardless of the user's
+# git autocrlf setting. Windows developers can still edit them;
+# git will not rewrite to CRLF at checkout. Required for install.sh
+# and scripts/*.sh to work when executed on macOS / Linux.
+*.sh     text eol=lf
+install.sh text eol=lf
+
+# PowerShell scripts are fine either way but LF is more portable.
+*.ps1    text eol=lf
+install.ps1 text eol=lf
+
+# Keep TypeScript / JavaScript / JSON / Markdown normalized but
+# allow the developer's native line endings at checkout. Default
+# behavior — explicit for clarity.
+*.ts     text
+*.js     text
+*.json   text
+*.md     text
+*.yaml   text
+*.yml    text

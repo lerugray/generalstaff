@@ -90,6 +90,25 @@ carry across them.
 
 ## Quickstart
 
+### One-line installer (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lerugray/generalstaff/master/install.sh | bash
+```
+
+### One-line installer (Windows, PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/lerugray/generalstaff/master/install.ps1 | iex
+```
+
+The installer clones this repo into `./GeneralStaff/`, auto-installs
+`bun` if missing (not as root; writes to `$HOME/.bun`), runs
+`bun install`, and prints next steps. Safe to re-run. Override the
+install location with `GENERALSTAFF_DIR=/your/path`.
+
+### Manual install
+
 Requires `git`, `bash` (on Windows, Git Bash is fine), `bun` 1.2+, and
 `claude` (the Claude Code CLI) in your PATH.
 
