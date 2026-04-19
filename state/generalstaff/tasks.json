@@ -1662,14 +1662,15 @@
   {
     "id": "gs-252",
     "title": "Add cycle duration percentiles (p50/p90/max) to `generalstaff status --summary`. CREATE ONLY: modify `src/summary.ts` (or wherever `status --summary` computes its metrics — inspect the summary path in `src/cli.ts` status handler) to compute p50, p90, and max of the `duration_seconds` field across the session_complete / cycle_end events already being scanned for the summary. Text rendering: add a one-line `cycle_duration: p50=Ns p90=Ns max=Ns` under the existing metrics. `--json` shape: add a `cycle_duration: { p50: number, p90: number, max: number, count: number }` field (count = number of cycles contributing to the percentiles). If no cycles match (empty pool), emit `cycle_duration: (no cycles)` in text mode and `cycle_duration: null` in JSON. Must respect the existing `--since` filter (gs-247) — percentiles only over filtered events. Append tests. DO NOT CREATE: new src/ files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Tests: (a) 3-cycle fixture → percentiles match hand-computed values; (b) empty pool renders null/no-cycles both modes; (c) --since filter narrows the pool; (d) single-cycle edge case: p50 = p90 = max = that one duration. Expected diff: ~130 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/summary.ts",
       "src/cli.ts",
       "tests/summary.test.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T08:43:07.039Z"
   },
   {
     "id": "gs-253",

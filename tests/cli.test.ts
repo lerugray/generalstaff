@@ -4806,6 +4806,10 @@ dispatcher:
       // outside.
       expect(parsed.wall_clock_minutes).toBe(75);
       expect(parsed.last_session_end).toBe("2026-04-17T18:15:00.000Z");
+      // gs-252: cycle_duration percentiles span only the same filtered pool.
+      // Durations in window: [240, 60] → sorted [60, 240] → p50 (rank ceil(0.5*2)=1
+      // → idx 0) = 60; p90 (rank ceil(0.9*2)=2 → idx 1) = 240; max = 240; count = 2.
+      expect(parsed.cycle_duration).toEqual({ p50: 60, p90: 240, max: 240, count: 2 });
     });
 
     it("rejects an unparseable --since value with a clear error", async () => {
