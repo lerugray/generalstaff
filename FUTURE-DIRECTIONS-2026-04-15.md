@@ -1694,3 +1694,129 @@ with human collaborators, not with the bot. The bot can
 cannot decide what counts as plain language without producing
 confident slop. Captured as forward direction, not as a queued
 task.
+
+### Addendum-5 — 2026-04-18 late evening: Phase 5 views as load-bearing marketing artifact
+
+**What Ray noticed.** After building the five Phase 5 reference
+views (fleet, task-queue, session-tail, dispatch-detail, inbox),
+he flagged that "some of this stuff will be relevant too for the
+README when this goes public, landing page on GitHub Pages if we
+have one." This is a substantive strategic observation worth
+capturing so future launch work doesn't re-derive it under time
+pressure.
+
+**The insight.** The Phase 5 aesthetic — warm cream paper,
+Spectral + JetBrains Mono + Archivo Narrow type stack, rust-
+accent discipline, hairline rules, printed-dispatch-sheet metaphor
+— is not just the app's internal UI. It's the *project's visual
+identity*. That identity will appear on every public surface:
+
+- The GitHub repo README (screenshots embedded in markdown)
+- A potential GH Pages landing page for `lerugray.github.io/generalstaff`
+  or similar
+- Demo screenshots in articles, threads, showcases
+- Talk slides when the project gets presented
+- Any hypothetical `generalstaff design <project>` plugin output
+  for managed projects that want the same aesthetic
+
+Because the identity is already *earned* by the dashboard work
+(not invented for marketing), every public surface gains visual
+coherence for free. A reader sees a screenshot in a README, clicks
+through to the GH Pages landing page, installs the CLI, runs the
+dashboard — the aesthetic is continuous. Three surfaces, one
+system.
+
+**Why this matters for Ray specifically.** Per CLAUDE.md
+§"Project stakes," GeneralStaff is portfolio-adjacent — shipping
+matters more than perfecting, the open-source story is load-
+bearing. A launch where the repo README, the landing page, AND
+the running dashboard all share one considered visual identity is
+substantively different from a launch where each surface was
+designed in isolation. The Phase 5 brief budget tonight bought
+that coherence for all of them, not just for the dashboard.
+
+**GH Pages landing page — section outline (not committed as a
+build yet).** When the time comes to build `index.html` for a
+`docs/` or `site/` GH Pages source, the natural structure is:
+
+1. **Masthead** — reuse from the dashboard vocabulary (wordmark,
+   rust dot, sub-line). Landing-page sub could say something like
+   "An open-source autonomous-bot dispatcher for your own code."
+2. **Hero pitch** — one-sentence tagline, two-sentence elaboration.
+   Something in the range of: *"GeneralStaff runs Claude Code
+   sessions across your projects on your own machine, with a
+   verification gate that won't let the bot ship slop."* The
+   Spectral display size (54px like the `.crest` in dispatch-
+   detail) reads as serious without shouting.
+3. **What it looks like** — three or four screenshots of the
+   dashboard views at reasonable resolution, captioned in Spectral
+   italic. Fleet overview first, then session tail, then dispatch
+   detail. The screenshots *are* the best argument the project has.
+4. **How it works** — a single illustrated explanation of one
+   cycle. Claim → engineer → verify → review. Could use the same
+   `.phases` strip pattern from session-tail as a diagram.
+5. **Philosophy** — two paragraphs on the Hammerstein staff-officer
+   framing. Why "industriousness without judgment is worse than
+   laziness without judgment." Why the verification gate is
+   load-bearing, not ceremonial. Tone: considered, not breathless.
+6. **Hard Rules** — the ten rules rendered as a numbered list in
+   Spectral, with brief gloss. This is *the* differentiating
+   argument against Polsia-style alternatives; don't bury it.
+7. **Install / quickstart** — mono code block with the three or
+   four commands to register a project and run a session. Honest
+   about prerequisites (Bun, a Claude Max subscription or BYOK key,
+   a git repo you control).
+8. **Philosophy continued** — the anti-slop positioning,
+   architecture-is-the-philosophy argument. Why local-first,
+   BYOK, open audit log, no SaaS tier.
+9. **Footer / colophon** — reuse the dashboard's colophon pattern.
+   Rendered-time, version, repo link.
+
+The landing page should read as a **longer-form cousin of a
+single dashboard sheet**, not as a Polsia-style SaaS pitch. Same
+grid, same paper, same type — just with marketing copy instead of
+data.
+
+**README vs landing page (complementary, not overlapping).** The
+repo `README.md` is markdown; it renders on the GitHub repo
+homepage, handles install-from-clone and contributing pointers,
+and serves people who found the repo via search or a link. The GH
+Pages landing page is the shareable-URL destination — it's what
+you paste into a tweet, what shows up in a search-result card,
+what a journalist screenshots. Both exist because they serve
+different funnels. Write both; don't try to make one cover both
+jobs.
+
+**When to build these.** The README can be drafted now or in any
+session — lightweight text work, delegable to Gemini via the
+routing rules in global CLAUDE.md (free tier, strong on
+documentation prose). The landing-page HTML is heavier (~800-1000
+lines, similar weight to `dispatch-detail-v1.html`) and is a
+natural candidate for either (a) a Sonnet subagent with the five
+reference HTMLs as context, or (b) a dedicated GeneralStaff bot
+cycle queued as a task once the scope + hands-off paths are
+defined. Either works; the budget argument is "don't do it in the
+main Claude Code session when free-tier or in-dispatcher
+alternatives exist and the work is pattern-extension."
+
+**Kriegspiel theming (UI-VISION §"When this happens") —
+clarification.** UI-VISION defers kriegspiel to Phase 5.5, *after*
+the dashboard ships functional. The landing page is **not** the
+dashboard — it's marketing. A kriegspiel-themed landing page
+could legitimately ship earlier than kriegspiel-themed dashboard
+views, because marketing has different stability concerns than
+working software. But the recommendation for now is **don't fork
+the aesthetic** — ship the landing page in the same plain-paper
+aesthetic as the dashboard, then theme both together at 5.5 if at
+all. Visual coherence across surfaces is the whole argument of
+this addendum; splitting landing vs dashboard aesthetics defeats
+it.
+
+**What this does NOT commit to.** No GH Pages setup yet, no
+`docs/site/` or `site/` directory, no landing-page HTML on disk,
+no README rewrite. All four Phase 5 dashboard views remain the
+artifact; this addendum is a pointer to how they'll amplify later.
+Pre-building the marketing surface before launch readiness is
+itself the stupid-industrious quadrant. The right move is: note
+the connection, keep Phase 5 shipped and stable, revisit when
+launch is actually near.
