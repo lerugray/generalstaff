@@ -2567,4 +2567,164 @@ dispatcher:
       expect(result.stdout).toContain("generalstaff view <name>");
     });
   });
+
+  describe("view task-queue subcommand (gs-227)", () => {
+    const VIEW_DIR = join(import.meta.dir, "fixtures", "view_taskqueue_test");
+    const ALPHA_DIR = join(VIEW_DIR, "alpha");
+    const EMPTY_DIR = join(VIEW_DIR, "empty");
+
+    const PROJECTS_YAML = () => `
+projects:
+  - id: alpha
+    path: ${ALPHA_DIR.replace(/\\/g, "/")}
+    priority: 1
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: bot/work
+    auto_merge: true
+    hands_off:
+      - src/reviewer.ts
+  - id: empty
+    path: ${EMPTY_DIR.replace(/\\/g, "/")}
+    priority: 2
+    engineer_command: "echo hi"
+    verification_command: "echo ok"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    branch: main
+    auto_merge: false
+    hands_off:
+      - CLAUDE.md
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`;
+
+    beforeEach(() => {
+      mkdirSync(join(ALPHA_DIR, "state", "alpha"), { recursive: true });
+      mkdirSync(join(EMPTY_DIR, "state", "empty"), { recursive: true });
+      writeFileSync(join(VIEW_DIR, "projects.yaml"), PROJECTS_YAML());
+      writeFileSync(
+        join(ALPHA_DIR, "state", "alpha", "tasks.json"),
+        JSON.stringify([
+          {
+            id: "a-1",
+            title: "in-flight task",
+            status: "in_progress",
+            priority: 1,
+          },
+          {
+            id: "a-2",
+            title: "ready pickable task",
+            status: "pending",
+            priority: 2,
+          },
+          {
+            id: "a-3",
+            title: "interactive blocked task",
+            status: "pending",
+            priority: 3,
+            interactive_only: true,
+          },
+          {
+            id: "a-4",
+            title: "hands-off blocked task",
+            status: "pending",
+            priority: 4,
+            expected_touches: ["src/reviewer.ts"],
+          },
+          {
+            id: "a-5",
+            title: "done long ago task",
+            status: "done",
+            priority: 5,
+            completed_at: "2026-04-17T10:00:00.000Z",
+          },
+        ]),
+      );
+      writeFileSync(
+        join(EMPTY_DIR, "state", "empty", "tasks.json"),
+        JSON.stringify([]),
+      );
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("--json emits TaskQueueData shape with four buckets", async () => {
+      const result = await runCli(
+        ["view", "task-queue", "alpha", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.project_id).toBe("alpha");
+      expect(Array.isArray(parsed.in_flight)).toBe(true);
+      expect(Array.isArray(parsed.ready)).toBe(true);
+      expect(Array.isArray(parsed.blocked)).toBe(true);
+      expect(Array.isArray(parsed.shipped)).toBe(true);
+      expect(parsed.in_flight).toHaveLength(1);
+      expect(parsed.ready).toHaveLength(1);
+      expect(parsed.blocked).toHaveLength(2);
+      expect(parsed.shipped).toHaveLength(1);
+      const blockedA3 = parsed.blocked.find(
+        (e: { id: string }) => e.id === "a-3",
+      );
+      expect(blockedA3.block_reason).toBe("interactive_only");
+      const blockedA4 = parsed.blocked.find(
+        (e: { id: string }) => e.id === "a-4",
+      );
+      expect(blockedA4.block_reason).toBe("hands_off_intersect");
+    });
+
+    it("missing project-id arg errors and exits 1", async () => {
+      const result = await runCli(["view", "task-queue"], VIEW_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: view task-queue requires <project-id>",
+      );
+    });
+
+    it("unknown project-id surfaces TaskQueueError and exits 1", async () => {
+      const result = await runCli(
+        ["view", "task-queue", "nonesuch"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("unknown project: nonesuch");
+    });
+
+    it("renders four labeled sections with per-task info", async () => {
+      const result = await runCli(["view", "task-queue", "alpha"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("In-flight:");
+      expect(result.stdout).toContain("Ready:");
+      expect(result.stdout).toContain("Blocked:");
+      expect(result.stdout).toContain("Shipped:");
+      expect(result.stdout).toContain("a-1");
+      expect(result.stdout).toContain("a-2");
+      expect(result.stdout).toContain("a-3");
+      expect(result.stdout).toContain("[P2]");
+      expect(result.stdout).toContain("block: interactive_only");
+      expect(result.stdout).toContain("block: hands_off_intersect");
+    });
+
+    it("renders empty buckets as (none) for a project with no tasks", async () => {
+      const result = await runCli(["view", "task-queue", "empty"], VIEW_DIR);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("In-flight: (none)");
+      expect(result.stdout).toContain("Ready: (none)");
+      expect(result.stdout).toContain("Blocked: (none)");
+      expect(result.stdout).toContain("Shipped: (none)");
+    });
+  });
 });

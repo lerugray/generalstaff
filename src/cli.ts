@@ -1954,10 +1954,66 @@ switch (command) {
       break;
     }
 
-    // task-queue, session-tail, dispatch-detail, inbox are queued as
-    // gs-227..230. Recognise them as valid names (so they don't collide
-    // with the "unknown view" branch) but surface a clear not-yet-wired
-    // message until their CLI shims land.
+    if (viewName === "task-queue") {
+      const { values: tqValues, positionals: tqPositionals } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const projectId = tqPositionals[0];
+      if (!projectId) {
+        console.error("Error: view task-queue requires <project-id>");
+        process.exit(1);
+      }
+      const { getProjectTaskQueue, TaskQueueError } = await import(
+        "./views/task_queue"
+      );
+      let data;
+      try {
+        data = await getProjectTaskQueue(projectId);
+      } catch (err) {
+        if (err instanceof TaskQueueError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (tqValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else {
+        const MAX_TITLE = 60;
+        const trunc = (s: string) =>
+          s.length > MAX_TITLE ? s.slice(0, MAX_TITLE - 1) + "…" : s;
+        const renderBucket = (
+          label: string,
+          entries: typeof data.in_flight,
+        ) => {
+          if (entries.length === 0) {
+            console.log(`${label}: (none)`);
+            return;
+          }
+          console.log(`${label}:`);
+          for (const e of entries) {
+            const parts = [`  ${e.id}`, `[P${e.priority}]`, trunc(e.title)];
+            if (e.block_reason) parts.push(`(block: ${e.block_reason})`);
+            if (e.age_label) parts.push(`(${e.age_label})`);
+            console.log(parts.join(" "));
+          }
+        };
+        renderBucket("In-flight", data.in_flight);
+        renderBucket("Ready", data.ready);
+        renderBucket("Blocked", data.blocked);
+        renderBucket("Shipped", data.shipped);
+      }
+      break;
+    }
+
+    // session-tail, dispatch-detail, inbox are queued as gs-228..230.
+    // Recognise them as valid names (so they don't collide with the
+    // "unknown view" branch) but surface a clear not-yet-wired message
+    // until their CLI shims land.
     console.error(
       `Error: view '${viewName}' is not yet wired up — queued as a follow-up task`,
     );
