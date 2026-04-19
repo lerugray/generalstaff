@@ -1,0 +1,114 @@
+diff --git a/src/tasks.ts b/src/tasks.ts
+index dd302f1..523f798 100644
+--- a/src/tasks.ts
++++ b/src/tasks.ts
+@@ -182,7 +182,18 @@ export function isTaskBotPickable(
+   // Mirror pendingTasks() semantic: bot-pickable starts from the same
+   // "not-done-and-not-skipped" filter (so in_progress tasks remain
+   // pickable by the bot's next cycle). The new gates layer on top.
+-  if (task.status === "done" || task.status === "skipped") {
++  // gs-231: also treat a stray `status: "completed"` as terminal.
++  // The validator (validateTaskEntry) rejects that value, but raw
++  // reads that bypass loadTasks (e.g. greenfieldCountRemainingDetailed
++  // casts JSON.parse output directly) could still surface it. Guard
++  // defensively here so unknown-but-terminal statuses don't leak back
++  // into the bot-pickable pool.
++  const terminalStatus = task.status as string;
++  if (
++    terminalStatus === "done" ||
++    terminalStatus === "skipped" ||
++    terminalStatus === "completed"
++  ) {
+     return { ok: false, reason: "not_pending" };
+   }
+   if (task.interactive_only) {
+diff --git a/src/work_detection.ts b/src/work_detection.ts
+index 56841fd..90cccbc 100644
+--- a/src/work_detection.ts
++++ b/src/work_detection.ts
+@@ -117,7 +117,13 @@ export async function greenfieldCountRemainingDetailed(
+   const b = emptyBreakdown();
+   b.total = tasks.length;
+   for (const task of tasks) {
+-    if (task.status === "done") {
++    // gs-231: treat a stray `status: "completed"` the same as `done`
++    // for breakdown bucketing. The validator rejects `"completed"`,
++    // but this function bypasses loadTasks by casting JSON.parse
++    // output directly, so a historical `"completed"` value could
++    // otherwise fall through to the default pending bucket below.
++    const statusLabel = task.status as string;
++    if (task.status === "done" || statusLabel === "completed") {
+       b.done += 1;
+       continue;
+     }
+diff --git a/state/generalstaff/tasks.json b/state/generalstaff/tasks.json
+index 431ad86..565947d 100644
+--- a/state/generalstaff/tasks.json
++++ b/state/generalstaff/tasks.json
+@@ -1424,7 +1424,7 @@
+   {
+     "id": "gs-231",
+     "title": "Harden isTaskBotPickable to treat `status: \"completed\"` same as `status: \"done\"`. CREATE ONLY: modify `src/tasks.ts` isTaskBotPickable — the existing `if (task.status === \"done\" || task.status === \"skipped\")` branch should also match `\"completed\"` (for tasks the bot marked `completed` before the status enum was locked down). Same treatment: return `{ ok: false, reason: \"not_pending\" }`. Also update `greenfieldCountRemainingDetailed` in `src/work_detection.ts` to count `\"completed\"` tasks under `done` instead of the default pending-bucket fallthrough. Append tests to `tests/tasks.test.ts` covering: (a) status='completed' returns not_pickable with reason not_pending; (b) status='completed' counts in done bucket in WorkBreakdown. DO NOT CREATE: new files; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: gs-215 historical task was marked 'completed' rather than 'done' by the bot, leaking past this filter and showing as bot-pickable in `status --backlog` until interactively patched 2026-04-18 evening. Harden at the pickability-check layer rather than normalizing tasks.json entries, so any future stray status values don't re-spawn the issue. Expected diff: ~60 lines.",
+-    "status": "pending",
++    "status": "done",
+     "priority": 2,
+     "expected_touches": [
+       "src/tasks.ts",
+diff --git a/tests/tasks.test.ts b/tests/tasks.test.ts
+index 00f1b09..fd5ecd5 100644
+--- a/tests/tasks.test.ts
++++ b/tests/tasks.test.ts
+@@ -1302,4 +1302,16 @@ describe("isTaskBotPickable + botPickableTasks (gs-195)", () => {
+     const result = isTaskBotPickable(t, ["src/schema/**"]);
+     expect(result).toEqual({ ok: false, reason: "interactive_only" });
+   });
++
++  it("gs-231: status='completed' is not pickable (treated as terminal)", () => {
++    // gs-215 was marked `completed` by the bot before the status enum
++    // was locked down. The validator now rejects that value, but
++    // isTaskBotPickable is the last line of defense for callers that
++    // bypass loadTasks.
++    const t = task({
++      status: "completed" as unknown as GreenfieldTask["status"],
++    });
++    const result = isTaskBotPickable(t, []);
++    expect(result).toEqual({ ok: false, reason: "not_pending" });
++  });
+ });
+diff --git a/tests/work_detection.test.ts b/tests/work_detection.test.ts
+index fa78044..028c0b4 100644
+--- a/tests/work_detection.test.ts
++++ b/tests/work_detection.test.ts
+@@ -627,6 +627,32 @@ describe("countRemainingWorkDetailed", () => {
+     expect(b.total).toBe(7);
+   });
+ 
++  it("gs-231: status='completed' counts in the done bucket, not pending_bot_pickable", async () => {
++    // gs-215 was marked `completed` by the bot before the status enum
++    // was locked down. greenfieldCountRemainingDetailed bypasses the
++    // validator by casting JSON.parse output directly, so `"completed"`
++    // can survive — it should be bucketed as terminal/done rather than
++    // leaking back into pending_bot_pickable.
++    writeFixture(
++      "state/gs-231-completed/tasks.json",
++      JSON.stringify([
++        { id: "1", title: "plain pending", status: "pending", priority: 1 },
++        { id: "2", title: "legacy", status: "completed", priority: 1 },
++        { id: "3", title: "done", status: "done", priority: 1 },
++      ]),
++    );
++    const project = makeProject({
++      id: "gs-231-completed",
++      work_detection: "tasks_json",
++    });
++    const b = await countRemainingWorkDetailed(project);
++    expect(b.done).toBe(2);
++    expect(b.pending_bot_pickable).toBe(1);
++    expect(b.pending_interactive_only).toBe(0);
++    expect(b.pending_handsoff_conflict).toBe(0);
++    expect(b.total).toBe(3);
++  });
++
+   it("returns an all-zero breakdown when tasks.json is missing", async () => {
+     const project = makeProject({
+       id: "gs-200-missing",
