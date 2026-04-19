@@ -117,7 +117,13 @@ export async function greenfieldCountRemainingDetailed(
   const b = emptyBreakdown();
   b.total = tasks.length;
   for (const task of tasks) {
-    if (task.status === "done") {
+    // gs-231: treat a stray `status: "completed"` the same as `done`
+    // for breakdown bucketing. The validator rejects `"completed"`,
+    // but this function bypasses loadTasks by casting JSON.parse
+    // output directly, so a historical `"completed"` value could
+    // otherwise fall through to the default pending bucket below.
+    const statusLabel = task.status as string;
+    if (task.status === "done" || statusLabel === "completed") {
       b.done += 1;
       continue;
     }
