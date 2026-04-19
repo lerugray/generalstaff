@@ -16,6 +16,11 @@ digests/
 next_project.txt
 STOP
 
+# Transient pid file — written at session start by scripts/run_session.bat,
+# cleaned at session end. Tracking it causes `D state/session.pid` residue
+# that blocks the next launch's clean-tree preflight (gs-236).
+state/session.pid
+
 # Bun / Node
 node_modules/
 bun.lock

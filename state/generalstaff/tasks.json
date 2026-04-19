@@ -1475,7 +1475,7 @@
   {
     "id": "gs-236",
     "title": "Gitignore `state/session.pid` so session-end pid cleanup doesn't leave a tracked-file deletion as clean-tree residue. CREATE ONLY: modify `.gitignore` to add `state/session.pid` (with a short comment explaining it's a transient pid file written at session start and cleaned at session end); run `git rm --cached state/session.pid` if the file is currently tracked (one-liner in the task — bot should detect and remove-from-index if present); append a test to `tests/gitignore.test.ts` asserting the pattern is present. DO NOT CREATE: new files outside the test; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Motivation: tonight's relaunches repeatedly produced `D state/session.pid` as uncommitted state requiring a separate cleanup commit before the next launch. Making it .gitignored removes the friction and prevents future session-end churn commits. Expected diff: ~20 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       ".gitignore",
