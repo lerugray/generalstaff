@@ -393,18 +393,29 @@ candidate set is narrow:
   project for GeneralStaff to manage, regardless of how
   convenient the proximity seems. This probably applies to any
   Ray project with real users — confirm before suggesting.
-- **gamr is the planned scratch test project.** Ray's old idea
-  (~10 years ago): "Tinder for gamers, but strictly platonic" —
-  matching people for gaming partners, nearby or remote. Ray
-  himself calls it a "dumb idea now." That is the point. We pick
-  a deliberately mediocre idea to hold product-viability constant
-  and LOW while we measure the dispatcher's generality on a
-  non-self project. Do NOT drift into trying to make gamr "good"
-  as a product — that defeats the experimental design. Evaluate
-  gamr cycles by dispatcher behavior (verification gate rigor,
-  hands-off enforcement, cycle-to-cycle compounding), not by
-  whether the features are shippable. Web version preferred
-  over mobile for scaffolding simplicity.
+- **gamr is a live-project test case as of 2026-04-19.** Ray's
+  old idea (~10 years ago): "Tinder for gamers, but strictly
+  platonic" — matching people for gaming partners, nearby or
+  remote. Originally registered 2026-04-18 as a *deliberately
+  mediocre* test bench to hold product-viability constant while
+  measuring the dispatcher's generality. **That framing was
+  reversed on 2026-04-19** after the Claude-generated design
+  turned out well and Ray observed no competing product fills
+  the platonic-gamer-matching niche. New framing: gamr is a
+  genuine launch candidate. Risk/return is low — basic web
+  version with one cheap paid tier + ads on the free tier — and
+  launching it serves dual purposes: (a) Ray's portfolio /
+  career upside (per "Project stakes" above), (b) first
+  real-live-project test case for GeneralStaff's Phase 7+
+  validation (ties to UI-VISION-2026-04-19.md's dev-mode /
+  live-mode split). Phased launch plan lives at
+  `../gamr/LAUNCH-PLAN.md`; phase-progression architecture at
+  `FUTURE-DIRECTIONS-2026-04-19.md`. Web version preferred over
+  mobile for scaffolding simplicity. This reversal does NOT
+  relax any Hard Rule — the Hammerstein principle (bots handle
+  execution where industriousness compounds; commander keeps
+  taste) still applies. It just means gamr now has a real
+  product roadmap instead of being "shape-of-work only."
 - **raybrain is bot-eligible as of 2026-04-18 evening.** Earlier
   in the day it was excluded from GeneralStaff bot sessions
   because Ray had parallel interactive work on the raybrain
