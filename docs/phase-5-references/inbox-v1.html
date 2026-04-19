@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>generalstaff — inbox</title>
+<meta name="viewport" content="width=1280">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Archivo+Narrow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f1e7d3;
+    --paper-2:     #ede1c9;
+    --paper-edge:  #e4d5b7;
+    --ink:         #2a2418;
+    --ink-soft:    #4a4131;
+    --ink-faint:   #8a7f66;
+    --ink-ghost:   #b7ab8e;
+    --rule:        #3a3122;
+    --rule-soft:   #c9bb9b;
+    --rust:        #8a3a1c;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Spectral', Georgia, serif;
+    font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 60%, rgba(80,55,15,0.10) 100%),
+      radial-gradient(circle at 20% 10%, rgba(255,255,255,0.25), transparent 40%);
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(90,65,25,0.12) 1px, transparent 1px),
+      radial-gradient(rgba(90,65,25,0.08) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    z-index: 0;
+  }
+
+  .sheet {
+    position: relative;
+    z-index: 1;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  /* ——— masthead (reused) ——— */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+    gap: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+  .wordmark { font-family: 'Spectral', Georgia, serif; font-weight: 500; font-size: 32px; letter-spacing: -0.01em; line-height: 1; color: var(--ink); }
+  .wordmark .dot { color: var(--rust); font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 14px; vertical-align: 6px; margin-right: 10px; }
+  .sub { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.14em; font-size: 11px; color: var(--ink-soft); justify-self: start; align-self: center; padding: 4px 0 4px 14px; border-left: 1px solid var(--rule-soft); line-height: 1.5; }
+  .sub b { font-weight: 600; color: var(--ink); letter-spacing: 0.14em; }
+  .stamp { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--ink-soft); text-align: right; line-height: 1.7; letter-spacing: 0.02em; }
+  .stamp .k { color: var(--ink-faint); }
+
+  .docline { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 0 44px; font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.2em; font-size: 10.5px; color: var(--ink-faint); }
+  .docline .title { font-family: 'Spectral', Georgia, serif; text-transform: none; letter-spacing: 0; font-size: 13.5px; font-style: italic; color: var(--ink-soft); }
+
+  /* ——— summary band (reused, 3 cells) ——— */
+
+  .summary { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 0; margin-bottom: 44px; border-top: 0.5px solid var(--rule-soft); border-bottom: 0.5px solid var(--rule-soft); }
+  .cell { padding: 22px 24px 20px; border-right: 0.5px solid var(--rule-soft); }
+  .cell:last-child { border-right: none; }
+  .cell:first-child { padding-left: 0; }
+  .cell:last-child { padding-right: 0; }
+  .lab { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.18em; font-size: 10px; color: var(--ink-faint); margin-bottom: 14px; }
+  .big { font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 34px; line-height: 1; letter-spacing: -0.02em; color: var(--ink); font-feature-settings: "tnum" 1; }
+  .note { font-family: 'Spectral', Georgia, serif; font-style: italic; font-size: 13px; color: var(--ink-soft); margin-top: 10px; line-height: 1.35; }
+  .note .em { font-style: normal; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; color: var(--ink); background: rgba(138,58,28,0.08); padding: 1px 6px 2px; margin-right: 4px; }
+  .attn .note .em { background: rgba(138,58,28,0.14); color: var(--rust); }
+  .attn .big { color: var(--rust); }
+  .summary .headline { padding: 22px 32px 20px 0; border-right: 0.5px solid var(--rule-soft); }
+  .headline .over { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.22em; font-size: 10px; color: var(--ink-faint); margin-bottom: 10px; }
+  .headline h1 { margin: 0; font-family: 'Spectral', Georgia, serif; font-weight: 400; font-size: 28px; line-height: 1.15; letter-spacing: -0.012em; color: var(--ink); text-wrap: pretty; max-width: 24ch; }
+  .headline h1 em { font-style: italic; color: var(--ink-soft); }
+
+  /* ——— section head (reused) ——— */
+
+  .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 40px 0 14px; }
+  .sec-head h2 { margin: 0; font-family: 'Spectral', Georgia, serif; font-weight: 500; font-size: 18px; color: var(--ink); }
+  .sec-head h2 .n { font-family: 'JetBrains Mono', monospace; font-weight: 400; color: var(--ink-faint); font-size: 13px; margin-left: 10px; letter-spacing: 0.04em; }
+  .sec-head .legend { font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.18em; font-size: 10px; color: var(--ink-faint); }
+
+  /* ——— NEW: .message (extends the 3-col left-rail pattern) ——— */
+
+  .messages { border-top: 1.25px solid var(--rule); }
+
+  .message {
+    display: grid;
+    grid-template-columns: 110px 1fr 150px;
+    column-gap: 24px;
+    padding: 20px 0 22px;
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+
+  .message .when {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.45;
+    padding-top: 4px;
+  }
+  .message .when .ago {
+    display: block;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+  }
+
+  .message .body { min-width: 0; }
+
+  .message .from-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+  .message .from-line .from {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-soft);
+  }
+  .message .from-line .from.bot    { color: var(--ink-soft); }
+  .message .from-line .from.human  { color: var(--ink); }
+  .message .from-line .from.human::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--ink);
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+  .message .from-line .from.system { color: var(--ink-faint); font-style: italic; font-family: 'Spectral', serif; text-transform: none; letter-spacing: 0.01em; }
+  .message .from-line .sid {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    letter-spacing: 0.02em;
+  }
+  .message .from-line .kind {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    margin-left: auto;
+  }
+  .message .from-line .kind.blocker  { color: var(--rust); }
+  .message .from-line .kind.handoff  { color: var(--ink-soft); }
+  .message .from-line .kind.fyi      { color: var(--ink-ghost); }
+  .message .from-line .kind.decision { color: var(--ink); }
+
+  .message .text {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--ink);
+    margin: 0;
+    text-wrap: pretty;
+    max-width: 68ch;
+  }
+  .message .text .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .message .text em { font-style: italic; color: var(--ink-soft); }
+
+  .message .aside {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    padding-top: 4px;
+    line-height: 1.6;
+  }
+  .message .aside .k {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    margin-right: 4px;
+  }
+  .message .aside .ref {
+    display: block;
+    color: var(--ink);
+    font-weight: 500;
+    margin-top: 2px;
+  }
+  .message .aside .ref + .ref { margin-top: 0; }
+
+  /* date separator (war-diary style) */
+  .date-sep {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 24px 0 14px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.24em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .date-sep::before, .date-sep::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule-soft);
+  }
+  .date-sep .day {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 14px;
+    color: var(--ink-soft);
+    font-weight: 400;
+  }
+
+  /* ——— afterword / colophon (reused) ——— */
+
+  .afterword { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 48px; margin-top: 56px; padding-top: 22px; border-top: 0.5px solid var(--rule-soft); }
+  .afterword h3 { margin: 0 0 10px; font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.22em; font-size: 10px; font-weight: 600; color: var(--ink-faint); }
+  .afterword p { margin: 0; font-family: 'Spectral', Georgia, serif; font-size: 13.5px; line-height: 1.55; color: var(--ink-soft); text-wrap: pretty; }
+  .afterword p .mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--ink); }
+
+  .colophon { margin-top: 72px; display: flex; justify-content: space-between; align-items: baseline; font-family: 'Archivo Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.22em; font-size: 10px; color: var(--ink-ghost); padding-top: 16px; border-top: 0.5px solid var(--rule-soft); }
+  .colophon .run { font-family: 'JetBrains Mono', monospace; text-transform: none; letter-spacing: 0.04em; font-size: 11px; color: var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="wordmark"><span class="dot">●</span>generalstaff</div>
+    <div class="sub">Inbox · <b>fleet channel</b></div>
+    <div class="stamp">
+      <span class="k">sheet</span>&nbsp;&nbsp;05 / inbox<br>
+      <span class="k">host</span>&nbsp;&nbsp;&nbsp;localhost:7823
+    </div>
+  </header>
+
+  <div class="docline">
+    <span>Shared breadcrumbs · cross-session</span>
+    <span class="title">“Messages from one shift to the next.”</span>
+    <span>Rev. 0.4 · April 2026</span>
+  </div>
+
+  <section class="summary">
+    <div class="cell headline">
+      <div class="over">Fleet channel</div>
+      <h1>Seven messages across tonight and yesterday. <em>One blocker, two handoffs, four FYIs.</em></h1>
+    </div>
+
+    <div class="cell attn">
+      <div class="lab">Blockers</div>
+      <div class="big">1</div>
+      <div class="note"><span class="em">raybrain</span>hit OOM mid-session.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Handoffs</div>
+      <div class="big">2</div>
+      <div class="note">Queue-state passed between sessions.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Last posted</div>
+      <div class="big" style="font-size:22px;padding-top:11px">7m ago</div>
+      <div class="note">By session <span class="em">bc4nbrro5</span>on close.</div>
+    </div>
+  </section>
+
+  <!-- ——— today ——— -->
+  <div class="date-sep"><span>Today</span><span class="day">2026-04-18</span></div>
+
+  <div class="messages">
+
+    <div class="message">
+      <div class="when">21:43<span class="ago">7m ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from bot">session</span>
+          <span class="sid">bc4nbrro5</span>
+          <span class="kind handoff">Handoff</span>
+        </div>
+        <p class="text">Closed with <span class="mono">2/2 verified</span> on generalstaff (<span class="mono">gs-220</span>, <span class="mono">gs-216</span>). Queue is empty after this close — next session should read the Phase 5 references at <span class="mono">docs/phase-5-references/</span> and decide on the remaining two views, or open a different project.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">refs</span></div>
+        <div class="ref">gs-220</div>
+        <div class="ref">gs-216</div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="when">21:25<span class="ago">25m ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from bot">session</span>
+          <span class="sid">b05evw3nt</span>
+          <span class="kind fyi">FYI</span>
+        </div>
+        <p class="text">Shipped <span class="mono">gs-217</span> (fleet-status one-row-per-project), <span class="mono">gs-218</span> (tasks.json schema validation), <span class="mono">gs-219</span> (this inbox). The channel you're reading is now live — any session can post with <span class="mono">appendFleetMessage()</span>.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">refs</span></div>
+        <div class="ref">gs-217</div>
+        <div class="ref">gs-218</div>
+        <div class="ref">gs-219</div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="when">18:42<span class="ago">3h ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from bot">session</span>
+          <span class="sid">bxs08e22x</span>
+          <span class="kind handoff">Handoff</span>
+        </div>
+        <p class="text">raybrain Phase 2 complete — <span class="mono">rayb-006..011</span> all verified (pydantic schema, privacy guards, Ollama ingest, wiki store, LanceDB retriever, CLI). Committed to raybrain master. GeneralStaff sessions are clear to pick up any raybrain Phase 3+ tasks once they appear.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">project</span></div>
+        <div class="ref">raybrain</div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="when">11:51<span class="ago">8h ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from bot">session</span>
+          <span class="sid">b9m3kvq0a</span>
+          <span class="kind blocker">Blocker</span>
+        </div>
+        <p class="text">Stopped after 82 cycles — engineer subprocess OOM'd repeatedly on <span class="mono">rayb-001</span>. First-to-third crash span exceeded gs-193's 600-second window so the existing soft-skip never fired. Flagging for fast-fail extension: a <em>slow-crash</em> streak needs its own escape hatch. <span class="mono">gs-220</span> queued to address.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">refs</span></div>
+        <div class="ref">gs-193</div>
+        <div class="ref">gs-220</div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="when">09:04<span class="ago">11h ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from human">ray</span>
+          <span class="kind decision">Decision</span>
+        </div>
+        <p class="text">Skip raybrain tonight while I work the policy surface interactively (<span class="mono">src/**/schema/**</span>, <span class="mono">src/**/privacy/**</span>, <span class="mono">src/**/policy/**</span>). Flip those three globs to <span class="mono">hands_off</span> in <span class="mono">projects.yaml</span>. Will reopen for bot sessions once the prose-to-code translation is done.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">project</span></div>
+        <div class="ref">raybrain</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ——— yesterday ——— -->
+  <div class="date-sep"><span>Yesterday</span><span class="day">2026-04-17</span></div>
+
+  <div class="messages">
+
+    <div class="message">
+      <div class="when">22:01<span class="ago">22h ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from bot">session</span>
+          <span class="sid">bn1zck88p</span>
+          <span class="kind fyi">FYI</span>
+        </div>
+        <p class="text">gamr Phase 1 scaffold shipped — 4 verified cycles (<span class="mono">gamr-001..004</span>). Stack is Next.js + Tailwind, deployed web-only per CLAUDE.md convention. Real test project validated: dispatcher drives a non-dogfood codebase without generalstaff-specific assumptions leaking in.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">project</span></div>
+        <div class="ref">gamr</div>
+      </div>
+    </div>
+
+    <div class="message">
+      <div class="when">19:38<span class="ago">1d ago</span></div>
+      <div class="body">
+        <div class="from-line">
+          <span class="from system">dispatcher</span>
+          <span class="kind fyi">FYI</span>
+        </div>
+        <p class="text">Hot-reloaded <span class="mono">projects.yaml</span> mid-session (gs-191) — added gamr to the registry without restarting. Sequential mode: picked gamr on the next round without dropping generalstaff's in-flight work.</p>
+      </div>
+      <div class="aside">
+        <div><span class="k">feature</span></div>
+        <div class="ref">gs-191</div>
+      </div>
+    </div>
+
+  </div>
+
+  <section class="afterword">
+    <div>
+      <h3>What this channel is</h3>
+      <p>An append-only JSONL at <span class="mono">state/_fleet/messages.jsonl</span>. Sessions post structured breadcrumbs — status, handoffs, blockers, decisions — that later sessions can read at startup. Not a chat room; closer to a ship's log.</p>
+    </div>
+    <div>
+      <h3>Message kinds</h3>
+      <p><span class="mono">handoff</span> passes queue-state between sessions. <span class="mono">blocker</span> flags something a later session should address. <span class="mono">fyi</span> is informational. <span class="mono">decision</span> is a human call worth preserving. Kinds are a convention, not enforced by schema.</p>
+    </div>
+    <div>
+      <h3>Retention</h3>
+      <p>Reads from a session-start cutoff so restarts don't re-log ancient history (gs-219). The file itself is append-only — old messages stay on disk as a durable audit trail alongside <span class="mono">PROGRESS.jsonl</span>. Trim by hand if it ever grows noisy.</p>
+    </div>
+  </section>
+
+  <div class="colophon">
+    <span>generalstaff · open-source autonomous-bot dispatcher</span>
+    <span class="run">rendered 19:58 · pid 48213 · sheet refreshed on load</span>
+    <span>page 1 of 1</span>
+  </div>
+
+</div>
+
+</body>
+</html>

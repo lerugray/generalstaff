@@ -265,6 +265,46 @@ distinct content types a Phase 5 dashboard needs — tabular data
 now **prose + code + structured checks** in a single deep-drill
 view. Four views, one brief, still-zero re-briefs.
 
+## 2026-04-18 — inbox (hand-built, zero Design spend)
+
+`inbox-v1.html` is the fifth and final Phase 5 view — the shared
+fleet-channel reader (`state/_fleet/messages.jsonl`, gs-219). The
+most vocabulary-reuse of any view; heavy on existing patterns.
+
+**What carries over from prior views:** masthead, docline, summary
+band, section head, afterword, colophon — plus the 3-col left-rail
+grid pattern established across `.task`, `.dispatch`, and now
+`.message`.
+
+**New vocabulary this view adds (two patterns):**
+- `.message` — `.when` timestamp rail + `.body` (from-line + prose
+  text) + `.aside` refs column. Structural twin of `.dispatch`
+  with phase/aside swapped for message-specific content.
+- `.from.bot` / `.from.human` / `.from.system` — sender type
+  variants (human gets the square dot treatment borrowed from the
+  cycle-verdict chip; system renders in italic Spectral to mark
+  non-human non-bot posters like the dispatcher itself)
+- `.kind.blocker` / `.handoff` / `.fyi` / `.decision` — small-caps
+  chip with rust for blockers; consistent with the cross-view
+  rust-accent rule
+- `.date-sep` — war-diary date separator (Archivo Narrow label +
+  italic Spectral day + hairline flankers)
+
+**All content synthesized** against the `FleetMessage` schema from
+`src/fleet_messages.ts` (no actual `messages.jsonl` exists yet —
+gs-219 just shipped the infrastructure). Every referenced event is
+real and sourced from the session history: the raybrain 82-cycle
+OOM loop (session b9m3kvq0a), Ray's morning hands_off decision,
+gs-217/218/219/220 landings, gamr Phase 1 scaffold, gs-191
+hot-reload. Session IDs and task refs all match real history.
+
+**What this validates:** the anchor vocabulary carries the
+lightest data shape (messages) with minimal new CSS. Inbox's total
+new vocabulary is two patterns plus a separator — the curve of
+"new CSS needed per view" is visibly flattening as the anchor
+matures. Phase 5 anchor-extension cycle fully validated: five
+views, one brief, still-zero re-briefs.
+
 ## Conventions for this directory
 
 - One subdirectory or zipped artifact per design artifact.
