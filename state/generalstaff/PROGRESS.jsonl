@@ -3102,3 +3102,5 @@
 {"timestamp":"2026-04-19T14:04:30.572Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":45,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
 {"timestamp":"2026-04-19T14:12:28.636Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":8,"total_cycles":0,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-19T14:19:21.129Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":45,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
+{"timestamp":"2026-04-19T14:19:21.975Z","event":"cycle_start","cycle_id":"20260419141921_lpyv","project_id":"generalstaff","data":{"start_sha":"3c8fe48dc3d30fb03b6b03a6fc9b20a70d94693f","branch":"bot/work"}}
+{"timestamp":"2026-04-19T14:19:21.975Z","event":"engineer_invoked","cycle_id":"20260419141921_lpyv","project_id":"generalstaff","data":{"command":"bash scripts/run_bot.sh ${cycle_budget_minutes}","cycle_budget_minutes":30,"dry_run":false}}
