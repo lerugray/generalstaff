@@ -2894,4 +2894,184 @@ dispatcher:
       expect(result.stdout).toContain("verified");
     });
   });
+
+  describe("view dispatch-detail subcommand (gs-229)", () => {
+    const VIEW_DIR = join(
+      import.meta.dir,
+      "fixtures",
+      "view_dispatch_detail_test",
+    );
+    const FLEET_DIR = join(VIEW_DIR, "state", "_fleet");
+
+    const buildLog = (cycleId: string): string => {
+      const events: Array<Record<string, unknown>> = [
+        {
+          timestamp: "2026-04-18T10:00:00Z",
+          event: "cycle_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { task_id: "a-1", session_id: "sess-01", sha_before: "aaa" },
+        },
+        {
+          timestamp: "2026-04-18T10:00:05Z",
+          event: "engineer_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", command: "claude -p" },
+        },
+        {
+          timestamp: "2026-04-18T10:01:05Z",
+          event: "engineer_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", duration_seconds: 60 },
+        },
+        {
+          timestamp: "2026-04-18T10:01:10Z",
+          event: "verification_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01", command: "bun test" },
+        },
+        {
+          timestamp: "2026-04-18T10:01:40Z",
+          event: "verification_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            duration_seconds: 30,
+            outcome: "pass",
+          },
+        },
+        {
+          timestamp: "2026-04-18T10:01:45Z",
+          event: "reviewer_start",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: { session_id: "sess-01" },
+        },
+        {
+          timestamp: "2026-04-18T10:02:00Z",
+          event: "reviewer_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            duration_seconds: 15,
+            verdict: "verified",
+            scope_drift_files: [],
+            hands_off_violations: [],
+            silent_failures: [],
+          },
+        },
+        {
+          timestamp: "2026-04-18T10:02:05Z",
+          event: "cycle_end",
+          cycle_id: cycleId,
+          project_id: "alpha",
+          data: {
+            session_id: "sess-01",
+            task_id: "a-1",
+            outcome: "verified",
+            duration_seconds: 125,
+            sha_after: "bbb",
+            files_touched: [
+              { path: "src/foo.ts", added: 5, removed: 1 },
+              { path: "tests/foo.test.ts", added: 10, removed: 0 },
+            ],
+            diff_stats: { additions: 15, deletions: 1 },
+          },
+        },
+      ];
+      return events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    };
+
+    beforeEach(() => {
+      mkdirSync(FLEET_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      rmSync(VIEW_DIR, { recursive: true, force: true });
+    });
+
+    it("--json emits DispatchDetailData shape", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["view", "dispatch-detail", "cyc-001", "--json"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout);
+      expect(parsed.cycle_id).toBe("cyc-001");
+      expect(parsed.task_id).toBe("a-1");
+      expect(parsed.project_id).toBe("alpha");
+      expect(parsed.verdict).toBe("verified");
+      expect(parsed.duration_seconds).toBe(125);
+      expect(parsed).toHaveProperty("engineer");
+      expect(parsed).toHaveProperty("verification");
+      expect(parsed).toHaveProperty("review");
+      expect(parsed.engineer.duration_seconds).toBe(60);
+      expect(parsed.verification.duration_seconds).toBe(30);
+      expect(parsed.review.duration_seconds).toBe(15);
+      expect(parsed.diff_added).toBe(15);
+      expect(parsed.diff_removed).toBe(1);
+      expect(Array.isArray(parsed.files_touched)).toBe(true);
+      expect(parsed.files_touched).toHaveLength(2);
+      expect(Array.isArray(parsed.checks)).toBe(true);
+      expect(parsed.checks).toHaveLength(3);
+    });
+
+    it("missing cycle-id errors and exits 1", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(["view", "dispatch-detail"], VIEW_DIR);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "Error: view dispatch-detail requires <cycle-id>",
+      );
+    });
+
+    it("unknown cycle-id errors and exits 1", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["view", "dispatch-detail", "cyc-does-not-exist"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("Error: cycle not found: cyc-does-not-exist");
+    });
+
+    it("phase durations render as integers", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["view", "dispatch-detail", "cyc-001"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("engineer");
+      expect(result.stdout).toContain("60s");
+      expect(result.stdout).toContain("verification");
+      expect(result.stdout).toContain("30s");
+      expect(result.stdout).toContain("review");
+      expect(result.stdout).toContain("15s");
+      // no decimals — rendered as integers
+      expect(result.stdout).not.toMatch(/\d+\.\d+s/);
+    });
+
+    it("files_touched renders with +/- markers", async () => {
+      writeFileSync(join(FLEET_DIR, "PROGRESS.jsonl"), buildLog("cyc-001"));
+      const result = await runCli(
+        ["view", "dispatch-detail", "cyc-001"],
+        VIEW_DIR,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("Files touched:");
+      expect(result.stdout).toContain("+5/-1");
+      expect(result.stdout).toContain("src/foo.ts");
+      expect(result.stdout).toContain("+10/-0");
+      expect(result.stdout).toContain("tests/foo.test.ts");
+      // aggregate diff line
+      expect(result.stdout).toContain("Diff: +15/-1");
+    });
+  });
 });
