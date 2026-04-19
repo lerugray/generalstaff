@@ -1328,12 +1328,13 @@
   {
     "id": "gs-222",
     "title": "Phase 6 data-contract: per-project task queue view module. CREATE ONLY: `src/views/task_queue.ts` exporting `getProjectTaskQueue(projectId: string): Promise<TaskQueueData>` along with `TaskQueueData` and `TaskQueueEntry` interfaces plus a `TaskQueueError` class extending Error; `tests/views/task_queue.test.ts` with unit tests. DO NOT CREATE: src/cli.ts changes; any new src/ file outside src/views/; do not touch src/safety.ts, src/reviewer.ts, src/prompts/, scripts/, projects.yaml, or any hands_off path. Data shape: TaskQueueData = { project_id: string, in_flight: TaskQueueEntry[], ready: TaskQueueEntry[], blocked: TaskQueueEntry[], shipped: TaskQueueEntry[] }; TaskQueueEntry = { id: string, title: string, priority: number, status: 'pending' | 'in_progress' | 'done' | 'skipped', expected_touches?: string[], interactive_only?: boolean, completed_at?: string, block_reason?: 'interactive_only' | 'hands_off_intersect', age_label?: string }. Bucket rules: in_flight = status === 'in_progress'; ready = status === 'pending' AND isTaskBotPickable(task, handsOff).ok === true; blocked = status === 'pending' AND isTaskBotPickable returns a reason — set block_reason to that reason ('interactive_only' or 'hands_off_intersect'); shipped = status === 'done' filtered to entries with completed_at, sorted by completed_at DESC, capped at most-recent 8. age_label derives from completed_at (or from a task's last-modified proxy if available) formatted as '2h ago' / 'yesterday' / '3d ago' / 'apr 14' — reuse formatRelativeTime from src/relative_time.ts if present, else implement inline; empty string or omit when no completed_at. Data sources: loadProjects() to resolve projectId to config (for project.path + hands_off); read join(project.path, 'state', projectId, 'tasks.json') directly; reuse isTaskBotPickable from src/tasks.ts. Error handling: unknown projectId throws `new TaskQueueError('unknown project: <id>')`; missing tasks.json returns { project_id, in_flight: [], ready: [], blocked: [], shipped: [] } without throwing. Reference HTML: `docs/phase-5-references/task-queue-v1.html`. Tests: (a) 4-bucket happy path with mixed statuses; (b) unknown projectId throws TaskQueueError; (c) missing tasks.json returns empty-buckets TaskQueueData; (d) shipped cap at 8 (add 10 done tasks, assert 8 returned, newest first); (e) interactive_only task → blocked with block_reason === 'interactive_only'; (f) hands_off conflict via expected_touches → blocked with block_reason === 'hands_off_intersect'; (g) task without expected_touches treated as ready (no hands_off check to trigger). Expected diff: ~230 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/views/task_queue.ts",
       "tests/views/task_queue.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-19T01:36:46.177Z"
   },
   {
     "id": "gs-223",
