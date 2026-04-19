@@ -34,56 +34,51 @@ Polsia is already on HN's radar that week.
 
 ## First comment (OP framing)
 
-GeneralStaff is a local-first dispatcher that runs Claude Code (or any
-coding agent you can invoke with a shell command) across your own
-projects with a verification gate that cannot be prompted around. If
-the engineer's diff fails the project's `bun test && bun x tsc --noEmit`
-(or whatever you configure), the cycle rolls back. If the diff touches
-a path on the project's hands-off list, same thing. Every prompt,
-response, and diff is appended to a `PROGRESS.jsonl` audit log that
-sits in your repo — grep it to see what the bot tried and got
-rejected on.
+GeneralStaff is a local-first dispatcher that runs Claude Code (or
+any coding agent you can invoke from a shell) across your own
+projects. It has a verification gate you can't prompt around. If
+the engineer's diff fails your `bun test && bun x tsc --noEmit`, the
+cycle rolls back. If the diff touches a path on your hands-off list,
+same thing. Every prompt, response, and diff goes into a
+`PROGRESS.jsonl` audit log in your repo. Grep it to see what the
+bot tried and what got rejected.
 
-Three things it does that I couldn't find in one package elsewhere:
+Three things it does that I couldn't find in one package:
 
-1. **The verification gate is a Boolean, not a prompt.** Tests pass or
-   they don't; scope drift is caught by a cross-check against the diff
-   rather than trusting the reviewer's judgment; hands-off matches are
-   done on the filesystem path. Prompt-engineering can be ignored by
-   the agent. A green test gate cannot.
+1. **The verification gate is Boolean.** Tests pass or they don't.
+   A cross-check against the raw diff catches scope drift, not the
+   reviewer's judgment. Hands-off matches happen on the filesystem
+   path. Prompt-engineering can be ignored by the agent. A green
+   test gate can't.
 
-2. **Local-first, BYOK, open audit log.** Your code never leaves your
-   machine. Your LLM API key stays in your env. The dispatcher pushes
-   only to `bot/work` on your own git remote. There is no GeneralStaff
-   server — `git clone` is the entire install path, and `git pull`
-   is the update path. The audit log is a plain text file in your
-   repo, not a dashboard in someone else's database.
+2. **Local-first, BYOK, open audit log.** Your code never leaves
+   your machine. Your LLM API key stays in your env. The dispatcher
+   pushes only to `bot/work` on your own git remote. There is no
+   GeneralStaff server. `git clone` is the install; `git pull` is
+   the update. The audit log is a plain text file in your repo.
 
-3. **Built by itself.** GeneralStaff is registered as its own first
-   managed project. The repo you'd be cloning was brought from
-   scaffold-only to v0.1.0 in four days, largely by itself, under
-   the same verification gate it ships with. The repo has 1,441
-   passing tests and a 9% self-rejection rate on proposed diffs
-   (190 verified / 19 rejected / 1 weak in `PROGRESS.jsonl`, with
-   real hands-off violations caught on `src/safety.ts`,
-   `src/reviewer.ts`, and `src/prompts/`). You don't have to trust
-   the claim — grep the log.
+3. **Built by itself.** I registered GeneralStaff as its own first
+   managed project. The repo you'd be cloning went from scaffold to
+   v0.1.0 in four days, largely by itself, under the same
+   verification gate it ships with. 1,441 passing tests. 9%
+   self-rejection rate on proposed diffs (190 verified, 19
+   rejected, 1 weak in `PROGRESS.jsonl`, with real hands-off
+   violations caught on `src/safety.ts`, `src/reviewer.ts`, and
+   `src/prompts/`). You don't have to trust the claim. Grep the log.
 
-The architecture is an explicit response to Polsia's #1 Trustpilot
-complaint (confident false task completions). The structural answer:
-make the gate a property of the system, not a property of the prompt.
-The philosophical framing (Hammerstein's officer typology —
-industrious without judgment is worse than lazy without judgment
-because the damage compounds) is in the README if you want the
-longer argument.
+The architecture is a response to Polsia's #1 Trustpilot complaint:
+confident false task completions. Put the gate in the system, not in
+the prompt. The Hammerstein framing (industrious without judgment
+is worse than lazy without judgment because the damage compounds)
+is in the README if you want the longer argument.
 
 Requirements: Bun 1.2+, git, and either Claude Code, an OpenRouter
-account, or a local Ollama install. One-line installer for macOS /
-Linux / Windows. AGPL-3.0.
+account, or a local Ollama install. One-line installer for macOS,
+Linux, Windows. AGPL-3.0.
 
-Built on nights and weekends while working minimum wage. Feedback
-welcome, especially from people running their own bot loops in
-production — I expect there are three or four things I haven't
+Built on nights and weekends while working a minimum-wage day job.
+Feedback welcome, especially from people running bot loops in
+production. I expect there are three or four things I haven't
 thought of yet.
 
 ---
