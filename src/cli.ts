@@ -187,7 +187,7 @@ Usage:
     Example: generalstaff summary --format=json         # machine-readable output
     Example: generalstaff summary --project=myapp       # filter to a single project
 
-  generalstaff doctor [--fix] [--yes] [--verbose] [--json]
+  generalstaff doctor [--fix] [--yes] [--verbose] [--json] [--summary]
                                                           Check prerequisites + diagnose resolvable issues
     Example: generalstaff doctor                        # diagnose only
     Example: generalstaff doctor --fix                  # prompt y/N for each fix
@@ -195,6 +195,8 @@ Usage:
     Example: generalstaff doctor --verbose              # add context under each passing sanity check
     Example: generalstaff doctor --json                 # machine-readable {ok, checks[]} on stdout
     Example: generalstaff doctor --json --fix --yes     # emit post-fix state as JSON
+    Example: generalstaff doctor --summary              # one-line health signal for scripts/CI
+    Example: generalstaff doctor --summary --json       # {total, pass, warn, fail} count object
   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
@@ -1277,14 +1279,24 @@ switch (command) {
         verbose: { type: "boolean", default: false },
         // gs-251: machine-readable output, pairs with --fix and --verbose.
         json: { type: "boolean", default: false },
+        // gs-266: one-line health summary for scripts/CI. Mutex with
+        // --verbose (they ask for opposite levels of detail).
+        summary: { type: "boolean", default: false },
       },
       allowPositionals: false,
     });
+    if (doctorValues.summary && doctorValues.verbose) {
+      console.error(
+        "Error: --summary and --verbose are mutually exclusive.",
+      );
+      process.exit(1);
+    }
     await runDoctor({
       fix: Boolean(doctorValues.fix),
       assumeYes: Boolean(doctorValues.yes),
       verbose: Boolean(doctorValues.verbose),
       json: Boolean(doctorValues.json),
+      summary: Boolean(doctorValues.summary),
     });
     break;
   }

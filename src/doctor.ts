@@ -76,6 +76,19 @@ export interface DoctorOptions {
   // post-fix state; --json + --verbose is accepted but a no-op (verbose
   // only affects text rendering).
   json?: boolean;
+  // gs-266: when true, emit a one-line summary instead of the full
+  // verbose check list. --summary + --json emits a structured count
+  // object instead of the one-line text. Mutually exclusive with
+  // --verbose at the CLI layer (the parser rejects the combination).
+  summary?: boolean;
+}
+
+// gs-266: shape of the --summary --json payload.
+export interface DoctorSummaryReport {
+  total: number;
+  pass: number;
+  warn: number;
+  fail: number;
 }
 
 // gs-251: shape of a single check in --json output.
@@ -691,6 +704,10 @@ async function defaultPrompt(question: string): Promise<boolean> {
 }
 
 export async function runDoctor(opts: DoctorOptions = {}): Promise<void> {
+  if (opts.summary) {
+    await runDoctorSummary(opts);
+    return;
+  }
   if (opts.json) {
     await runDoctorJson(opts);
     return;
@@ -1105,4 +1122,50 @@ async function runDoctorJson(opts: DoctorOptions): Promise<void> {
   const report = await collectDoctorJsonReport(opts);
   console.log(JSON.stringify(report));
   if (!report.ok && exitOnFailure) process.exit(1);
+}
+
+// gs-266: tally the structured report into pass/warn/fail buckets.
+// Fixable issues (state-dir-missing, stale-worktree, orphaned-stop-file)
+// are surfaced as WARN in the verbose text renderer, so they map to
+// `warn` here even though their JSON status is "fail". The reviewer-
+// provider check is not in collectDoctorJsonReport's output — it's
+// queried separately so a misconfigured reviewer counts toward `warn`.
+// Skipped checks (e.g. project-scoped checks when projects.yaml fails
+// to load) do not count toward any bucket nor toward the total.
+export function summarizeDoctorReport(
+  report: DoctorJsonReport,
+  reviewer: ReviewerProviderCheck,
+): DoctorSummaryReport {
+  let pass = 0;
+  let warn = 0;
+  let fail = 0;
+  for (const c of report.checks) {
+    if (c.status === "skipped") continue;
+    if (c.status === "pass") {
+      pass++;
+      continue;
+    }
+    if (c.fixable === true) warn++;
+    else fail++;
+  }
+  if (reviewer.status === "pass") pass++;
+  else warn++;
+  return { total: pass + warn + fail, pass, warn, fail };
+}
+
+async function runDoctorSummary(opts: DoctorOptions): Promise<void> {
+  const exitOnFailure = opts.exitOnFailure ?? true;
+  const report = await collectDoctorJsonReport(opts);
+  const reviewer = checkReviewerProvider();
+  const summary = summarizeDoctorReport(report, reviewer);
+  if (opts.json) {
+    console.log(JSON.stringify(summary));
+  } else {
+    console.log(
+      `doctor: ${summary.total} checks, ${summary.pass} PASS, ` +
+        `${summary.warn} WARN, ${summary.fail} FAIL — ` +
+        "run `generalstaff doctor` for details",
+    );
+  }
+  if (summary.fail > 0 && exitOnFailure) process.exit(1);
 }

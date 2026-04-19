@@ -14,7 +14,9 @@ import {
   checkProjectsYamlCustomized,
   checkStateDirWritable,
   checkReviewerProvider,
+  summarizeDoctorReport,
 } from "../src/doctor";
+import type { DoctorJsonReport } from "../src/doctor";
 import { setRootDir } from "../src/state";
 import type { ProjectConfig } from "../src/types";
 
@@ -700,5 +702,84 @@ describe("checkReviewerProvider (gs-263)", () => {
     });
     expect(result.provider).toBe("openrouter");
     expect(result.status).toBe("pass");
+  });
+});
+
+// gs-266: --summary collapses the doctor output to one line and exits
+// 1 only on hard FAIL. summarizeDoctorReport is the pure mapping
+// helper exercised here; runDoctor({summary:true}) is exercised at the
+// CLI integration layer in tests/cli.test.ts.
+describe("summarizeDoctorReport (gs-266)", () => {
+  const reviewerPass = {
+    status: "pass" as const,
+    provider: "claude",
+    detail: "reviewer: claude",
+  };
+  const reviewerWarn = {
+    status: "warn" as const,
+    provider: "openrouter",
+    detail: "OPENROUTER_API_KEY not set; cycles will fail-safe",
+  };
+
+  it("counts plain pass/fail/skipped checks and adds reviewer pass", () => {
+    const report: DoctorJsonReport = {
+      ok: true,
+      checks: [
+        { name: "prereq: bun", status: "pass" },
+        { name: "prereq: git", status: "pass" },
+        { name: "project paths", status: "skipped" },
+        { name: "digests/", status: "pass" },
+      ],
+    };
+    const s = summarizeDoctorReport(report, reviewerPass);
+    expect(s).toEqual({ total: 4, pass: 4, warn: 0, fail: 0 });
+  });
+
+  it("maps fixable failures to WARN and non-fixable to FAIL", () => {
+    const report: DoctorJsonReport = {
+      ok: false,
+      checks: [
+        { name: "prereq: bun", status: "pass" },
+        { name: "prereq: claude", status: "fail" },
+        {
+          name: "orphaned-stop-file",
+          status: "fail",
+          fixable: true,
+        },
+      ],
+    };
+    const s = summarizeDoctorReport(report, reviewerPass);
+    // 1 pass + reviewer pass = 2; 1 warn (fixable); 1 fail (non-fixable).
+    expect(s).toEqual({ total: 4, pass: 2, warn: 1, fail: 1 });
+  });
+
+  it("counts a warn-status reviewer toward WARN", () => {
+    const report: DoctorJsonReport = {
+      ok: true,
+      checks: [{ name: "prereq: bun", status: "pass" }],
+    };
+    const s = summarizeDoctorReport(report, reviewerWarn);
+    expect(s).toEqual({ total: 2, pass: 1, warn: 1, fail: 0 });
+  });
+
+  it("excludes skipped checks from the total", () => {
+    const report: DoctorJsonReport = {
+      ok: true,
+      checks: [
+        { name: "prereq: bun", status: "pass" },
+        { name: "project paths", status: "skipped" },
+        { name: "state dirs", status: "skipped" },
+      ],
+    };
+    const s = summarizeDoctorReport(report, reviewerPass);
+    // 1 pass + reviewer = 2 total; the two skipped checks don't count.
+    expect(s).toEqual({ total: 2, pass: 2, warn: 0, fail: 0 });
+  });
+
+  it("returns zeroed totals on an empty checks array (degenerate)", () => {
+    const report: DoctorJsonReport = { ok: true, checks: [] };
+    const s = summarizeDoctorReport(report, reviewerPass);
+    // Just the reviewer counts.
+    expect(s).toEqual({ total: 1, pass: 1, warn: 0, fail: 0 });
   });
 });
