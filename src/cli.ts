@@ -83,6 +83,7 @@ import {
   ProviderConfigError,
 } from "./providers/registry";
 import type { ProviderHealth, ProviderRole } from "./providers/types";
+import type { EngineerProvider } from "./types";
 import { appendFleetMessage } from "./fleet_messages";
 
 const VERSION = "0.1.0";
@@ -271,6 +272,13 @@ Usage:
     Example: generalstaff serve --port=4000              # override port
     Example: generalstaff serve --open                   # open the default browser after binding
     Example: generalstaff serve --dry-run                # print resolved config and exit
+
+  generalstaff engineer-benchmark --project=<id> --provider=<claude|aider>
+                                  --tasks=<csv> [--model=<str>] [--output=<path>]
+                                  [--timeout=<seconds>] [--dry-run]
+                                                          Replay N shipped tasks against an alt engineer (Phase 7)
+    Example: generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-020,gamr-025,gamr-030
+    Example: generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-020 --dry-run
 
   generalstaff message send --from=<str> --body=<str> [--kind=<...>] [--session-id=<id>]
                            [--task-id=<id>] [--cycle-id=<id>] [--json]
@@ -3105,6 +3113,136 @@ switch (command) {
       } catch {
         // Silent: if the browser launcher isn't available, the server still runs.
       }
+    }
+    break;
+  }
+
+  case "engineer-benchmark": {
+    // gs-271: Phase 7 benchmark harness. Replays previously-shipped
+    // tasks against an alternative engineer provider in disposable
+    // temp clones so we can decide whether to flip a project's
+    // engineer_provider default without putting real cycles at risk.
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff engineer-benchmark --project=<id> --provider=<claude|aider> --tasks=<csv> [options]\n" +
+          "\n" +
+          "Replay shipped tasks against an alternative engineer provider in isolated clones.\n" +
+          "For each task id supplied, this command:\n" +
+          "  1. finds the commit that shipped the task (subject starting with '<id>:')\n" +
+          "  2. clones the project at the parent commit into a tmp dir\n" +
+          "  3. injects a single-task tasks.json so the engineer picks it deterministically\n" +
+          "  4. runs the alt-provider engineer via resolveEngineerCommand\n" +
+          "  5. captures engineer exit + diff + verification outcome\n" +
+          "  6. tears down the tmp clone\n" +
+          "\n" +
+          "Options:\n" +
+          "  --project=<id>         Managed project to benchmark against (required)\n" +
+          "  --provider=<name>      Engineer provider: claude | aider (required)\n" +
+          "  --tasks=<csv>          Comma-separated task ids to replay (required)\n" +
+          "  --model=<str>          Optional model override (aider default: " + "openrouter/qwen/qwen3-coder-plus" + ")\n" +
+          "  --output=<path>        Write the full JSON report to this path\n" +
+          "  --timeout=<seconds>    Per-task engineer timeout (default: cycle_budget_minutes+5)\n" +
+          "  --dry-run              Resolve args + print synth invocation, don't spawn anything\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-020,gamr-025\n" +
+          "  generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-020 --dry-run\n" +
+          "  generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-020 --output=bench.json\n",
+      );
+      process.exit(0);
+    }
+
+    const { values: benchValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+        provider: { type: "string" },
+        tasks: { type: "string" },
+        model: { type: "string" },
+        output: { type: "string" },
+        timeout: { type: "string" },
+        "dry-run": { type: "boolean", default: false },
+        "keep-worktree": { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
+
+    if (!benchValues.project) {
+      console.error("Error: --project is required");
+      process.exit(1);
+    }
+    if (!benchValues.provider) {
+      console.error("Error: --provider is required (claude|aider)");
+      process.exit(1);
+    }
+    if (benchValues.provider !== "claude" && benchValues.provider !== "aider") {
+      console.error(
+        `Error: --provider must be one of: claude, aider (got "${benchValues.provider}")`,
+      );
+      process.exit(1);
+    }
+    if (!benchValues.tasks) {
+      console.error("Error: --tasks is required (comma-separated task ids)");
+      process.exit(1);
+    }
+
+    const taskIds = benchValues.tasks
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0);
+    if (taskIds.length === 0) {
+      console.error("Error: --tasks must contain at least one id");
+      process.exit(1);
+    }
+
+    let benchTimeout: number | undefined;
+    if (benchValues.timeout !== undefined) {
+      const parsedT = parseInt(benchValues.timeout, 10);
+      if (isNaN(parsedT) || parsedT < 1) {
+        console.error("Error: --timeout must be a positive integer (seconds)");
+        process.exit(1);
+      }
+      benchTimeout = parsedT;
+    }
+
+    const { loadProjectsYaml, getProject } = await import("./projects");
+    const { runEngineerBenchmark } = await import("./benchmark");
+    const benchYaml = await loadProjectsYaml();
+    const benchProject = getProject(benchYaml.projects, benchValues.project);
+
+    console.log(
+      `engineer-benchmark: project=${benchProject.id} provider=${benchValues.provider} tasks=${taskIds.length} dry_run=${benchValues["dry-run"]}`,
+    );
+
+    const report = await runEngineerBenchmark(benchProject, {
+      projectId: benchProject.id,
+      taskIds,
+      provider: benchValues.provider as EngineerProvider,
+      engineerModel: benchValues.model,
+      outputPath: benchValues.output,
+      dryRun: benchValues["dry-run"] === true,
+      taskTimeoutSeconds: benchTimeout,
+      keepWorktree: benchValues["keep-worktree"] === true,
+    });
+
+    console.log("");
+    console.log("Benchmark summary:");
+    console.log(`  total:              ${report.summary.total}`);
+    console.log(`  verified:           ${report.summary.verified}`);
+    console.log(`  verification_failed:${report.summary.verification_failed}`);
+    console.log(`  empty_diff:         ${report.summary.empty_diff}`);
+    console.log(`  engineer_failed:    ${report.summary.engineer_failed}`);
+    console.log(`  engineer_timeout:   ${report.summary.engineer_timeout}`);
+    console.log(`  setup_failed:      ${report.summary.setup_failed}`);
+    console.log(`  verified_rate:      ${(report.summary.verified_rate * 100).toFixed(1)}%`);
+    console.log(
+      `  mean engineer dur:  ${report.summary.mean_engineer_duration_seconds.toFixed(1)}s`,
+    );
+    console.log(
+      `  mean verify dur:    ${report.summary.mean_verification_duration_seconds.toFixed(1)}s`,
+    );
+    if (benchValues.output) {
+      console.log(`\nFull report written to: ${benchValues.output}`);
     }
     break;
   }

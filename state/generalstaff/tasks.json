@@ -1887,23 +1887,38 @@
   {
     "id": "gs-271",
     "title": "Phase 7 Part 2 — engineer benchmark harness. Write a CLI subcommand `generalstaff engineer-benchmark --project=<id> --provider=aider [--tasks=<csv>] [--count=N]` that replays N previously-shipped tasks against the alternative engineer provider in a disposable worktree. **Scope:** (1) new src/benchmark.ts exporting `runEngineerBenchmark(opts)` that for each task (a) creates a temporary worktree at a path outside the managed project, (b) resets the state file to a pre-task snapshot (git checkout of tasks.json from pre-completion commit), (c) runs the alt-provider engineer for one cycle, (d) captures verified/rolled-back outcome, duration, diff stats, (e) writes a per-task row to a results JSON file. (2) new CLI subcommand in src/cli.ts wiring --project/--provider/--tasks/--count with validation. (3) tests in tests/benchmark.test.ts using a fake engineer that returns canned results (don't spawn real aider in tests). (4) Does NOT actually run the benchmark — that's gs-272 (interactive). **Hands-off:** does not touch src/safety.ts, src/reviewer.ts, src/prompts/, projects.yaml, docs/internal/, scripts/, README.md, or any PHASE-*.md. Expected diff: ~300-450 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "src/benchmark.ts",
       "src/cli.ts",
       "tests/benchmark.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-20T04:30:00Z"
   },
   {
     "id": "gs-272",
-    "title": "Phase 7 Part 3 — run the 10-task aider benchmark, publish results. **Interactive-only** (judgment required: which 10 tasks, result interpretation, accept/reject the 70%-verified acceptance bar). Depends on gs-271. Run `generalstaff engineer-benchmark --project=gamr --provider=aider --count=10` against shipped gamr tasks, collect results, write docs/internal/PHASE-7-BENCHMARK-<date>.md with per-task outcomes, aggregate verified rate, mean duration, diff-size comparison, and a verdict: keep default claude OR flip gamr's default to aider. If >=70% verified rate, queue gs-273 to flip gamr's projects.yaml to engineer_provider: aider.",
-    "status": "pending",
+    "title": "Phase 7 Part 3 — run the 10-task aider benchmark, publish results. **Interactive-only** (judgment required: which 10 tasks, result interpretation, accept/reject the 70%-verified acceptance bar). Depends on gs-271. Run `generalstaff engineer-benchmark --project=gamr --provider=aider --count=10` against shipped gamr tasks, collect results, write docs/internal/PHASE-7-BENCHMARK-<date>.md with per-task outcomes, aggregate verified rate, mean duration, diff-size comparison, and a verdict: keep default claude OR flip gamr's default to aider. If >=70% verified rate, queue gs-273 to flip gamr's projects.yaml to engineer_provider: aider. **OUTCOME (2026-04-20):** First run gave 5/10 verified (50%), but 3 of 5 failures were a Windows unicode crash in our own aider bash wrapper, not aider quality. Fix landed; 2 legitimate non-verified outcomes (1 flake, 1 real test-fix-limit failure). Full verdict=INCONCLUSIVE; re-run of affected 3 tasks queued as gs-274 to get a clean read. Report: docs/internal/PHASE-7-BENCHMARK-2026-04-20.md.",
+    "status": "done",
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "Writes docs/internal/PHASE-7-BENCHMARK-*.md (hands_off); requires Ray's judgment on benchmark task selection and verdict.",
     "expected_touches": [
-      "docs/internal/PHASE-7-BENCHMARK-2026-04-XX.md"
+      "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
+      "src/engineer_providers/aider.ts"
+    ],
+    "completed_at": "2026-04-20T04:55:00Z"
+  },
+  {
+    "id": "gs-274",
+    "title": "Phase 7 Part 4 — re-run benchmark after the PYTHONIOENCODING=utf-8 fix, to get a clean verdict on aider+Qwen3 Coder quality. **Interactive-only** (Ray greenlights, spends ~$0.12 OpenRouter). Depends on the unicode fix in src/engineer_providers/aider.ts (landed 2026-04-20 in the gs-270 follow-up commit). **Scope:** Re-run the 3 tasks that crashed on the Windows unicode bug in the first benchmark (gamr-028, gamr-029, gamr-030). Combine results with the 7 clean outcomes from logs/benchmark-phase7-2026-04-20.json. Append the combined table + verdict to docs/internal/PHASE-7-BENCHMARK-2026-04-20.md. If combined verified_rate >= 70%, queue gs-275 to flip gamr's projects.yaml engineer_provider default to aider. If <70%, note rejection reason and keep claude default. Command: `generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-028,gamr-029,gamr-030 --timeout=1200 --output=logs/benchmark-phase7-rerun-2026-04-20.json`.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Re-running spends OpenRouter credit; Ray's judgment on whether clean re-run is worth the cost. Also appends to docs/internal/PHASE-7-BENCHMARK-*.md (hands_off).",
+    "expected_touches": [
+      "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
+      "logs/benchmark-phase7-rerun-2026-04-20.json"
     ]
   }
 ]

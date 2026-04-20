@@ -86,6 +86,19 @@ export function buildAiderCommand(project: ProjectConfig): string {
   const qProjectId = shellSingleQuote(project.id);
 
   return `set -euo pipefail
+
+# Force UTF-8 in the Python interpreter aider runs under. Without
+# this, aider's "rich" library crashes with UnicodeEncodeError on
+# Windows (Git Bash / cp1252 console) the first time the model emits
+# a non-ASCII character in aider's status output — ≥, ✓, █, etc. —
+# which dumps a Python traceback and kills the subprocess with exit
+# code 1. Discovered during the gs-272 benchmark run: 3 of 10 tasks
+# failed for exactly this reason before the fix. Safe on Linux/macOS
+# (where the default is usually already utf-8) so it's set
+# unconditionally rather than platform-gated.
+export PYTHONIOENCODING=utf-8
+export PYTHONUTF8=1
+
 BUDGET=${project.cycle_budget_minutes}
 PROJECT_ROOT="$PWD"
 WORKTREE_DIR="$PROJECT_ROOT/.bot-worktree"
@@ -158,10 +171,13 @@ echo ""
 #   behavior as closely as aider's agent loop allows.
 aider \\
   --model ${qModel} \\
+  --edit-format udiff \\
   --yes-always \\
   --auto-commits \\
   --no-analytics \\
   --no-stream \\
+  --no-pretty \\
+  --no-fancy-input \\
   --test-cmd ${qTestCmd} \\
   --auto-test \\
   --message ${qPrompt}

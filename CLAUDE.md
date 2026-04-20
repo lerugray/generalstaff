@@ -295,6 +295,23 @@ explicitly, don't proactively write.
   after the slop-pass; the slop-pass is the floor, not the
   ceiling.
 
+- **Structural code decisions are Claude's call in interactive
+  sessions.** When hitting a tradeoff internal to the code —
+  API shape, file organization, refactor pattern, worktree
+  isolation strategy, test-double approach, how to thread a
+  new field through a module graph — default to making the
+  call and moving. Ask only for **strategic / product**
+  decisions: which features to build, user-facing copy, which
+  N tasks to benchmark, when to cut a release, which project
+  to register next. Rationale captured 2026-04-20 — Ray
+  self-identifies as a game designer, not a programmer; asking
+  him to arbitrate structural code choices both slows the
+  session down and asks for judgment he's explicitly deferring.
+  This is the interactive-session analog of the Hammerstein
+  framing that already governs bot cycles: execution decisions
+  belong to the staff officer, strategic decisions belong to
+  command.
+
 ### Reviewer provider configuration
 
 The verification-gate reviewer (`src/reviewer.ts`) is
