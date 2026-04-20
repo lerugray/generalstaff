@@ -1,1 +1,37 @@
-[]
+[
+  {
+    "id": "cdna-001",
+    "title": "5 free analyses experiment — run the positioning-pivot validation (per CLAUDE.md and docs/internal/product-positioning-2026-04-13.md). Goal: validate the '$100-500 musicologist you can't afford' frame by offering 5 free analyses to early users and measuring whether they convert / refer / produce shareable output. Out-of-scope: any landing-page copy in the old $29-99 frame (paused per 2026-04-14). Interactive-only — requires Ray's outreach judgment, real-user conversations, and positioning calls.",
+    "status": "pending",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Positioning + pricing validation with real early users. Needs Ray's outreach voice, judgment on who to approach, and live conversation follow-up. No bot-safe slice."
+  },
+  {
+    "id": "cdna-002",
+    "title": "Reference-DB per-track fallback populates — when cdna-004 (playlist populate) flags an album as 'find_album_urls failed' or 'playlist fetch returned bad candidate', take over the song-by-song workaround: (a) search YouTube for each track individually, (b) record per-track video IDs, (c) invoke the track-level downloader with those explicit URLs, (d) verify + commit. This is the judgment-heavy fallback that belongs to Ray, not the bot — the common-case playlist populate is cdna-004.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Per-track URL search + manual sanity check on which videos match the canonical album sequence is judgment work. Bot handles the common case (cdna-004); Ray handles the fallback."
+  },
+  {
+    "id": "cdna-003",
+    "title": "Dislikes-as-first-class-input design spec (per CLAUDE.md §'Product Direction: Dislikes as First-Class Input' and docs/internal/product-philosophy-dislikes-as-input.md). Not a current build target — this is the design-spec work that precedes build. Produce: (a) UI placement for the 'dislikes' input alongside existing influences field, (b) analytical model for how dislikes data feeds into the interpret layer, (c) how dislikes affect fingerprint narrative. Interactive-only — core product direction.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Product-direction design spec. Taste work — which signal to surface, how to narrate, how it interacts with the honest-findings principle."
+  },
+  {
+    "id": "cdna-004",
+    "title": "Populate ONE unpopulated album into reference-db. **Step 1:** Read wanted_artists.json and pick the first entry whose `slug` has no corresponding reference-db/artists/<slug>.json file. If the entry lacks `playlist_url`, run `PYTHONIOENCODING=utf-8 python scripts/find_album_urls.py wanted_artists.json --write` first to fill missing URLs via YouTube Data API v3 (YOUTUBE_API_KEY sourced from MiroShark/.env per catalogdna's convention). If playlist_url was flaky / returned no good candidate, flag the task as stale and move on. **Step 2:** Run `.venv/Scripts/python.exe populate_reference_db.py --artist='<artist>' --album='<album>'` for that single entry. Takes 5-15 min for download + MIDI conversion + analysis. **Step 3:** Verify `reference-db/artists/<slug>.json` exists, has track_count > 5, and has non-zero values on at least chord_pct_major / mode_major_ratio / register_low_pct. **Step 4:** Commit wanted_artists.json (if find_album_urls.py changed it) + the new reference-db entry. Message like 'populate: <artist> — <album> (<N> tracks)'. **Do NOT batch** — one album per cycle. Per-track URL workaround (when playlist_url keeps failing) is a separate interactive-only task Ray handles manually. Clone/re-add this task for the next album once done.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": false,
+    "expected_touches": [
+      "wanted_artists.json",
+      "reference-db/artists/"
+    ]
+  }
+]
