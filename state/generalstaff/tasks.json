@@ -2048,7 +2048,7 @@
   {
     "id": "gs-288",
     "title": "Session runner should commit its own session_end PROGRESS.jsonl entries before exiting. Root cause discovered 2026-04-20 evening: the bot's session_end event is emitted after the last cycle's auto-commit runs, which leaves the session_end line(s) uncommitted in state/*/PROGRESS.jsonl. When Ray switches PCs, those lines don't cross over via git, and the next machine's session appends on top of an origin file that has no trace of the previous machine's wrap. Home-PC evening session had to splice 4 such lines back in chronologically (commit 498d9b0). Fix: in src/session.ts, after the session_end events are appended, run a final 'git add state/ && git commit -m ...' similar to autoCommitState in cycle.ts. Keep the invariant that autoCommitState still runs per-cycle; the session-level commit is a belt-and-suspenders catch for session_end entries specifically. Tests: spawn a fake session that produces session_end, verify the entries end up in HEAD, not in the working copy. Expected diff: ~30 lines (session.ts + new test). interactive_only:false â this is bot-pickable after the test is specified.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   }
 ]
