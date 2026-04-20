@@ -460,6 +460,37 @@ async function findSessionNote(
   }
 }
 
+/**
+ * gs-281: peek at the next bot-pickable task for a project, returning
+ * `undefined` when there isn't one (or when tasks.json can't be parsed).
+ *
+ * `loadTasks` returns `[]` silently when `state/<id>/tasks.json` doesn't
+ * exist (the common non-greenfield case). So anything thrown from
+ * `loadTasks` here means the file exists but failed to parse or validate
+ * — in that case we log a `task_peek_failed` progress event with the
+ * error message, so operators have a grep-able signal, and fall through
+ * to `undefined` so the cycle proceeds on the legacy non-creative path.
+ *
+ * Exported for unit testing the two branches (missing vs. malformed).
+ */
+export async function peekNextBotPickableTask(
+  project: ProjectConfig,
+  cycleId: string,
+): Promise<GreenfieldTask | undefined> {
+  try {
+    const tasks = await loadTasks(project.id);
+    return nextBotPickableTask(tasks, project.hands_off, {
+      creativeWorkAllowed: project.creative_work_allowed,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await appendProgress(project.id, "task_peek_failed", {
+      error: message,
+    }, cycleId);
+    return undefined;
+  }
+}
+
 export async function executeCycle(
   project: ProjectConfig,
   config: DispatcherConfig,
@@ -551,17 +582,11 @@ export async function executeCycle(
     //     off bot/work so correctness and creative cycles don't
     //     contaminate each other's SHAs). The same peek also resolves
     //     task-level engineer_provider overrides downstream (gs-275).
-    //     Non-greenfield projects (catalogdna_bot_tasks etc.) throw on
-    //     loadTasks and silently fall through to the legacy non-creative
-    //     path with branch=project.branch.
-    try {
-      const tasks = await loadTasks(project.id);
-      nextTask = nextBotPickableTask(tasks, project.hands_off, {
-        creativeWorkAllowed: project.creative_work_allowed,
-      });
-    } catch {
-      nextTask = undefined;
-    }
+    //     Non-greenfield projects (catalogdna_bot_tasks etc.) fall
+    //     through silently (loadTasks returns [] when the file is
+    //     missing); malformed tasks.json logs a task_peek_failed event
+    //     (gs-281) so operators have a grep-able signal.
+    nextTask = await peekNextBotPickableTask(project, cycleId);
 
     // 1b. Creative-work detection. Requires BOTH task-level `creative: true`
     //     AND project-level `creative_work_allowed: true` — if only one is

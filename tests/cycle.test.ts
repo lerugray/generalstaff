@@ -14,7 +14,10 @@ import {
   applyReviewerSanityCheck,
   decideBotBranchHandling,
   detectMalformedJsonFiles,
+  peekNextBotPickableTask,
 } from "../src/cycle";
+import { setRootDir } from "../src/state";
+import { readJsonl } from "../src/audit";
 import type { ProjectConfig, ReviewerResponse } from "../src/types";
 import type { ReviewerResult } from "../src/reviewer";
 
@@ -1059,5 +1062,69 @@ describe("detectMalformedJsonFiles (gs-280)", () => {
     expect(result).toHaveLength(1);
     expect(result[0].error.length).toBeLessThanOrEqual(500);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("peekNextBotPickableTask (gs-281)", () => {
+  const TEST_DIR = join(import.meta.dir, "fixtures", "peek_task_gs281");
+  const PROJECT_ID = "p";
+
+  function setup() {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(join(TEST_DIR, "state", PROJECT_ID), { recursive: true });
+    setRootDir(TEST_DIR);
+  }
+
+  function teardown() {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    setRootDir(process.cwd());
+  }
+
+  it("stays silent when tasks.json doesn't exist (non-greenfield project)", async () => {
+    setup();
+    try {
+      const project = makeProject({ id: PROJECT_ID, hands_off: [] });
+      const result = await peekNextBotPickableTask(project, "cycle-missing");
+      expect(result).toBeUndefined();
+
+      // No PROGRESS.jsonl written — the missing-file branch stays silent.
+      const progress = await readJsonl(
+        join(TEST_DIR, "state", PROJECT_ID, "PROGRESS.jsonl"),
+      );
+      expect(progress).toEqual([]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it("logs task_peek_failed when tasks.json exists but is malformed", async () => {
+    setup();
+    try {
+      writeFileSync(
+        join(TEST_DIR, "state", PROJECT_ID, "tasks.json"),
+        "{ not valid json",
+        "utf8",
+      );
+      const project = makeProject({ id: PROJECT_ID, hands_off: [] });
+      const result = await peekNextBotPickableTask(project, "cycle-malformed");
+      expect(result).toBeUndefined();
+
+      const progress = await readJsonl(
+        join(TEST_DIR, "state", PROJECT_ID, "PROGRESS.jsonl"),
+      );
+      expect(progress).toHaveLength(1);
+      const entry = progress[0] as {
+        event: string;
+        project_id: string;
+        cycle_id: string;
+        data: { error: string };
+      };
+      expect(entry.event).toBe("task_peek_failed");
+      expect(entry.project_id).toBe(PROJECT_ID);
+      expect(entry.cycle_id).toBe("cycle-malformed");
+      expect(entry.data.error).toContain("invalid JSON");
+    } finally {
+      teardown();
+    }
   });
 });
