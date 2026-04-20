@@ -129,6 +129,14 @@ Usage:
   generalstaff projects                                   List registered projects
     Example: generalstaff projects
 
+  generalstaff sync --project=<id> | --all                Write CLAUDE-GS.md into the project's .claude/ dir
+    Example: generalstaff sync --project=my-website      # syncs MISSION, hands_off, open tasks into .claude/CLAUDE-GS.md
+    Example: generalstaff sync --all                     # syncs every registered project
+    # Interactive Claude sessions in the project dir then inherit GS's
+    # discipline surface. Re-run after changing MISSION, hands_off, or
+    # the task queue. Reference via \`@.claude/CLAUDE-GS.md\` import in
+    # the project's CLAUDE.md, or cite the file path in the first prompt.
+
   generalstaff init <path> [--id=<id>] [--priority=N]     Scaffold state dir for a new project
     Example: generalstaff init ./myapp
     Example: generalstaff init ../other-repo --id=other
@@ -1043,6 +1051,53 @@ switch (command) {
         console.log(`  budget:   ${p.cycle_budget_minutes} min`);
         console.log(`  branch:   ${p.branch}`);
       }
+    }
+    break;
+  }
+
+  case "sync": {
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+        all: { type: "boolean" },
+      },
+      strict: false,
+    });
+    if (!values.project && !values.all) {
+      console.error(
+        "Usage: generalstaff sync --project=<id>   # sync one project's CLAUDE-GS.md\n" +
+          "       generalstaff sync --all            # sync every registered project\n" +
+          "\n" +
+          "Writes <project.path>/.claude/CLAUDE-GS.md with MISSION scope,\n" +
+          "hands_off list, open tasks, and Hammerstein framing — so an\n" +
+          "interactive Claude session in that directory operates under the\n" +
+          "same discipline surface the bot does.",
+      );
+      process.exit(1);
+    }
+    const { syncProject, syncAllProjects, SyncError } = await import(
+      "./sync"
+    );
+    try {
+      const results = values.all
+        ? await syncAllProjects()
+        : [await syncProject(values.project as string)];
+      for (const r of results) {
+        const missionNote = r.mission_present ? "" : " (no MISSION.md)";
+        const failed = r.written.startsWith("(failed:");
+        const status = failed ? r.written : `→ ${r.written}`;
+        console.log(
+          `${r.project_id}  hands_off=${r.hands_off_count}  open_tasks=${r.open_tasks}${missionNote}  ${status}`,
+        );
+      }
+    } catch (err) {
+      if (err instanceof SyncError) {
+        console.error(`sync failed for '${err.projectId}': ${err.message}`);
+      } else {
+        console.error(`sync failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      process.exit(1);
     }
     break;
   }
