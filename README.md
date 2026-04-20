@@ -12,19 +12,26 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 
 > **Status.** Phases 1–4 shipped: sequential MVP, multi-provider LLM
 > routing, cross-project generality, opt-in parallel worktrees.
-> Phase 5 visual anchor closed. Phase 6 foundation trio mostly
-> landed: HTTP server skeleton + `generalstaff serve` CLI shipped,
-> shared layout template + CSS still queued. Phase 7 pluggable
-> engineer landed (opt-in `engineer_provider: aider` routes bulk
-> scaffolding to aider + OpenRouter instead of `claude -p`;
-> benchmark at `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md` —
-> did not clear the 70% verified bar on React component scaffolds,
-> stays available for future per-task routing). **1,500+ passing
+> Phase 5 visual anchor closed. Phase 6 foundation trio landed:
+> HTTP server, `generalstaff serve` CLI, shared layout + base
+> stylesheet (data-heavy route handlers — project/cycle/tail/inbox
+> — queued). Phase 7 pluggable engineer shipped: opt-in
+> `engineer_provider: aider` routes cycles to aider + OpenRouter
+> (Qwen 3.6+ Plus) instead of `claude -p`. The 10-task benchmark
+> at `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md` cleared
+> 80% verified on `qwen3.6-plus`, so the alternative engineer is
+> a viable way to keep Claude subscription quota pressure off
+> bulk scaffolding work. Per-task routing (`task.engineer_provider`)
+> lets projects mix engineers by task complexity. Per-project
+> creative-work opt-in (Hard Rule #1's "opt-in plugins with
+> explicit warnings" clause) enables scoped creative-draft
+> delegation with human-in-the-loop review — policy at
+> `docs/internal/RULE-RELAXATION-2026-04-20.md`. **1,560+ passing
 > tests across 47 test files** — notable for a largely
 > LLM-generated codebase, and itself a cross-check on the
 > verification gate (tests must pass for the gate to mark a cycle
-> verified). Three managed projects cycling. Cross-platform
-> (Windows, macOS, Linux).
+> verified). Three managed projects cycling (Bookfinder General
+> queued as fourth). Cross-platform (Windows, macOS, Linux).
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
