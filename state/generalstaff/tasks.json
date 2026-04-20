@@ -1950,15 +1950,17 @@
   },
   {
     "id": "gs-277",
-    "title": "Phase 7 follow-up — re-benchmark with a stronger non-Claude model. gs-274's REJECT verdict was specifically for openrouter/qwen/qwen3-coder-plus. Worth testing whether qwen3.6-plus (newer general-purpose flagship, released 2026-04-02) or an equivalent clears the 70% bar on the same 10-task set. **Interactive-only** (~$0.50-1.50 OpenRouter spend). Run: `generalstaff engineer-benchmark --project=gamr --provider=aider --model=openrouter/qwen/qwen3.6-plus --tasks=<same 10> --output=logs/benchmark-phase7-qwen36-<date>.json`. If clears 70%: update PHASE-7-BENCHMARK with new data, queue flip-default task. If not: stay on claude, document the observed ceiling for OpenRouter-free models at this task shape. **STARTED 2026-04-20 ~08:15 UTC in background; qwen3.6-plus is noticeably slower per task than qwen3-coder-plus (~8-10 min per task vs ~1-2 min) so the full run is still executing at session-wrap.** Ray can check results via logs/benchmark-phase7-qwen36-2026-04-20.json once complete.",
-    "status": "in_progress",
+    "title": "Phase 7 follow-up — re-benchmark with a stronger non-Claude model. gs-274's REJECT verdict was specifically for openrouter/qwen/qwen3-coder-plus. Worth testing whether qwen3.6-plus (newer general-purpose flagship, released 2026-04-02) or an equivalent clears the 70% bar on the same 10-task set. Run: `generalstaff engineer-benchmark --project=gamr --provider=aider --model=openrouter/qwen/qwen3.6-plus --tasks=<same 10> --output=logs/benchmark-phase7-qwen36-<date>.json`. **OUTCOME (2026-04-20 09:39 UTC):** 8/10 = 80% verified — clears 70% bar. All 3 React component scaffolds that qwen3-coder-plus failed on (gamr-028/029/031) verified this run. gamr-030 still failed but honestly (419 lines real code, tests didn't pass — vs qwen3-coder-plus's gamed verdict). gamr-025 flaked (empty_diff, model wrongly declared done). Mean engineer duration 508s vs qwen3-coder-plus's 107s (5× slower), but ~50% cheaper per-token so net OpenRouter spend similar. Full writeup + model comparison in docs/internal/PHASE-7-BENCHMARK-2026-04-20.md. DEFAULT_AIDER_MODEL swapped to qwen3.6-plus in same commit cycle as this task's completion. Flipping gamr's engineer_provider default to aider is now viable but stays Ray's strategic call (session-wall-clock tradeoff).",
+    "status": "done",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "Spends OpenRouter credit; Ray's call on whether to explore this branch vs. focus elsewhere.",
     "expected_touches": [
       "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
-      "logs/benchmark-phase7-qwen36-2026-04-XX.json"
-    ]
+      "logs/benchmark-phase7-qwen36-2026-04-20.json",
+      "src/engineer_providers/aider.ts"
+    ],
+    "completed_at": "2026-04-20T09:40:00Z"
   },
   {
     "id": "gs-278",

@@ -13,11 +13,22 @@
 
 import type { ProjectConfig } from "../types";
 
-// OpenRouter's Qwen3 Coder Plus — strong code model, ~$0.65/$3.25 per M
-// tokens. Roughly 40-50x cheaper than Claude Sonnet per input token. The
-// Phase 7 benchmark (deferred task gs-271) validates whether the quality
-// clears the 70% verified-rate bar before we recommend it as a default.
-export const DEFAULT_AIDER_MODEL = "openrouter/qwen/qwen3-coder-plus";
+// OpenRouter's Qwen 3.6 Plus — newer general-purpose flagship (released
+// 2026-04-02, ~$0.325/$1.95 per M tokens). The gs-277 benchmark
+// (docs/internal/PHASE-7-BENCHMARK-2026-04-20.md) ran this model
+// against 10 replayed gamr tasks and got 8/10 = 80% verified,
+// clearing the 70% acceptance bar. The original default
+// `openrouter/qwen/qwen3-coder-plus` had gotten only 50% on the same
+// set — qwen3.6-plus reliably handles multi-file React component
+// scaffolding that qwen3-coder-plus couldn't, at the cost of ~5×
+// slower cycles (mean 508s vs 107s).
+//
+// Per-token pricing is actually ~50% cheaper on qwen3.6-plus than
+// qwen3-coder-plus, so the longer cycles roughly wash out to similar
+// OpenRouter spend per cycle. Projects that want faster iteration
+// with weaker quality can override per-project via `engineer_model`
+// or per-task via `task.engineer_model`.
+export const DEFAULT_AIDER_MODEL = "openrouter/qwen/qwen3.6-plus";
 
 // Shell-quote a string for use inside bash single quotes. Single-quoting
 // is the only shell escape that has no surprises — the only char to worry
