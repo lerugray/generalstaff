@@ -2027,7 +2027,7 @@
   {
     "id": "gs-285",
     "title": "gs-286: Phase 6 route handler — GET /tail/:sessionId (Server-Sent Events). Live session tail via SSE. Read from src/views/session_tail.ts for the event stream data. Server emits text/event-stream with heartbeat comments every 15s to keep the connection alive and appends PROGRESS.jsonl events for that session as they land (tail via fs.watch or similar). Client-side JavaScript (tiny, vanilla) renders each event as it arrives. Phase 6 sketch says this is the one route that needs JS — keep it minimal, no framework. Expected touches: src/server/routes/tail.ts (new), src/server/static/tail.js (new), src/server.ts, tests/server.test.ts. Expected diff: ~150-250 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

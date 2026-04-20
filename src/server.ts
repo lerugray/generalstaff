@@ -11,6 +11,7 @@ import { fileURLToPath } from "url";
 import { layout } from "./server/templates/layout";
 import { renderProjectPage } from "./server/routes/project";
 import { renderCyclePage } from "./server/routes/cycle";
+import { renderTailPage, openTailStream } from "./server/routes/tail";
 
 export interface StartServerOptions {
   port?: number;
@@ -43,6 +44,19 @@ function loadStyleCss(): string {
   return cachedStyleCss;
 }
 
+let cachedTailJs: string | null = null;
+function loadTailJs(): string {
+  if (cachedTailJs !== null) return cachedTailJs;
+  try {
+    const moduleDir = dirname(fileURLToPath(import.meta.url));
+    const jsPath = join(moduleDir, "server", "static", "tail.js");
+    cachedTailJs = readFileSync(jsPath, "utf8");
+  } catch {
+    cachedTailJs = "/* tail.js failed to load at server boot */";
+  }
+  return cachedTailJs;
+}
+
 function renderIndex(): string {
   return layout({
     title: "GeneralStaff — Fleet",
@@ -62,9 +76,10 @@ export async function startServer(
   const hostname = opts.host ?? "127.0.0.1";
   const port = opts.port ?? 3737;
 
-  // Warm the style cache at boot so the first request doesn't pay
-  // the disk-read cost.
+  // Warm the static-asset caches at boot so the first request
+  // doesn't pay the disk-read cost.
   loadStyleCss();
+  loadTailJs();
 
   const server = Bun.serve({
     hostname,
@@ -79,6 +94,15 @@ export async function startServer(
           status: 200,
           headers: {
             "Content-Type": "text/css; charset=utf-8",
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      if (req.method === "GET" && url.pathname === "/static/tail.js") {
+        return new Response(loadTailJs(), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/javascript; charset=utf-8",
             "Cache-Control": "no-cache",
           },
         });
@@ -120,6 +144,30 @@ export async function startServer(
               "Cache-Control": "no-cache",
             },
           });
+        }
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/tail/")) {
+        const rest = url.pathname.slice("/tail/".length);
+        // Two shapes land here: `/tail/:sessionId` (HTML shell) and
+        // `/tail/:sessionId/stream` (SSE). Anything else is 404.
+        if (rest.endsWith("/stream")) {
+          const sessionId = decodeURIComponent(
+            rest.slice(0, -"/stream".length),
+          );
+          if (sessionId.length > 0 && !sessionId.includes("/")) {
+            return openTailStream(sessionId);
+          }
+        } else {
+          const sessionId = decodeURIComponent(rest);
+          if (sessionId.length > 0 && !sessionId.includes("/")) {
+            return new Response(renderTailPage(sessionId), {
+              status: 200,
+              headers: {
+                "Content-Type": "text/html; charset=utf-8",
+                "Cache-Control": "no-cache",
+              },
+            });
+          }
         }
       }
       return new Response("Not Found", { status: 404 });
