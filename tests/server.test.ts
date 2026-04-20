@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { startServer } from "../src/server";
@@ -376,6 +376,310 @@ describe("startServer — gs-284 GET /cycle/:cycleId", () => {
       expect(res.status).toBe(404);
       const body = await res.text();
       expect(body).toContain("Cycle not found");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("startServer — gs-285 GET /tail/:sessionId", () => {
+  const FIXTURE_DIR = join(tmpdir(), `gs-server-tail-${process.pid}`);
+  let originalRoot: string;
+
+  function fleetLogPath(): string {
+    return join(FIXTURE_DIR, "state", "_fleet", "PROGRESS.jsonl");
+  }
+
+  function writeFleetLog(events: Array<Record<string, unknown>>) {
+    const dir = join(FIXTURE_DIR, "state", "_fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      fleetLogPath(),
+      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  function appendFleetEvent(event: Record<string, unknown>) {
+    appendFileSync(fleetLogPath(), JSON.stringify(event) + "\n", "utf8");
+  }
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    originalRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+  });
+
+  afterEach(() => {
+    setRootDir(originalRoot);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("serves /static/tail.js with application/javascript content-type", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/static/tail.js`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("application/javascript");
+      const body = await res.text();
+      // Sanity: the load-bearing EventSource subscription is present.
+      expect(body).toContain("new EventSource");
+      expect(body).toContain("tail-events");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 200 HTML shell for /tail/:sessionId with the session id and tail.js reference", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/tail/sess-42`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain("sess-42");
+      expect(body).toContain("tail-events");
+      expect(body).toContain("/static/tail.js");
+      expect(body).toContain('window.__GS_SESSION_ID = "sess-42"');
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("escapes HTML/JS metacharacters in session id rather than injecting raw markup", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      // URL-encode `<>"`; they survive decodeURIComponent and land in
+      // both the HTML body and the JS string literal.
+      const sid = `s"<x>`;
+      const res = await fetch(
+        `${server.url}/tail/${encodeURIComponent(sid)}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      // Should NOT contain a raw `<x>` tag — that would be an XSS hole.
+      expect(body).not.toContain("<x>");
+      // Escaped form should be present in the HTML body.
+      expect(body).toContain("&lt;x&gt;");
+      // JS literal should use \u003c/\u003e, not raw angle brackets.
+      expect(body).toContain("\\u003cx\\u003e");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("streams backlog events from /tail/:sessionId/stream as SSE", async () => {
+    writeFleetLog([
+      // session A event (should stream)
+      {
+        timestamp: "2026-04-20T10:00:00Z",
+        event: "cycle_start",
+        cycle_id: "c-1",
+        project_id: "alpha",
+        data: { session_id: "sess-A", task_id: "t-1" },
+      },
+      // session B event (should NOT stream — different session)
+      {
+        timestamp: "2026-04-20T10:00:01Z",
+        event: "cycle_start",
+        cycle_id: "c-9",
+        project_id: "beta",
+        data: { session_id: "sess-B", task_id: "t-9" },
+      },
+      // another session A event
+      {
+        timestamp: "2026-04-20T10:05:00Z",
+        event: "cycle_end",
+        cycle_id: "c-1",
+        project_id: "alpha",
+        data: { session_id: "sess-A", outcome: "verified" },
+      },
+    ]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/tail/sess-A/stream`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      const deadline = Date.now() + 3000;
+      // Read until we've seen both sess-A events or we hit the deadline.
+      while (Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        if (buf.includes("c-1") && buf.includes("cycle_end")) break;
+      }
+      await reader.cancel();
+
+      expect(buf).toContain("data: ");
+      expect(buf).toContain('"cycle_id":"c-1"');
+      expect(buf).toContain('"event":"cycle_end"');
+      // sess-B events must not leak into the sess-A stream.
+      expect(buf).not.toContain('"session_id":"sess-B"');
+      expect(buf).not.toContain("c-9");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("pushes newly-appended events to an already-open stream", async () => {
+    writeFleetLog([]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/tail/sess-live/stream`);
+      expect(res.status).toBe(200);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+
+      // Drain the initial hello comment.
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      const firstChunk = decoder.decode(first.value!, { stream: true });
+      expect(firstChunk).toContain("tail opened for sess-live");
+
+      // Now append an event AFTER the stream is open.
+      appendFleetEvent({
+        timestamp: "2026-04-20T11:00:00Z",
+        event: "engineer_start",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { session_id: "sess-live", command: "claude -p" },
+      });
+
+      let buf = "";
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        if (buf.includes("c-42")) break;
+      }
+      await reader.cancel();
+
+      expect(buf).toContain('"event":"engineer_start"');
+      expect(buf).toContain('"cycle_id":"c-42"');
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 404 when /tail/ has no session id", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/tail/`);
+      expect(res.status).toBe(404);
+      await res.text();
+    } finally {
+      server.stop();
+    }
+  });
+});
+
+describe("startServer — gs-286 GET /inbox", () => {
+  const FIXTURE_DIR = join(tmpdir(), `gs-server-inbox-${process.pid}`);
+  let originalRoot: string;
+
+  function writeFleetMessages(entries: Array<Record<string, unknown>>) {
+    const dir = join(FIXTURE_DIR, "state", "_fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "messages.jsonl"),
+      entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    originalRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+  });
+
+  afterEach(() => {
+    setRootDir(originalRoot);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("returns 200 HTML with recent messages grouped by date and links to cycles", async () => {
+    const now = new Date();
+    const today = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const yesterday = new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString();
+    writeFleetMessages([
+      {
+        timestamp: today,
+        from: "generalstaff-bot",
+        body: "verification failed on gs-99",
+        kind: "blocker",
+        refs: [{ cycle_id: "c-77", task_id: "gs-99" }],
+      },
+      {
+        timestamp: yesterday,
+        from: "dispatcher",
+        body: "picked gamr for next slot",
+        kind: "fyi",
+        refs: [],
+      },
+    ]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain("Inbox");
+      expect(body).toContain("verification failed on gs-99");
+      expect(body).toContain("picked gamr for next slot");
+      expect(body).toContain('href="/cycle/c-77"');
+      expect(body).toContain("generalstaff-bot");
+      expect(body).toContain("dispatcher");
+      expect(body).toContain("blocker");
+      // Inbox nav link should be marked active.
+      expect(body).toMatch(/<a href="\/inbox"\s+aria-current="page">Inbox<\/a>/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("shows empty-state copy when there are no fleet messages", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Inbox empty");
+      expect(body).toContain("all projects running clean");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("escapes HTML in message bodies to prevent injection", async () => {
+    const now = new Date();
+    writeFleetMessages([
+      {
+        timestamp: new Date(now.getTime() - 60 * 1000).toISOString(),
+        from: "ray",
+        body: "<script>alert('xss')</script>",
+        refs: [],
+      },
+    ]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).not.toContain("<script>alert('xss')</script>");
+      expect(body).toContain("&lt;script&gt;");
     } finally {
       server.stop();
     }
