@@ -43,8 +43,10 @@
   {
     "id": "bf-005",
     "title": "Draft a 300-word README section titled 'Why Bookfinder exists' (or similar — engineer picks best title from 3 candidates). Voice-calibrated to the PIH manuals in `voice_reference_paths`. Drafts go to `drafts/readme-why-section-v1.md` — NOT into README.md directly (README.md is hands_off). Ray edits the draft and decides whether to fold into README. Audience: open-source developers browsing GitHub. Message: what gap Bookfinder fills (Anna's Archive search that actually returns the right book; cleanly extracts text; summarizes with stop-slop rules so the output isn't LLM boilerplate). Tone: technical, dry humor, no marketing-speak. Do NOT mention 'unleash' / 'revolutionize' / any engagement-bait verbs.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
-    "creative": true
+    "creative": true,
+    "completed_at": "2026-04-20T11:05:00Z",
+    "outcome_notes": "Bot commit 91330bb on bot/work. Draft at drafts/readme-why-section-v1.md; README.md untouched (hands_off). Three candidate titles listed in an HTML comment at top — engineer recommended #1 'Why Bookfinder exists'. Body is ~316 words across five paragraphs: one-line setup, then three concrete-failure paragraphs (Anna's re-ranking with the Van Creveld / Tuchman examples straight from CLAUDE.md, EPUB-first + 25MB skip for extraction, stop-slop-in-the-prompt for summaries), then a deflating closer that the tool does only the glue. Voice: PIH-manual dry — parenthetical qualifiers, 'Nothing clever; just avoiding the trap,' no marketing verbs. Banned-word check (unleash / revolutionize / engagement-bait) clean. Verification gate (pytest + ruff) run before commit despite no code touched — 4 passed, ruff clean."
   }
 ]
