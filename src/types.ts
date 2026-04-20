@@ -214,6 +214,16 @@ export interface GreenfieldTask {
   expected_touches?: string[];
   interactive_only?: boolean;
   interactive_only_reason?: string;
+  // gs-275: per-task engineer override. When set, the dispatcher
+  // peeks at the next bot-pickable task's provider before spawning
+  // the engineer; the task's override wins over the project-level
+  // engineer_provider default. Motivation — the gs-274 benchmark
+  // revealed aider+Qwen3 Coder works well for type/fixture/e2e/CSS
+  // tasks and fails on React component scaffolding; per-task
+  // routing lets a project use aider on the subset where it works
+  // while keeping claude for the subset where it doesn't.
+  engineer_provider?: EngineerProvider;
+  engineer_model?: string;
 }
 
 // --- Concurrency detection ---

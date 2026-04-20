@@ -15,7 +15,12 @@ import type {
   KillableChild,
   KillChildTreeOptions,
 } from "./active_engineer";
-import type { ProjectConfig, DispatcherConfig, EngineerProvider } from "./types";
+import type {
+  ProjectConfig,
+  DispatcherConfig,
+  EngineerProvider,
+  GreenfieldTask,
+} from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
 
 export interface EngineerResult {
@@ -32,11 +37,24 @@ export interface EngineerResult {
 export { killChildTree, getActiveEngineerChild, killActiveEngineer } from "./active_engineer";
 export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
 
-// Resolve the final bash command string for a cycle based on
-// project.engineer_provider. "claude" (default) uses the project's
-// engineer_command verbatim with ${cycle_budget_minutes} expanded.
-// Any non-claude provider has GS generate the full invocation — the
-// engineer_command field is ignored in that case.
+// Resolve the final bash command string for a cycle.
+//
+// Precedence on provider + model (gs-275 added the task-level tier):
+//   1. Task override (task.engineer_provider / task.engineer_model)
+//   2. Project default (project.engineer_provider / project.engineer_model)
+//   3. Built-in default ("claude" / provider-specific model default)
+//
+// Task-level overrides let a project mix engineers across its task
+// queue — e.g. route type/fixture/e2e/CSS tasks to aider+OpenRouter
+// for quota-free execution while keeping React component scaffolding
+// on claude where it works. The dispatcher peeks at the next
+// bot-pickable task upstream of the engineer spawn (see cycle.ts)
+// so we know which override applies before the engineer subprocess
+// reads tasks.json itself.
+//
+// The "claude" path uses project.engineer_command verbatim with
+// ${cycle_budget_minutes} expanded. Any non-claude provider has GS
+// generate the full invocation; engineer_command is ignored there.
 //
 // SAFETY INVARIANT (security audit 2026-04-19, still applies): only
 // numeric or otherwise shell-safe template variables may be substituted
@@ -46,22 +64,57 @@ export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
 // must be shell-quoted before substitution. For non-claude providers,
 // the provider module owns escaping of every interpolated value — see
 // engineer_providers/aider.ts shellSingleQuote for the pattern.
-export function resolveEngineerCommand(project: ProjectConfig): {
+export function resolveEngineerCommand(
+  project: ProjectConfig,
+  nextTask?: GreenfieldTask,
+): {
   provider: EngineerProvider;
   command: string;
+  source: "task" | "project" | "default";
 } {
-  const provider: EngineerProvider = project.engineer_provider ?? "claude";
+  // Precedence resolution. Track source so the audit log can show where
+  // the provider choice came from — useful when diagnosing why one cycle
+  // used aider and the next used claude.
+  let provider: EngineerProvider;
+  let source: "task" | "project" | "default";
+  if (nextTask?.engineer_provider) {
+    provider = nextTask.engineer_provider;
+    source = "task";
+  } else if (project.engineer_provider) {
+    provider = project.engineer_provider;
+    source = "project";
+  } else {
+    provider = "claude";
+    source = "default";
+  }
+
+  // Model override follows the same precedence but is applied by the
+  // provider module itself (it reads project.engineer_model). For the
+  // task-level model override to take effect we synthesize a project
+  // config with the task's model overlaid. Claude path doesn't honor
+  // engineer_model (the model is inside the project's own wrapper
+  // script), so the overlay is only meaningful for non-claude paths.
+  const effectiveProject: ProjectConfig =
+    nextTask?.engineer_model
+      ? { ...project, engineer_model: nextTask.engineer_model }
+      : project;
+
   switch (provider) {
     case "claude":
       return {
         provider,
+        source,
         command: project.engineer_command.replace(
           /\$\{cycle_budget_minutes\}/g,
           String(project.cycle_budget_minutes),
         ),
       };
     case "aider":
-      return { provider, command: buildAiderCommand(project) };
+      return {
+        provider,
+        source,
+        command: buildAiderCommand(effectiveProject),
+      };
   }
 }
 
@@ -70,16 +123,20 @@ export async function runEngineer(
   cycleId: string,
   config?: DispatcherConfig,
   dryRun: boolean = false,
+  nextTask?: GreenfieldTask,
 ): Promise<EngineerResult> {
   const cycDir = ensureCycleDir(project.id, cycleId, config);
   const logPath = join(cycDir, "engineer.log");
 
-  const { provider, command } = resolveEngineerCommand(project);
+  const { provider, command, source } = resolveEngineerCommand(project, nextTask);
 
   await appendProgress(project.id, "engineer_invoked", {
     provider,
+    provider_source: source,
     command: provider === "claude" ? project.engineer_command : "(generated by provider module)",
-    engineer_model: project.engineer_model,
+    engineer_model: nextTask?.engineer_model ?? project.engineer_model,
+    task_override: nextTask?.engineer_provider !== undefined,
+    peeked_task_id: nextTask?.id,
     cycle_budget_minutes: project.cycle_budget_minutes,
     dry_run: dryRun,
   }, cycleId);

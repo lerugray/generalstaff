@@ -380,3 +380,102 @@ describe("runEngineer dry-run with alternative provider (gs-270)", () => {
     expect(logContent!).toContain("claude -p");
   });
 });
+
+describe("resolveEngineerCommand — per-task override precedence (gs-275)", () => {
+  it("returns source='default' when nothing is set", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject();
+    const { provider, source } = resolveEngineerCommand(project);
+    expect(provider).toBe("claude");
+    expect(source).toBe("default");
+  });
+
+  it("returns source='project' when project.engineer_provider is set", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_provider: "aider" });
+    const { provider, source } = resolveEngineerCommand(project);
+    expect(provider).toBe("aider");
+    expect(source).toBe("project");
+  });
+
+  it("returns source='task' when task.engineer_provider is set", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject();
+    const nextTask = {
+      id: "t-001",
+      title: "x",
+      status: "pending" as const,
+      priority: 1,
+      engineer_provider: "aider" as const,
+    };
+    const { provider, source } = resolveEngineerCommand(project, nextTask);
+    expect(provider).toBe("aider");
+    expect(source).toBe("task");
+  });
+
+  it("task override wins over project default (task > project precedence)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_provider: "aider" });
+    const nextTask = {
+      id: "t-001",
+      title: "x",
+      status: "pending" as const,
+      priority: 1,
+      engineer_provider: "claude" as const,
+    };
+    const { provider, source } = resolveEngineerCommand(project, nextTask);
+    expect(provider).toBe("claude");
+    expect(source).toBe("task");
+  });
+
+  it("task.engineer_model overrides project.engineer_model for aider", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "aider",
+      engineer_model: "openrouter/qwen/qwen3-coder-plus",
+    });
+    const nextTask = {
+      id: "t-001",
+      title: "x",
+      status: "pending" as const,
+      priority: 1,
+      engineer_model: "openrouter/anthropic/claude-haiku-4-5",
+    };
+    const { command } = resolveEngineerCommand(project, nextTask);
+    expect(command).toContain("openrouter/anthropic/claude-haiku-4-5");
+    expect(command).not.toContain("qwen3-coder-plus");
+  });
+
+  it("undefined nextTask behaves identically to no-task call (backward compat)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_command: "echo ${cycle_budget_minutes}", cycle_budget_minutes: 25 });
+    const withNoTask = resolveEngineerCommand(project);
+    const withUndefinedTask = resolveEngineerCommand(project, undefined);
+    expect(withNoTask.command).toBe(withUndefinedTask.command);
+    expect(withNoTask.provider).toBe(withUndefinedTask.provider);
+    expect(withNoTask.source).toBe(withUndefinedTask.source);
+  });
+});
+
+describe("runEngineer with task override (gs-275)", () => {
+  it("logs provider_source=task in audit when task carries override", async () => {
+    const project = makeProject({ engineer_command: "echo default" });
+    const nextTask = {
+      id: "t-001",
+      title: "x",
+      status: "pending" as const,
+      priority: 1,
+      engineer_provider: "aider" as const,
+    };
+    await runEngineer(project, "cycle-task-override", undefined, true, nextTask);
+    const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+    const lines = readFileSync(progressPath, "utf8").trim().split("\n");
+    const invoked = lines
+      .map((l) => JSON.parse(l))
+      .find((e: { event: string }) => e.event === "engineer_invoked");
+    expect(invoked.data.provider).toBe("aider");
+    expect(invoked.data.provider_source).toBe("task");
+    expect(invoked.data.task_override).toBe(true);
+    expect(invoked.data.peeked_task_id).toBe("t-001");
+  });
+});

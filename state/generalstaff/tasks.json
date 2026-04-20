@@ -1926,13 +1926,17 @@
   {
     "id": "gs-275",
     "title": "Phase 7 follow-up — per-task engineer routing. Add optional `task.engineer_provider` and `task.engineer_model` fields to GreenfieldTask that override the project-level default. **Motivation:** the gs-274 benchmark revealed aider+Qwen3 Coder works well for type scaffolds / fixtures / e2e / CSS but fails on React component scaffolding in this codebase. Per-task routing lets us reap the quota savings on the subset where aider works while keeping claude for the subset where it doesn't. **Scope:** (1) Add optional fields to `GreenfieldTask` in src/types.ts. (2) In src/engineer.ts, when the picker selects a task, check for task-level overrides and synthesize a ProjectConfig with the overrides applied. (3) Tests covering override precedence (task > project > default). (4) Document the new fields in a docs/internal/ note or inline in the existing Phase 7 material. Hands-off: does not touch projects.yaml, scripts/, src/reviewer.ts, src/prompts/. Expected diff: ~120-180 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/types.ts",
+      "src/tasks.ts",
       "src/engineer.ts",
-      "tests/engineer.test.ts"
-    ]
+      "src/cycle.ts",
+      "tests/engineer.test.ts",
+      "tests/tasks.test.ts"
+    ],
+    "completed_at": "2026-04-20T09:05:00Z"
   },
   {
     "id": "gs-276",

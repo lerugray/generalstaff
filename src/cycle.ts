@@ -18,6 +18,7 @@ import {
 } from "./state";
 import { appendProgress } from "./audit";
 import { runEngineer } from "./engineer";
+import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runVerification } from "./verification";
 import { runReviewer, type ReviewerResult } from "./reviewer";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
@@ -577,8 +578,28 @@ export async function executeCycle(
     console.log(`Start SHA (${branch}): ${cycleStartSha.slice(0, 8)}`);
 
     // 4. Engineer step
+    //
+    // gs-275: peek at the next bot-pickable task *before* spawning the
+    // engineer, so we can resolve task-level engineer_provider /
+    // engineer_model overrides. The peek mirrors the engineer's own
+    // pick rules (highest priority, lowest id among ties, bot-pickable
+    // filter), so the two converge on the same task under normal
+    // operation. If peek fails (no tasks.json, empty queue, etc.)
+    // nextTask is undefined and the existing project-level resolution
+    // applies — legacy behavior unchanged.
+    let nextTask;
+    try {
+      const tasks = await loadTasks(project.id);
+      nextTask = nextBotPickableTask(tasks, project.hands_off);
+    } catch {
+      // Non-greenfield projects (catalogdna_bot_tasks, git_issues,
+      // git_unmerged) won't have a tasks.json at state/<id>/; that's
+      // fine, the peek silently returns undefined and resolution falls
+      // back to project-level defaults.
+      nextTask = undefined;
+    }
     console.log(`Running engineer: ${project.engineer_command}`);
-    const engineerResult = await runEngineer(project, cycleId, config, dryRun);
+    const engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask);
     console.log(
       `Engineer finished: exit=${engineerResult.exitCode}, ` +
         `${engineerResult.durationSeconds.toFixed(0)}s`,

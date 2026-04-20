@@ -5,7 +5,8 @@ import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { getRootDir } from "./state";
 import { matchesHandsOff } from "./safety";
-import type { GreenfieldTask } from "./types";
+import type { GreenfieldTask, EngineerProvider } from "./types";
+import { VALID_ENGINEER_PROVIDERS } from "./types";
 
 function tasksPath(projectId: string): string {
   return join(getRootDir(), "state", projectId, "tasks.json");
@@ -97,6 +98,27 @@ function validateTaskEntry(
     throw new TaskValidationError(
       `${loc}: 'priority' must be a positive integer, got ${JSON.stringify(rec.priority)}`,
     );
+  }
+
+  // gs-275: per-task engineer override. Catch typos at load time.
+  if ("engineer_provider" in rec && rec.engineer_provider !== undefined && rec.engineer_provider !== null) {
+    if (typeof rec.engineer_provider !== "string") {
+      throw new TaskValidationError(
+        `${loc}: 'engineer_provider' must be a string if set, got ${typeof rec.engineer_provider}`,
+      );
+    }
+    if (!VALID_ENGINEER_PROVIDERS.includes(rec.engineer_provider as EngineerProvider)) {
+      throw new TaskValidationError(
+        `${loc}: 'engineer_provider' must be one of ${VALID_ENGINEER_PROVIDERS.join(", ")}, got ${JSON.stringify(rec.engineer_provider)}`,
+      );
+    }
+  }
+  if ("engineer_model" in rec && rec.engineer_model !== undefined && rec.engineer_model !== null) {
+    if (typeof rec.engineer_model !== "string" || rec.engineer_model.length === 0) {
+      throw new TaskValidationError(
+        `${loc}: 'engineer_model' must be a non-empty string if set, got ${JSON.stringify(rec.engineer_model)}`,
+      );
+    }
   }
 
   return rec as unknown as GreenfieldTask;
@@ -219,6 +241,44 @@ export function botPickableTasks(
   handsOff: string[],
 ): GreenfieldTask[] {
   return tasks.filter((t) => isTaskBotPickable(t, handsOff).ok);
+}
+
+// Parse the numeric suffix from a task id like "gamr-027" → 27 or
+// "gs-270" → 270 for deterministic ordering among same-priority tasks.
+// Falls back to Infinity when the id doesn't carry a numeric suffix so
+// alphanumeric-only ids sort last rather than crashing.
+function taskIdSortKey(id: string): number {
+  const match = id.match(/-(\d+)$/);
+  if (!match) return Number.POSITIVE_INFINITY;
+  return parseInt(match[1], 10);
+}
+
+// gs-275: return the task the bot engineer would pick next under the
+// current rules. Mirrors the engineer prompt's decision logic exactly:
+// (1) filter to bot-pickable (pending, not interactive_only, no
+// hands_off intersection), (2) sort by priority ascending (1 = highest),
+// (3) break ties by numeric-suffix on id ascending. Returns undefined
+// if no task is pickable.
+//
+// The dispatcher calls this upstream of `runEngineer` so it can
+// resolve task-level engineer overrides (task.engineer_provider,
+// task.engineer_model) before spawning the engineer subprocess.
+// Because the engineer's own pick rules are identical, the two will
+// converge on the same task — we're peeking, not constraining.
+export function nextBotPickableTask(
+  tasks: GreenfieldTask[],
+  handsOff: string[],
+): GreenfieldTask | undefined {
+  const pickable = botPickableTasks(tasks, handsOff);
+  if (pickable.length === 0) return undefined;
+  const sorted = [...pickable].sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const aKey = taskIdSortKey(a.id);
+    const bKey = taskIdSortKey(b.id);
+    if (aKey !== bKey) return aKey - bKey;
+    return a.id.localeCompare(b.id);
+  });
+  return sorted[0];
 }
 
 export interface TaskCounts {

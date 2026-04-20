@@ -20,6 +20,7 @@ import {
   countTasks,
   isTaskBotPickable,
   botPickableTasks,
+  nextBotPickableTask,
   TasksLoadError,
   TaskValidationError,
 } from "../src/tasks";
@@ -1313,5 +1314,146 @@ describe("isTaskBotPickable + botPickableTasks (gs-195)", () => {
     });
     const result = isTaskBotPickable(t, []);
     expect(result).toEqual({ ok: false, reason: "not_pending" });
+  });
+});
+
+describe("nextBotPickableTask (gs-275)", () => {
+  function task(overrides: Partial<GreenfieldTask> = {}): GreenfieldTask {
+    return {
+      id: "proj-001",
+      title: "test",
+      status: "pending",
+      priority: 1,
+      ...overrides,
+    };
+  }
+
+  it("returns undefined for empty task list", () => {
+    expect(nextBotPickableTask([], [])).toBeUndefined();
+  });
+
+  it("returns undefined when all tasks are done", () => {
+    const ts = [task({ id: "a-001", status: "done" }), task({ id: "a-002", status: "skipped" })];
+    expect(nextBotPickableTask(ts, [])).toBeUndefined();
+  });
+
+  it("returns undefined when all remaining tasks are interactive_only", () => {
+    const ts = [task({ id: "a-001", interactive_only: true }), task({ id: "a-002", interactive_only: true })];
+    expect(nextBotPickableTask(ts, [])).toBeUndefined();
+  });
+
+  it("picks the lower-priority-number task among priority-1 and priority-2", () => {
+    const ts = [task({ id: "a-001", priority: 2 }), task({ id: "a-002", priority: 1 })];
+    expect(nextBotPickableTask(ts, [])?.id).toBe("a-002");
+  });
+
+  it("picks lowest numeric-suffix id among same-priority ties", () => {
+    const ts = [
+      task({ id: "proj-005", priority: 1 }),
+      task({ id: "proj-003", priority: 1 }),
+      task({ id: "proj-010", priority: 1 }),
+    ];
+    expect(nextBotPickableTask(ts, [])?.id).toBe("proj-003");
+  });
+
+  it("skips interactive_only tasks even if they're higher priority", () => {
+    const ts = [
+      task({ id: "a-001", priority: 1, interactive_only: true }),
+      task({ id: "a-002", priority: 2 }),
+    ];
+    expect(nextBotPickableTask(ts, [])?.id).toBe("a-002");
+  });
+
+  it("skips tasks whose expected_touches intersect hands_off", () => {
+    const ts = [
+      task({ id: "a-001", priority: 1, expected_touches: ["src/safety.ts"] }),
+      task({ id: "a-002", priority: 2 }),
+    ];
+    expect(nextBotPickableTask(ts, ["src/safety.ts"])?.id).toBe("a-002");
+  });
+
+  it("returns a task that carries an engineer_provider override", () => {
+    const ts = [
+      task({ id: "a-001", priority: 1, engineer_provider: "aider" }),
+    ];
+    const picked = nextBotPickableTask(ts, []);
+    expect(picked?.engineer_provider).toBe("aider");
+  });
+});
+
+describe("validateTaskEntry — gs-275 engineer override fields", () => {
+  const TEST_DIR = join(import.meta.dir, "fixtures", "task_validator_gs275");
+
+  beforeEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(join(TEST_DIR, "state", "p"), { recursive: true });
+    setRootDir(TEST_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    setRootDir(process.cwd());
+  });
+
+  function writeTasksJson(entries: unknown): void {
+    writeFileSync(
+      join(TEST_DIR, "state", "p", "tasks.json"),
+      JSON.stringify(entries),
+      "utf8",
+    );
+  }
+
+  it("accepts a task with engineer_provider: 'aider'", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, engineer_provider: "aider" },
+    ]);
+    const tasks = await loadTasks("p");
+    expect(tasks[0].engineer_provider).toBe("aider");
+  });
+
+  it("accepts a task with engineer_provider + engineer_model", async () => {
+    writeTasksJson([
+      {
+        id: "p-001",
+        title: "x",
+        status: "pending",
+        priority: 1,
+        engineer_provider: "aider",
+        engineer_model: "openrouter/anthropic/claude-haiku-4-5",
+      },
+    ]);
+    const tasks = await loadTasks("p");
+    expect(tasks[0].engineer_provider).toBe("aider");
+    expect(tasks[0].engineer_model).toBe("openrouter/anthropic/claude-haiku-4-5");
+  });
+
+  it("rejects unknown engineer_provider string", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, engineer_provider: "cursor" },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
+
+  it("rejects non-string engineer_provider", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, engineer_provider: 42 },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
+
+  it("rejects empty engineer_model", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, engineer_model: "" },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
+
+  it("accepts a task without the new fields (legacy compat)", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1 },
+    ]);
+    const tasks = await loadTasks("p");
+    expect(tasks[0].engineer_provider).toBeUndefined();
+    expect(tasks[0].engineer_model).toBeUndefined();
   });
 });
