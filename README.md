@@ -270,8 +270,28 @@ cycle:
   GeneralStaff per-managed-project: agents-md tightens the engineer
   subprocess, the verification gate catches what slips through.
 
-The combination is defense in depth. Use either alone if that fits;
-neither is a hard dependency of the other.
+- **[lean-ctx](https://github.com/tzervas/lean-ctx)** — a context
+  runtime for coding agents that compresses file reads, shell
+  output, and search results into a compact wire format the agent
+  can still reason about. It sits underneath Claude Code (or any
+  MCP-capable agent) and typically cuts a meaningful fraction of
+  the tokens a session would otherwise burn on repeated reads.
+  Complementary here: lean-ctx lowers the per-token cost of your
+  interactive sessions, which frees weekly quota for the
+  autonomous dispatcher to run more cycles before you hit your cap.
+
+- **[aider](https://aider.chat) + OpenRouter** — as of Phase 7,
+  projects can set `engineer_provider: aider` (see
+  `projects.yaml.example`) to route the engineer half of each
+  cycle to aider + OpenRouter (Qwen3 Coder by default) instead of
+  the default `claude -p`. Roughly 40× cheaper per token than
+  Claude Sonnet and doesn't touch your Claude weekly cap. Best
+  suited for bulk scaffolding; complex or algorithmic work should
+  stay on the default claude engineer. Full BYOK — you supply your
+  own `OPENROUTER_API_KEY`, nothing is hosted on your behalf.
+
+The combination is defense in depth. Use any of them alone if that
+fits; none is a hard dependency of the others.
 
 ## Who this is for
 

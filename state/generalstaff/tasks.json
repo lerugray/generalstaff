@@ -1863,5 +1863,47 @@
       "src/server.ts",
       "tests/server.test.ts"
     ]
+  },
+  {
+    "id": "gs-270",
+    "title": "Phase 7 Part 1 — engineer-provider scaffold + aider invocation generator. Landed interactively because the scope touches projects.yaml.example, README.md, and docs/internal/PHASE-7-SKETCH-*.md (all hands_off). Added optional `engineer_provider: claude | aider` and `engineer_model: string` fields to `ProjectConfig` (src/types.ts), parser + validation in src/projects.ts, a new `src/engineer_providers/aider.ts` that generates the full bash invocation for an aider cycle (worktree setup, stack-detected install, aider CLI with --auto-commits --test-cmd --message), and a `resolveEngineerCommand(project)` dispatcher in src/engineer.ts that returns byte-identical output to the pre-gs-270 path when engineer_provider is unset or 'claude'. 11 new tests across tests/engineer.test.ts + tests/projects.test.ts, 1496/1496 pass. Documentation: projects.yaml.example now documents the new fields with BYOK guidance; README.md 'Works alongside' section mentions lean-ctx + aider/OpenRouter as complementary; PHASE-7-SKETCH header updated to reflect Part 1 status. Benchmark harness + actual benchmark run are separate follow-up tasks (gs-271, gs-272).",
+    "status": "done",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Scope includes edits to projects.yaml.example, README.md, and docs/internal/PHASE-7-SKETCH-2026-04-19.md, all of which match generalstaff hands_off patterns.",
+    "expected_touches": [
+      "src/types.ts",
+      "src/projects.ts",
+      "src/engineer.ts",
+      "src/engineer_providers/aider.ts",
+      "tests/engineer.test.ts",
+      "tests/projects.test.ts",
+      "projects.yaml.example",
+      "README.md",
+      "docs/internal/PHASE-7-SKETCH-2026-04-19.md"
+    ],
+    "completed_at": "2026-04-20T04:00:00Z"
+  },
+  {
+    "id": "gs-271",
+    "title": "Phase 7 Part 2 — engineer benchmark harness. Write a CLI subcommand `generalstaff engineer-benchmark --project=<id> --provider=aider [--tasks=<csv>] [--count=N]` that replays N previously-shipped tasks against the alternative engineer provider in a disposable worktree. **Scope:** (1) new src/benchmark.ts exporting `runEngineerBenchmark(opts)` that for each task (a) creates a temporary worktree at a path outside the managed project, (b) resets the state file to a pre-task snapshot (git checkout of tasks.json from pre-completion commit), (c) runs the alt-provider engineer for one cycle, (d) captures verified/rolled-back outcome, duration, diff stats, (e) writes a per-task row to a results JSON file. (2) new CLI subcommand in src/cli.ts wiring --project/--provider/--tasks/--count with validation. (3) tests in tests/benchmark.test.ts using a fake engineer that returns canned results (don't spawn real aider in tests). (4) Does NOT actually run the benchmark — that's gs-272 (interactive). **Hands-off:** does not touch src/safety.ts, src/reviewer.ts, src/prompts/, projects.yaml, docs/internal/, scripts/, README.md, or any PHASE-*.md. Expected diff: ~300-450 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/benchmark.ts",
+      "src/cli.ts",
+      "tests/benchmark.test.ts"
+    ]
+  },
+  {
+    "id": "gs-272",
+    "title": "Phase 7 Part 3 — run the 10-task aider benchmark, publish results. **Interactive-only** (judgment required: which 10 tasks, result interpretation, accept/reject the 70%-verified acceptance bar). Depends on gs-271. Run `generalstaff engineer-benchmark --project=gamr --provider=aider --count=10` against shipped gamr tasks, collect results, write docs/internal/PHASE-7-BENCHMARK-<date>.md with per-task outcomes, aggregate verified rate, mean duration, diff-size comparison, and a verdict: keep default claude OR flip gamr's default to aider. If >=70% verified rate, queue gs-273 to flip gamr's projects.yaml to engineer_provider: aider.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Writes docs/internal/PHASE-7-BENCHMARK-*.md (hands_off); requires Ray's judgment on benchmark task selection and verdict.",
+    "expected_touches": [
+      "docs/internal/PHASE-7-BENCHMARK-2026-04-XX.md"
+    ]
   }
 ]

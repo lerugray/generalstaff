@@ -36,6 +36,18 @@ export type WorkDetectionMode =
   | "git_unmerged";
 export type ConcurrencyDetectionMode = "catalogdna" | "worktree" | "none";
 
+// gs-270: Phase 7 engineer-swap. Projects opt into an alternative engineer
+// provider (aider on OpenRouter, etc.) to keep subscription-quota pressure
+// off the default `claude -p` engineer. Default is "claude" (current
+// behavior: run `engineer_command` verbatim). Non-claude providers have GS
+// generate the full bash invocation internally — worktree setup, deps,
+// provider CLI, prompt — so projects don't need a per-provider wrapper.
+export type EngineerProvider = "claude" | "aider";
+export const VALID_ENGINEER_PROVIDERS: readonly EngineerProvider[] = [
+  "claude",
+  "aider",
+];
+
 export interface ProjectConfig {
   id: string;
   path: string;
@@ -49,6 +61,13 @@ export interface ProjectConfig {
   auto_merge: boolean;
   hands_off: string[];
   notes?: string;
+  // gs-270: optional alternative engineer. Unset or "claude" preserves
+  // current behavior — `engineer_command` is run as-is. Any other value
+  // has GS generate the engineer invocation internally; `engineer_command`
+  // is then ignored. BYOK per Hard Rule 8 — operator supplies the API key
+  // (OPENROUTER_API_KEY for aider, etc.).
+  engineer_provider?: EngineerProvider;
+  engineer_model?: string;
 }
 
 export interface DispatcherConfig {

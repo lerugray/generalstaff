@@ -282,3 +282,101 @@ describe("engineer module", () => {
     });
   });
 });
+
+describe("resolveEngineerCommand (gs-270, Phase 7)", () => {
+  it("defaults to claude provider when engineer_provider is unset", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "echo ${cycle_budget_minutes}",
+      cycle_budget_minutes: 30,
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("claude");
+    expect(command).toBe("echo 30");
+  });
+
+  it("preserves claude path byte-identically when engineer_provider: claude", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "bash engineer_command.sh ${cycle_budget_minutes}",
+      cycle_budget_minutes: 45,
+      engineer_provider: "claude",
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("claude");
+    expect(command).toBe("bash engineer_command.sh 45");
+  });
+
+  it("generates an aider bash command when engineer_provider: aider", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "ignored-when-aider",
+      cycle_budget_minutes: 30,
+      engineer_provider: "aider",
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("aider");
+    expect(command).toContain("aider");
+    expect(command).toContain("--model");
+    expect(command).toContain("worktree");
+    expect(command).toContain(project.verification_command);
+    expect(command).not.toContain("ignored-when-aider");
+  });
+
+  it("includes engineer_model override in the generated aider command", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "aider",
+      engineer_model: "openrouter/anthropic/claude-sonnet-4-6",
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("openrouter/anthropic/claude-sonnet-4-6");
+  });
+
+  it("uses the default aider model when engineer_model is unset", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const { DEFAULT_AIDER_MODEL } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ engineer_provider: "aider" });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain(DEFAULT_AIDER_MODEL);
+  });
+
+  it("shell-quotes hands_off values containing single quotes safely", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "aider",
+      hands_off: ["path/with'quote"],
+    });
+    const { command } = resolveEngineerCommand(project);
+    // The embedded single quote should appear inside the escape sequence,
+    // not as a raw unquoted character that would break out of the shell.
+    expect(command).toContain("path/with'\\''quote");
+  });
+});
+
+describe("runEngineer dry-run with alternative provider (gs-270)", () => {
+  it("logs provider=aider in dry-run output", async () => {
+    const project = makeProject({
+      engineer_provider: "aider",
+      engineer_command: "this-is-ignored-for-aider",
+    });
+    const result = await runEngineer(project, "cycle-aider-dry", undefined, true);
+    expect(result.exitCode).toBe(0);
+
+    const logContent = await readCycleFile("test-proj", "cycle-aider-dry", "engineer.log");
+    expect(logContent).not.toBeNull();
+    expect(logContent!).toContain("[DRY RUN]");
+    expect(logContent!).toContain("provider=aider");
+    expect(logContent!).toContain("aider");
+    expect(logContent!).not.toContain("this-is-ignored-for-aider");
+  });
+
+  it("logs provider=claude in dry-run for default path", async () => {
+    const project = makeProject({ engineer_command: "claude -p 'hi'" });
+    await runEngineer(project, "cycle-claude-dry", undefined, true);
+
+    const logContent = await readCycleFile("test-proj", "cycle-claude-dry", "engineer.log");
+    expect(logContent!).toContain("provider=claude");
+    expect(logContent!).toContain("claude -p");
+  });
+});

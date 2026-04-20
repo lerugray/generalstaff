@@ -1,8 +1,17 @@
 # Phase 7 sketch (2026-04-19)
 
-**Status:** Design sketch. NOT approved for implementation yet. Lives
-here so Ray (and a future Claude session) can return to it post-
-Thursday when there's fresh quota to validate quality tradeoffs.
+**Status (2026-04-20 early AM, updated mid-sketch):** Part 1 of the
+implementation task list below has landed as **gs-270** — optional
+`engineer_provider: aider` + `engineer_model` fields in
+`projects.yaml`, full aider invocation generator in
+`src/engineer_providers/aider.ts`, dispatch in `src/engineer.ts`,
+11 new tests across `tests/engineer.test.ts` and
+`tests/projects.test.ts`. The default path (engineer_provider
+unset or "claude") is byte-identical to prior behavior; no
+existing project is affected. The benchmark (Part 3 / gs-271) is
+still deferred to Thursday post-quota-reset so a 10-task replay can
+validate the 70%-verified-rate acceptance bar before flipping any
+managed project's default.
 
 **Motivation captured 2026-04-19 evening:** autonomous bot cycles
 currently invoke `claude -p --dangerously-skip-permissions` as the

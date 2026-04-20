@@ -21,7 +21,9 @@ import type {
   ProjectsYaml,
   WorkDetectionMode,
   ConcurrencyDetectionMode,
+  EngineerProvider,
 } from "./types";
+import { VALID_ENGINEER_PROVIDERS } from "./types";
 
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
   "catalogdna_bot_tasks",
@@ -182,6 +184,47 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     );
   }
 
+  // gs-270: optional engineer_provider + engineer_model (Phase 7 engineer
+  // swap). Unset preserves claude behavior. If set, must be one of the
+  // registered providers; engineer_model is a free-form string the
+  // provider module interprets.
+  let engineerProvider: EngineerProvider | undefined;
+  if (raw.engineer_provider !== undefined && raw.engineer_provider !== null) {
+    if (typeof raw.engineer_provider !== "string") {
+      throw new ProjectValidationError(
+        id,
+        "engineer_provider",
+        `must be a string, got ${typeof raw.engineer_provider}`,
+      );
+    }
+    if (!VALID_ENGINEER_PROVIDERS.includes(raw.engineer_provider as EngineerProvider)) {
+      throw new ProjectValidationError(
+        id,
+        "engineer_provider",
+        `must be one of: ${VALID_ENGINEER_PROVIDERS.join(", ")} — got "${raw.engineer_provider}"`,
+      );
+    }
+    engineerProvider = raw.engineer_provider as EngineerProvider;
+  }
+  let engineerModel: string | undefined;
+  if (raw.engineer_model !== undefined && raw.engineer_model !== null) {
+    if (typeof raw.engineer_model !== "string") {
+      throw new ProjectValidationError(
+        id,
+        "engineer_model",
+        `must be a string, got ${typeof raw.engineer_model}`,
+      );
+    }
+    if (raw.engineer_model === "") {
+      throw new ProjectValidationError(
+        id,
+        "engineer_model",
+        "must not be empty if specified — omit the field to use the provider default",
+      );
+    }
+    engineerModel = raw.engineer_model;
+  }
+
   return {
     id,
     path,
@@ -195,6 +238,8 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     auto_merge: autoMerge,
     hands_off: handsOff,
     notes: raw.notes as string | undefined,
+    engineer_provider: engineerProvider,
+    engineer_model: engineerModel,
   };
 }
 

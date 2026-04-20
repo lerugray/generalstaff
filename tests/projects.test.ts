@@ -822,3 +822,111 @@ describe("projects.yaml parse-error diagnostics (line + cause + fix)", () => {
   });
 });
 
+describe("engineer_provider parsing (gs-270, Phase 7)", () => {
+  it("defaults engineer_provider to undefined when omitted (preserves claude default)", async () => {
+    const path = writeYaml(
+      "no-provider.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].engineer_provider).toBeUndefined();
+    expect(yaml.projects[0].engineer_model).toBeUndefined();
+    cleanup();
+  });
+
+  it("parses engineer_provider: aider when explicitly set", async () => {
+    const path = writeYaml(
+      "aider.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    engineer_provider: aider
+    engineer_model: openrouter/qwen/qwen3-coder-plus
+    hands_off:
+      - secret/
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].engineer_provider).toBe("aider");
+    expect(yaml.projects[0].engineer_model).toBe("openrouter/qwen/qwen3-coder-plus");
+    cleanup();
+  });
+
+  it("rejects unknown engineer_provider values", async () => {
+    const path = writeYaml(
+      "bad-provider.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    engineer_provider: cursor
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/engineer_provider/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/cursor/);
+    cleanup();
+  });
+
+  it("rejects non-string engineer_provider", async () => {
+    const path = writeYaml(
+      "numeric-provider.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    engineer_provider: 42
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/engineer_provider/);
+    cleanup();
+  });
+
+  it("rejects empty engineer_model", async () => {
+    const path = writeYaml(
+      "empty-model.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    engineer_provider: aider
+    engineer_model: ""
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/engineer_model/);
+    cleanup();
+  });
+});
+

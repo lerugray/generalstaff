@@ -1338,3 +1338,131 @@ ship (a) faster with fewer premature-optimization concerns.
   dependencies become a thing, that's its own design pass.
 - Heterogeneous slot pools (e.g. "GPU-only slot for ML
   cycles"). Slots are interchangeable in v6.
+
+---
+
+## §v7 — Pluggable engineer providers (2026-04-20, gs-270)
+
+Phase 7 makes the engineer half of a cycle pluggable the same way
+the reviewer has been since Phase 2. Motivation in full is in
+`docs/internal/PHASE-7-SKETCH-2026-04-19.md`; this section records
+the landed architecture so a future session can read the delta
+without chasing through both files.
+
+### What changed
+
+A cycle's engineer invocation was previously hardcoded to run
+`project.engineer_command` as a bash string, expanding
+`${cycle_budget_minutes}` into it. That command typically wrapped
+`claude -p --dangerously-skip-permissions` — consuming the
+operator's Claude subscription quota regardless of task shape.
+
+v7 adds two optional fields to `ProjectConfig`:
+
+- `engineer_provider: "claude" | "aider"` (optional, default
+  "claude") — selects which provider module builds the cycle's
+  command.
+- `engineer_model: string` (optional) — provider-interpreted model
+  override. For aider, any OpenRouter model id.
+
+When `engineer_provider` is unset or "claude", behavior is
+byte-identical to pre-v7 — `engineer_command` is run verbatim. No
+migration needed for existing projects.
+
+When `engineer_provider` is set to a non-claude value, the new
+`resolveEngineerCommand(project)` function in `src/engineer.ts`
+dispatches into the provider module. The provider module is
+responsible for generating the full bash invocation that sets up
+the `.bot-worktree`, installs dependencies, and runs the chosen
+CLI with a task-picking prompt. The result is fed into the same
+`spawn("bash", ["-c", command])` codepath as the claude path, so
+timeout handling, log streaming, and progress events are
+provider-agnostic.
+
+### aider provider module
+
+`src/engineer_providers/aider.ts` exports:
+
+- `buildAiderCommand(project): string` — returns the full bash
+  script body for one aider cycle.
+- `buildAiderPrompt(project): string` — returns the aider
+  `--message` text; factored out so the benchmark harness (gs-271)
+  can test prompt shape independently.
+- `DEFAULT_AIDER_MODEL = "openrouter/qwen/qwen3-coder-plus"` — the
+  default when `engineer_model` is unset.
+
+The generated bash does: ensure-branch → prune stale worktree →
+create worktree on `bot/work` → cd in → stack-detected best-effort
+install (bun / npm / pnpm / pip / cargo) → `aider --model X
+--yes-always --auto-commits --no-analytics --no-stream --test-cmd
+"<verification_command>" --auto-test --message "<prompt>"` → exit.
+
+Stack detection is intentionally best-effort — aider can still run
+against a tree with missing dependencies, and the verification
+gate will catch any real break. Hardcoding a stack-per-project
+would bloat `projects.yaml` without enough payoff.
+
+Every string that crosses the bash boundary (model, branch,
+project id, verification command, prompt) is wrapped in
+`shellSingleQuote` so single quotes in operator-supplied values
+can't escape the shell context. The security invariant from the
+pre-v7 claude path (only numeric template substitution is safe
+without explicit escaping) now lives in the provider module's
+own escaping discipline.
+
+### Commit model
+
+Aider runs with `--auto-commits`, so each accepted edit block
+produces a commit inside the worktree. This diverges from the
+claude path (where the prompt asks for a single final commit)
+but matches aider's native agent loop more naturally. The
+dispatcher's diff capture (`getGitDiff(cycle_start_sha,
+cycle_end_sha)`) is SHA-range-based and already handles multiple
+commits correctly; rollback-on-failure
+(`cycle.ts:808-831`) also works because it resets the branch
+SHA regardless of how many commits sit between the endpoints.
+We took the simplest approach that passed the existing tests.
+
+### BYOK preserved
+
+Hard Rule 8 remains intact. `OPENROUTER_API_KEY` sourcing logic
+already exists in `scripts/run_session.bat` (for the reviewer);
+aider reads the same env var natively so no additional credential
+plumbing is required. The generated bash surfaces a loud warning
+if the key is unset at invocation time — aider will fail to
+authenticate, but the upstream warning saves log-reading.
+
+### What v7 explicitly does NOT do
+
+- **Does NOT refactor task-picking upstream.** Task selection
+  still happens inside the engineer subprocess, reading
+  `state/<project>/tasks.json` the same way `claude -p` does.
+  The aider prompt tells aider to read the file and pick. If
+  benchmark results show aider can't reliably replicate this
+  behavior, a future phase may hoist task picking into GS
+  itself — but v7 keeps the contract unchanged so the rollback
+  path is "unset `engineer_provider`" with no other migration.
+- **Does NOT auto-route tasks by complexity.** The operator
+  picks the engineer per project. Per-task routing (e.g. "hard
+  tasks to Claude, easy ones to Qwen") is a possible future
+  optimization once we have benchmark data.
+- **Does NOT benchmark or flip any managed project's default.**
+  Landing v7 only makes the option available. The 10-task
+  benchmark against gamr (gs-272) validates whether aider
+  clears the 70%-verified-rate acceptance bar before any
+  project's default changes.
+- **Does NOT touch the reviewer.** Reviewer provider plumbing
+  from Phase 2 is untouched. v7 is strictly engineer-side.
+
+### Open questions for post-benchmark (gs-272)
+
+- **Does Qwen3 Coder Plus handle TypeScript + React fluently
+  enough to clear the bar?** Benchmark answers empirically.
+- **Is `--auto-commits` the right call?** If aider produces
+  many small commits that clutter the history, we may want
+  `--no-auto-commits` + a final GS-generated commit. Defer
+  until we see real output.
+- **Does aider's agent loop drift the same way `claude -p`
+  does on ambiguous tasks?** The reviewer catches both at the
+  gate regardless of engineer, but drift patterns may inform
+  the prompt shape.

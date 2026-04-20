@@ -56,6 +56,35 @@
 #       ollama=1. Raise on a paid tier (e.g. `=8` on OpenRouter);
 #       lower to throttle. Only binds when `max_parallel_slots > 1`.
 #
+# -------------------------------------------------------------------
+# Engineer provider (Phase 7, gs-270). Optional per-project.
+# -------------------------------------------------------------------
+#
+#   engineer_provider: claude | aider   (optional, default: claude)
+#       Which agent runs as the cycle's engineer. Default "claude" is
+#       the current behavior — the dispatcher runs the project's
+#       `engineer_command` string verbatim (typically a wrapper around
+#       `claude -p`). Set to "aider" to route the engineer half of
+#       the cycle to aider + OpenRouter — GS then generates the full
+#       invocation (worktree setup + provider CLI + prompt) internally
+#       and the `engineer_command` field is ignored.
+#
+#       Why you'd opt in: aider + OpenRouter Qwen3 Coder Plus is ~40x
+#       cheaper per input token than Claude Sonnet and does not
+#       consume your Claude subscription quota. Best for bulk
+#       scaffolding work (type definitions, test boilerplate, UI
+#       components). Complex / algorithmic work should stay on claude.
+#
+#       Pre-req when set to aider:
+#         - aider installed locally (`pip install aider-chat`)
+#         - OPENROUTER_API_KEY in the process env (Hard Rule 8 / BYOK)
+#
+#   engineer_model: string   (optional, provider-dependent default)
+#       Model override. For aider, any OpenRouter model id works; the
+#       default is "openrouter/qwen/qwen3-coder-plus". Ignored for
+#       the claude path (the model is chosen by the project's
+#       engineer_command wrapper).
+#
 # Hard Rule 8 (BYOK): every credential above comes from your own
 # environment. Nothing is shipped, nothing is hosted on your behalf.
 
