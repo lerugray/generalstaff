@@ -12,6 +12,7 @@ import { layout } from "./server/templates/layout";
 import { renderProjectPage } from "./server/routes/project";
 import { renderCyclePage } from "./server/routes/cycle";
 import { renderTailPage, openTailStream } from "./server/routes/tail";
+import { renderInboxPage } from "./server/routes/inbox";
 
 export interface StartServerOptions {
   port?: number;
@@ -110,6 +111,16 @@ export async function startServer(
       if (req.method === "GET" && url.pathname === "/") {
         return new Response(renderIndex(), {
           status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      if (req.method === "GET" && url.pathname === "/inbox") {
+        const { status, html } = await renderInboxPage();
+        return new Response(html, {
+          status,
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "no-cache",

@@ -2033,7 +2033,7 @@
   {
     "id": "gs-286",
     "title": "gs-287: Phase 6 route handler — GET /inbox. Cross-project messages/signals page. Read from src/views/inbox.ts. Layout: list of entries grouped by project, each with a timestamp, signal type (e.g. verification_failed, hands_off_violation, creative_draft_ready), one-line summary, and a link to the originating cycle's /cycle/:id page. Follow the layout() pattern. Empty state: show 'Inbox empty — all projects running clean.' Expected touches: src/server/routes/inbox.ts (new), src/server.ts, tests/server.test.ts. Expected diff: ~100-180 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

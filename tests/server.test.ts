@@ -582,6 +582,110 @@ describe("startServer — gs-285 GET /tail/:sessionId", () => {
   });
 });
 
+describe("startServer — gs-286 GET /inbox", () => {
+  const FIXTURE_DIR = join(tmpdir(), `gs-server-inbox-${process.pid}`);
+  let originalRoot: string;
+
+  function writeFleetMessages(entries: Array<Record<string, unknown>>) {
+    const dir = join(FIXTURE_DIR, "state", "_fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "messages.jsonl"),
+      entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    originalRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+  });
+
+  afterEach(() => {
+    setRootDir(originalRoot);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("returns 200 HTML with recent messages grouped by date and links to cycles", async () => {
+    const now = new Date();
+    const today = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+    const yesterday = new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString();
+    writeFleetMessages([
+      {
+        timestamp: today,
+        from: "generalstaff-bot",
+        body: "verification failed on gs-99",
+        kind: "blocker",
+        refs: [{ cycle_id: "c-77", task_id: "gs-99" }],
+      },
+      {
+        timestamp: yesterday,
+        from: "dispatcher",
+        body: "picked gamr for next slot",
+        kind: "fyi",
+        refs: [],
+      },
+    ]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain("Inbox");
+      expect(body).toContain("verification failed on gs-99");
+      expect(body).toContain("picked gamr for next slot");
+      expect(body).toContain('href="/cycle/c-77"');
+      expect(body).toContain("generalstaff-bot");
+      expect(body).toContain("dispatcher");
+      expect(body).toContain("blocker");
+      // Inbox nav link should be marked active.
+      expect(body).toMatch(/<a href="\/inbox"\s+aria-current="page">Inbox<\/a>/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("shows empty-state copy when there are no fleet messages", async () => {
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("Inbox empty");
+      expect(body).toContain("all projects running clean");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("escapes HTML in message bodies to prevent injection", async () => {
+    const now = new Date();
+    writeFleetMessages([
+      {
+        timestamp: new Date(now.getTime() - 60 * 1000).toISOString(),
+        from: "ray",
+        body: "<script>alert('xss')</script>",
+        refs: [],
+      },
+    ]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/inbox`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).not.toContain("<script>alert('xss')</script>");
+      expect(body).toContain("&lt;script&gt;");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 describe("startServer — gs-269 layout + / route + static stylesheet", () => {
   it("serves /static/style.css with 200 + text/css content-type", async () => {
     const server = await startServer({ port: 0 });
