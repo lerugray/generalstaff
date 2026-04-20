@@ -250,6 +250,29 @@ export interface GreenfieldTask {
   voice_reference_override?: string[];
 }
 
+// --- gs-279: creative-work cycle context ---
+
+// Computed in cycle.ts after the nextTask peek and passed down through
+// runEngineer so both the aider path (prompt prepend + branch override
+// baked into the generated bash) and the claude path (env vars for the
+// project's engineer_command.sh) can honor it. Default behavior when
+// undefined / isCreative=false is byte-identical to pre-gs-279.
+export interface CycleCreativeContext {
+  isCreative: boolean;
+  // The branch this cycle operates on. Equals project.branch for
+  // correctness cycles and project.creative_work_branch for creative
+  // cycles. Aider uses this to set up its worktree; the claude path
+  // exposes it as GENERALSTAFF_BOT_BRANCH.
+  effectiveBranch: string;
+  // Resolved voice-reference paths (task.voice_reference_override ∪
+  // project.voice_reference_paths). Empty for non-creative cycles.
+  voiceReferencePaths: string[];
+  // Where creative drafts should land inside the managed project.
+  // Default "drafts/". Exposed as GENERALSTAFF_DRAFTS_DIR for the
+  // claude path; aider's creative prompt embeds it directly.
+  draftsDir: string;
+}
+
 // --- Concurrency detection ---
 
 export interface BotRunningResult {

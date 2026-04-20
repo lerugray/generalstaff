@@ -20,8 +20,11 @@ import type {
   DispatcherConfig,
   EngineerProvider,
   GreenfieldTask,
+  CycleCreativeContext,
 } from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
+
+export type { CycleCreativeContext };
 
 export interface EngineerResult {
   exitCode: number | null;
@@ -67,6 +70,7 @@ export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
 export function resolveEngineerCommand(
   project: ProjectConfig,
   nextTask?: GreenfieldTask,
+  context?: CycleCreativeContext,
 ): {
   provider: EngineerProvider;
   command: string;
@@ -113,7 +117,7 @@ export function resolveEngineerCommand(
       return {
         provider,
         source,
-        command: buildAiderCommand(effectiveProject),
+        command: buildAiderCommand(effectiveProject, context),
       };
   }
 }
@@ -124,11 +128,12 @@ export async function runEngineer(
   config?: DispatcherConfig,
   dryRun: boolean = false,
   nextTask?: GreenfieldTask,
+  context?: CycleCreativeContext,
 ): Promise<EngineerResult> {
   const cycDir = ensureCycleDir(project.id, cycleId, config);
   const logPath = join(cycDir, "engineer.log");
 
-  const { provider, command, source } = resolveEngineerCommand(project, nextTask);
+  const { provider, command, source } = resolveEngineerCommand(project, nextTask, context);
 
   await appendProgress(project.id, "engineer_invoked", {
     provider,
@@ -139,6 +144,13 @@ export async function runEngineer(
     peeked_task_id: nextTask?.id,
     cycle_budget_minutes: project.cycle_budget_minutes,
     dry_run: dryRun,
+    ...(context?.isCreative
+      ? {
+          creative: true,
+          effective_branch: context.effectiveBranch,
+          voice_reference_path_count: context.voiceReferencePaths.length,
+        }
+      : {}),
   }, cycleId);
 
   if (dryRun) {
@@ -170,10 +182,30 @@ export async function runEngineer(
     logStream.write(`Started: ${new Date().toISOString()}\n`);
     logStream.write(`${"=".repeat(40)}\n\n`);
 
+    // gs-279: claude-path creative cycles need the creative context passed
+    // through the environment because the project's own engineer_command.sh
+    // owns the actual engineer invocation (GS can't prepend to the prompt
+    // the way it can for aider). Projects that opt in to creative work on
+    // the claude path should read these vars from their engineer script —
+    // see docs/internal/RULE-RELAXATION-2026-04-20.md for the contract.
+    // Aider bakes the creative context directly into its generated bash
+    // via buildAiderCommand, so for the aider path these vars are purely
+    // informational. Both paths always get OPENROUTER_API_KEY etc. via
+    // ...process.env as before.
+    const creativeEnv: Record<string, string> = context?.isCreative
+      ? {
+          GENERALSTAFF_CREATIVE_CYCLE: "1",
+          GENERALSTAFF_BOT_BRANCH: context.effectiveBranch,
+          GENERALSTAFF_DRAFTS_DIR: context.draftsDir,
+          GENERALSTAFF_VOICE_REFERENCE_PATHS:
+            context.voiceReferencePaths.join(":"),
+        }
+      : {};
+
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...creativeEnv },
     });
     setActiveEngineerChild(child);
 

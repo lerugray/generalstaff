@@ -11,7 +11,7 @@
 // Hard Rule 8 (BYOK): OPENROUTER_API_KEY must be present in the process
 // env; aider reads it natively. No key is embedded here.
 
-import type { ProjectConfig } from "../types";
+import type { ProjectConfig, CycleCreativeContext } from "../types";
 
 // OpenRouter's Qwen 3.6 Plus — newer general-purpose flagship (released
 // 2026-04-02, ~$0.325/$1.95 per M tokens). The gs-277 benchmark
@@ -42,12 +42,90 @@ function shellSingleQuote(s: string): string {
 // picking instructions, what-can/can't-do, verification gate, budget.
 // Generic across projects — no per-project tuning yet. If benchmark shows
 // quality gaps we can add per-project prompt overrides in a follow-up.
-export function buildAiderPrompt(project: ProjectConfig): string {
+//
+// gs-279: when `context.isCreative` is true, the prompt is reshaped for
+// creative work: voice-reference preamble first, drafts-only output
+// instructions, no reviewer gate warning, no "pick any algorithmic task"
+// framing (RULE-RELAXATION-2026-04-20 guardrail 5 says taste calls stay
+// with the human even inside creative work).
+export function buildAiderPrompt(
+  project: ProjectConfig,
+  context?: CycleCreativeContext,
+): string {
+  const effectiveBranch = context?.effectiveBranch ?? project.branch;
   const handsOffList = project.hands_off.map((h) => `  - ${h}`).join("\n");
+
+  if (context?.isCreative) {
+    const voiceRefBlock =
+      context.voiceReferencePaths.length > 0
+        ? context.voiceReferencePaths
+            .map((p) => `  - ${p}`)
+            .join("\n")
+        : "  (no voice references configured — draft in a neutral technical register)";
+    return `You are an autonomous drafting bot working on the ${project.id} project.
+
+## Your environment
+You are in a git worktree on the ${effectiveBranch} branch (separate from
+the main bot/work branch to keep creative drafts from contaminating
+correctness-work SHAs). The main working tree is on master and may be
+in use by a human. Work only in this directory.
+
+## This is a CREATIVE_WORK cycle
+You are drafting prose, not writing code that needs to pass tests. Human
+review is the gate for this cycle — you draft, the human edits, the
+human publishes. Do NOT commit anything to the main README, docs, or
+user-facing surfaces directly. Drafts land in the ${context.draftsDir}
+directory at the project root.
+
+## Before drafting — calibrate voice
+Read these files first to calibrate your voice to the project owner's
+own writing. Order matters; read top-to-bottom.
+
+${voiceRefBlock}
+
+Match the register, cadence, sentence length, and idiom of those
+references. Do not write in LLM default voice (no "unleash", no
+"revolutionize", no em-dash-heavy throat-clearing, no marketing
+engagement-bait verbs).
+
+## Your task
+Read state/${project.id}/tasks.json and pick the highest-priority
+unfinished task with \`creative: true\` (status: 'pending', lowest
+priority number first; lowest id among ties). Work on exactly that
+task — draft only what the task's brief names.
+
+## What you can do
+- Create / modify files inside ${context.draftsDir}.
+- Read voice-reference files listed above (outside ${context.draftsDir}).
+- Run the verification command (if any): ${project.verification_command}
+- Commit with a message describing the draft you produced.
+- Update the task's status to 'done' in state/${project.id}/tasks.json
+  after committing.
+
+## What you must NOT do
+- Modify any file matching a pattern in this hands_off list:
+${handsOffList}
+- Publish drafts to the main README, docs, blog, or any user-facing
+  surface — drafts always land in ${context.draftsDir} and wait for
+  human review.
+- Invent the brief. If the task says "draft a 300-word README section
+  explaining X", you write that exact thing; you don't pivot to "here's
+  a tweet instead" or "let me also write a landing page". One task,
+  one deliverable.
+- Post to any external surface (Twitter, HN, Reddit, the project's
+  own site) — those remain manual actions the human takes after
+  reviewing drafts.
+
+## Budget
+You have ${project.cycle_budget_minutes} minutes total. After
+committing the draft, stop — the dispatcher starts a fresh cycle
+for the next task.`;
+  }
+
   return `You are an autonomous engineering bot working on the ${project.id} project.
 
 ## Your environment
-You are in a git worktree on the ${project.branch} branch. The main working
+You are in a git worktree on the ${effectiveBranch} branch. The main working
 tree is on master and may be in use by a human. Work only in this directory.
 
 ## Your task
@@ -83,15 +161,24 @@ one task, stop — the dispatcher starts a fresh cycle for the next task.`;
 // Build the bash command that runs one aider engineer cycle. Does worktree
 // setup inline (same shape as engineer_command.sh) so projects using
 // engineer_provider: aider don't need to author a per-project wrapper.
-export function buildAiderCommand(project: ProjectConfig): string {
+//
+// gs-279: when `context.isCreative` is true, the worktree is set up on
+// context.effectiveBranch (typically project.creative_work_branch) instead
+// of project.branch, and the generated prompt is the creative variant
+// that prepends voice-reference calibration instructions.
+export function buildAiderCommand(
+  project: ProjectConfig,
+  context?: CycleCreativeContext,
+): string {
   const model = project.engineer_model ?? DEFAULT_AIDER_MODEL;
-  const prompt = buildAiderPrompt(project);
+  const prompt = buildAiderPrompt(project, context);
+  const effectiveBranch = context?.effectiveBranch ?? project.branch;
 
   // Shell-escape every value that crosses the bash boundary. set -euo
   // pipefail at the top surfaces errors early; the dispatcher's timeout
   // (cycle_budget_minutes + 5) is the external budget bound.
   const qModel = shellSingleQuote(model);
-  const qBranch = shellSingleQuote(project.branch);
+  const qBranch = shellSingleQuote(effectiveBranch);
   const qPrompt = shellSingleQuote(prompt);
   const qTestCmd = shellSingleQuote(project.verification_command);
   const qProjectId = shellSingleQuote(project.id);

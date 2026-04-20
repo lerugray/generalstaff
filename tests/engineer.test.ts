@@ -479,3 +479,213 @@ describe("runEngineer with task override (gs-275)", () => {
     expect(invoked.data.peeked_task_id).toBe("t-001");
   });
 });
+
+describe("buildAiderPrompt — creative cycle (gs-279)", () => {
+  it("falls back to non-creative prompt when context is undefined", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ id: "proj-ncp", verification_command: "bun test" });
+    const prompt = buildAiderPrompt(project);
+    expect(prompt).toContain("autonomous engineering bot");
+    expect(prompt).toContain("Verification gate");
+    expect(prompt).not.toContain("CREATIVE_WORK");
+    expect(prompt).not.toContain("calibrate voice");
+  });
+
+  it("falls back to non-creative prompt when context.isCreative is false", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject();
+    const prompt = buildAiderPrompt(project, {
+      isCreative: false,
+      effectiveBranch: "bot/work",
+      voiceReferencePaths: [],
+      draftsDir: "drafts/",
+    });
+    expect(prompt).toContain("autonomous engineering bot");
+    expect(prompt).not.toContain("CREATIVE_WORK");
+  });
+
+  it("emits the creative variant when context.isCreative is true", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ id: "bookfinder-general" });
+    const prompt = buildAiderPrompt(project, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["docs/voice/manual-a.md", "docs/voice/manual-b.md"],
+      draftsDir: "drafts/",
+    });
+    expect(prompt).toContain("autonomous drafting bot");
+    expect(prompt).toContain("CREATIVE_WORK cycle");
+    expect(prompt).toContain("Before drafting — calibrate voice");
+    expect(prompt).toContain("docs/voice/manual-a.md");
+    expect(prompt).toContain("docs/voice/manual-b.md");
+    expect(prompt).toContain("drafts/");
+    // Creative prompt must NOT include the non-creative "Verification gate"
+    // section — it's skipped by cycle.ts for creative cycles.
+    expect(prompt).not.toContain("Verification gate\nTests must pass");
+  });
+
+  it("handles empty voice_reference_paths gracefully with a neutral-register fallback", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject();
+    const prompt = buildAiderPrompt(project, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: [],
+      draftsDir: "drafts/",
+    });
+    expect(prompt).toContain("no voice references configured");
+    expect(prompt).toContain("neutral technical register");
+  });
+
+  it("names the effectiveBranch in the creative prompt", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject();
+    const prompt = buildAiderPrompt(project, {
+      isCreative: true,
+      effectiveBranch: "bot/custom-drafts",
+      voiceReferencePaths: [],
+      draftsDir: "drafts/",
+    });
+    expect(prompt).toContain("bot/custom-drafts");
+  });
+
+  it("names the draftsDir in the creative prompt", async () => {
+    const { buildAiderPrompt } = await import("../src/engineer_providers/aider");
+    const project = makeProject();
+    const prompt = buildAiderPrompt(project, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: [],
+      draftsDir: "content/draft-output/",
+    });
+    expect(prompt).toContain("content/draft-output/");
+  });
+});
+
+describe("buildAiderCommand — creative cycle branch override (gs-279)", () => {
+  it("uses project.branch in the generated bash when context is undefined", async () => {
+    const { buildAiderCommand } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });
+    const command = buildAiderCommand(project);
+    expect(command).toContain("BRANCH='bot/work'");
+  });
+
+  it("uses context.effectiveBranch in the generated bash when isCreative", async () => {
+    const { buildAiderCommand } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });
+    const command = buildAiderCommand(project, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["docs/voice/manual.md"],
+      draftsDir: "drafts/",
+    });
+    // Worktree setup must use the creative branch, not bot/work
+    expect(command).toContain("BRANCH='bot/creative-drafts'");
+    expect(command).not.toContain("BRANCH='bot/work'");
+  });
+
+  it("embeds the creative prompt in the aider --message for creative cycles", async () => {
+    const { buildAiderCommand } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ engineer_provider: "aider" });
+    const command = buildAiderCommand(project, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["docs/voice/manual.md"],
+      draftsDir: "drafts/",
+    });
+    // The aider --message arg should contain the creative-specific prompt text
+    expect(command).toContain("CREATIVE_WORK cycle");
+    expect(command).toContain("docs/voice/manual.md");
+  });
+});
+
+describe("resolveEngineerCommand — creative cycle threading (gs-279)", () => {
+  it("threads context through to the aider command", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_provider: "aider", branch: "bot/work" });
+    const { command } = resolveEngineerCommand(project, undefined, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["docs/voice.md"],
+      draftsDir: "drafts/",
+    });
+    expect(command).toContain("BRANCH='bot/creative-drafts'");
+    expect(command).toContain("CREATIVE_WORK cycle");
+  });
+
+  it("claude path ignores creative context in the command string (env-var contract instead)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    // Claude path returns project.engineer_command verbatim — creative state
+    // for that path flows through env vars set by runEngineer, not the
+    // command string. This test locks the contract so future changes don't
+    // accidentally start interpolating creative state into the claude
+    // command (which would break projects whose engineer_command.sh isn't
+    // ready for it).
+    const project = makeProject({
+      engineer_command: "bash engineer_command.sh ${cycle_budget_minutes}",
+      cycle_budget_minutes: 30,
+    });
+    const { provider, command } = resolveEngineerCommand(project, undefined, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["x.md"],
+      draftsDir: "drafts/",
+    });
+    expect(provider).toBe("claude");
+    expect(command).toBe("bash engineer_command.sh 30");
+    expect(command).not.toContain("creative");
+    expect(command).not.toContain("x.md");
+  });
+});
+
+describe("runEngineer — creative audit trail (gs-279)", () => {
+  it("records creative metadata in engineer_invoked event for creative cycles", async () => {
+    const project = makeProject({ engineer_command: "echo default" });
+    await runEngineer(project, "cycle-creative-audit", undefined, true, undefined, {
+      isCreative: true,
+      effectiveBranch: "bot/creative-drafts",
+      voiceReferencePaths: ["docs/voice/a.md", "docs/voice/b.md"],
+      draftsDir: "drafts/",
+    });
+    const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+    const lines = readFileSync(progressPath, "utf8").trim().split("\n");
+    const invoked = lines
+      .map((l) => JSON.parse(l))
+      .find((e: { event: string }) => e.event === "engineer_invoked");
+    expect(invoked.data.creative).toBe(true);
+    expect(invoked.data.effective_branch).toBe("bot/creative-drafts");
+    expect(invoked.data.voice_reference_path_count).toBe(2);
+  });
+
+  it("omits creative metadata in engineer_invoked event for non-creative cycles", async () => {
+    const project = makeProject({ engineer_command: "echo default" });
+    await runEngineer(project, "cycle-noncreative-audit", undefined, true);
+    const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+    const lines = readFileSync(progressPath, "utf8").trim().split("\n");
+    const invoked = lines
+      .map((l) => JSON.parse(l))
+      .find((e: { event: string }) => e.event === "engineer_invoked");
+    expect(invoked.data.creative).toBeUndefined();
+    expect(invoked.data.effective_branch).toBeUndefined();
+    expect(invoked.data.voice_reference_path_count).toBeUndefined();
+  });
+
+  it("omits creative metadata when context.isCreative is false", async () => {
+    // Regression guard: passing a context object with isCreative=false
+    // must not leak creative fields into the audit log — only genuinely
+    // creative cycles should be distinguishable in the grep.
+    const project = makeProject({ engineer_command: "echo default" });
+    await runEngineer(project, "cycle-explicit-false", undefined, true, undefined, {
+      isCreative: false,
+      effectiveBranch: "bot/work",
+      voiceReferencePaths: [],
+      draftsDir: "drafts/",
+    });
+    const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+    const lines = readFileSync(progressPath, "utf8").trim().split("\n");
+    const invoked = lines
+      .map((l) => JSON.parse(l))
+      .find((e: { event: string }) => e.event === "engineer_invoked");
+    expect(invoked.data.creative).toBeUndefined();
+  });
+});

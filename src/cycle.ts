@@ -30,6 +30,7 @@ import type {
   CycleOutcome,
   SingleCycleOptions,
   DiffStats,
+  GreenfieldTask,
 } from "./types";
 
 function generateCycleId(): string {
@@ -461,6 +462,17 @@ export async function executeCycle(
   let terminus: "skip" | "full" = "skip";
   let handsOffViolations: Array<{ file: string; pattern: string }> | undefined;
 
+  // gs-279: creative-work cycle state. Set after the nextTask peek below.
+  // `branch` is the *effective* branch the cycle operates on — for creative
+  // cycles it's overridden to project.creative_work_branch (see guardrail 2
+  // of docs/internal/RULE-RELAXATION-2026-04-20.md). `voiceReferencePaths`
+  // is the resolved per-cycle list (task override ∪ project default) passed
+  // down to the engineer so it can read those files before drafting.
+  let isCreative = false;
+  let branch = project.branch;
+  let voiceReferencePaths: string[] = [];
+  let nextTask: GreenfieldTask | undefined;
+
   assemble: {
     // 1. Pre-flight skip paths
     if (await isStopFilePresent()) {
@@ -499,6 +511,48 @@ export async function executeCycle(
       }
     }
 
+    // 1a. Peek at the next bot-pickable task BEFORE branch handling. For
+    //     creative-tagged tasks on opted-in projects, we override the
+    //     effective branch to project.creative_work_branch (guardrail 2
+    //     of docs/internal/RULE-RELAXATION-2026-04-20.md — keeps drafts
+    //     off bot/work so correctness and creative cycles don't
+    //     contaminate each other's SHAs). The same peek also resolves
+    //     task-level engineer_provider overrides downstream (gs-275).
+    //     Non-greenfield projects (catalogdna_bot_tasks etc.) throw on
+    //     loadTasks and silently fall through to the legacy non-creative
+    //     path with branch=project.branch.
+    try {
+      const tasks = await loadTasks(project.id);
+      nextTask = nextBotPickableTask(tasks, project.hands_off, {
+        creativeWorkAllowed: project.creative_work_allowed,
+      });
+    } catch {
+      nextTask = undefined;
+    }
+
+    // 1b. Creative-work detection. Requires BOTH task-level `creative: true`
+    //     AND project-level `creative_work_allowed: true` — if only one is
+    //     set, the task picker already skipped the task (see tasks.ts
+    //     `creative_work_not_allowed_for_project`) so `nextTask` is a
+    //     different (non-creative) task and this branch is false.
+    if (nextTask?.creative === true && project.creative_work_allowed === true) {
+      isCreative = true;
+      branch = project.creative_work_branch ?? "bot/creative-drafts";
+      voiceReferencePaths =
+        nextTask.voice_reference_override ??
+        project.voice_reference_paths ??
+        [];
+      const draftsDirDisplay =
+        project.creative_work_drafts_dir ?? "drafts/";
+      console.log(
+        `\n[WARN] Starting CREATIVE_WORK cycle for ${project.id}:${nextTask.id}.\n` +
+        `       Creative work bypasses Hard Rule #1 via project opt-in.\n` +
+        `       Bot will draft; human review is MANDATORY before publication.\n` +
+        `       Branch: ${branch} — drafts in ${draftsDirDisplay}.\n` +
+        `       See docs/internal/RULE-RELAXATION-2026-04-20.md.`,
+      );
+    }
+
     // 2. Decide what to do with the bot's branch (gs-177 / DESIGN.md §v5).
     //    Three handling modes:
     //      - "reset"            : branch clean of unmerged or doesn't exist
@@ -506,7 +560,6 @@ export async function executeCycle(
     //      - "accumulate"       : auto_merge=false, leave bot/work alone
     //                             (gs-177's new path — eliminates the
     //                              one-cycle-per-session ceiling)
-    const branch = project.branch;
     const branchSha = await getGitSha(project.path, branch);
     const initialBranchExists = branchSha !== "unknown";
     const unmerged = initialBranchExists
@@ -574,34 +627,29 @@ export async function executeCycle(
     await appendProgress(project.id, "cycle_start", {
       start_sha: cycleStartSha,
       branch,
+      ...(isCreative
+        ? { creative: true, task_id: nextTask?.id }
+        : {}),
     }, cycleId);
     console.log(`Start SHA (${branch}): ${cycleStartSha.slice(0, 8)}`);
 
     // 4. Engineer step
     //
-    // gs-275: peek at the next bot-pickable task *before* spawning the
-    // engineer, so we can resolve task-level engineer_provider /
-    // engineer_model overrides. The peek mirrors the engineer's own
-    // pick rules (highest priority, lowest id among ties, bot-pickable
-    // filter), so the two converge on the same task under normal
-    // operation. If peek fails (no tasks.json, empty queue, etc.)
-    // nextTask is undefined and the existing project-level resolution
-    // applies — legacy behavior unchanged.
-    let nextTask;
-    try {
-      const tasks = await loadTasks(project.id);
-      nextTask = nextBotPickableTask(tasks, project.hands_off, {
-        creativeWorkAllowed: project.creative_work_allowed,
-      });
-    } catch {
-      // Non-greenfield projects (catalogdna_bot_tasks, git_issues,
-      // git_unmerged) won't have a tasks.json at state/<id>/; that's
-      // fine, the peek silently returns undefined and resolution falls
-      // back to project-level defaults.
-      nextTask = undefined;
-    }
+    // gs-275: the task peek happens earlier (step 1a) so creative
+    // cycles can route to the creative branch; that same peek also
+    // resolves task-level engineer_provider / engineer_model overrides
+    // (precedence: task > project > default), so by here `nextTask` is
+    // already the bot-pickable task the engineer will work on. Non-
+    // greenfield projects (catalogdna_bot_tasks, git_issues,
+    // git_unmerged) passed through the peek as `undefined` and engineer
+    // resolution falls back to project-level defaults.
     console.log(`Running engineer: ${project.engineer_command}`);
-    const engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask);
+    const engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask, {
+      isCreative,
+      effectiveBranch: branch,
+      voiceReferencePaths,
+      draftsDir: project.creative_work_drafts_dir ?? "drafts/",
+    });
     console.log(
       `Engineer finished: exit=${engineerResult.exitCode}, ` +
         `${engineerResult.durationSeconds.toFixed(0)}s`,
@@ -716,97 +764,124 @@ export async function executeCycle(
     );
 
     // 8. Reviewer agent
-    const markedDone = await detectMarkedDoneTasks(
-      project,
-      cycleStartSha,
-      cycleEndSha,
-    );
-    const sessionNote = await findSessionNote(
-      project,
-      cycleStartSha,
-      cycleEndSha,
-    );
-
-    let verificationOutput = "";
-    try {
-      verificationOutput = await readFile(verResult.logPath, "utf8");
-    } catch {
-      // ok
-    }
-
-    // Reviewer runs in worktree if available (so it can read the bot's files)
-    const reviewerCwd = existsSync(wt) ? wt : undefined;
-    console.log("Running reviewer agent...");
-    const reviewerResult = await runReviewer(
-      project,
-      cycleId,
-      {
-        projectId: project.id,
-        markedDoneTasks: markedDone,
-        sessionNoteOrNone: sessionNote,
-        fullDiff,
-        diffStat,
-        verificationCommand: project.verification_command,
-        verificationExitCode: verResult.exitCode,
-        verificationOutputTruncated: verificationOutput,
-        handsOffList: project.hands_off,
-      },
-      config,
-      dryRun,
-      reviewerCwd,
-      reviewerProviderOverride ? { provider: reviewerProviderOverride } : undefined,
-    );
-    console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
-    if (reviewerResult.parseError) {
-      console.log(`Reviewer parse error: ${reviewerResult.parseError}`);
-    }
-
-    // 8a. Sanity-check reviewer hands_off_violations against actual
-    //     changed files. Some reviewer models (observed on Ollama
-    //     qwen3:8b, 2026-04-17) hallucinate violations naming files
-    //     not present in the diff, which then fails cycles that should
-    //     pass. See gs-133.
-    const sanity = applyReviewerSanityCheck(reviewerResult, changedFiles);
-    if (sanity.dropped.length > 0) {
-      await appendProgress(project.id, "reviewer_hallucination", {
-        dropped_violations: sanity.dropped,
-        changed_files: changedFiles,
-        verdict_flipped: sanity.flipped,
-      }, cycleId);
-      if (sanity.flipped) {
-        console.log(
-          `Reviewer verdict flipped verification_failed → verified ` +
-          `(all hands_off_violations hallucinated: ${sanity.dropped.join(", ")})`,
-        );
+    //
+    // gs-279: creative cycles SKIP the reviewer (RULE-RELAXATION-2026-04-20
+    // guardrail 4). The reviewer's scope-drift + hands_off checks don't
+    // translate cleanly to prose, and human review is the gate for
+    // creative work. Verification still runs above so objective failures
+    // (markdown lint, spell check) block the cycle normally. The hands_off
+    // check above the verification step also still runs — creative opt-in
+    // relaxes Rule #1 only, not Rule #5.
+    if (isCreative) {
+      console.log("Creative cycle — skipping reviewer (human review is the gate).");
+      result.verification_outcome = verResult.outcome;
+      result.diff_stats = diffStats;
+      if (verResult.outcome === "failed") {
+        result.final_outcome = "verification_failed";
+        result.reviewer_verdict = "verification_failed";
+        result.reason = `Verification gate failed (exit ${verResult.exitCode})`;
+      } else if (verResult.outcome === "weak") {
+        result.final_outcome = "verified_weak";
+        result.reviewer_verdict = "verified_weak";
+        result.reason = "Creative cycle — verification weak (human review pending)";
       } else {
-        console.log(
-          `Dropped ${sanity.dropped.length} hallucinated hands_off_violation(s): ` +
-          `${sanity.dropped.join(", ")}`,
-        );
+        result.final_outcome = "verified";
+        result.reviewer_verdict = "verified";
+        result.reason = "Creative cycle — draft produced (human review pending)";
       }
-    }
-
-    // 9. Determine final outcome
-    if (verResult.outcome === "failed") {
-      result.final_outcome = "verification_failed";
-      result.reason = `Verification gate failed (exit ${verResult.exitCode})`;
-    } else if (reviewerResult.verdict === "verification_failed") {
-      result.final_outcome = "verification_failed";
-      result.reason = reviewerResult.response?.reason ?? "Reviewer rejected";
-    } else if (
-      verResult.outcome === "weak" ||
-      reviewerResult.verdict === "verified_weak"
-    ) {
-      result.final_outcome = "verified_weak";
-      result.reason =
-        reviewerResult.response?.reason ?? "Weak verification or low confidence";
     } else {
-      result.final_outcome = "verified";
-      result.reason = reviewerResult.response?.reason ?? "Verification passed, scope matched";
+      const markedDone = await detectMarkedDoneTasks(
+        project,
+        cycleStartSha,
+        cycleEndSha,
+      );
+      const sessionNote = await findSessionNote(
+        project,
+        cycleStartSha,
+        cycleEndSha,
+      );
+
+      let verificationOutput = "";
+      try {
+        verificationOutput = await readFile(verResult.logPath, "utf8");
+      } catch {
+        // ok
+      }
+
+      // Reviewer runs in worktree if available (so it can read the bot's files)
+      const reviewerCwd = existsSync(wt) ? wt : undefined;
+      console.log("Running reviewer agent...");
+      const reviewerResult = await runReviewer(
+        project,
+        cycleId,
+        {
+          projectId: project.id,
+          markedDoneTasks: markedDone,
+          sessionNoteOrNone: sessionNote,
+          fullDiff,
+          diffStat,
+          verificationCommand: project.verification_command,
+          verificationExitCode: verResult.exitCode,
+          verificationOutputTruncated: verificationOutput,
+          handsOffList: project.hands_off,
+        },
+        config,
+        dryRun,
+        reviewerCwd,
+        reviewerProviderOverride ? { provider: reviewerProviderOverride } : undefined,
+      );
+      console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
+      if (reviewerResult.parseError) {
+        console.log(`Reviewer parse error: ${reviewerResult.parseError}`);
+      }
+
+      // 8a. Sanity-check reviewer hands_off_violations against actual
+      //     changed files. Some reviewer models (observed on Ollama
+      //     qwen3:8b, 2026-04-17) hallucinate violations naming files
+      //     not present in the diff, which then fails cycles that should
+      //     pass. See gs-133.
+      const sanity = applyReviewerSanityCheck(reviewerResult, changedFiles);
+      if (sanity.dropped.length > 0) {
+        await appendProgress(project.id, "reviewer_hallucination", {
+          dropped_violations: sanity.dropped,
+          changed_files: changedFiles,
+          verdict_flipped: sanity.flipped,
+        }, cycleId);
+        if (sanity.flipped) {
+          console.log(
+            `Reviewer verdict flipped verification_failed → verified ` +
+            `(all hands_off_violations hallucinated: ${sanity.dropped.join(", ")})`,
+          );
+        } else {
+          console.log(
+            `Dropped ${sanity.dropped.length} hallucinated hands_off_violation(s): ` +
+            `${sanity.dropped.join(", ")}`,
+          );
+        }
+      }
+
+      // 9. Determine final outcome
+      if (verResult.outcome === "failed") {
+        result.final_outcome = "verification_failed";
+        result.reason = `Verification gate failed (exit ${verResult.exitCode})`;
+      } else if (reviewerResult.verdict === "verification_failed") {
+        result.final_outcome = "verification_failed";
+        result.reason = reviewerResult.response?.reason ?? "Reviewer rejected";
+      } else if (
+        verResult.outcome === "weak" ||
+        reviewerResult.verdict === "verified_weak"
+      ) {
+        result.final_outcome = "verified_weak";
+        result.reason =
+          reviewerResult.response?.reason ?? "Weak verification or low confidence";
+      } else {
+        result.final_outcome = "verified";
+        result.reason = reviewerResult.response?.reason ?? "Verification passed, scope matched";
+      }
+      result.verification_outcome = verResult.outcome;
+      result.reviewer_verdict = reviewerResult.verdict;
+      result.diff_stats = diffStats;
     }
-    result.verification_outcome = verResult.outcome;
-    result.reviewer_verdict = reviewerResult.verdict;
-    result.diff_stats = diffStats;
   }
 
   // --- Single terminal assembly block ---
@@ -831,22 +906,24 @@ export async function executeCycle(
     if (result.final_outcome === "verification_failed" && canRollback) {
       const beforeSha = result.cycle_end_sha;
       try {
-        // Use update-ref so the reset works even when bot/work is the
+        // Use update-ref so the reset works even when the branch is the
         // checked-out ref in a worktree (the typical .bot-worktree
-        // setup). `git branch -f` refuses in that case.
-        await $`git -C ${project.path} update-ref refs/heads/${project.branch} ${result.cycle_start_sha}`.quiet();
+        // setup). `git branch -f` refuses in that case. Rolls back the
+        // effective branch — bot/work for correctness cycles, the
+        // creative_work_branch for creative cycles (gs-279).
+        await $`git -C ${project.path} update-ref refs/heads/${branch} ${result.cycle_start_sha}`.quiet();
         console.log(
-          `Rolled back ${project.branch}: ${beforeSha.slice(0, 8)} → ${result.cycle_start_sha.slice(0, 8)}`,
+          `Rolled back ${branch}: ${beforeSha.slice(0, 8)} → ${result.cycle_start_sha.slice(0, 8)}`,
         );
         result.cycle_end_sha = result.cycle_start_sha;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.log(
-          `Warning: rollback of ${project.branch} failed: ${msg}`,
+          `Warning: rollback of ${branch} failed: ${msg}`,
         );
       }
       await appendProgress(project.id, "cycle_rollback", {
-        branch: project.branch,
+        branch,
         before_sha: beforeSha,
         after_sha: result.cycle_end_sha,
         reason: result.reason,
@@ -854,7 +931,9 @@ export async function executeCycle(
     }
 
     // Field order mirrors the pre-refactor event layout so on-disk JSON
-    // line shape is unchanged for downstream consumers.
+    // line shape is unchanged for downstream consumers. gs-279 adds the
+    // `creative` flag (and task_id) for creative cycles so auditors can
+    // grep `cycle_end` events by creative/non-creative cleanly.
     const cycleEndData: Record<string, unknown> = {
       outcome: result.final_outcome,
       reason: result.reason,
@@ -870,6 +949,7 @@ export async function executeCycle(
           new Date(result.started_at).getTime()) /
           1000,
       ),
+      ...(isCreative ? { creative: true, task_id: nextTask?.id } : {}),
     };
     await appendProgress(project.id, "cycle_end", cycleEndData, cycleId);
 

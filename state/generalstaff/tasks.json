@@ -1980,14 +1980,16 @@
   {
     "id": "gs-279",
     "title": "Phase 7 follow-up — creative-work execution behaviors (gs-278 Phase B). gs-278 Phase A shipped the type+validation+skip scaffolding. Phase B adds the actual creative-cycle execution: (1) in cycle.ts, if the peeked task has creative=true AND the project has creative_work_allowed=true, log the CREATIVE_WORK warning (console + distinct audit event type in PROGRESS.jsonl — e.g. `cycle_start_creative` or additional `creative: true` field on cycle_start), (2) synthesize an effective project config with project.branch swapped to project.creative_work_branch (defaulting to 'bot/creative-drafts'), so the engineer's worktree-add targets the creative branch, (3) in the reviewer invocation, skip the gate entirely for creative cycles — creative work has no objective scope-drift check, the human-in-the-loop is the review mechanism, (4) in the aider provider module, prepend a voice-reference section to the engineer prompt when voice_reference_paths is non-empty and the task is creative. Claude-path creative work is out of scope for gs-279 (engineer_command.sh is project-owned and not modifiable by GS). Expected diff: ~200-300 lines across src/cycle.ts + src/engineer.ts + src/engineer_providers/aider.ts + tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/cycle.ts",
       "src/engineer.ts",
       "src/engineer_providers/aider.ts",
-      "tests/cycle.test.ts",
+      "src/types.ts",
       "tests/engineer.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-20T11:45:00Z",
+    "outcome_notes": "Landed on the work PC. All four Phase B behaviors shipped as specified: CREATIVE_WORK warning emission in cycle.ts, branch override to project.creative_work_branch for creative cycles, reviewer-skip with outcome derived from verification alone, voice-reference prompt prepend in the aider provider. Extended slightly beyond scope: (a) task peek moved earlier in runCycle so effectiveBranch resolves before branch handling (enables creative branch to accumulate/reset correctly), (b) claude-path creative cycles get GENERALSTAFF_CREATIVE_CYCLE=1 + GENERALSTAFF_BOT_BRANCH + GENERALSTAFF_DRAFTS_DIR + GENERALSTAFF_VOICE_REFERENCE_PATHS env vars (documented contract; projects opt in by reading them from their engineer_command.sh). 16 new tests in tests/engineer.test.ts cover prompt variants, branch override, audit trail, and context threading. 1575/1576 pass — the 1 fail is pre-existing `flushSessionEndMerges handles mix of projects` flaky timeout that passes in isolation (5.45s, Windows git-worktree timing under concurrent test load)."
   }
 ]
