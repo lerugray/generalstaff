@@ -930,3 +930,122 @@ projects:
   });
 });
 
+describe("creative-work opt-in fields parsing (gs-278)", () => {
+  it("defaults all creative-work fields to undefined when omitted", async () => {
+    const path = writeYaml(
+      "no-creative.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].creative_work_allowed).toBeUndefined();
+    expect(yaml.projects[0].creative_work_branch).toBeUndefined();
+    expect(yaml.projects[0].creative_work_drafts_dir).toBeUndefined();
+    expect(yaml.projects[0].voice_reference_paths).toBeUndefined();
+    cleanup();
+  });
+
+  it("parses creative_work_allowed: true with branch and drafts dir overrides", async () => {
+    const path = writeYaml(
+      "creative-ok.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    creative_work_allowed: true
+    creative_work_branch: "bot/my-drafts"
+    creative_work_drafts_dir: "my-drafts/"
+    voice_reference_paths:
+      - "docs/voice/pih-1.md"
+      - "docs/voice/pih-2.md"
+    hands_off:
+      - secret/
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].creative_work_allowed).toBe(true);
+    expect(yaml.projects[0].creative_work_branch).toBe("bot/my-drafts");
+    expect(yaml.projects[0].creative_work_drafts_dir).toBe("my-drafts/");
+    expect(yaml.projects[0].voice_reference_paths).toEqual([
+      "docs/voice/pih-1.md",
+      "docs/voice/pih-2.md",
+    ]);
+    cleanup();
+  });
+
+  it("rejects non-boolean creative_work_allowed", async () => {
+    const path = writeYaml(
+      "creative-bad-type.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    creative_work_allowed: "yes"
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/creative_work_allowed/);
+    cleanup();
+  });
+
+  it("rejects empty-string entry in voice_reference_paths", async () => {
+    const path = writeYaml(
+      "voice-empty.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    voice_reference_paths:
+      - "docs/voice/ok.md"
+      - ""
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/voice_reference_paths/);
+    cleanup();
+  });
+
+  it("rejects empty-string creative_work_branch", async () => {
+    const path = writeYaml(
+      "creative-empty-branch.yaml",
+      `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    creative_work_branch: ""
+    hands_off:
+      - secret/
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/creative_work_branch/);
+    cleanup();
+  });
+});
+

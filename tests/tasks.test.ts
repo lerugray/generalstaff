@@ -1379,6 +1379,154 @@ describe("nextBotPickableTask (gs-275)", () => {
     const picked = nextBotPickableTask(ts, []);
     expect(picked?.engineer_provider).toBe("aider");
   });
+
+  it("gs-278: skips creative tasks when project hasn't opted in", () => {
+    const ts = [
+      task({ id: "a-001", priority: 1, creative: true }),
+      task({ id: "a-002", priority: 2 }),
+    ];
+    // No projectCtx → creative work implicitly disallowed
+    expect(nextBotPickableTask(ts, [])?.id).toBe("a-002");
+    // Explicit creativeWorkAllowed=false — same result
+    expect(
+      nextBotPickableTask(ts, [], { creativeWorkAllowed: false })?.id,
+    ).toBe("a-002");
+  });
+
+  it("gs-278: allows creative tasks when project opts in", () => {
+    const ts = [
+      task({ id: "a-001", priority: 1, creative: true }),
+      task({ id: "a-002", priority: 2 }),
+    ];
+    expect(
+      nextBotPickableTask(ts, [], { creativeWorkAllowed: true })?.id,
+    ).toBe("a-001");
+  });
+
+  it("gs-278: non-creative tasks are unaffected by the creative flag", () => {
+    const ts = [task({ id: "a-001", priority: 1 })];
+    // Both modes should pick the same task
+    expect(nextBotPickableTask(ts, [])?.id).toBe("a-001");
+    expect(
+      nextBotPickableTask(ts, [], { creativeWorkAllowed: true })?.id,
+    ).toBe("a-001");
+  });
+});
+
+describe("isTaskBotPickable — gs-278 creative check", () => {
+  function task(overrides: Partial<GreenfieldTask> = {}): GreenfieldTask {
+    return {
+      id: "t-001",
+      title: "x",
+      status: "pending",
+      priority: 1,
+      ...overrides,
+    };
+  }
+
+  it("returns creative_work_not_allowed_for_project when task is creative and project isn't opted in", () => {
+    const t = task({ creative: true });
+    const result = isTaskBotPickable(t, []);
+    expect(result).toEqual({ ok: false, reason: "creative_work_not_allowed_for_project" });
+  });
+
+  it("returns ok:true when task is creative and project opts in", () => {
+    const t = task({ creative: true });
+    const result = isTaskBotPickable(t, [], { creativeWorkAllowed: true });
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("creative flag has no effect when false/undefined", () => {
+    const t = task({ creative: false });
+    expect(isTaskBotPickable(t, []).ok).toBe(true);
+    const t2 = task();
+    expect(isTaskBotPickable(t2, []).ok).toBe(true);
+  });
+
+  it("creative check runs after interactive_only check (interactive_only wins on the reason field)", () => {
+    const t = task({ creative: true, interactive_only: true });
+    const result = isTaskBotPickable(t, []);
+    expect(result).toEqual({ ok: false, reason: "interactive_only" });
+  });
+});
+
+describe("validateTaskEntry — gs-278 creative fields", () => {
+  const TEST_DIR = join(import.meta.dir, "fixtures", "task_validator_gs278");
+
+  beforeEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(join(TEST_DIR, "state", "p"), { recursive: true });
+    setRootDir(TEST_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    setRootDir(process.cwd());
+  });
+
+  function writeTasksJson(entries: unknown): void {
+    writeFileSync(
+      join(TEST_DIR, "state", "p", "tasks.json"),
+      JSON.stringify(entries),
+      "utf8",
+    );
+  }
+
+  it("accepts a task with creative: true", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, creative: true },
+    ]);
+    const tasks = await loadTasks("p");
+    expect(tasks[0].creative).toBe(true);
+  });
+
+  it("rejects non-boolean creative", async () => {
+    writeTasksJson([
+      { id: "p-001", title: "x", status: "pending", priority: 1, creative: "yes" },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
+
+  it("accepts voice_reference_override as a non-empty string array", async () => {
+    writeTasksJson([
+      {
+        id: "p-001",
+        title: "x",
+        status: "pending",
+        priority: 1,
+        creative: true,
+        voice_reference_override: ["docs/voice/pih.md"],
+      },
+    ]);
+    const tasks = await loadTasks("p");
+    expect(tasks[0].voice_reference_override).toEqual(["docs/voice/pih.md"]);
+  });
+
+  it("rejects non-array voice_reference_override", async () => {
+    writeTasksJson([
+      {
+        id: "p-001",
+        title: "x",
+        status: "pending",
+        priority: 1,
+        voice_reference_override: "docs/voice/pih.md",
+      },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
+
+  it("rejects empty-string entry in voice_reference_override", async () => {
+    writeTasksJson([
+      {
+        id: "p-001",
+        title: "x",
+        status: "pending",
+        priority: 1,
+        voice_reference_override: ["docs/voice/ok.md", ""],
+      },
+    ]);
+    await expect(loadTasks("p")).rejects.toThrow(TaskValidationError);
+  });
 });
 
 describe("validateTaskEntry — gs-275 engineer override fields", () => {

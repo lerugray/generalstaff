@@ -1950,14 +1950,42 @@
   },
   {
     "id": "gs-277",
-    "title": "Phase 7 follow-up — re-benchmark with a stronger non-Claude model. gs-274's REJECT verdict was specifically for openrouter/qwen/qwen3-coder-plus. Worth testing whether qwen3.6-plus (newer general-purpose flagship, released 2026-04-02) or an equivalent clears the 70% bar on the same 10-task set. **Interactive-only** (~$0.50-1.50 OpenRouter spend). Run: `generalstaff engineer-benchmark --project=gamr --provider=aider --model=openrouter/qwen/qwen3.6-plus --tasks=<same 10> --output=logs/benchmark-phase7-qwen36-<date>.json`. If clears 70%: update PHASE-7-BENCHMARK with new data, queue flip-default task. If not: stay on claude, document the observed ceiling for OpenRouter-free models at this task shape.",
-    "status": "pending",
+    "title": "Phase 7 follow-up — re-benchmark with a stronger non-Claude model. gs-274's REJECT verdict was specifically for openrouter/qwen/qwen3-coder-plus. Worth testing whether qwen3.6-plus (newer general-purpose flagship, released 2026-04-02) or an equivalent clears the 70% bar on the same 10-task set. **Interactive-only** (~$0.50-1.50 OpenRouter spend). Run: `generalstaff engineer-benchmark --project=gamr --provider=aider --model=openrouter/qwen/qwen3.6-plus --tasks=<same 10> --output=logs/benchmark-phase7-qwen36-<date>.json`. If clears 70%: update PHASE-7-BENCHMARK with new data, queue flip-default task. If not: stay on claude, document the observed ceiling for OpenRouter-free models at this task shape. **STARTED 2026-04-20 ~08:15 UTC in background; qwen3.6-plus is noticeably slower per task than qwen3-coder-plus (~8-10 min per task vs ~1-2 min) so the full run is still executing at session-wrap.** Ray can check results via logs/benchmark-phase7-qwen36-2026-04-20.json once complete.",
+    "status": "in_progress",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "Spends OpenRouter credit; Ray's call on whether to explore this branch vs. focus elsewhere.",
     "expected_touches": [
       "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
       "logs/benchmark-phase7-qwen36-2026-04-XX.json"
+    ]
+  },
+  {
+    "id": "gs-278",
+    "title": "Phase 7 follow-up — creative-work opt-in mechanism (Hard Rule #1 carve-out). Implements what docs/internal/RULE-RELAXATION-2026-04-20.md specifies: per-project creative_work_allowed flag + companion fields (creative_work_branch, creative_work_drafts_dir, voice_reference_paths), per-task creative flag + voice_reference_override, and the dispatcher policies (skip creative tasks on non-opted-in projects; route opted-in creative cycles to the creative branch; skip reviewer gate; prepend voice references to engineer prompt). **Phase A landed 2026-04-20** — type additions + validation + the `creative_work_not_allowed_for_project` skip reason. **Phase B deferred to gs-279** — CREATIVE_WORK warning emission, reviewer-skip on creative cycles, voice-reference prompt prepend (aider path), branch-override threading. Phase A is safe to ship standalone because any creative task on a non-opted-in project is correctly skipped; creative tasks on opted-in projects are still pickable but will run under the default reviewer/branch flow until Phase B lands.",
+    "status": "done",
+    "priority": 3,
+    "expected_touches": [
+      "src/types.ts",
+      "src/projects.ts",
+      "src/tasks.ts",
+      "tests/tasks.test.ts",
+      "tests/projects.test.ts",
+      "projects.yaml.example"
+    ],
+    "completed_at": "2026-04-20T09:30:00Z"
+  },
+  {
+    "id": "gs-279",
+    "title": "Phase 7 follow-up — creative-work execution behaviors (gs-278 Phase B). gs-278 Phase A shipped the type+validation+skip scaffolding. Phase B adds the actual creative-cycle execution: (1) in cycle.ts, if the peeked task has creative=true AND the project has creative_work_allowed=true, log the CREATIVE_WORK warning (console + distinct audit event type in PROGRESS.jsonl — e.g. `cycle_start_creative` or additional `creative: true` field on cycle_start), (2) synthesize an effective project config with project.branch swapped to project.creative_work_branch (defaulting to 'bot/creative-drafts'), so the engineer's worktree-add targets the creative branch, (3) in the reviewer invocation, skip the gate entirely for creative cycles — creative work has no objective scope-drift check, the human-in-the-loop is the review mechanism, (4) in the aider provider module, prepend a voice-reference section to the engineer prompt when voice_reference_paths is non-empty and the task is creative. Claude-path creative work is out of scope for gs-279 (engineer_command.sh is project-owned and not modifiable by GS). Expected diff: ~200-300 lines across src/cycle.ts + src/engineer.ts + src/engineer_providers/aider.ts + tests.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/cycle.ts",
+      "src/engineer.ts",
+      "src/engineer_providers/aider.ts",
+      "tests/cycle.test.ts",
+      "tests/engineer.test.ts"
     ]
   }
 ]

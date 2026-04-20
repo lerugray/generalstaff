@@ -590,7 +590,9 @@ export async function executeCycle(
     let nextTask;
     try {
       const tasks = await loadTasks(project.id);
-      nextTask = nextBotPickableTask(tasks, project.hands_off);
+      nextTask = nextBotPickableTask(tasks, project.hands_off, {
+        creativeWorkAllowed: project.creative_work_allowed,
+      });
     } catch {
       // Non-greenfield projects (catalogdna_bot_tasks, git_issues,
       // git_unmerged) won't have a tasks.json at state/<id>/; that's

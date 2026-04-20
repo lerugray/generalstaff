@@ -85,6 +85,49 @@
 #       the claude path (the model is chosen by the project's
 #       engineer_command wrapper).
 #
+# -------------------------------------------------------------------
+# Creative-work opt-in (Phase 7 / gs-278). Per-project. Off by default.
+# -------------------------------------------------------------------
+#
+# Hard Rule #1 says bots do correctness work; creative work (marketing,
+# launch copy, growth strategy) stays with humans. The rule's final
+# clause also says creative agents are "opt-in plugins with explicit
+# warnings" — these fields implement that opt-in. Full policy context
+# in docs/internal/RULE-RELAXATION-2026-04-20.md.
+#
+# Use with care. Creative cycles have no reviewer gate (there's no
+# objective "tests pass" for prose) and no hands_off check on draft
+# content — the human-in-the-loop review is the only quality gate.
+#
+#   creative_work_allowed: bool   (optional, default false)
+#       When true AND a picked task has `creative: true`, the cycle
+#       proceeds with a CREATIVE_WORK warning, routes outputs to the
+#       creative branch, and skips the reviewer. When false/unset,
+#       creative-tagged tasks are skipped with reason
+#       `creative_work_not_allowed_for_project`.
+#
+#   creative_work_branch: string   (optional, default "bot/creative-drafts")
+#       Separate branch for creative-tagged cycles. Keeps drafts off
+#       the main bot/work branch so correctness cycles and creative
+#       cycles don't contaminate each other's SHAs.
+#
+#   creative_work_drafts_dir: string   (optional, default "drafts/")
+#       Directory path (relative to project root) where creative
+#       outputs land. Makes it easy to .gitignore drafts or review
+#       them in isolation.
+#
+#   voice_reference_paths: string[]   (optional)
+#       Files the engineer reads before drafting creative work to
+#       calibrate the author's voice. Seed with anything written by
+#       the project owner in their actual idiom — manuals, blog
+#       posts, prior copy. Order matters: put the highest-signal
+#       source first.
+#
+# Per-task overrides (in tasks.json):
+#   creative: true                  # marks this task as creative
+#   voice_reference_override: []    # replaces project voice paths
+#                                   # for this task specifically
+#
 # Hard Rule 8 (BYOK): every credential above comes from your own
 # environment. Nothing is shipped, nothing is hosted on your behalf.
 

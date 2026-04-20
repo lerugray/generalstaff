@@ -68,6 +68,18 @@ export interface ProjectConfig {
   // (OPENROUTER_API_KEY for aider, etc.).
   engineer_provider?: EngineerProvider;
   engineer_model?: string;
+  // gs-278: creative-work opt-in (Hard Rule #1's "opt-in plugins with
+  // explicit warnings" clause). When true AND a picked task has
+  // `creative: true`, the dispatcher routes the cycle to the creative
+  // branch, prepends voice-reference context to the engineer prompt,
+  // skips the reviewer gate, and writes outputs to the drafts dir.
+  // When false/unset, creative-tagged tasks are skipped with reason
+  // `creative_work_not_allowed_for_project`.
+  // See docs/internal/RULE-RELAXATION-2026-04-20.md for the policy.
+  creative_work_allowed?: boolean;
+  creative_work_branch?: string;
+  creative_work_drafts_dir?: string;
+  voice_reference_paths?: string[];
 }
 
 export interface DispatcherConfig {
@@ -224,6 +236,18 @@ export interface GreenfieldTask {
   // while keeping claude for the subset where it doesn't.
   engineer_provider?: EngineerProvider;
   engineer_model?: string;
+  // gs-278: creative-work opt-in (Hard Rule #1 carve-out). Creative
+  // tasks produce drafts in the project's creative_work_drafts_dir,
+  // on the project's creative_work_branch, with reviewer gate
+  // skipped. Only honored when the project has
+  // creative_work_allowed=true — otherwise the task is skipped with
+  // reason `creative_work_not_allowed_for_project`. Per-task
+  // voice_reference_override supplements project-level
+  // voice_reference_paths when the task needs a different voice
+  // corpus (e.g. a tweet uses different source material than a
+  // README section).
+  creative?: boolean;
+  voice_reference_override?: string[];
 }
 
 // --- Concurrency detection ---

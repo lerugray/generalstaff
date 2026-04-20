@@ -225,6 +225,65 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     engineerModel = raw.engineer_model;
   }
 
+  // gs-278: creative-work opt-in (Hard Rule #1 carve-out). Off by
+  // default; projects that want to accept creative tasks must
+  // explicitly opt in. See docs/internal/RULE-RELAXATION-2026-04-20.md
+  // for the policy context.
+  let creativeWorkAllowed: boolean | undefined;
+  if (raw.creative_work_allowed !== undefined && raw.creative_work_allowed !== null) {
+    if (typeof raw.creative_work_allowed !== "boolean") {
+      throw new ProjectValidationError(
+        id,
+        "creative_work_allowed",
+        `must be a boolean, got ${typeof raw.creative_work_allowed}`,
+      );
+    }
+    creativeWorkAllowed = raw.creative_work_allowed;
+  }
+  let creativeWorkBranch: string | undefined;
+  if (raw.creative_work_branch !== undefined && raw.creative_work_branch !== null) {
+    if (typeof raw.creative_work_branch !== "string" || raw.creative_work_branch.trim() === "") {
+      throw new ProjectValidationError(
+        id,
+        "creative_work_branch",
+        "must be a non-empty string if specified",
+      );
+    }
+    creativeWorkBranch = raw.creative_work_branch;
+  }
+  let creativeWorkDraftsDir: string | undefined;
+  if (raw.creative_work_drafts_dir !== undefined && raw.creative_work_drafts_dir !== null) {
+    if (typeof raw.creative_work_drafts_dir !== "string" || raw.creative_work_drafts_dir.trim() === "") {
+      throw new ProjectValidationError(
+        id,
+        "creative_work_drafts_dir",
+        "must be a non-empty string if specified",
+      );
+    }
+    creativeWorkDraftsDir = raw.creative_work_drafts_dir;
+  }
+  let voiceReferencePaths: string[] | undefined;
+  if (raw.voice_reference_paths !== undefined && raw.voice_reference_paths !== null) {
+    if (!Array.isArray(raw.voice_reference_paths)) {
+      throw new ProjectValidationError(
+        id,
+        "voice_reference_paths",
+        `must be an array, got ${typeof raw.voice_reference_paths}`,
+      );
+    }
+    for (let j = 0; j < raw.voice_reference_paths.length; j++) {
+      const entry = raw.voice_reference_paths[j];
+      if (typeof entry !== "string" || entry.trim() === "") {
+        throw new ProjectValidationError(
+          id,
+          "voice_reference_paths",
+          `entry [${j}] must be a non-empty string, got ${JSON.stringify(entry)}`,
+        );
+      }
+    }
+    voiceReferencePaths = raw.voice_reference_paths as string[];
+  }
+
   return {
     id,
     path,
@@ -240,6 +299,10 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     notes: raw.notes as string | undefined,
     engineer_provider: engineerProvider,
     engineer_model: engineerModel,
+    creative_work_allowed: creativeWorkAllowed,
+    creative_work_branch: creativeWorkBranch,
+    creative_work_drafts_dir: creativeWorkDraftsDir,
+    voice_reference_paths: voiceReferencePaths,
   };
 }
 

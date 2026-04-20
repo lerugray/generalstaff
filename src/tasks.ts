@@ -121,6 +121,36 @@ function validateTaskEntry(
     }
   }
 
+  // gs-278: creative-work opt-in (Hard Rule #1 carve-out). Tasks that
+  // set creative=true are routed differently by the dispatcher — see
+  // docs/internal/RULE-RELAXATION-2026-04-20.md for the policy.
+  if ("creative" in rec && rec.creative !== undefined && rec.creative !== null) {
+    if (typeof rec.creative !== "boolean") {
+      throw new TaskValidationError(
+        `${loc}: 'creative' must be a boolean if set, got ${typeof rec.creative}`,
+      );
+    }
+  }
+  if (
+    "voice_reference_override" in rec &&
+    rec.voice_reference_override !== undefined &&
+    rec.voice_reference_override !== null
+  ) {
+    if (!Array.isArray(rec.voice_reference_override)) {
+      throw new TaskValidationError(
+        `${loc}: 'voice_reference_override' must be an array, got ${typeof rec.voice_reference_override}`,
+      );
+    }
+    for (let j = 0; j < rec.voice_reference_override.length; j++) {
+      const entry = rec.voice_reference_override[j];
+      if (typeof entry !== "string" || entry.length === 0) {
+        throw new TaskValidationError(
+          `${loc}: 'voice_reference_override[${j}]' must be a non-empty string`,
+        );
+      }
+    }
+  }
+
   return rec as unknown as GreenfieldTask;
 }
 
@@ -178,7 +208,22 @@ export type TaskPickabilityReason =
       ok: false;
       reason: "hands_off_intersect";
       conflict: { pattern: string; touch: string };
-    };
+    }
+  // gs-278: the picked task carries `creative: true` but the project
+  // has not opted in via `creative_work_allowed: true`. Surfaces
+  // distinctly so the dispatcher can log it instead of silently
+  // eliding a queued creative task.
+  | { ok: false; reason: "creative_work_not_allowed_for_project" };
+
+// gs-278: optional context the bot-pickability check uses for
+// project-scoped policies that aren't captured by hands_off alone.
+// Kept as an object so future policies (e.g. scheduling windows) can
+// be added without breaking existing callers — all fields are
+// optional and have safe defaults (treat the project as not opting
+// in).
+export interface BotPickabilityProjectContext {
+  creativeWorkAllowed?: boolean;
+}
 
 /**
  * Decide whether a bot cycle can pick up this task.
@@ -200,6 +245,7 @@ export type TaskPickabilityReason =
 export function isTaskBotPickable(
   task: GreenfieldTask,
   handsOff: string[],
+  projectCtx?: BotPickabilityProjectContext,
 ): TaskPickabilityReason {
   // Mirror pendingTasks() semantic: bot-pickable starts from the same
   // "not-done-and-not-skipped" filter (so in_progress tasks remain
@@ -233,14 +279,23 @@ export function isTaskBotPickable(
       }
     }
   }
+  // gs-278: creative-work carve-out (Hard Rule #1 opt-in). Defaults
+  // are conservative — if projectCtx is omitted or doesn't opt in, any
+  // creative-tagged task is skipped. Existing call sites that haven't
+  // been updated to pass projectCtx therefore preserve Rule #1's
+  // default-off behaviour unchanged.
+  if (task.creative === true && projectCtx?.creativeWorkAllowed !== true) {
+    return { ok: false, reason: "creative_work_not_allowed_for_project" };
+  }
   return { ok: true };
 }
 
 export function botPickableTasks(
   tasks: GreenfieldTask[],
   handsOff: string[],
+  projectCtx?: BotPickabilityProjectContext,
 ): GreenfieldTask[] {
-  return tasks.filter((t) => isTaskBotPickable(t, handsOff).ok);
+  return tasks.filter((t) => isTaskBotPickable(t, handsOff, projectCtx).ok);
 }
 
 // Parse the numeric suffix from a task id like "gamr-027" → 27 or
@@ -268,8 +323,9 @@ function taskIdSortKey(id: string): number {
 export function nextBotPickableTask(
   tasks: GreenfieldTask[],
   handsOff: string[],
+  projectCtx?: BotPickabilityProjectContext,
 ): GreenfieldTask | undefined {
-  const pickable = botPickableTasks(tasks, handsOff);
+  const pickable = botPickableTasks(tasks, handsOff, projectCtx);
   if (pickable.length === 0) return undefined;
   const sorted = [...pickable].sort((a, b) => {
     if (a.priority !== b.priority) return a.priority - b.priority;
