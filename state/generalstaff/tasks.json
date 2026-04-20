@@ -2039,7 +2039,7 @@
   {
     "id": "gs-287",
     "title": "gs-283: Refresh README phase labels to match docs/internal/. README currently uses 'Phase 5 UI shell (in progress)' for what the design docs call 'Phase 6' (the local dashboard — bun.serve + route handlers). Rename in the README so the two are consistent: 'Phase 6: Local web dashboard' replaces 'Phase 5 UI shell'. Keep 'Phase 5 visual anchor (closed 2026-04-18)' as-is since that refers to the docs/phase-5-references/ HTML mockups (distinct from the UI shell work). Also add a 'Phase 7: Engineer-swap (complete)' line if missing. Interactive-only because README.md is in the generalstaff hands_off list. Expected diff: ~20 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": true
   }

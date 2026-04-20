@@ -12,10 +12,11 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 
 > **Status.** Phases 1–4 shipped: sequential MVP, multi-provider LLM
 > routing, cross-project generality, opt-in parallel worktrees.
-> Phase 5 visual anchor closed. Phase 6 foundation trio landed:
-> HTTP server, `generalstaff serve` CLI, shared layout + base
-> stylesheet (data-heavy route handlers — project/cycle/tail/inbox
-> — queued). Phase 7 pluggable engineer shipped: opt-in
+> Phase 5 visual anchor closed. Phase 6 local web dashboard closed
+> 2026-04-20: HTTP server, `generalstaff serve` CLI, shared layout
+> + base stylesheet, plus four route handlers (`/project/:id`,
+> `/cycle/:cycleId`, `/tail/:sessionId` SSE, `/inbox`). Phase 7
+> pluggable engineer shipped: opt-in
 > `engineer_provider: aider` routes cycles to aider + OpenRouter
 > (Qwen 3.6+ Plus) instead of `claude -p`. The 10-task benchmark
 > at `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md` cleared
@@ -428,18 +429,39 @@ root.
   without committing to an implementation stack. One Claude Design
   brief anchored the visual system; four hand-built views extended
   it with zero additional design spend.
-- **Phase 5 UI shell** (in progress): local dashboard implementation
-  reading the Phase 5 data contract (`src/views/*.ts`). Implementation
-  stack (Tauri, local web server, or other) not yet chosen. Data to
-  render (gs-188's parallel-efficiency metrics) is already live.
-- **Phase 5.5+:** Command-room UI aesthetic (Kriegspiel-inspired —
+- ✓ **Phase 6 local web dashboard** (closed 2026-04-20 afternoon):
+  local HTTP server (Bun.serve, port 3737) + `generalstaff serve`
+  CLI subcommand + shared layout and stylesheet (foundation trio:
+  gs-267/268/269) + four route handlers covering the Phase 5 data
+  contract — `GET /project/:id` (gs-283), `GET /cycle/:cycleId`
+  (gs-284), `GET /tail/:sessionId` Server-Sent Events stream
+  (gs-285), `GET /inbox` (gs-286). Read-only v1 per
+  [`docs/internal/PHASE-6-SKETCH-2026-04-19.md`](docs/internal/PHASE-6-SKETCH-2026-04-19.md);
+  localhost-bound, no auth beyond 127.0.0.1.
+- ✓ **Phase 7 engineer-swap** (closed 2026-04-20): pluggable
+  engineer providers via `engineer_provider: claude | aider` on
+  ProjectConfig. aider + OpenRouter Qwen3.6-plus cleared the 70%
+  verified-rate bar (gs-277 benchmark, 8/10 verified) and shipped
+  as the default model. Creative-work opt-in (gs-278 Phase A +
+  gs-279 Phase B) carved out the first exception to Hard Rule #1
+  — per-project `creative_work_allowed: true`, per-task
+  `creative: true`, branch routing to `bot/creative-drafts`,
+  reviewer skip, voice-reference prompt prepend. First real-world
+  creative cycle (bookfinder-general's bf-005) drafted a
+  usable-with-light-edit README section now live on public main.
+  See [`docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`](docs/internal/PHASE-7-BENCHMARK-2026-04-20.md).
+- **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
+  the dashboard, edit `tasks.json` from the UI, merge `bot/work`
+  with a button. Read-only v1 is the current dashboard; actions
+  are the next iteration.
+- **Command-room UI aesthetic (proposed):** Kriegspiel-inspired
   high-density map/status layout, borrowed from 19th-century
-  Prussian wargaming). See
+  Prussian wargaming. See
   [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
 - **Public launch:** gated on README polish, `SUPPORTERS.md`, and
-  `LICENSE` — not on Phase 5 completion per
-  [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md). The CLI surface is feature-
-  complete for the MVP value proposition; the UI is an enhancement.
+  `LICENSE` per [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md).
+  CLI + dashboard both feature-complete for MVP value; launch
+  timing is separate from phase completion.
 
 ## Documentation
 
