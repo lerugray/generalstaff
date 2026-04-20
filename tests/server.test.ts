@@ -1,5 +1,9 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { startServer } from "../src/server";
+import { setRootDir, getRootDir } from "../src/state";
 
 describe("startServer", () => {
   it("binds to an ephemeral port when port=0", async () => {
@@ -58,6 +62,133 @@ describe("startServer", () => {
       failed = true;
     }
     expect(failed).toBe(true);
+  });
+});
+
+describe("startServer — gs-283 GET /project/:id", () => {
+  const FIXTURE_DIR = join(tmpdir(), `gs-server-project-${process.pid}`);
+  let originalRoot: string;
+
+  function writeProjectsYaml(projectIds: string[]) {
+    const lines = ["projects:"];
+    for (const id of projectIds) {
+      const projectPath = join(FIXTURE_DIR, `proj-${id}`).replace(/\\/g, "/");
+      mkdirSync(join(FIXTURE_DIR, `proj-${id}`, "state", id), {
+        recursive: true,
+      });
+      lines.push(
+        `  - id: ${id}`,
+        `    path: ${projectPath}`,
+        `    priority: 1`,
+        `    engineer_command: "echo"`,
+        `    verification_command: "echo"`,
+        `    cycle_budget_minutes: 30`,
+        `    branch: bot/work`,
+        `    auto_merge: false`,
+        `    hands_off:`,
+        `      - secret/`,
+      );
+    }
+    lines.push("dispatcher:", "  max_parallel_slots: 1");
+    writeFileSync(join(FIXTURE_DIR, "projects.yaml"), lines.join("\n"), "utf8");
+  }
+
+  function writeTasks(
+    projectId: string,
+    tasks: Array<{ id: string; title: string; status: string; priority: number }>,
+  ) {
+    const path = join(FIXTURE_DIR, `proj-${projectId}`, "state", projectId, "tasks.json");
+    writeFileSync(path, JSON.stringify(tasks, null, 2), "utf8");
+  }
+
+  function writeProgress(projectId: string, events: Array<Record<string, unknown>>) {
+    const path = join(FIXTURE_DIR, `proj-${projectId}`, "state", projectId, "PROGRESS.jsonl");
+    writeFileSync(path, events.map((e) => JSON.stringify(e)).join("\n") + "\n", "utf8");
+  }
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    originalRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+  });
+
+  afterEach(() => {
+    setRootDir(originalRoot);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("returns 200 HTML with project id, task queue, and dispatches panel", async () => {
+    writeProjectsYaml(["alpha"]);
+    writeTasks("alpha", [
+      { id: "a-1", title: "ready task", status: "pending", priority: 1 },
+      { id: "a-2", title: "in flight task", status: "in_progress", priority: 1 },
+    ]);
+    writeProgress("alpha", [
+      {
+        timestamp: "2026-04-20T10:00:00Z",
+        event: "cycle_end",
+        cycle_id: "c-1",
+        project_id: "alpha",
+        data: { outcome: "verified", task_id: "a-0", duration_seconds: 120 },
+      },
+      {
+        timestamp: "2026-04-20T11:00:00Z",
+        event: "cycle_end",
+        cycle_id: "c-2",
+        project_id: "alpha",
+        data: { outcome: "verification_failed", task_id: "a-1", duration_seconds: 90 },
+      },
+    ]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/project/alpha`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain("alpha");
+      expect(body).toContain("ready task");
+      expect(body).toContain("in flight task");
+      expect(body).toContain("Task queue");
+      expect(body).toContain("Recent dispatches");
+      // pass rate section: 1 verified / 1 failed = 50.0%
+      expect(body).toContain("50.0%");
+      // recent dispatches link to /cycle/:id
+      expect(body).toContain('href="/cycle/c-1"');
+      expect(body).toContain('href="/cycle/c-2"');
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 404 when project id is not in projects.yaml", async () => {
+    writeProjectsYaml(["alpha"]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/project/ghost`);
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(body).toContain("Project not found");
+      expect(body).toContain("ghost");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 200 with empty-state panels when project has no tasks.json or PROGRESS.jsonl", async () => {
+    writeProjectsYaml(["alpha"]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/project/alpha`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain("alpha");
+      expect(body).toContain("No cycles recorded yet");
+    } finally {
+      server.stop();
+    }
   });
 });
 

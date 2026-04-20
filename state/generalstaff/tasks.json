@@ -2014,7 +2014,7 @@
   {
     "id": "gs-283",
     "title": "gs-284: Phase 6 route handler — GET /project/:id. Server-render a per-project page reading src/views/task_queue.ts (for the pending-task list) and src/views/dispatch_detail.ts (for recent dispatches + verification rate). Follow the GET / pattern that gs-269 established: import layout() from src/server/templates/layout.ts, compose child HTML via the existing helpers, wire into src/server.ts or src/server/routes/ following whatever structure gs-269's landing page uses. Return 404 if projectId is not in projects.yaml. No JSON APIs in v1 (all HTML). Expected touches: src/server/routes/project.ts (new), src/server.ts (route wiring), tests/server.test.ts (route tests). Expected diff: ~100-180 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {
