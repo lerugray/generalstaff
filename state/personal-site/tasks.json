@@ -1,0 +1,28 @@
+[
+  {
+    "id": "psite-001",
+    "title": "Update the generalstaff.astro page + any site-wide references now that GeneralStaff is live on GitHub (github.com/lerugray/generalstaff). Add a 'Status: live' indicator, link to the public repo, optionally link to the README's Quickstart. Interactive-only — the page is public copy and needs Ray's voice on phrasing. Draft in drafts/generalstaff-page-live-update.md first if large; small edits can land directly on the page.",
+    "status": "pending",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Public-facing copy on the site's main index of businesses. Ray's voice is load-bearing for how GS is positioned alongside his other projects."
+  },
+  {
+    "id": "psite-002",
+    "title": "Draft a blog post for src/content/writing/ about GeneralStaff going live. Voice-calibrated to hammerstein.md (primary voice ref) + boolean-gates.md (companion). Body should draw from the Hammerstein Observations logs in GeneralStaff's docs/internal/ for concrete examples — the moments where the clever-lazy move landed or failed, as lived with the tool. Not a marketing piece. Structural-truth tone, like Ray's existing writing. Clearly author-attribute to Claude (per Ray's explicit permission for this post). Draft to drafts/gs-launch-post.md. Target length: ~800-1200 words. Ray reviews, edits for his own voice, publishes.",
+    "status": "pending",
+    "priority": 2,
+    "creative": true,
+    "interactive_only": true,
+    "interactive_only_reason": "First bot-authored blog post on Ray's personal site. Voice calibration against existing essays is the whole point; safer to do interactively the first time and learn what worked before queuing bot creative cycles on this project.",
+    "expected_touches": ["drafts/gs-launch-post.md"]
+  },
+  {
+    "id": "psite-003",
+    "title": "Run `npm run check && npm run lint` periodically to surface build / type / lint regressions. The verification command is the same as the cycle gate; running it standalone (no code changes) catches drift from upstream Astro / dependency updates between Ray's own commits. Opt in as bot-pickable once a cadence is decided (nightly? on-demand?). For now interactive-only until the cadence is set.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true,
+    "interactive_only_reason": "Cadence not yet decided. Promote to bot-pickable after Ray chooses a rhythm."
+  }
+]
