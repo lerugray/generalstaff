@@ -192,6 +192,196 @@ describe("startServer — gs-283 GET /project/:id", () => {
   });
 });
 
+describe("startServer — gs-284 GET /cycle/:cycleId", () => {
+  const FIXTURE_DIR = join(tmpdir(), `gs-server-cycle-${process.pid}`);
+  let originalRoot: string;
+
+  function writeFleetLog(events: Array<Record<string, unknown>>) {
+    const dir = join(FIXTURE_DIR, "state", "_fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "PROGRESS.jsonl"),
+      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  function writeProjectsYaml(projectIds: string[]) {
+    const lines = ["projects:"];
+    for (const id of projectIds) {
+      const projectPath = join(FIXTURE_DIR, `proj-${id}`).replace(/\\/g, "/");
+      mkdirSync(join(FIXTURE_DIR, `proj-${id}`, "state", id), {
+        recursive: true,
+      });
+      lines.push(
+        `  - id: ${id}`,
+        `    path: ${projectPath}`,
+        `    priority: 1`,
+        `    engineer_command: "echo"`,
+        `    verification_command: "echo"`,
+        `    cycle_budget_minutes: 30`,
+        `    branch: bot/work`,
+        `    auto_merge: false`,
+        `    hands_off:`,
+        `      - secret/`,
+      );
+    }
+    lines.push("dispatcher:", "  max_parallel_slots: 1");
+    writeFileSync(join(FIXTURE_DIR, "projects.yaml"), lines.join("\n"), "utf8");
+  }
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+    originalRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+  });
+
+  afterEach(() => {
+    setRootDir(originalRoot);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("returns 200 HTML with cycle id, outcome, duration, and phase sections", async () => {
+    writeProjectsYaml(["alpha"]);
+    writeFleetLog([
+      {
+        timestamp: "2026-04-20T10:00:00Z",
+        event: "cycle_start",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { task_id: "a-7", sha_before: "abc123" },
+      },
+      {
+        timestamp: "2026-04-20T10:00:05Z",
+        event: "engineer_start",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { command: "claude -p" },
+      },
+      {
+        timestamp: "2026-04-20T10:05:00Z",
+        event: "engineer_end",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { duration_seconds: 295 },
+      },
+      {
+        timestamp: "2026-04-20T10:05:05Z",
+        event: "verification_start",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { command: "bun test" },
+      },
+      {
+        timestamp: "2026-04-20T10:06:00Z",
+        event: "verification_end",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: { duration_seconds: 55, outcome: "passed" },
+      },
+      {
+        timestamp: "2026-04-20T10:06:10Z",
+        event: "reviewer_start",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: {},
+      },
+      {
+        timestamp: "2026-04-20T10:06:40Z",
+        event: "reviewer_end",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: {
+          duration_seconds: 30,
+          verdict: "verified",
+          scope_drift_files: [],
+          hands_off_violations: [],
+          silent_failures: [],
+        },
+      },
+      {
+        timestamp: "2026-04-20T10:07:00Z",
+        event: "cycle_end",
+        cycle_id: "c-42",
+        project_id: "alpha",
+        data: {
+          outcome: "verified",
+          task_id: "a-7",
+          duration_seconds: 420,
+          verdict_prose: "All checks passed cleanly.",
+          sha_after: "def456",
+          diff_added: 42,
+          diff_removed: 7,
+          files_touched: [
+            { path: "src/foo.ts", added: 30, removed: 5 },
+            { path: "tests/foo.test.ts", added: 12, removed: 2 },
+          ],
+        },
+      },
+    ]);
+
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/cycle/c-42`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+      const body = await res.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain("c-42");
+      expect(body).toContain("verified");
+      expect(body).toContain("420s");
+      expect(body).toContain("Engineer");
+      expect(body).toContain("Verification");
+      expect(body).toContain("Review");
+      expect(body).toContain("Diff stats");
+      expect(body).toContain("All checks passed cleanly.");
+      expect(body).toContain("src/foo.ts");
+      expect(body).toContain("+42");
+      expect(body).toContain("-7");
+      expect(body).toContain('href="/project/alpha"');
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 404 when cycle id has no events in the fleet log", async () => {
+    writeProjectsYaml(["alpha"]);
+    writeFleetLog([
+      {
+        timestamp: "2026-04-20T10:00:00Z",
+        event: "cycle_end",
+        cycle_id: "c-1",
+        project_id: "alpha",
+        data: { outcome: "verified" },
+      },
+    ]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/cycle/ghost-cycle`);
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(body).toContain("Cycle not found");
+      expect(body).toContain("ghost-cycle");
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("returns 404 when fleet log does not exist", async () => {
+    writeProjectsYaml(["alpha"]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/cycle/c-1`);
+      expect(res.status).toBe(404);
+      const body = await res.text();
+      expect(body).toContain("Cycle not found");
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 describe("startServer — gs-269 layout + / route + static stylesheet", () => {
   it("serves /static/style.css with 200 + text/css content-type", async () => {
     const server = await startServer({ port: 0 });

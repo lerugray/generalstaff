@@ -10,6 +10,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { layout } from "./server/templates/layout";
 import { renderProjectPage } from "./server/routes/project";
+import { renderCyclePage } from "./server/routes/cycle";
 
 export interface StartServerOptions {
   port?: number;
@@ -97,6 +98,21 @@ export async function startServer(
         );
         if (projectId.length > 0 && !projectId.includes("/")) {
           const { status, html } = await renderProjectPage(projectId);
+          return new Response(html, {
+            status,
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/cycle/")) {
+        const cycleId = decodeURIComponent(
+          url.pathname.slice("/cycle/".length),
+        );
+        if (cycleId.length > 0 && !cycleId.includes("/")) {
+          const { status, html } = await renderCyclePage(cycleId);
           return new Response(html, {
             status,
             headers: {

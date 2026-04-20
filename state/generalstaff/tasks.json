@@ -2020,8 +2020,9 @@
   {
     "id": "gs-284",
     "title": "gs-285: Phase 6 route handler — GET /cycle/:cycleId. Single-cycle drill-down page. Read from src/views/dispatch_detail.ts to get the cycle's engineer prompt metadata, reviewer verdict text, diff stats, duration, outcome. Layout: summary header (cycle id, project, outcome badge, duration) + sections for engineer output, verification output tail, reviewer response, diff stats. Follow the layout() pattern from gs-269. Return 404 if cycleId not found. Expected touches: src/server/routes/cycle.ts (new), src/server.ts, tests/server.test.ts. Expected diff: ~120-200 lines.",
-    "status": "pending",
-    "priority": 2
+    "status": "done",
+    "priority": 2,
+    "completed_at": "2026-04-20T16:36:41.438Z"
   },
   {
     "id": "gs-285",
