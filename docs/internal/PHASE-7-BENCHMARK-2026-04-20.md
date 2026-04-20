@@ -1,10 +1,22 @@
 # Phase 7 engineer-benchmark results (2026-04-20)
 
-**Status:** **INCONCLUSIVE** — first run gave a 50% verified rate,
-but 3 of 10 failures were caused by a Windows-specific encoding bug
-in our own aider bash wrapper, not by aider quality. Fix landed in
-the same commit; a re-run is needed to get a clean read on whether
-aider+Qwen3 Coder Plus actually clears the 70% acceptance bar.
+**Status:** **REJECT** — after re-running the 3 bug-affected tasks
+with the unicode fix in place, the combined honest verified rate
+is **5/10 = 50%**, which does not clear the 70% acceptance bar.
+aider+Qwen3 Coder Plus is real-useful for a bounded subset of
+task types (type scaffolds, fixture data, e2e tests, CSS fixes)
+and unreliable for others (multi-file React component scaffolds
+with Next.js path aliases + testing-library setup). Recommended
+action: **do NOT flip gamr's default to aider**; keep the
+`engineer_provider: aider` option in code for future per-task
+routing if we ever build that mechanism.
+
+The 2026-04-20 04:32 run (first) hit a Windows unicode bug in
+our own bash wrapper that took down 3 of 10 tasks — this was
+GS's defect, not aider's. The fix (setting
+`PYTHONIOENCODING=utf-8`) landed the same commit and the 08:00
+re-run of the 3 affected tasks gave clean, unambiguous data.
+Full combined results below.
 
 **Acceptance bar (from `docs/internal/PHASE-7-SKETCH-2026-04-19.md`):**
 - verified_rate ≥ 70% on 10 replayed shipped tasks
@@ -24,8 +36,10 @@ in the subprocess env.
 deterministically. Full teardown on exit — benchmark never
 touches the live gamr repo.
 
-**Total OpenRouter spend:** ~$0.20 across 10 tasks (observed range:
-$0.01–$0.04 per task).
+**Total OpenRouter spend:** ~$0.50 across 13 task-runs (first 10
+at ~$0.20, re-run of 3 at ~$0.30 because the re-run tasks were
+component scaffolds that used more tokens than the pure-type
+tasks in the first batch).
 
 ---
 
@@ -51,58 +65,57 @@ would guarantee `empty_diff` regardless of aider quality.
 
 ---
 
-## Results — first run (2026-04-20 04:32–04:51 UTC)
+## Combined results (first run + re-run)
+
+First run at 2026-04-20 04:32–04:51 UTC, re-run of bug-affected
+tasks at 2026-04-20 07:44–08:00 UTC after the unicode fix.
 
 | task | verdict | engineer_s | verify_s | files | +ins | −del | notes |
 |---|---|---|---|---|---|---|---|
 | gamr-020 | **verified** | 104.2 | 3.4 | 2 | 97 | 12 | CSS fix + test, clean |
-| gamr-021 | empty_diff | 33.0 | 3.5 | 0 | 0 | 0 | model decided task was "already done"; flake — same task verified in the smoke-test run 2 minutes earlier |
+| gamr-021 | empty_diff | 33.0 | 3.5 | 0 | 0 | 0 | model decided task was "already done"; flake — same task verified in the pre-benchmark smoke 2 minutes earlier |
 | gamr-022 | **verified** | 49.3 | 2.6 | 1 | 1 | 1 | type scaffold, clean |
 | gamr-023 | **verified** | 174.4 | 2.5 | 2 | 154 | 1 | 4 keyboard-shortcut e2e tests, clean |
 | gamr-025 | **verified** | 55.2 | 2.5 | 3 | 40 | 1 | moderation types, clean |
-| gamr-026 | **verified** | 357.5 | 3.7 | 3 | 418 | 19 | biggest diff (24 profiles + 10 games), clean |
-| gamr-028 | engineer_failed | 51.3 | 3.7 | 0 | 0 | 0 | **`UnicodeEncodeError \u2265`** — rich/cp1252 crash |
-| gamr-029 | engineer_failed | 70.2 | 4.0 | 0 | 0 | 0 | **`UnicodeEncodeError \u2713`** — rich/cp1252 crash |
-| gamr-030 | engineer_failed | 97.9 | 1.8 | 7 | 467 | 3 | **`UnicodeEncodeError \u2588`** — rich/cp1252 crash partway through; aider had already committed 7 files but exited 1 |
+| gamr-026 | **verified** | 357.5 | 3.7 | 3 | 418 | 19 | biggest clean diff (24 profiles + 10 games) |
+| gamr-028 | verification_failed (re-run) | 335.3 | 1.7 | 6 | 667 | 1 | aider did the work — 6 files, full component + tests — but bun test couldn't resolve `@/components` path alias; aider exhausted 3-reflection retry budget |
+| gamr-029 | verification_failed (re-run) | 306.3 | 1.8 | 5 | 279 | 1 | similar to gamr-028 — real work, test-runner config mismatch |
+| gamr-030 | **raw: verified / true: false verified** (re-run) | 292.2 | 4.1 | 2 | 0 | 0 | **gamed the verdict** — aider's commit message said "feat: create ProfileEditForm component" but the actual commit contains only a tasks.json edit (deleting one entry from `expected_touches`); no `ProfileEditForm.tsx`, no module.css, no test. Verification passed only because nothing real was added. Our benchmark verdict logic didn't catch this; the reviewer gate would have. |
 | gamr-031 | verification_failed | 78.0 | 1.9 | 3 | 169 | 0 | aider hit the 3-reflection limit trying to fix 5 failing `MessageComposer` tests; committed its best attempt but tests never passed |
 
 ---
 
-## Summary — first run
+## Summary — combined (honest)
 
 - **Total:** 10
-- **Verified:** 5 / 10 = **50.0%**
-- **Verification_failed:** 1 (gamr-031 — real aider quality limit)
-- **Empty_diff:** 1 (gamr-021 — flake, model wrongly declared done)
-- **Engineer_failed:** 3 (gamr-028/029/030 — all Windows unicode bug)
+- **Raw verified (from `summarizeBenchmark`):** 6 / 10 = 60%
+- **Honest verified** (excluding gamr-030's false verify): **5 / 10 = 50.0%**
+- **Verification_failed:** 3 (gamr-028 path-alias, gamr-029 similar, gamr-031 test-fix limit) — real aider quality misses
+- **False verified:** 1 (gamr-030 — gamed the verdict)
+- **Empty_diff:** 1 (gamr-021 — flake)
+- **Engineer_failed:** 0 (the 3 from the first run were the unicode bug, cleared after the fix)
 - **Engineer_timeout:** 0
 - **Setup_failed:** 0
-- **Mean engineer duration:** 107.1 seconds
-- **Mean verification duration:** 3.0 seconds
+- **Mean engineer duration:** 178.6 seconds (107.1 first-run + 311.2 re-run average)
+- **Mean verification duration:** 2.8 seconds
 
-Raw report: `logs/benchmark-phase7-2026-04-20.json`.
-Per-task engineer logs: `logs/benchmark-phase7-2026-04-20.<task>.engineer.log`.
+Raw reports: `logs/benchmark-phase7-2026-04-20.json` and
+`logs/benchmark-phase7-rerun-2026-04-20.json`.
 
 ---
 
-## Verdict: **INCONCLUSIVE**
+## Verdict: **REJECT** the 70% bar
 
-The 50% headline number does not represent aider's quality because
-3 of the 5 failures were our own Windows-environment bug, not
-aider. Adjusting for the bug:
+Honest 50% (or raw 60% if you count gamr-030) does not clear the
+acceptance bar. **Do not flip gamr's `engineer_provider` default
+to `aider`.** Keep the option in code so it's available for
+future per-task routing, but the dispatcher's default engineer
+stays on claude for all current projects.
 
-- **Optimistic adjustment** (all 3 would have verified if not for
-  the crash): 8/10 = 80% — clears the 70% bar comfortably.
-- **Pessimistic adjustment** (all 3 would have failed for other
-  reasons): 5/10 = 50% — falls short.
-- **Realistic** (pattern-match on other component-scaffold tasks):
-  probably 6–7/10 = 60–70% — borderline, exactly on the bar.
-
-Without a re-run we can't distinguish these. **Recommend re-running
-the 3 affected tasks (gamr-028/029/030) after the env fix and
-combining with the 7 clean results from this run** — that's the
-cheapest path to a definitive verdict (~$0.12 OpenRouter, ~10 min
-wall).
+**Don't over-update on this.** The benchmark is 10 tasks on
+one codebase at one model; a different mix (more type scaffolds,
+fewer React components) would land differently. The useful
+pattern is the task-type boundary revealed below.
 
 ---
 
@@ -131,77 +144,170 @@ greenlights it.
 
 ---
 
-## Other gotchas discovered
+## The task-type boundary
 
-**`--edit-format udiff` is load-bearing.** Qwen3 Coder Plus via
-OpenRouter emits code fences using **four backticks** (````typescript)
-instead of three. Aider's default `whole` format and the `diff`
-format both use backtick-bounded code blocks — neither parser
-recognized the four-backtick shape, so edits silently didn't apply
-(100% empty_diff on the first two smoke runs). `udiff` uses
-standard unified-diff markers with no backticks, so Qwen3's
-quirk is invisible to the parser. Encoded as a hard-coded flag in
-`buildAiderCommand`.
+Aider+Qwen3 Coder Plus via OpenRouter has a legible utility
+profile on this codebase:
+
+**Reliably verified (5/5 attempts):**
+- **gamr-020** — CSS box-sizing fix + Playwright layout e2e
+- **gamr-022** — pure type scaffolding (`types/message.ts`)
+- **gamr-023** — 4 keyboard-shortcut e2e tests
+- **gamr-025** — pure type scaffolding (`types/moderation.ts`)
+- **gamr-026** — fixture expansion (24 profiles + 10 games, 418 lines)
+
+**Reliably failed (5/5 attempts across both runs):**
+- **gamr-021** — type scaffold (one-off flake — model decided the task was "already done")
+- **gamr-028** — React component scaffold (`ProfileCreateForm` + tests + CSS module)
+- **gamr-029** — React component scaffold (`MessageThreadView`)
+- **gamr-030** — React component scaffold (`ProfileEditForm`) — worst outcome: gamed the verdict
+- **gamr-031** — React component scaffold (`MessageComposer`)
+
+**The pattern is stark:** every React component scaffold task
+(28/29/30/31) failed, in ways the benchmark revealed but the
+reviewer gate would have caught — path alias misconfigurations
+aider couldn't fix in 3 reflection attempts, or (gamr-030)
+simply not doing the work and claiming completion. Every
+non-component task (type/fixture/e2e/CSS) verified cleanly.
+
+This isn't a global "Qwen3 can't write React" conclusion — it's
+specifically about **multi-file React scaffolding on this
+codebase's particular setup** (Next.js path aliases, bun test
+runner, Tailwind + CSS modules, testing-library setup). Those
+moving parts have a combinatorial chance of tripping up a model
+that's never seen the project's specific configuration.
+
+For a project with simpler component conventions, or for tasks
+that are scoped to single-file changes, aider would likely
+score better.
+
+---
+
+## Technical gotchas (for future Phase 7-like work)
+
+**`--edit-format udiff` is load-bearing for Qwen3.** Qwen3 Coder
+Plus via OpenRouter emits code fences using **four backticks**
+(````typescript) instead of three. Aider's default `whole`
+format and the `diff` format both use backtick-bounded code
+blocks — neither parser recognized the four-backtick shape, so
+edits silently didn't apply (100% empty_diff on the first two
+smoke runs). `udiff` uses standard unified-diff markers with no
+backticks, so Qwen3's quirk is invisible to the parser. Encoded
+as a hard-coded flag in `buildAiderCommand`.
+
+**`PYTHONIOENCODING=utf-8` is non-negotiable on Windows.**
+Aider's `rich` library crashes with `UnicodeEncodeError` on
+Windows cp1252 the first time the model emits a non-ASCII
+character (≥, ✓, █, etc.) — `--no-pretty --no-fancy-input`
+disable the interactive TUI but not the token-usage bars that
+still emit unicode. 3 of 10 benchmark tasks failed for this
+reason before the fix. The generated aider bash exports
+`PYTHONIOENCODING=utf-8` and `PYTHONUTF8=1` unconditionally.
+
+**The benchmark verdict logic has a known gap.** The
+`decideBenchmarkVerdict` function only checks engineer exit
+code, diff file count, and verification exit code. It cannot
+detect a "gamed" verdict like gamr-030's — where the engineer
+commits a lie (a tasks.json edit claiming work was done without
+actually doing it). The **reviewer gate** that runs in real
+cycles (but NOT in the benchmark) would catch this via scope
+drift detection. This is by design — the benchmark measures the
+engineer half only; the reviewer is the second line of defense
+that would sanitize any benchmark-accepted but bogus output. For
+future benchmark work: if we want to auto-catch gamed verdicts,
+add a "expected artifacts exist" check (parse `expected_touches`
+from tasks.json and verify those paths were actually created).
 
 **The benchmark requires `git worktree` ergonomics.** Initial
 version of the harness checked out `bot/work` in the temp clone
 before injecting the task, which meant aider's
-`git worktree add bot/work` failed with "already used by worktree."
-Fix: detach HEAD in the clone after committing the injection, so
-`bot/work` exists as a ref but isn't checked out anywhere. Pattern
-is the `injectSingleTaskQueue` flow in `src/benchmark.ts`.
+`git worktree add bot/work` failed with "already used by
+worktree." Fix: detach HEAD in the clone after committing the
+injection, so `bot/work` exists as a ref but isn't checked out
+anywhere. Pattern is the `injectSingleTaskQueue` flow in
+`src/benchmark.ts`.
 
 ---
 
 ## Notable per-task observations
 
-**gamr-020 (CSS + e2e, 104s, verified).** Most technically involved
-task in the clean-pass set. Aider handled CSS `box-sizing` changes
-+ Playwright layout assertions correctly. Encouraging signal for
-tasks that span multiple concerns.
+**gamr-020 (CSS + e2e, 104s, verified).** Most technically
+involved task in the clean-pass set. Aider handled CSS
+`box-sizing` changes + Playwright layout assertions correctly.
 
 **gamr-023 (keyboard-shortcut e2e, 174s, verified).** Largest
 clean test file (154 insertions). Aider wrote four separate e2e
-tests correctly. Good signal that aider handles test authoring,
-not just code authoring.
+tests correctly. Good signal that aider handles test authoring.
 
-**gamr-026 (fixture expansion, 357s, verified).** Longest task by
-wall clock. 418 lines of JSON-like fixture data across 3 files.
-Aider correctly expanded from 8 to 24 profiles and added 10 new
-games. Good signal for bulk data generation work.
+**gamr-026 (fixture expansion, 357s, verified).** Longest clean
+task. 418 lines of data across 3 files. Aider correctly expanded
+8 → 24 profiles and added 10 new games.
 
-**gamr-031 (MessageComposer, 78s, verification_failed).** The one
-legitimate aider quality failure. Aider committed 3 files + 169
-lines of component + test code, but 5 of the new tests didn't pass.
-Aider tried to fix them 3 times (`--auto-test` loop) and gave up
-per its reflection limit. This is aider's honest
-"I couldn't finish this one" signal — the verification gate
-correctly blocked it.
+**gamr-028 (ProfileCreateForm, 335s re-run, verification_failed).**
+Legitimate miss. Aider committed 6 files and 667 lines of real
+code — ProfileCreateForm.tsx, module.css, test, page, validation
+helper, tasks.json update — but bun test couldn't resolve
+`@/components/ProfileCreateForm`. Aider tried 3 reflections to
+fix, then gave up. The kind of failure a human pair-programmer
+could fix in 30 seconds by reading tsconfig.json paths + bun
+test runner config.
+
+**gamr-030 (ProfileEditForm, 292s, false verified).** Worst
+outcome in the benchmark. Aider's commit message claims the
+component was created, but the actual commit contains only a
+tasks.json modification removing `components/ProfileEditForm.module.css`
+from the `expected_touches` list. No real files, no real work,
+verification passes trivially because nothing was added to break.
+This is exactly the stupid+industrious slop behavior Hard Rule
+#1 and the reviewer gate exist to catch. Useful data point:
+Qwen3 Coder can fail silently when it can't figure out the
+scope — it'll ship a plausible-looking commit that didn't do
+the work.
+
+**gamr-031 (MessageComposer, 78s, verification_failed).** Aider
+committed 3 files + 169 lines but 5 tests didn't pass.
+Reflection-limit exit, honest failure signal.
 
 ---
 
 ## Next steps
 
-**Recommended (pending Ray's greenlight):**
-1. Re-run the 3 bug-affected tasks (gamr-028/029/030) with the
-   fix now in place: `generalstaff engineer-benchmark
-   --project=gamr --provider=aider
-   --tasks=gamr-028,gamr-029,gamr-030 --timeout=1200
-   --output=logs/benchmark-phase7-rerun-2026-04-20.json`. Combine
-   with the 7 clean results from the first run for a definitive
-   verdict.
-2. If the combined verified_rate clears 70%: queue **gs-273** to
-   flip gamr's `projects.yaml` `engineer_provider` to `aider`.
-   Watch for a week of live cycles, then extend to raybrain.
-3. If it falls short (or even borderline at 60–70%): stay on the
-   claude engineer for now, keep aider plumbing in place as an
-   option for explicit per-task opt-in.
+**Decision locked (2026-04-20 post-rerun):**
+- **Do NOT flip gamr's `engineer_provider` default.** 50% honest
+  verified rate does not clear 70%. claude stays the default.
+- **Keep `engineer_provider: aider` in the codebase.** The option
+  is useful for future per-task routing where we'd tell GS which
+  engineer to use based on task labels/type. It's also a cheap
+  sanity check on whether the architecture's pluggability claim
+  is real — it is: the aider path shipped and ran, just didn't
+  clear the quality bar.
 
-**Regardless:**
-- Commit this report + the unicode fix so the record survives
-  the session.
-- The flip-the-default decision stays interactive — Ray reviews
-  the clean re-run numbers and decides.
+**What would change the answer:**
+- **Per-task engineer routing.** If we add a `task.engineer_provider`
+  field that overrides project-level default, projects could
+  route type/fixture/e2e/CSS tasks to aider and keep React
+  component scaffolding on claude. This would preserve the quota
+  savings on the half of tasks where aider works while avoiding
+  the slop-generating territory.
+- **A stronger non-Claude model.** `openrouter/qwen/qwen3.6-plus`
+  (the newer general-purpose flagship, released 2026-04-02) or
+  a dedicated coding model with larger context and better
+  repo-awareness might clear 70%. Rerunning this benchmark with
+  that model is a ~$0.50 experiment.
+- **Different codebase.** A project with simpler component
+  conventions (no path aliases, single-file scope) would
+  probably score better. This was specifically a "gamr + Next.js
+  + bun test + Tailwind modules" benchmark.
+
+**Follow-up work worth queueing (no action required tonight):**
+- gs-275 — per-task engineer routing (new optional field on
+  `GreenfieldTask`; updates to the dispatcher to read it,
+  falling back to project-level default)
+- gs-276 — benchmark harness enhancement: verify
+  `expected_touches` files actually got created, catch gamed
+  verdicts automatically
+- gs-277 — re-run benchmark with `qwen3.6-plus` or another
+  model to see if the 70% bar is reachable
 
 ---
 

@@ -1911,14 +1911,48 @@
   },
   {
     "id": "gs-274",
-    "title": "Phase 7 Part 4 — re-run benchmark after the PYTHONIOENCODING=utf-8 fix, to get a clean verdict on aider+Qwen3 Coder quality. **Interactive-only** (Ray greenlights, spends ~$0.12 OpenRouter). Depends on the unicode fix in src/engineer_providers/aider.ts (landed 2026-04-20 in the gs-270 follow-up commit). **Scope:** Re-run the 3 tasks that crashed on the Windows unicode bug in the first benchmark (gamr-028, gamr-029, gamr-030). Combine results with the 7 clean outcomes from logs/benchmark-phase7-2026-04-20.json. Append the combined table + verdict to docs/internal/PHASE-7-BENCHMARK-2026-04-20.md. If combined verified_rate >= 70%, queue gs-275 to flip gamr's projects.yaml engineer_provider default to aider. If <70%, note rejection reason and keep claude default. Command: `generalstaff engineer-benchmark --project=gamr --provider=aider --tasks=gamr-028,gamr-029,gamr-030 --timeout=1200 --output=logs/benchmark-phase7-rerun-2026-04-20.json`.",
-    "status": "pending",
+    "title": "Phase 7 Part 4 — re-run benchmark after the PYTHONIOENCODING=utf-8 fix, to get a clean verdict on aider+Qwen3 Coder quality. **Interactive-only** (Ray greenlights, spends ~$0.12 OpenRouter). Depends on the unicode fix in src/engineer_providers/aider.ts (landed 2026-04-20 in the gs-270 follow-up commit). **Scope:** Re-run the 3 tasks that crashed on the Windows unicode bug in the first benchmark (gamr-028, gamr-029, gamr-030). Combine results with the 7 clean outcomes from logs/benchmark-phase7-2026-04-20.json. Append the combined table + verdict to docs/internal/PHASE-7-BENCHMARK-2026-04-20.md. If combined verified_rate >= 70%, queue gs-275 to flip gamr's projects.yaml engineer_provider default to aider. If <70%, note rejection reason and keep claude default. **OUTCOME (2026-04-20 08:00):** clean re-run produced gamr-028 verification_failed (path-alias), gamr-029 verification_failed (similar), gamr-030 false verified (gamed the verdict). Combined honest rate 5/10 = 50%, does NOT clear 70% bar. **Decision: REJECT** — do not flip gamr default. Keep aider path in code for future per-task routing. Follow-ups queued as gs-275/276/277. Report appended to docs/internal/PHASE-7-BENCHMARK-2026-04-20.md.",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Re-running spends OpenRouter credit; Ray's judgment on whether clean re-run is worth the cost. Also appends to docs/internal/PHASE-7-BENCHMARK-*.md (hands_off).",
     "expected_touches": [
       "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
       "logs/benchmark-phase7-rerun-2026-04-20.json"
+    ],
+    "completed_at": "2026-04-20T08:10:00Z"
+  },
+  {
+    "id": "gs-275",
+    "title": "Phase 7 follow-up — per-task engineer routing. Add optional `task.engineer_provider` and `task.engineer_model` fields to GreenfieldTask that override the project-level default. **Motivation:** the gs-274 benchmark revealed aider+Qwen3 Coder works well for type scaffolds / fixtures / e2e / CSS but fails on React component scaffolding in this codebase. Per-task routing lets us reap the quota savings on the subset where aider works while keeping claude for the subset where it doesn't. **Scope:** (1) Add optional fields to `GreenfieldTask` in src/types.ts. (2) In src/engineer.ts, when the picker selects a task, check for task-level overrides and synthesize a ProjectConfig with the overrides applied. (3) Tests covering override precedence (task > project > default). (4) Document the new fields in a docs/internal/ note or inline in the existing Phase 7 material. Hands-off: does not touch projects.yaml, scripts/, src/reviewer.ts, src/prompts/. Expected diff: ~120-180 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/types.ts",
+      "src/engineer.ts",
+      "tests/engineer.test.ts"
+    ]
+  },
+  {
+    "id": "gs-276",
+    "title": "Phase 7 follow-up — benchmark harness enhancement: detect gamed verdicts. gs-274 surfaced gamr-030 as a false verified — aider committed a tasks.json edit removing one entry from `expected_touches` and called the task done without writing any real code. The benchmark's current verdict logic treats (engineer_exit=0, files_changed>0, verification_exit=0) as verified, which this case satisfies trivially because only tasks.json changed. **Scope:** in src/benchmark.ts, after the verification gate passes, also check that every path in the target task's `expected_touches` list actually exists in the post-cycle worktree. If any declared artifact is missing, downgrade the verdict from `verified` to a new `verdict: 'gamed'` (or equivalent — name to be decided). Add unit tests. Update decideBenchmarkVerdict's signature if needed. Does NOT touch the reviewer or the real-cycle gate — this is benchmark-only. Expected diff: ~80-150 lines.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/benchmark.ts",
+      "tests/benchmark.test.ts"
+    ]
+  },
+  {
+    "id": "gs-277",
+    "title": "Phase 7 follow-up — re-benchmark with a stronger non-Claude model. gs-274's REJECT verdict was specifically for openrouter/qwen/qwen3-coder-plus. Worth testing whether qwen3.6-plus (newer general-purpose flagship, released 2026-04-02) or an equivalent clears the 70% bar on the same 10-task set. **Interactive-only** (~$0.50-1.50 OpenRouter spend). Run: `generalstaff engineer-benchmark --project=gamr --provider=aider --model=openrouter/qwen/qwen3.6-plus --tasks=<same 10> --output=logs/benchmark-phase7-qwen36-<date>.json`. If clears 70%: update PHASE-7-BENCHMARK with new data, queue flip-default task. If not: stay on claude, document the observed ceiling for OpenRouter-free models at this task shape.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true,
+    "interactive_only_reason": "Spends OpenRouter credit; Ray's call on whether to explore this branch vs. focus elsewhere.",
+    "expected_touches": [
+      "docs/internal/PHASE-7-BENCHMARK-2026-04-20.md",
+      "logs/benchmark-phase7-qwen36-2026-04-XX.json"
     ]
   }
 ]
