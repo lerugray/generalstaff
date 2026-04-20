@@ -2050,5 +2050,12 @@
     "title": "Session runner should commit its own session_end PROGRESS.jsonl entries before exiting. Root cause discovered 2026-04-20 evening: the bot's session_end event is emitted after the last cycle's auto-commit runs, which leaves the session_end line(s) uncommitted in state/*/PROGRESS.jsonl. When Ray switches PCs, those lines don't cross over via git, and the next machine's session appends on top of an origin file that has no trace of the previous machine's wrap. Home-PC evening session had to splice 4 such lines back in chronologically (commit 498d9b0). Fix: in src/session.ts, after the session_end events are appended, run a final 'git add state/ && git commit -m ...' similar to autoCommitState in cycle.ts. Keep the invariant that autoCommitState still runs per-cycle; the session-level commit is a belt-and-suspenders catch for session_end entries specifically. Tests: spawn a fake session that produces session_end, verify the entries end up in HEAD, not in the working copy. Expected diff: ~30 lines (session.ts + new test). interactive_only:false â this is bot-pickable after the test is specified.",
     "status": "done",
     "priority": 3
+  },
+  {
+    "id": "gs-289",
+    "title": "Prompt hardening follow-up to gs-282. Observed 2026-04-20 evening cycle 0_bas3: the bot correctly invoked 'bun /src/cli.ts task done' but then committed only the code changes, forgetting to 'git add state/generalstaff/tasks.json' before 'git commit'. The CLI-written status change lived in the worktree, got discarded during worktree teardown. A follow-up cycle (8_p2pg) self-healed by re-picking the still-pending task and landing e452baa 'gs-288: mark done' â but this wastes a full cycle. Fix: in scripts/run_bot.sh and each engineer_command.sh (bookfinder/raybrain/gamr/devforge), add one line to the task-done instructions: 'Before committing, stage the tasks.json change with git add state/' along with the code changes. Keep the CLI-preferred / structured-JSON-fallback guidance intact; this is a staging-step clarification. interactive_only because scripts/ is hands_off.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
   }
 ]
