@@ -69,6 +69,7 @@ mock.module("../../src/safety", () => ({
   isBotRunning: () => ({ running: false }),
   isWorkingTreeClean: async () => ({ clean: true }),
   matchesHandsOff: () => null,
+  matchesHandsOffSymlinkAware: () => null,
   stopFilePath: () => stopFilePath,
 }));
 

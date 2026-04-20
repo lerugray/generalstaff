@@ -9,7 +9,8 @@
 (function () {
   "use strict";
 
-  var sessionId = window.__GS_SESSION_ID;
+  var rootEl = document.getElementById("tail-root");
+  var sessionId = rootEl ? rootEl.getAttribute("data-session-id") : null;
   var statusEl = document.getElementById("tail-status");
   var eventsEl = document.getElementById("tail-events");
 

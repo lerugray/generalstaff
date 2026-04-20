@@ -21,7 +21,7 @@ import { runEngineer } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runVerification } from "./verification";
 import { runReviewer, type ReviewerResult } from "./reviewer";
-import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff } from "./safety";
+import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, matchesHandsOffSymlinkAware } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import type {
   ProjectConfig,
@@ -781,12 +781,20 @@ export async function executeCycle(
       break assemble;
     }
 
-    // 6c. Check for hands-off violations — skip verification + reviewer if found
+    // 6c. Check for hands-off violations — skip verification + reviewer if found.
+    // Uses the symlink-aware variant so a bot that creates `safe-alias.ts ->
+    // src/reviewer.ts` and edits through the alias is caught. baseDir is the
+    // bot worktree — the place the diff paths actually resolve against.
     const diffStats = diffSummaryStats(fullDiff);
     const changedFiles = extractChangedFiles(fullDiff);
+    const wtBase = botWorktreePath(project);
     const violations: Array<{ file: string; pattern: string }> = [];
     for (const file of changedFiles) {
-      const pattern = matchesHandsOff(file, project.hands_off);
+      const pattern = matchesHandsOffSymlinkAware(
+        file,
+        project.hands_off,
+        wtBase,
+      );
       if (pattern) {
         violations.push({ file, pattern });
       }

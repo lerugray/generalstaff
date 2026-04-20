@@ -457,34 +457,40 @@ describe("startServer — gs-285 GET /tail/:sessionId", () => {
       const res = await fetch(`${server.url}/tail/sess-42`);
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("text/html");
+      // Security headers land on every HTML response.
+      expect(res.headers.get("content-security-policy")).toContain(
+        "default-src 'self'",
+      );
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
       const body = await res.text();
       expect(body).toContain("<!DOCTYPE html>");
       expect(body).toContain("sess-42");
       expect(body).toContain("tail-events");
       expect(body).toContain("/static/tail.js");
-      expect(body).toContain('window.__GS_SESSION_ID = "sess-42"');
+      // Session ID is carried on a data attribute now, not an inline
+      // script — keeps CSP strict (`script-src 'self'`).
+      expect(body).toContain('data-session-id="sess-42"');
+      expect(body).not.toContain("window.__GS_SESSION_ID");
     } finally {
       server.stop();
     }
   });
 
-  it("escapes HTML/JS metacharacters in session id rather than injecting raw markup", async () => {
+  it("rejects session ids with HTML/JS metacharacters as 404 rather than rendering", async () => {
     const server = await startServer({ port: 0 });
     try {
-      // URL-encode `<>"`; they survive decodeURIComponent and land in
-      // both the HTML body and the JS string literal.
+      // `<>"` in a session id should never reach the template. The
+      // isSafeId allow-list (alphanumerics + `_-`) blocks the request
+      // at the edge, so this is a 404 rather than an escape-hatched
+      // 200. Stronger than the previous "escape at render time"
+      // posture because the malicious input doesn't touch the renderer
+      // at all.
       const sid = `s"<x>`;
       const res = await fetch(
         `${server.url}/tail/${encodeURIComponent(sid)}`,
       );
-      expect(res.status).toBe(200);
-      const body = await res.text();
-      // Should NOT contain a raw `<x>` tag — that would be an XSS hole.
-      expect(body).not.toContain("<x>");
-      // Escaped form should be present in the HTML body.
-      expect(body).toContain("&lt;x&gt;");
-      // JS literal should use \u003c/\u003e, not raw angle brackets.
-      expect(body).toContain("\\u003cx\\u003e");
+      expect(res.status).toBe(404);
     } finally {
       server.stop();
     }

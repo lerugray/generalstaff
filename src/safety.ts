@@ -1,9 +1,9 @@
 // GeneralStaff — safety module (build step 5)
 // STOP file, working-tree-clean check, hands_off glob, isBotRunning (Q3)
 
-import { existsSync, statSync, readdirSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, statSync, readdirSync, mkdirSync, readFileSync, lstatSync, realpathSync } from "fs";
 import { readFile, writeFile, unlink } from "fs/promises";
-import { dirname, join } from "path";
+import { dirname, join, isAbsolute, relative, resolve } from "path";
 import { $ } from "bun";
 import { spawnSync as realSpawnSync } from "child_process";
 import type { ProjectConfig, BotRunningResult } from "./types";
@@ -286,6 +286,40 @@ export function matchesHandsOff(
     }
   }
   return null;
+}
+
+// Symlink-aware hands-off check. The naive matchesHandsOff only inspects
+// the diff path itself. A bot could bypass a `src/reviewer.ts` pattern
+// by creating `safe-alias.ts -> src/reviewer.ts` and editing through the
+// alias — the diff path is `safe-alias.ts`, which never matches the
+// pattern. This variant also resolves the path's realpath (relative to
+// baseDir) and re-checks, so alias-style bypasses are caught.
+//
+// baseDir is the directory the diff path is relative to (typically the
+// bot worktree). Falls back silently to the direct check if the path
+// can't be resolved (e.g. deleted file, missing worktree).
+export function matchesHandsOffSymlinkAware(
+  filePath: string,
+  handsOff: string[],
+  baseDir: string,
+): string | null {
+  const direct = matchesHandsOff(filePath, handsOff);
+  if (direct !== null) return direct;
+
+  try {
+    const fullPath = isAbsolute(filePath)
+      ? filePath
+      : resolve(baseDir, filePath);
+    const lstat = lstatSync(fullPath);
+    if (!lstat.isSymbolicLink()) return null;
+    const real = realpathSync(fullPath);
+    const rel = relative(baseDir, real);
+    if (!rel || rel.startsWith("..")) return null;
+    const posix = rel.split(/[\\/]/).join("/");
+    return matchesHandsOff(posix, handsOff);
+  } catch {
+    return null;
+  }
 }
 
 // --- Concurrent-run detection (Q3: three-signal check) ---

@@ -197,6 +197,16 @@ export function buildAiderCommand(
   const qTestCmd = shellSingleQuote(project.verification_command);
   const qProjectId = shellSingleQuote(project.id);
 
+  // cycle_budget_minutes is typed as number, but it crosses the YAML
+  // parse boundary so a malformed projects.yaml could sneak in a string
+  // or float. Assert at the interpolation site — the value ends up in
+  // `BUDGET=N` in the generated bash, unquoted by design.
+  if (!Number.isInteger(project.cycle_budget_minutes)) {
+    throw new Error(
+      `project ${project.id}: cycle_budget_minutes must be an integer, got ${String(project.cycle_budget_minutes)}`,
+    );
+  }
+
   return `set -euo pipefail
 
 # Force UTF-8 in the Python interpreter aider runs under. Without

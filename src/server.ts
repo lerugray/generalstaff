@@ -69,6 +69,40 @@ function escHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// Route-param allow-list. Project IDs, cycle IDs, and session IDs all
+// conform to alphanumerics + `_` + `-` in practice. Enforcing the
+// allow-list here blocks path-traversal tricks (both `/` and `\` on
+// Windows), Unicode line-terminator embedding in downstream contexts,
+// and any other separator-style attack on the file paths these IDs
+// interpolate into. Tightening this at the edge is cheap — widen it
+// only if a legitimate ID shape requires it.
+function isSafeId(id: string): boolean {
+  return id.length > 0 && /^[a-zA-Z0-9_-]+$/.test(id);
+}
+
+// Shared response headers for every HTML + SSE response. CSP is strict:
+// `default-src 'self'` + `script-src 'self'` (no inline scripts — the
+// one we had in tail.ts was refactored to a data attribute so this can
+// stay strict). `frame-ancestors 'none'` belt-and-suspenders with
+// `X-Frame-Options: DENY`.
+const SECURITY_HEADERS: Record<string, string> = {
+  "Content-Security-Policy":
+    "default-src 'self'; script-src 'self'; style-src 'self'; " +
+    "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; " +
+    "base-uri 'self'; form-action 'self'",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+};
+
+function htmlHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-cache",
+    ...SECURITY_HEADERS,
+  };
+}
+
 function renderProjectRow(p: FleetOverviewProjectRow): string {
   const id = escHtml(p.id);
   const outcome = p.last_cycle_outcome
@@ -200,34 +234,25 @@ export async function startServer(
       if (req.method === "GET" && url.pathname === "/") {
         return new Response(await renderIndex(), {
           status: 200,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache",
-          },
+          headers: htmlHeaders(),
         });
       }
       if (req.method === "GET" && url.pathname === "/inbox") {
         const { status, html } = await renderInboxPage();
         return new Response(html, {
           status,
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Cache-Control": "no-cache",
-          },
+          headers: htmlHeaders(),
         });
       }
       if (req.method === "GET" && url.pathname.startsWith("/project/")) {
         const projectId = decodeURIComponent(
           url.pathname.slice("/project/".length),
         );
-        if (projectId.length > 0 && !projectId.includes("/")) {
+        if (isSafeId(projectId)) {
           const { status, html } = await renderProjectPage(projectId);
           return new Response(html, {
             status,
-            headers: {
-              "Content-Type": "text/html; charset=utf-8",
-              "Cache-Control": "no-cache",
-            },
+            headers: htmlHeaders(),
           });
         }
       }
@@ -235,14 +260,11 @@ export async function startServer(
         const cycleId = decodeURIComponent(
           url.pathname.slice("/cycle/".length),
         );
-        if (cycleId.length > 0 && !cycleId.includes("/")) {
+        if (isSafeId(cycleId)) {
           const { status, html } = await renderCyclePage(cycleId);
           return new Response(html, {
             status,
-            headers: {
-              "Content-Type": "text/html; charset=utf-8",
-              "Cache-Control": "no-cache",
-            },
+            headers: htmlHeaders(),
           });
         }
       }
@@ -254,18 +276,15 @@ export async function startServer(
           const sessionId = decodeURIComponent(
             rest.slice(0, -"/stream".length),
           );
-          if (sessionId.length > 0 && !sessionId.includes("/")) {
+          if (isSafeId(sessionId)) {
             return openTailStream(sessionId);
           }
         } else {
           const sessionId = decodeURIComponent(rest);
-          if (sessionId.length > 0 && !sessionId.includes("/")) {
+          if (isSafeId(sessionId)) {
             return new Response(renderTailPage(sessionId), {
               status: 200,
-              headers: {
-                "Content-Type": "text/html; charset=utf-8",
-                "Cache-Control": "no-cache",
-              },
+              headers: htmlHeaders(),
             });
           }
         }

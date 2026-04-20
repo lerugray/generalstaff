@@ -31,26 +31,13 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function escapeJsString(s: string): string {
-  // Safe for a double-quoted JS string literal embedded in HTML.
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/</g, "\\u003c")
-    .replace(/>/g, "\\u003e")
-    .replace(/\r/g, "\\r")
-    .replace(/\n/g, "\\n");
-}
-
 export function renderTailPage(sessionId: string): string {
   const safeId = escapeHtml(sessionId);
-  const jsId = escapeJsString(sessionId);
-  const body = `<section class="panel" aria-labelledby="tail-heading">
+  const body = `<section class="panel" id="tail-root" data-session-id="${safeId}" aria-labelledby="tail-heading">
 <h2 id="tail-heading">Session tail <code>${safeId}</code></h2>
 <p class="tail-status" id="tail-status" aria-live="polite">Connecting…</p>
 <ol class="tail-events" id="tail-events" aria-live="polite"></ol>
 </section>
-<script>window.__GS_SESSION_ID = "${jsId}";</script>
 <script src="/static/tail.js" defer></script>`;
   return layout({
     title: `GeneralStaff — tail ${sessionId}`,

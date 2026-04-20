@@ -67,13 +67,17 @@ mock.module("../../src/reviewer", () => ({
 }));
 
 // Import the real matchesHandsOff before mocking
-const { matchesHandsOff: realMatchesHandsOff } = await import("../../src/safety");
+const {
+  matchesHandsOff: realMatchesHandsOff,
+  matchesHandsOffSymlinkAware: realMatchesHandsOffSymlinkAware,
+} = await import("../../src/safety");
 
 mock.module("../../src/safety", () => ({
   isStopFilePresent: async () => false,
   isBotRunning: () => ({ running: false }),
   isWorkingTreeClean: async () => ({ clean: true }),
   matchesHandsOff: realMatchesHandsOff,
+  matchesHandsOffSymlinkAware: realMatchesHandsOffSymlinkAware,
 }));
 
 mock.module("../../src/state", () => ({

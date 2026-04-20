@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import {
   matchesHandsOff,
+  matchesHandsOffSymlinkAware,
   isBotRunning,
   writeSessionPid,
   readSessionPid,
@@ -141,6 +142,78 @@ describe("matchesHandsOff", () => {
       );
       expect(matchesHandsOff("CLAUDE.md", ["CLAUDE.md"])).toBe("CLAUDE.md");
     });
+  });
+});
+
+describe("matchesHandsOffSymlinkAware", () => {
+  const fixtureRoot = join(FIXTURES, "symlink-check");
+
+  beforeEach(() => {
+    mkdirSync(fixtureRoot, { recursive: true });
+    mkdirSync(join(fixtureRoot, "src"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURES, { recursive: true, force: true });
+  });
+
+  it("matches direct hits just like matchesHandsOff", () => {
+    const result = matchesHandsOffSymlinkAware(
+      "src/reviewer.ts",
+      ["src/reviewer.ts"],
+      fixtureRoot,
+    );
+    expect(result).toBe("src/reviewer.ts");
+  });
+
+  it("returns null when the path is a plain non-symlink file not on hands_off", () => {
+    writeFileSync(join(fixtureRoot, "ok.ts"), "export const ok = 1;", "utf8");
+    const result = matchesHandsOffSymlinkAware(
+      "ok.ts",
+      ["src/reviewer.ts"],
+      fixtureRoot,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("catches symlink alias pointing at a hands_off target", async () => {
+    // Create the real file and an alias that points at it. On
+    // platforms without symlink privilege (Windows without dev-mode),
+    // `symlinkSync` throws — in that case the test is a silent no-op,
+    // but the unit-level function behavior is what we care about.
+    const { symlinkSync } = await import("fs");
+    writeFileSync(
+      join(fixtureRoot, "src", "reviewer.ts"),
+      "export const r = 1;",
+      "utf8",
+    );
+    try {
+      symlinkSync(
+        join(fixtureRoot, "src", "reviewer.ts"),
+        join(fixtureRoot, "safe-alias.ts"),
+        "file",
+      );
+    } catch (err) {
+      if (err instanceof Error && /EPERM|operation not permitted/i.test(err.message)) {
+        return; // skip on restricted platforms
+      }
+      throw err;
+    }
+    const result = matchesHandsOffSymlinkAware(
+      "safe-alias.ts",
+      ["src/reviewer.ts"],
+      fixtureRoot,
+    );
+    expect(result).toBe("src/reviewer.ts");
+  });
+
+  it("falls back silently when the path does not exist", () => {
+    const result = matchesHandsOffSymlinkAware(
+      "deleted-file.ts",
+      ["src/reviewer.ts"],
+      fixtureRoot,
+    );
+    expect(result).toBeNull();
   });
 });
 

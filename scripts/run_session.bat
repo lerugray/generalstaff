@@ -100,7 +100,7 @@ echo.
   echo.
 ) > "%LOG%"
 
-bun src/cli.ts session --budget=%BUDGET% >> "%LOG%" 2>&1
+bun src/cli.ts session --budget="%BUDGET%" >> "%LOG%" 2>&1
 set "EXITCODE=%ERRORLEVEL%"
 
 for /f %%i in ('powershell -nologo -command "Get-Date -Format yyyy-MM-ddTHH:mm:ssK"') do set "ENDTS=%%i"
