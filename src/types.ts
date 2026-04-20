@@ -179,7 +179,12 @@ export type ProgressEventType =
   | "session_start"
   | "session_end"
   | "session_complete"
-  | "session_end_auto_merge";
+  | "session_end_auto_merge"
+  // gs-280: emitted when the JSON syntax gate catches a malformed
+  // `.json` file in the cycle's diff before verification runs. The
+  // cycle short-circuits to verification_failed; the event preserves
+  // the parse error + file list for post-hoc grep.
+  | "malformed_json";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -293,6 +298,7 @@ const VALID_EVENTS: readonly string[] = [
   "cycle_end", "cycle_watchdog", "project_soft_skipped",
   "session_start", "session_end", "session_complete",
   "session_end_auto_merge",
+  "malformed_json",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

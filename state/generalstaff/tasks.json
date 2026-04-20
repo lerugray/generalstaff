@@ -1995,7 +1995,7 @@
   {
     "id": "gs-280",
     "title": "gs-280 — **Verification-gate JSON syntax check.** Root cause of 2026-04-20 cascading bug: bot's engineer edit to state/<project>/tasks.json left the file malformed (missing `},` between sibling task objects). Verification (pytest/ruff/etc.) doesn't parse tasks.json, so malformed state landed. Downstream cycles' `loadTasks` threw, silent try/catch in cycle.ts set `nextTask=undefined`, and creative-cycle branch routing (gs-279) never fired because it keys off nextTask.creative. Fix: in src/cycle.ts before reviewer runs, or as a new preflight gate, run `JSON.parse` on every `.json` file in the diff. If any fail, downgrade the cycle to `verification_failed` with reason `malformed_json: <path>`. Add unit test covering the gate. Does NOT touch src/verification.ts (keep the external verification command untouched). Expected diff: ~60-100 lines across src/cycle.ts + tests/cycle.test.ts.",
-    "status": "pending",
+    "status": "done",
     "priority": 2
   },
   {

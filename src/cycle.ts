@@ -308,6 +308,39 @@ export function applyReviewerSanityCheck(
   return { dropped, flipped };
 }
 
+// gs-280: JSON syntax gate. Reads every `.json` file in `changedFiles`
+// from `cwd` and attempts `JSON.parse`; returns the list of files that
+// failed to parse, with the error message truncated. Empty list =
+// gate passes. Motivation: bot engineers' line-oriented edits to
+// state/<project>/tasks.json have on multiple occasions (2026-04-20)
+// dropped the closing `},` between sibling task objects. Verification
+// (pytest/ruff/etc.) doesn't parse tasks.json; reviewer eyeballs the
+// diff text but not JSON structure. Without this gate, malformed JSON
+// lands on bot/work and subsequent cycles' `loadTasks` peek throws —
+// the silent try/catch in runCycle then sets nextTask=undefined and
+// gs-279's creative-cycle branch routing stops firing.
+//
+// The gate is exported + async-pure so tests can exercise it against
+// tmpdir fixtures without standing up a full cycle.
+export async function detectMalformedJsonFiles(
+  cwd: string,
+  changedFiles: string[],
+): Promise<Array<{ file: string; error: string }>> {
+  const jsonFiles = changedFiles.filter((f) => f.endsWith(".json"));
+  const malformed: Array<{ file: string; error: string }> = [];
+  for (const file of jsonFiles) {
+    const absPath = join(cwd, file);
+    try {
+      const content = await readFile(absPath, "utf8");
+      JSON.parse(content);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      malformed.push({ file, error: msg.slice(0, 500) });
+    }
+  }
+  return malformed;
+}
+
 export function diffSummaryStats(diff: string): DiffStats {
   if (!diff) {
     return { files_changed: 0, insertions: 0, deletions: 0 };
@@ -744,6 +777,39 @@ export async function executeCycle(
       result.reviewer_verdict = "verification_failed";
       result.diff_stats = diffStats;
       console.log(`\nHands-off violation detected: ${result.reason}`);
+      break assemble;
+    }
+
+    // 6d. gs-280: JSON syntax gate. Check that every `.json` file in
+    //     the diff still parses. Catches the specific failure mode
+    //     where a line-oriented bot edit to tasks.json drops a
+    //     closing `},` between sibling objects — verification
+    //     (pytest/ruff/etc.) won't parse it, reviewer eyeballs the
+    //     diff but not structure, and the malformed file then breaks
+    //     the NEXT cycle's task-peek (silent try/catch → nextTask
+    //     undefined → creative-cycle routing stops firing). Read
+    //     from the bot's worktree when present so we're checking the
+    //     exact bytes the engineer committed; fall back to project
+    //     path when the worktree isn't there (pre-cycle-6 code path).
+    const jsonGateCwd = existsSync(botWorktreePath(project))
+      ? botWorktreePath(project)
+      : project.path;
+    const malformedJson = await detectMalformedJsonFiles(
+      jsonGateCwd,
+      changedFiles,
+    );
+    if (malformedJson.length > 0) {
+      const summary = malformedJson.map((m) => m.file).join(", ");
+      result.final_outcome = "verification_failed";
+      result.reason = `malformed JSON in diff: ${summary}`;
+      result.verification_outcome = "failed";
+      result.reviewer_verdict = "verification_failed";
+      result.diff_stats = diffStats;
+      console.log(`\nJSON syntax gate failed: ${result.reason}`);
+      await appendProgress(project.id, "malformed_json", {
+        files: malformedJson,
+        changed_files: changedFiles,
+      }, cycleId);
       break assemble;
     }
 

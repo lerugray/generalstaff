@@ -13,6 +13,7 @@ import {
   crossCheckReviewerHandsOff,
   applyReviewerSanityCheck,
   decideBotBranchHandling,
+  detectMalformedJsonFiles,
 } from "../src/cycle";
 import type { ProjectConfig, ReviewerResponse } from "../src/types";
 import type { ReviewerResult } from "../src/reviewer";
@@ -956,4 +957,107 @@ describe("non-dogfood cycle end-to-end (gs-168)", () => {
     expect(out.reviewer_called).toBe(true);
     expect(out.final_outcome).toBe("verified");
   }, 60_000);
+});
+
+describe("detectMalformedJsonFiles (gs-280)", () => {
+  const FIXTURE = join(tmpdir(), `gs-malformed-json-${Date.now()}`);
+
+  it("returns empty list when there are no .json files in the changed set", async () => {
+    // Fixture that mostly exists to prove the filter works — *.md, *.ts
+    // should all be skipped even if they contain JSON-looking text.
+    const dir = join(FIXTURE, "no-json");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "notes.md"), "{ this is not json }", "utf8");
+    writeFileSync(join(dir, "src.ts"), "export const x = 1;", "utf8");
+    expect(
+      await detectMalformedJsonFiles(dir, ["notes.md", "src.ts"]),
+    ).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns empty list when every .json file parses cleanly", async () => {
+    const dir = join(FIXTURE, "valid-json");
+    mkdirSync(join(dir, "state", "proj"), { recursive: true });
+    writeFileSync(
+      join(dir, "state", "proj", "tasks.json"),
+      JSON.stringify([{ id: "t-001", status: "done" }]),
+      "utf8",
+    );
+    writeFileSync(join(dir, "package.json"), '{"name":"x"}', "utf8");
+    expect(
+      await detectMalformedJsonFiles(dir, [
+        "state/proj/tasks.json",
+        "package.json",
+      ]),
+    ).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports the specific file and error when a .json file is malformed", async () => {
+    // The exact failure mode we hit 2026-04-20 on bookfinder-general:
+    // missing `},` between sibling objects in a tasks.json list.
+    const dir = join(FIXTURE, "malformed-json");
+    mkdirSync(join(dir, "state", "proj"), { recursive: true });
+    writeFileSync(
+      join(dir, "state", "proj", "tasks.json"),
+      '[\n  {\n    "id": "a",\n    "status": "done"\n  \n  {\n    "id": "b"\n  }\n]',
+      "utf8",
+    );
+    const result = await detectMalformedJsonFiles(dir, [
+      "state/proj/tasks.json",
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe("state/proj/tasks.json");
+    expect(result[0].error.length).toBeGreaterThan(0);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("skips non-.json paths even when they would fail JSON.parse", async () => {
+    const dir = join(FIXTURE, "skip-non-json");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "README.md"), "{{ not json }}", "utf8");
+    writeFileSync(join(dir, "package.json"), '{"name":"ok"}', "utf8");
+    // Only the .json file gets parsed; README.md is skipped.
+    expect(
+      await detectMalformedJsonFiles(dir, ["README.md", "package.json"]),
+    ).toEqual([]);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reports missing .json files as malformed (file-not-found counts)", async () => {
+    // Edge case: a file listed in changedFiles but not actually present
+    // in the worktree. Either the diff was a deletion (we don't
+    // distinguish) or something raced. Either way, safer to flag than
+    // silently pass.
+    const dir = join(FIXTURE, "missing-json");
+    mkdirSync(dir, { recursive: true });
+    const result = await detectMalformedJsonFiles(dir, ["gone.json"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].file).toBe("gone.json");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns empty list when changedFiles is empty", async () => {
+    expect(
+      await detectMalformedJsonFiles(FIXTURE, []),
+    ).toEqual([]);
+  });
+
+  it("truncates error messages to at most 500 characters", async () => {
+    const dir = join(FIXTURE, "long-error");
+    mkdirSync(dir, { recursive: true });
+    // Large malformed JSON — actual JSON.parse error message won't
+    // realistically exceed 500 chars, but the truncation guard lets
+    // us bound the audit-log entry size if a future Node version
+    // emits something longer.
+    writeFileSync(
+      join(dir, "big.json"),
+      '{' + '"a":1,'.repeat(1000) + '}',  // bad trailing comma, will fail
+      "utf8",
+    );
+    const result = await detectMalformedJsonFiles(dir, ["big.json"]);
+    expect(result).toHaveLength(1);
+    expect(result[0].error.length).toBeLessThanOrEqual(500);
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
