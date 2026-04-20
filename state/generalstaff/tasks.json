@@ -2010,5 +2010,36 @@
     "status": "pending",
     "priority": 3,
     "interactive_only": true
+  },
+  {
+    "id": "gs-283",
+    "title": "gs-284: Phase 6 route handler — GET /project/:id. Server-render a per-project page reading src/views/task_queue.ts (for the pending-task list) and src/views/dispatch_detail.ts (for recent dispatches + verification rate). Follow the GET / pattern that gs-269 established: import layout() from src/server/templates/layout.ts, compose child HTML via the existing helpers, wire into src/server.ts or src/server/routes/ following whatever structure gs-269's landing page uses. Return 404 if projectId is not in projects.yaml. No JSON APIs in v1 (all HTML). Expected touches: src/server/routes/project.ts (new), src/server.ts (route wiring), tests/server.test.ts (route tests). Expected diff: ~100-180 lines.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-284",
+    "title": "gs-285: Phase 6 route handler — GET /cycle/:cycleId. Single-cycle drill-down page. Read from src/views/dispatch_detail.ts to get the cycle's engineer prompt metadata, reviewer verdict text, diff stats, duration, outcome. Layout: summary header (cycle id, project, outcome badge, duration) + sections for engineer output, verification output tail, reviewer response, diff stats. Follow the layout() pattern from gs-269. Return 404 if cycleId not found. Expected touches: src/server/routes/cycle.ts (new), src/server.ts, tests/server.test.ts. Expected diff: ~120-200 lines.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-285",
+    "title": "gs-286: Phase 6 route handler — GET /tail/:sessionId (Server-Sent Events). Live session tail via SSE. Read from src/views/session_tail.ts for the event stream data. Server emits text/event-stream with heartbeat comments every 15s to keep the connection alive and appends PROGRESS.jsonl events for that session as they land (tail via fs.watch or similar). Client-side JavaScript (tiny, vanilla) renders each event as it arrives. Phase 6 sketch says this is the one route that needs JS — keep it minimal, no framework. Expected touches: src/server/routes/tail.ts (new), src/server/static/tail.js (new), src/server.ts, tests/server.test.ts. Expected diff: ~150-250 lines.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-286",
+    "title": "gs-287: Phase 6 route handler — GET /inbox. Cross-project messages/signals page. Read from src/views/inbox.ts. Layout: list of entries grouped by project, each with a timestamp, signal type (e.g. verification_failed, hands_off_violation, creative_draft_ready), one-line summary, and a link to the originating cycle's /cycle/:id page. Follow the layout() pattern. Empty state: show 'Inbox empty — all projects running clean.' Expected touches: src/server/routes/inbox.ts (new), src/server.ts, tests/server.test.ts. Expected diff: ~100-180 lines.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-287",
+    "title": "gs-283: Refresh README phase labels to match docs/internal/. README currently uses 'Phase 5 UI shell (in progress)' for what the design docs call 'Phase 6' (the local dashboard — bun.serve + route handlers). Rename in the README so the two are consistent: 'Phase 6: Local web dashboard' replaces 'Phase 5 UI shell'. Keep 'Phase 5 visual anchor (closed 2026-04-18)' as-is since that refers to the docs/phase-5-references/ HTML mockups (distinct from the UI shell work). Also add a 'Phase 7: Engineer-swap (complete)' line if missing. Interactive-only because README.md is in the generalstaff hands_off list. Expected diff: ~20 lines.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
   }
 ]
