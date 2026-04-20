@@ -1,0 +1,191 @@
+/* GeneralStaff Phase 6 base stylesheet (gs-269).
+ *
+ * Palette ported from docs/phase-5-references/ — the "wargame paper"
+ * vocabulary established as the product's visual anchor in Phase 5.
+ * System font stack per the task's no-external-fonts constraint, so
+ * the page renders without Google Fonts or other network deps.
+ * The Phase 5 refs used Spectral + Archivo Narrow + JetBrains Mono;
+ * we substitute the equivalent system-family faces here. If a later
+ * phase wants real webfonts they can layer a @font-face on top
+ * without changing this base.
+ */
+
+:root {
+  /* Paper + ink palette */
+  --paper:       #f1e7d3;
+  --paper-2:     #ede1c9;
+  --paper-edge:  #e4d5b7;
+  --ink:         #2a2418;
+  --ink-soft:    #4a4131;
+  --ink-faint:   #8a7f66;
+  --ink-ghost:   #b7ab8e;
+  --rule:        #3a3122;
+  --rule-soft:   #c9bb9b;
+  --rust:        #8a3a1c; /* single accent */
+
+  /* Typography stack — system fonts only, no external network */
+  --font-body:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  /* Spacing scale — keep consistent across cards and panels */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  --content-max: 1200px;
+  --rule-thickness: 1px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* --- Header + nav --- */
+
+.site-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-6);
+  background: var(--paper-2);
+  border-bottom: 2px solid var(--rule);
+}
+
+.site-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.site-nav {
+  display: flex;
+  gap: var(--space-5);
+}
+
+.site-nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.95rem;
+  padding: var(--space-1) 0;
+  border-bottom: 2px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.site-nav a:hover {
+  color: var(--rust);
+}
+
+.site-nav a:focus-visible {
+  outline: 2px solid var(--rust);
+  outline-offset: 2px;
+}
+
+.site-nav a[aria-current="page"] {
+  color: var(--rust);
+  border-bottom-color: var(--rust);
+}
+
+/* --- Main content area --- */
+
+.site-main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-6);
+}
+
+.site-main h2,
+.site-main h3,
+.site-main h4 {
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+.site-main a {
+  color: var(--rust);
+}
+
+/* --- Card / panel component --- */
+
+.card,
+.panel {
+  background: var(--paper-2);
+  border: 1px solid var(--rule-soft);
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
+  border-radius: 2px;
+}
+
+.card h2,
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  color: var(--ink);
+}
+
+/* --- Footer --- */
+
+.site-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  background: var(--paper-2);
+  border-top: 1px solid var(--rule-soft);
+  color: var(--ink-faint);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+
+.site-footer-time {
+  color: var(--ink-ghost);
+}
+
+/* --- Small screens fallback ---
+ * No mobile-first pretense — the dashboard is meant for desktop
+ * monitoring per Phase 6 scope — but collapse nav + padding so
+ * narrow viewports stay readable instead of clipping.
+ */
+@media (max-width: 640px) {
+  .site-header,
+  .site-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  .site-nav {
+    gap: var(--space-4);
+  }
+  .site-main {
+    padding: var(--space-4);
+  }
+}

@@ -295,6 +295,17 @@ explicitly, don't proactively write.
   after the slop-pass; the slop-pass is the floor, not the
   ceiling.
 
+- **Calibrate to Ray's availability before rushing session
+  wrap-ups.** The system reminder surfaces the current date; if
+  the time-of-day matters (e.g. "do you have an hour before
+  work?", "is this a tomorrow thing?"), ask Ray instead of
+  guessing from context clues. Rationale captured 2026-04-20
+  after I assumed Ray was about to leave for work and tried to
+  rush a session wrap-up when he actually had 2 hours of useful
+  focus time. Cost of asking "how much time do you have?" is 5
+  seconds; cost of mis-assuming is an over-packed or
+  under-packed session plan.
+
 - **Structural code decisions are Claude's call in interactive
   sessions.** When hitting a tradeoff internal to the code —
   API shape, file organization, refactor pattern, worktree

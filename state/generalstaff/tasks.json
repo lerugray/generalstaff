@@ -1855,14 +1855,15 @@
   {
     "id": "gs-269",
     "title": "Phase 6 scaffold: shared HTML layout template + base stylesheet. **BACKGROUND:** Phase 6 uses server-rendered HTML (no SPA, no bundler) per `docs/internal/PHASE-6-SKETCH-2026-04-19.md`. This task lays the shared page shell that later route-renderer tasks use. Visual vocabulary draws from `docs/phase-5-references/`. Depends on gs-267. **Scope:** (1) Create `src/server/templates/layout.ts` exporting `export function layout(opts: { title: string; body: string; activeNav?: 'fleet' | 'inbox' }): string` returning a complete HTML5 document with `<!DOCTYPE html>`, `<head>` (title, charset, viewport meta, link to `/static/style.css`), and `<body>` containing a semantic structure: `<nav>` (links to /, /inbox with aria-current on active), `<main>` (injects `body`), `<footer>` (GeneralStaff version from package.json, current time). (2) Create `src/server/static/style.css` with: CSS custom properties for the palette (muted grays, one accent — pick from Phase 5 reference files' existing palette; inspect `docs/phase-5-references/` HTML files for color values); base typography (system font stack, readable body size); `nav`, `main`, `footer` layout rules; a `.card` / `.panel` component class for data sections. No external fonts, no external CSS frameworks. (3) Update `src/server.ts` to serve `/static/style.css` (read from disk relative to the module, return with `Content-Type: text/css`) and `GET /` → return `layout({ title: 'GeneralStaff', body: '<p>Fleet overview TBD</p>' })` with `Content-Type: text/html; charset=utf-8`. 404 still for unknown paths. (4) Tests in `tests/server.test.ts` (append): (a) GET /static/style.css returns 200 with `text/css` content-type; (b) GET / returns 200 HTML containing the title tag and the nav element; (c) GET /unknown still 404. (5) Do NOT add /project, /cycle, /tail, /inbox route handlers (later tasks). Do NOT add vanilla JS files yet. Do NOT touch CLI code. Do NOT touch src/safety.ts, src/reviewer.ts, src/prompts/, or any hands_off path. Should pass `bun test && bun x tsc --noEmit`. Expected diff: ~200-350 lines across layout.ts + style.css + server.ts updates + tests.",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "expected_touches": [
       "src/server/templates/layout.ts",
       "src/server/static/style.css",
       "src/server.ts",
       "tests/server.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-20T08:45:00Z"
   },
   {
     "id": "gs-270",
