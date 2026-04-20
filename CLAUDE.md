@@ -471,13 +471,25 @@ When GeneralStaff needs a second registered project (to prove the
 dispatcher's generality on something other than itself), the
 candidate set is narrow:
 
-- **catalogdna is off-limits as a GeneralStaff test target.** Ray
-  has parallel interactive work there, and the app is at a
-  sensitive stage around new-user onboarding that needs his
-  steady hand. Do not propose registering catalogdna as a second
-  project for GeneralStaff to manage, regardless of how
-  convenient the proximity seems. This probably applies to any
-  Ray project with real users — confirm before suggesting.
+- **catalogdna is GS-eligible as of 2026-04-20** (relaxation
+  doc: `docs/internal/RULE-RELAXATION-2026-04-20-catalogdna.md`).
+  The earlier "off-limits" constraint dated to the pre-pivot
+  paranoid phase when GS hadn't been production-tested. Five days
+  of GS on other projects (generalstaff dogfood, gamr, raybrain
+  Phase 1, bookfinder-general bf-001..005) demonstrated the
+  verification-gate + hands_off + reviewer discipline does what
+  the off-limits rule was indirectly protecting against. Ray
+  authorized the relaxation with the reasoning "I trust the work
+  GS has been doing and organizationally it will help catalogDNA
+  regardless." catalogdna's registration will default to **Mode B**
+  (interactive-primary with GS as discipline layer — see
+  `docs/internal/USE-MODES-2026-04-20.md` for the mode taxonomy),
+  not Mode A bot-primary. Ray's taste authority over
+  vault-finalization + any user-facing content is unchanged and
+  will be encoded in the eventual hands_off list. The broader
+  "confirm before suggesting" guidance for any Ray project with
+  real users remains in force — this relaxation is specific to
+  catalogdna, not a blanket policy change.
 - **gamr is a live-project test case as of 2026-04-19.** Ray's
   old idea (~10 years ago): "Tinder for gamers, but strictly
   platonic" — matching people for gaming partners, nearby or
