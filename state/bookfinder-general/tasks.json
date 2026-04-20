@@ -34,9 +34,11 @@
   {
     "id": "bf-004",
     "title": "Add PEP 257 docstrings to public functions in `bookfinder_general/cli.py`. Docstring each public function with: one-line summary, Args block listing each parameter with type and purpose, Returns block describing return shape, Raises block for documented exceptions. Private functions (leading underscore) get one-line docstrings only. Verify with `python -m ruff check bookfinder_general/cli.py` (pydocstyle rules if enabled). Expected diff: ~40-90 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
-    "expected_touches": ["bookfinder_general/cli.py"]
+    "expected_touches": ["bookfinder_general/cli.py"],
+    "completed_at": "2026-04-20T10:55:00Z",
+    "outcome_notes": "Bot commit 35b7753 on bot/work. cli.py has five public functions (no leading-underscore privates at module scope): print_banner, print_results_table, do_search, do_download, main. Each already had either no docstring or a one-line summary; upgraded all five to full PEP 257 form — summary line, Args block, Returns block, Raises block (noting 'Does not raise' where the function swallows ConnectionError / ValueError internally). The nested update_progress inside do_download is a closure, not module-level, so left alone. Ruff pydocstyle rules (D) are not enabled in pyproject — verification is just the default E4/E7/E9/F ruleset plus pytest. Verification: pytest 4 passed, ruff clean on bookfinder_general/ + tests/. Diff: 80 insertions, 4 deletions (84 lines touched, just inside the 40-90 expected band)."
   },
   {
     "id": "bf-005",
