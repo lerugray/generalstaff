@@ -85,6 +85,8 @@ changes, and commit when tests pass.
 - After committing, update the task status in state/generalstaff/tasks.json." \
   --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \
   --dangerously-skip-permissions \
+  --mcp-config '{"mcpServers":{}}' \
+  --strict-mcp-config \
   --output-format text
 
 echo ""
