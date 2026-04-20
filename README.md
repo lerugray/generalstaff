@@ -10,29 +10,33 @@ with a verification gate that cannot be prompted around, mandatory
 hands-off lists, and a full audit log of every prompt, response, and
 diff. The principled alternative to closed-source SaaS bot platforms.
 
-> **Status.** Phases 1–4 shipped: sequential MVP, multi-provider LLM
-> routing, cross-project generality, opt-in parallel worktrees.
-> Phase 5 visual anchor closed. Phase 6 local web dashboard closed
-> 2026-04-20: HTTP server, `generalstaff serve` CLI, shared layout
-> + base stylesheet, plus four route handlers (`/project/:id`,
-> `/cycle/:cycleId`, `/tail/:sessionId` SSE, `/inbox`). Phase 7
-> pluggable engineer shipped: opt-in
-> `engineer_provider: aider` routes cycles to aider + OpenRouter
-> (Qwen 3.6+ Plus) instead of `claude -p`. The 10-task benchmark
-> at `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md` cleared
-> 80% verified on `qwen3.6-plus`, so the alternative engineer is
-> a viable way to keep Claude subscription quota pressure off
-> bulk scaffolding work. Per-task routing (`task.engineer_provider`)
-> lets projects mix engineers by task complexity. Per-project
-> creative-work opt-in (Hard Rule #1's "opt-in plugins with
-> explicit warnings" clause) enables scoped creative-draft
-> delegation with human-in-the-loop review — policy at
-> `docs/internal/RULE-RELAXATION-2026-04-20.md`. **1,560+ passing
-> tests across 47 test files** — notable for a largely
-> LLM-generated codebase, and itself a cross-check on the
-> verification gate (tests must pass for the gate to mark a cycle
-> verified). Three managed projects cycling (Bookfinder General
-> queued as fourth). Cross-platform (Windows, macOS, Linux).
+> **Status:** v0.1.0 tagged 2026-04-19. **1,613 passing tests** across
+> 47 files. Tests doubling as a gate cross-check: a cycle only verifies
+> if the suite passes. Six managed projects cycling. Cross-platform
+> (Windows, macOS, Linux).
+>
+> **Shipped:**
+>
+> - **Phases 1–4** — sequential MVP, multi-provider LLM routing,
+>   cross-project generality, opt-in parallel worktrees.
+> - **Phase 5** — visual anchor (terminal dashboards).
+> - **Phase 6** — local web dashboard at `generalstaff serve`:
+>   fleet overview, per-project drill-down, single-cycle detail,
+>   live session tail via SSE, attention inbox.
+> - **Phase 7** — pluggable engineer. `engineer_provider: aider`
+>   routes cycles through aider + OpenRouter (Qwen 3.6+ Plus)
+>   instead of `claude -p`. 10-task benchmark cleared 80% verified
+>   on qwen3.6-plus — a viable way to keep Claude subscription
+>   quota off bulk scaffolding. Per-task routing
+>   (`task.engineer_provider`) mixes engineers by task complexity.
+>   Benchmark details: `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`.
+> - **Creative-work opt-in** — per-project flag with voice
+>   references and human-in-the-loop draft review. Policy:
+>   `docs/internal/RULE-RELAXATION-2026-04-20.md`.
+> - **Mode B registrations** — GS wraps projects that already have
+>   their own bot infrastructure (catalogdna pattern), acting as a
+>   discipline layer around the existing loop rather than replacing
+>   it. See `docs/internal/USE-MODES-2026-04-20.md`.
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
@@ -52,6 +56,7 @@ diff. The principled alternative to closed-source SaaS bot platforms.
 - [Quickstart](#quickstart)
 - [Why this over the alternatives](#why-this-over-the-alternatives)
 - [Works alongside](#works-alongside)
+- [Opt-in knobs](#opt-in-knobs)
 - [Who this is for](#who-this-is-for)
 - [The Hammerstein framing](#the-hammerstein-framing)
 - [Hard rules](#hard-rules)
@@ -307,6 +312,30 @@ cycle:
 
 The combination is defense in depth. Use any of them alone if that
 fits; none is a hard dependency of the others.
+
+## Opt-in knobs
+
+Defaults stay conservative on purpose. Autonomous mistakes on other
+people's projects cost time to clean up, and most users would rather
+pay a bit of friction up front than debug a bad auto-merge later. If
+you know what you want, flip any default per-project (or per-task) in
+`projects.yaml`. Full schema lives in `projects.yaml.example`. Quick
+reference:
+
+| Knob | Effect | Default | Flip when |
+|---|---|---|---|
+| `engineer_provider: aider` | Route cycles through aider + OpenRouter (Qwen3 / 3.6 Plus) instead of `claude -p` | `claude` | You'd rather not burn Claude subscription quota on bulk scaffolding. Per-cycle OpenRouter cost ~$0.05-0.10. |
+| `creative_work_allowed: true` | Allow `creative: true` tasks to dispatch creative-draft cycles (README sections, blog posts, launch copy) with voice references + human-in-the-loop review | `false` | You want bot drafts you can edit, and you've read `docs/internal/RULE-RELAXATION-2026-04-20.md` to understand the guardrails. |
+| `auto_merge: true` | Dispatcher auto-merges `bot/work` into your default branch after a clean cycle | `false` (Hard Rule 4 — opt in after 5 clean cycles) | You've watched the bot run cleanly and want to stop merging manually. |
+| `dispatcher.max_parallel_slots: N` | Run N cycles per round in parallel | `1` | You have ≥2 projects with real backlogs and wall-clock is the bottleneck. Multiplies reviewer API spend by N. |
+| `task.engineer_provider`, `task.engineer_model` | Per-task engineer override | inherits project | Use `claude` for gnarly refactors, `aider` for scaffold work, picking per task. |
+| `task.interactive_only: true` | Mark a task bot-unpickable; you handle it interactively | `false` | Tasks that need your taste / judgment but you still want tracked in the queue. |
+| `task.creative: true` | Mark a task as creative (drafts, copy) — routes to creative-work path when enabled project-wide | `false` | Drafts you want the bot to produce for human review. |
+
+The Hard Rules (below) hold regardless of knob state. `projects.yaml`
+always requires a non-empty `hands_off` list. `bot/work` is the only
+branch the bot pushes to. Every prompt, response, and diff lands in
+`PROGRESS.jsonl`. Knobs move the defaults; they can't move those.
 
 ## Who this is for
 
