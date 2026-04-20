@@ -1844,12 +1844,13 @@
   {
     "id": "gs-268",
     "title": "Phase 6 scaffold: wire `generalstaff serve` CLI subcommand. **BACKGROUND:** gs-267 ships `startServer()` in `src/server.ts`. This task exposes it via the CLI. See `docs/internal/PHASE-6-SKETCH-2026-04-19.md` §CLI surface. Depends on gs-267. **Scope:** (1) Add a `serve` subcommand to the CLI dispatch in `src/cli.ts`. Arguments: `--port <n>` (default 3737), `--host <ip>` (default 127.0.0.1), `--open` (launch default browser at the bound URL after server starts). (2) Handler imports `startServer` from `src/server.ts`, calls it with parsed args, prints `GeneralStaff serving at <url>` on stdout, registers SIGINT/SIGTERM handlers that call `stop()` and exit cleanly. (3) The `--open` flag: use `Bun.spawn()` to invoke the platform-appropriate open command — `xdg-open` on Linux, `open` on macOS, `cmd /c start <url>` on Windows. Detect via `process.platform`. Swallow errors silently (if open fails, server still runs). (4) Add help text in the existing CLI help style. Include `serve` in `generalstaff --help` output. (5) Tests in `tests/cli.test.ts` (append, don't restructure): (a) parsing `serve --port 4000` yields the right args; (b) `serve` alone uses defaults; (c) `serve --open` sets the flag. DO NOT test actually-launching-the-server in cli.test.ts; that's server.test.ts's job. (6) Do NOT modify `src/server.ts`. Do NOT add routes. Do NOT touch src/safety.ts, src/reviewer.ts, src/prompts/, or any hands_off path. Should pass `bun test && bun x tsc --noEmit`. Expected diff: ~80-140 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "expected_touches": [
       "src/cli.ts",
       "tests/cli.test.ts"
-    ]
+    ],
+    "completed_at": "2026-04-20T03:15:00Z"
   },
   {
     "id": "gs-269",

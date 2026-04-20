@@ -5641,3 +5641,66 @@ dispatcher:
     expect(result.stdout).not.toMatch(/doctor: \d+ checks/);
   });
 });
+
+// gs-268: serve subcommand — wires the Phase 6 dashboard server to the CLI.
+// Tests use --dry-run so no socket is bound; actual server behavior lives
+// in tests/server.test.ts.
+describe("serve subcommand (gs-268)", () => {
+  it("serve --help prints serve-specific usage and exits 0", async () => {
+    const result = await runCli(["serve", "--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Usage: generalstaff serve");
+    expect(result.stdout).toContain("--port");
+    expect(result.stdout).toContain("--host");
+    expect(result.stdout).toContain("--open");
+  });
+
+  it("serve is advertised in the global help", async () => {
+    const result = await runCli(["--help"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("generalstaff serve");
+  });
+
+  it("(a) --port=4000 is parsed and applied", async () => {
+    const result = await runCli(["serve", "--port=4000", "--dry-run"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("http://127.0.0.1:4000");
+    expect(result.stdout).toContain("open=false");
+  });
+
+  it("(b) serve alone uses defaults (127.0.0.1:3737, open=false)", async () => {
+    const result = await runCli(["serve", "--dry-run"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("http://127.0.0.1:3737");
+    expect(result.stdout).toContain("open=false");
+  });
+
+  it("(c) --open sets the flag", async () => {
+    const result = await runCli(["serve", "--open", "--dry-run"]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("open=true");
+  });
+
+  it("--host override is applied", async () => {
+    const result = await runCli([
+      "serve",
+      "--host=0.0.0.0",
+      "--port=8080",
+      "--dry-run",
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("http://0.0.0.0:8080");
+  });
+
+  it("rejects non-numeric --port with a clear error", async () => {
+    const result = await runCli(["serve", "--port=abc", "--dry-run"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--port must be an integer");
+  });
+
+  it("rejects out-of-range --port", async () => {
+    const result = await runCli(["serve", "--port=70000", "--dry-run"]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("--port must be an integer");
+  });
+});

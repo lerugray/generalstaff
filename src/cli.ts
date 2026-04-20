@@ -265,6 +265,13 @@ Usage:
     Example: generalstaff view fleet-overview --json     # same, as JSON
     # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
 
+  generalstaff serve [--port=<n>] [--host=<ip>] [--open] [--dry-run]
+                                                          Start the local web dashboard (Phase 6)
+    Example: generalstaff serve                          # bind 127.0.0.1:3737
+    Example: generalstaff serve --port=4000              # override port
+    Example: generalstaff serve --open                   # open the default browser after binding
+    Example: generalstaff serve --dry-run                # print resolved config and exit
+
   generalstaff message send --from=<str> --body=<str> [--kind=<...>] [--session-id=<id>]
                            [--task-id=<id>] [--cycle-id=<id>] [--json]
                                                           Append a message to the fleet inbox (gs-240)
@@ -324,6 +331,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "cycle",
   "status",
   "task",
+  "serve",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -3005,6 +3013,100 @@ switch (command) {
     // Unreachable — VALID_VIEWS guard above catches unknown names.
     console.error(`Error: view '${viewName}' handler missing`);
     process.exit(1);
+  }
+
+  case "serve": {
+    // gs-268: Phase 6 web dashboard launcher. Thin shim around
+    // startServer() in src/server.ts. Arg parsing is validated here so
+    // the server module stays focused on request handling.
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff serve [options]\n" +
+          "\n" +
+          "Start the local web dashboard server (Phase 6).\n" +
+          "\n" +
+          "Options:\n" +
+          "  --port=<n>     Port to bind (default: 3737)\n" +
+          "  --host=<ip>    Host/interface to bind (default: 127.0.0.1)\n" +
+          "  --open         Launch the default browser at the bound URL\n" +
+          "  --dry-run      Print resolved config and exit (does not bind)\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff serve\n" +
+          "  generalstaff serve --port=4000\n" +
+          "  generalstaff serve --host=0.0.0.0 --port=8080\n" +
+          "  generalstaff serve --open\n",
+      );
+      process.exit(0);
+    }
+    const { values: serveValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        port: { type: "string" },
+        host: { type: "string" },
+        open: { type: "boolean", default: false },
+        "dry-run": { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
+    let servePort = 3737;
+    if (serveValues.port !== undefined) {
+      const parsed = parseInt(serveValues.port, 10);
+      if (isNaN(parsed) || parsed < 0 || parsed > 65535 || !/^\d+$/.test(serveValues.port)) {
+        console.error(
+          "Error: --port must be an integer between 0 and 65535",
+        );
+        process.exit(1);
+      }
+      servePort = parsed;
+    }
+    const serveHost =
+      serveValues.host !== undefined && serveValues.host.length > 0
+        ? serveValues.host
+        : "127.0.0.1";
+    const serveOpen = serveValues.open === true;
+    const serveDryRun = serveValues["dry-run"] === true;
+
+    if (serveDryRun) {
+      console.log(
+        `serve: would bind http://${serveHost}:${servePort} (open=${serveOpen})`,
+      );
+      process.exit(0);
+    }
+
+    const { startServer } = await import("./server");
+    const running = await startServer({ port: servePort, host: serveHost });
+    console.log(`GeneralStaff serving at ${running.url}`);
+
+    let stopped = false;
+    const shutdown = (signal: string) => {
+      if (stopped) return;
+      stopped = true;
+      console.log(`\nReceived ${signal}, shutting down…`);
+      running.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+    if (serveOpen) {
+      try {
+        const platform = process.platform;
+        if (platform === "darwin") {
+          Bun.spawn(["open", running.url], { stdout: "ignore", stderr: "ignore" });
+        } else if (platform === "win32") {
+          Bun.spawn(["cmd", "/c", "start", "", running.url], {
+            stdout: "ignore",
+            stderr: "ignore",
+          });
+        } else {
+          Bun.spawn(["xdg-open", running.url], { stdout: "ignore", stderr: "ignore" });
+        }
+      } catch {
+        // Silent: if the browser launcher isn't available, the server still runs.
+      }
+    }
+    break;
   }
 
   case "message": {
