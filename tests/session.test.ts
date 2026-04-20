@@ -2125,5 +2125,13 @@ describe("flushSessionEndMerges (gs-254)", () => {
       rmSync(b.repo, { recursive: true, force: true });
       rmSync(c.repo, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
+  // 20s timeout (vs bun's 5s default) — this test creates + merges
+  // three real git repos in tmpdir, which can run 5-10s on Windows
+  // under full-suite concurrent load. Observed 2026-04-20 blocking a
+  // generalstaff bot cycle's verification: engineer produced a clean
+  // 366-line diff, reviewer verified, but this one test tripped the
+  // 5s cap, the suite exit was non-zero, and the cycle rolled back.
+  // In isolation the test runs in ~5.45s; the bump is margin against
+  // concurrent-load slowdown, not a change in what the test exercises.
 });
