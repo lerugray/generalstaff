@@ -182,13 +182,32 @@ export async function renderProjectPage(projectId: string): Promise<{ status: 20
   ]);
 
   const safeId = escapeHtml(project.id);
+  const safePath = escapeHtml(project.path);
+  const cdCmd = project.path.includes(" ")
+    ? `cd "${project.path}"`
+    : `cd ${project.path}`;
   const body = `<section class="panel" aria-labelledby="project-heading">
 <h2 id="project-heading">Project: ${safeId}</h2>
 <dl class="project-meta">
 <dt>Priority</dt><dd>${project.priority}</dd>
 <dt>Branch</dt><dd><code>${escapeHtml(project.branch)}</code></dd>
 <dt>Auto-merge</dt><dd>${project.auto_merge ? "enabled" : "off"}</dd>
+<dt>Path</dt><dd><code>${safePath}</code></dd>
 </dl>
+</section>
+<section class="panel" aria-labelledby="work-heading">
+<h2 id="work-heading">Work on this</h2>
+<p>Open an interactive Claude Code session in the project directory with
+GeneralStaff context primed. Copy the command block below:</p>
+<pre><code>generalstaff sync --project=${safeId}
+${escapeHtml(cdCmd)}
+claude</code></pre>
+<p>The <code>sync</code> step refreshes <code>.claude/CLAUDE-GS.md</code> in
+the project directory with the latest MISSION, hands-off list, and
+open tasks. If the file is already up to date, you can skip it and
+run <code>claude</code> directly in <code>${safePath}</code>. Reference
+the context from inside a session with
+<code>@.claude/CLAUDE-GS.md</code>.</p>
 </section>
 <section class="panel" aria-labelledby="verification-heading">
 <h2 id="verification-heading">Verification</h2>

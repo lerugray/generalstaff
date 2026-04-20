@@ -177,6 +177,26 @@ describe("startServer — gs-283 GET /project/:id", () => {
     }
   });
 
+  it("renders 'Work on this' section with sync+cd+claude commands, quoting paths that contain spaces", async () => {
+    // T3-minimal: each project page surfaces a copy-pasteable launch
+    // block so interactive work on a registered project is one command
+    // away. Paths with spaces must quote the cd target.
+    writeProjectsYaml(["alpha"]);
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/project/alpha`);
+      const body = await res.text();
+      expect(body).toContain("Work on this");
+      expect(body).toContain("generalstaff sync --project=alpha");
+      expect(body).toContain("claude");
+      expect(body).toContain("CLAUDE-GS.md");
+      // Tests use `proj-alpha/` (no space), so no quoting:
+      expect(body).toMatch(/cd [^"][^\n<]*proj-alpha/);
+    } finally {
+      server.stop();
+    }
+  });
+
   it("returns 200 with empty-state panels when project has no tasks.json or PROGRESS.jsonl", async () => {
     writeProjectsYaml(["alpha"]);
     const server = await startServer({ port: 0 });
