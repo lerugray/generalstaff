@@ -2001,7 +2001,7 @@
   {
     "id": "gs-281",
     "title": "gs-281 — **Fail-loud on task-peek failure in cycle.ts.** The try/catch around `loadTasks` + `nextBotPickableTask` in cycle.ts silently swallows parse errors and sets nextTask=undefined. That's correct behavior for non-greenfield projects (no tasks.json expected), but it's WRONG when a tasks.json exists but is malformed — the silent-swallow masks the issue and kills gs-279's creative-cycle routing downstream. Fix: distinguish 'file doesn't exist' (silent, expected) from 'file exists but unparseable' (log a `task_peek_failed` progress event with the error message, still fall through to undefined so cycle proceeds but operator has a grep-able signal). Add `task_peek_failed` to ProgressEventType union in src/types.ts. Unit-test the two branches. Expected diff: ~40-70 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3
   },
   {

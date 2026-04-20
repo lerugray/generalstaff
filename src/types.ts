@@ -184,7 +184,14 @@ export type ProgressEventType =
   // `.json` file in the cycle's diff before verification runs. The
   // cycle short-circuits to verification_failed; the event preserves
   // the parse error + file list for post-hoc grep.
-  | "malformed_json";
+  | "malformed_json"
+  // gs-281: the pre-cycle `loadTasks` peek (cycle.ts step 1a) found
+  // a `state/<id>/tasks.json` that exists but can't be parsed or
+  // validated. The cycle proceeds with nextTask=undefined so the
+  // legacy non-creative path still runs, but the event preserves
+  // the error for post-hoc grep so operators can spot the breakage
+  // instead of it silently masking downstream creative-cycle routing.
+  | "task_peek_failed";
 
 export interface ProgressEntry {
   timestamp: string;
