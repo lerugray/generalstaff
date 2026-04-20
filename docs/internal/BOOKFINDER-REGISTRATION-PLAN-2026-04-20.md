@@ -286,40 +286,34 @@ session), the steps are:
 
 ---
 
-## Gaps that need Ray's input before execution
+## Decisions (confirmed by Ray, 2026-04-20 ~04:45 EDT)
 
-Answer these in the next session (or now if time permits):
-
-1. **Path confirm.** Is `C:/Users/rweis/OneDrive/Documents/bookfinder-general`
-   the canonical local path on both home and work PCs, or only
-   home?
-2. **Priority confirm.** Is priority 3 right? (1=highest, 5=lowest.
-   Lower than gamr's 2 seems right — gamr is the more active
-   project — but you're the judge.)
-3. **Voice reference paths confirm.** I picked
+1. **Path.** Home PC is `C:/Users/rweis/OneDrive/Documents/bookfinder-general`
+   — confirmed. Work PC path is slightly different and will be set
+   when Ray resumes from there, but most bot work runs on home PC
+   so it's fine to register with the home-PC path for now. When the
+   work-PC path is known, update `projects.yaml` at that point
+   (interactive edit — projects.yaml is hands_off).
+2. **Priority 3** — confirmed.
+3. **Voice-reference paths** — confirmed:
    `An Amateur Guide To Wargame Design.txt` + `CATALOG.md` from
-   PIH/manuals/ as the starter set. There are ~20 files there;
-   which 2–4 have the strongest "your voice" signal for short-form
-   prose (README sections, launch posts)?
-4. **Task priorities confirm.** The 5 seeded tasks are my read of
-   "safe, useful, scoped." Any you'd swap? Any high-value work I
-   missed because I didn't read the whole source?
-5. **Creative-work readiness.** gs-278 Phase A is landed
-   (scaffolding); gs-279 (Phase B — the actual creative execution
-   behaviors) is NOT landed. Bookfinder can register with
-   `creative_work_allowed: true` today and all non-creative tasks
-   (bf-001..bf-004) will work; bf-005 (the creative task) will
-   technically run under the default reviewer flow until gs-279
-   lands, which might produce noise. Options:
-   - **Option A:** Register now, hold bf-005 as `status: "pending"`
-     with `interactive_only: true` until gs-279 lands. Bot grinds
-     on bf-001..bf-004. Clean sequencing.
-   - **Option B:** Land gs-279 first (future session), then
-     register with bf-005 bot-pickable from day one.
-   - **Option C:** Register now, let bf-005 be bot-pickable,
-     accept the draft won't have voice-reference-prepend or
-     reviewer-skip until gs-279 lands.
-   My lean is **Option A** — cleanest boundaries, no work lost.
+   PIH/manuals/. **Future addition, not for initial registration:**
+   Ray's Facebook export just arrived and raybrain is spinning up
+   an ingestion bot to process it. Once raybrain publishes a cleaned
+   voice corpus from the FB export, add a pointer to this project's
+   `voice_reference_paths` — the FB corpus will have much richer
+   first-person idiom signal than the wargame manuals (years of
+   informal writing).
+4. **Seeded tasks (bf-001..005)** — all 5 confirmed as-is, no swaps.
+5. **Creative-work sequencing: Option A.** Register now with
+   `creative_work_allowed: true`; bf-005 ships with
+   `interactive_only: true` (reason references gs-279 dependency).
+   Bot grinds bf-001..004 autonomously in the interim. When
+   gs-279 ships, flip bf-005's `interactive_only` to `false` and
+   it becomes bot-pickable with full creative-cycle behaviors.
+
+No remaining blockers — registration is executable whenever Ray
+wants to do it in a dedicated session.
 
 ---
 
