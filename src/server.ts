@@ -9,6 +9,7 @@ import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { layout } from "./server/templates/layout";
+import { renderProjectPage } from "./server/routes/project";
 
 export interface StartServerOptions {
   port?: number;
@@ -67,7 +68,7 @@ export async function startServer(
   const server = Bun.serve({
     hostname,
     port,
-    fetch(req: Request): Response {
+    async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       if (req.method === "GET" && url.pathname === "/health") {
         return new Response("ok", { status: 200 });
@@ -89,6 +90,21 @@ export async function startServer(
             "Cache-Control": "no-cache",
           },
         });
+      }
+      if (req.method === "GET" && url.pathname.startsWith("/project/")) {
+        const projectId = decodeURIComponent(
+          url.pathname.slice("/project/".length),
+        );
+        if (projectId.length > 0 && !projectId.includes("/")) {
+          const { status, html } = await renderProjectPage(projectId);
+          return new Response(html, {
+            status,
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "no-cache",
+            },
+          });
+        }
       }
       return new Response("Not Found", { status: 404 });
     },
