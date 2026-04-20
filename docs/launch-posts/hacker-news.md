@@ -50,11 +50,12 @@ not instructions. Tests fail, empty diff, hands-off violation: cycle
 rolls back and nothing reaches master. Every prompt, response, tool
 call, and diff lands in a `PROGRESS.jsonl` file inside your repo.
 
-1,609 passing tests. 9% self-rejection rate on proposed diffs (20 of
-231 reviewer verdicts came back `verification_failed`). The repo is
-registered as its own first managed project, so the audit log
-contains every cycle where the gate rejected a bad diff. You don't
-have to trust the claim. Grep the log.
+1,628 passing tests across 48 files. 8.6% self-rejection rate on
+proposed diffs (20 of 233 reviewer verdicts came back
+`verification_failed`). The repo is registered as its own first
+managed project, so the audit log contains every cycle where the
+gate rejected a bad diff. You don't have to trust the claim. Grep
+the log.
 
 Three things I couldn't find in one package:
 
@@ -88,7 +89,6 @@ Requirements: Bun 1.2+, git, and either Claude Code, an OpenRouter
 account, or a local Ollama install. One-line installer for macOS,
 Linux, Windows. AGPL-3.0.
 
-Built on nights and weekends while working a minimum-wage day job.
 Feedback welcome, especially from people running bot loops in
 production. I expect there are three or four things I haven't
 thought of yet.
@@ -97,11 +97,12 @@ thought of yet.
 
 ## Pre-post checklist
 
-- [ ] **Numbers fresh.** Re-grep `state/generalstaff/PROGRESS.jsonl`
-      for current verified/rejected/weak counts. The draft says
-      1,609 passing tests and 9% self-rejection (20 of 231 reviewer
-      verdicts). Re-verify within 24 hours of posting; absolute
-      counts drift daily, rate has held 8.7-9.1% since 2026-04-17.
+- [x] **Numbers fresh (2026-04-20 evening).** Re-grepped
+      `state/generalstaff/PROGRESS.jsonl`: 211 verified + 20
+      `verification_failed` + 2 `verified_weak` = 233 reviewer
+      verdicts, 8.6% self-rejection. Tests: 1,628 passing across
+      48 files (`bun test` local). Re-check within 24 hours of
+      posting; rate has held 8.6-9.1% since 2026-04-17.
 - [ ] **Front page scan.** Check HN front page 30 minutes before
       posting. If it's saturated with Anthropic/OpenAI news, wait a
       day — your angle gets eaten.

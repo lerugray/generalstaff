@@ -5,45 +5,45 @@
 **Open-source autonomous engineering that refuses to ship slop.**
 **Your code. Your keys. Your control.**
 
-A meta-dispatcher that runs Claude Code agents on your local projects
-with a verification gate that cannot be prompted around, mandatory
-hands-off lists, and a full audit log of every prompt, response, and
-diff. The principled alternative to closed-source SaaS bot platforms.
+A meta-dispatcher that runs Claude Code agents on your local projects.
+Verification gate you can't prompt around. Hands-off lists per project.
+Full audit log of every prompt, response, tool call, and diff in your
+own repo. Open-source alternative to closed SaaS bot platforms.
 
-> **Status:** v0.1.0 tagged 2026-04-19. **1,613 passing tests** across
-> 47 files. Tests doubling as a gate cross-check: a cycle only verifies
+> **Status:** v0.1.0 tagged 2026-04-19. **1,628 passing tests** across
+> 48 files. Tests doubling as a gate cross-check: a cycle only verifies
 > if the suite passes. Six managed projects cycling. Cross-platform
 > (Windows, macOS, Linux).
 >
 > **Shipped:**
 >
-> - **Phases 1–4** — sequential MVP, multi-provider LLM routing,
+> - **Phases 1–4:** sequential MVP, multi-provider LLM routing,
 >   cross-project generality, opt-in parallel worktrees.
-> - **Phase 5** — visual anchor (terminal dashboards).
-> - **Phase 6** — local web dashboard at `generalstaff serve`:
->   fleet overview, per-project drill-down, single-cycle detail,
+> - **Phase 5:** visual anchor (terminal dashboards).
+> - **Phase 6:** local web dashboard at `generalstaff serve`.
+>   Fleet overview, per-project drill-down, single-cycle detail,
 >   live session tail via SSE, attention inbox.
-> - **Phase 7** — pluggable engineer. `engineer_provider: aider`
+> - **Phase 7:** pluggable engineer. `engineer_provider: aider`
 >   routes cycles through aider + OpenRouter (Qwen 3.6+ Plus)
 >   instead of `claude -p`. 10-task benchmark cleared 80% verified
->   on qwen3.6-plus — a viable way to keep Claude subscription
->   quota off bulk scaffolding. Per-task routing
+>   on qwen3.6-plus. Per-task routing
 >   (`task.engineer_provider`) mixes engineers by task complexity.
->   Benchmark details: `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`.
-> - **Creative-work opt-in** — per-project flag with voice
->   references and human-in-the-loop draft review. Policy:
+>   Benchmark details in
+>   `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`.
+> - **Creative-work opt-in:** per-project flag with voice
+>   references and human-in-the-loop draft review. Policy in
 >   `docs/internal/RULE-RELAXATION-2026-04-20.md`.
-> - **Mode B registrations** — GS wraps projects that already have
->   their own bot infrastructure (catalogdna pattern), acting as a
->   discipline layer around the existing loop rather than replacing
->   it. See `docs/internal/USE-MODES-2026-04-20.md`.
+> - **Mode B registrations:** GS wraps projects that already have
+>   their own bot infrastructure (catalogdna pattern). It acts as a
+>   discipline layer around the existing loop, not a replacement.
+>   See `docs/internal/USE-MODES-2026-04-20.md`.
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
 > same verification gate, scope-match reviewer, and hands-off check
 > the tool ships with. Read
 > [`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl)
-> to count the rejections yourself — including the cycles the system
+> to count the rejections yourself, including the cycles the system
 > caught itself being wrong.
 
 ## Contents
@@ -75,47 +75,43 @@ alternative to Polsia"). On 2026-04-19 it tagged v0.1.0.
 
 Between those two dates, dogfooding itself the whole time:
 
-- **1,175 commits**, of which **179** are shipped task commits
+- **1,407 commits**, of which **200** are shipped task commits
   (one per `gs-XXX` feature or fix landing on master)
-- **1,441 passing tests** across 45 test files
-- **16,900+ lines of TypeScript** in `src/`
-- **190 verified + 19 rejected + 1 weak** reviewer verdicts on its
-  own diffs — the verification gate caught and rolled back ~9% of
+- **1,628 passing tests** across 48 test files (of which 4 cover
+  the symlink-aware hands-off gate added in the pre-HN audit below)
+- **20,500+ lines of TypeScript** in `src/`
+- **211 verified + 20 rejected + 2 weak** reviewer verdicts on its
+  own diffs. The verification gate caught and rolled back 8.6% of
   what the engineer proposed, including hands-off violations on
-  `src/safety.ts`, `src/reviewer.ts`, and `src/prompts/`
-- Three managed projects cycling (itself, `gamr`, `raybrain`)
-- One pre-launch security audit, five HIGH/MEDIUM findings fixed
-  in the same audit pass
+  `src/safety.ts`, `src/reviewer.ts`, and `src/prompts/`.
+- Six managed projects cycling (itself, `gamr`, `raybrain`,
+  `devforge`, `bookfinder-general`, `catalogdna`).
+- Two pre-launch security audits. The first fixed five
+  HIGH/MEDIUM findings. The second caught a symlink bypass on the
+  hands-off check plus a handful of low-severity hardening items.
+  Both audits landed their fixes in the same pass.
 
-The audit trail is literal: every cycle in that span wrote a line
-to
+Every cycle in that span wrote a line to
 [`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl).
-Anyone can `grep '"verdict":"verification_failed"'` that file and
-count the rejections themselves. The velocity doesn't land without
-the gate — the gate is what makes the velocity trustworthy instead
-of slop.
-
-This section exists because "built itself" reads as marketing
-prose without numbers attached. With the numbers attached, it's a
-working demonstration of what the tool is for.
+`grep '"verdict":"verification_failed"'` it yourself and count the
+rejections. The gate is what makes the velocity trustworthy instead
+of slop; without it, the commits would be faster and worse.
 
 ## The problem
 
-Autonomous coding agents fail in one predictable way: they are
-**industrious without judgment**. Closed SaaS platforms and naive
-`claude -p` loops let agents confidently mark tasks as done when tests
-fail, diffs are empty, or scope was hallucinated. Polsia's #1 one-star
-review complaint on Trustpilot is false task completions. The damage
-compounds quietly because nobody is checking the bot's work against
-reality.
+Autonomous coding agents fail in one predictable way: **industrious
+without judgment**. Closed SaaS platforms and naive `claude -p` loops
+let agents mark tasks as done when tests fail, diffs are empty, or
+scope was hallucinated. Polsia's top one-star review complaint on
+Trustpilot is false task completions. Nobody is checking the bot's
+work against reality, so the damage compounds where you won't see it
+until next week.
 
-The economic shape compounds the technical failure. Closed-SaaS tools
-charge per credit for confident slop and capture the value whether
-the project ships or not. The slop isn't a bug in the pricing model;
-it's what the pricing model rewards — the tool wins whether your
-project works or not. GeneralStaff is structured to refuse
-participation in that equilibrium: local-first, BYOK, open audit log,
-no platform middleman.
+The pricing model rewards the slop. Closed-SaaS tools charge per
+credit whether the project ships or not, so the slop isn't a bug in
+their pricing; it's the equilibrium. GeneralStaff refuses to
+participate: local-first, BYOK, open audit log, no platform
+middleman.
 
 ## The approach
 
@@ -127,13 +123,13 @@ no platform middleman.
 - **Verification gate** (Hard Rule #6): a Boolean check in the
   dispatcher. Tests must pass, diff must be non-empty, reviewer must
   confirm scope match. A cycle is not marked `done` until all three
-  hold. This is not a prompt -- it is code, and it fires on every cycle.
-- **Hands-off lists** (Hard Rule #5): per-project glob patterns that
-  the bot must not touch. Violations are caught by the reviewer and
-  surfaced as true negatives. Empty list = no registration.
-- **Worktree isolation**: the bot works in `.bot-worktree` on a
+  hold. It is code, not a prompt, and it fires on every cycle.
+- **Hands-off lists** (Hard Rule #5): per-project glob patterns the
+  bot must not touch. The reviewer catches violations and surfaces
+  them as true negatives. Empty list = no registration.
+- **Worktree isolation:** the bot works in `.bot-worktree` on a
   `bot/work` branch. Your interactive work on `master` never conflicts
-  with autonomous cycles, and you can review any cycle's diff before
+  with autonomous cycles, and you review each cycle's diff before
   merging.
 - **BYOK billing** (Hard Rule #8): you pay Anthropic, OpenRouter, or
   whoever directly. No platform credits, no SaaS middleman, no revenue
@@ -144,15 +140,15 @@ no platform middleman.
 
 Every item above is falsifiable from this repo's own git history. On
 2026-04-17 the verification gate caught an autonomous cycle trying to
-edit `src/reviewer.ts` — a file on its own hands-off list — and
-rejected the commit. That rejection is in `PROGRESS.jsonl`. Closed
-SaaS tools can't show you theirs.
+edit `src/reviewer.ts` (on its own hands-off list) and rejected the
+commit. That rejection is in `PROGRESS.jsonl`. Closed SaaS tools can't
+show you theirs.
 
 ## What it actually catches
 
-The verification gate is not decorative. Here's a real rejection
-from this repo's own audit log — the bot produced a diff modifying
-three safety-critical files, and the reviewer caught all three:
+The verification gate is not decorative. In this real rejection from
+this repo's own audit log, the bot produced a diff modifying three
+safety-critical files and the reviewer caught all three:
 
 ```json
 {
@@ -172,22 +168,22 @@ three safety-critical files, and the reviewer caught all three:
 
 Cycle rolled back. No commit to `master`. The entry above is a
 literal line from
-[`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl)
-— grep for `"verdict":"verification_failed"` and count for yourself.
+[`state/generalstaff/PROGRESS.jsonl`](state/generalstaff/PROGRESS.jsonl).
+Grep for `"verdict":"verification_failed"` and count for yourself.
 A closed-SaaS tool could not show you this log even if they wanted
 to; the log doesn't exist outside their ops.
 
 ## What it looks like
 
-The screenshot at the top is the Phase 6 dashboard mockup — a
-command-center view with five sections: current session status, items
+The screenshot at the top is the Phase 6 dashboard mockup: a
+command-center view with five sections. Current session status, items
 that need your attention, per-project fleet cards, dispatch controls,
 and a usage sidebar. The dimmed card at the bottom previews how a
 post-launch project's card will render once live-mode ingestion lands
-(revenue, active users, ad spend, uptime — see
+(revenue, active users, ad spend, uptime; see
 [`docs/internal/UI-VISION-2026-04-19.md`](docs/internal/UI-VISION-2026-04-19.md)).
 
-**What's shipped today:** the data contract — five JSON view modules
+**What's shipped today:** the data contract. Five JSON view modules
 (`fleet-overview`, `task-queue`, `session-tail`, `dispatch-detail`,
 `inbox`) and their CLI wrapping. You can run
 `generalstaff view fleet-overview --json` right now and get the same
