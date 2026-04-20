@@ -22,6 +22,7 @@
     "expected_touches": ["bookfinder_general/config.py"],
     "completed_at": "2026-04-20T10:30:00Z",
     "outcome_notes": "Bot commit ff8772f on bot/work. config.py has no functions — it's constants-only — so the type surface reduces to Final[...] annotations on each module-level constant plus `from __future__ import annotations` and a `from typing import Final` import. Used modern builtin generics (list[str], dict[str, str]) since from-future-annotations makes those safe on 3.11+. Verification: python -m pytest tests/ -q → 4 passed; ruff clean on bookfinder_general/ + tests/. Diff: 14 insertions, 11 deletions (25 lines touched, slightly below the 30-60 expected band because there were no functions to annotate)."
+  },
   {
     "id": "bf-003",
     "title": "Add full type hints to `bookfinder_general/library.py`. Same pattern as bf-002 — all function signatures, `from __future__ import annotations`, module-level constants. Pay attention to: any function that takes a path (use `Path` from pathlib, not `str`), any function that returns a dict (use `TypedDict` or a `dataclass`), any async functions. Verify with ruff + import smoke-test. Expected diff: ~50-100 lines.",
