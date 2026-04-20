@@ -248,7 +248,9 @@ bot can grind on.
     "title": "Draft a 300-word README section titled 'Why Bookfinder exists' (or similar — engineer picks best title from 3 candidates). Voice-calibrated to the PIH manuals in `voice_reference_paths`. Drafts go to `drafts/readme-why-section-v1.md` — NOT into README.md directly (README.md is hands_off). Ray edits the draft and decides whether to fold into README. Audience: open-source developers browsing GitHub. Message: what gap Bookfinder fills (Anna's Archive search that actually returns the right book; cleanly extracts text; summarizes with stop-slop rules so the output isn't LLM boilerplate). Tone: technical, dry humor, no marketing-speak. Do NOT mention 'unleash' / 'revolutionize' / any engagement-bait verbs.",
     "status": "pending",
     "priority": 3,
-    "creative": true
+    "creative": true,
+    "interactive_only": true,
+    "interactive_only_reason": "Creative-cycle execution behaviors (gs-279: voice-reference prompt prepend, reviewer-skip, creative-branch override) not yet landed. Flip to bot-pickable once gs-279 ships."
   }
 ]
 ```
