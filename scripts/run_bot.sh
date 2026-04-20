@@ -82,7 +82,20 @@ changes, and commit when tests pass.
 - Do not modify files in the hands-off list (see CLAUDE.md for the list).
 - If you can't complete the task, write a note explaining why and move on.
 - Budget: ${BUDGET_MINUTES} minutes. Stop before the budget runs out.
-- After committing, update the task status in state/generalstaff/tasks.json." \
+
+## Marking the task done
+After committing, mark the task done via the GeneralStaff CLI — do NOT
+line-edit state/generalstaff/tasks.json. Line-oriented edits have corrupted
+the JSON structure on multiple occasions (dropped commas between sibling
+objects, 2026-04-20). The CLI parses, mutates, and writes back a
+well-formed file:
+
+  bun \"\$GENERALSTAFF_ROOT/src/cli.ts\" task done --project=generalstaff --task=<task-id>
+
+GENERALSTAFF_ROOT is set by the dispatcher. If the CLI itself errors,
+fall back to: read the whole tasks.json, JSON.parse it, set the target
+task's status to 'done', write back with 2-space indent + trailing
+newline. Never do line-by-line edits on tasks.json." \
   --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \
   --dangerously-skip-permissions \
   --mcp-config '{"mcpServers":{}}' \

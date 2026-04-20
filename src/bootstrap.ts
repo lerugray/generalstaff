@@ -192,8 +192,18 @@ tasks, lowest id first). Work on exactly that task — no scope creep.
 - Run \\\`bun install\\\` if needed (lockfile must already be committed).
 - Run \\\`${verifyCommand}\\\` to verify your changes.
 - Commit with a message describing the task you completed.
-- Update the task's status to 'done' in state/${projectId}/tasks.json after
-  committing.
+- Mark the task done via the GeneralStaff CLI. Do NOT line-edit
+  state/${projectId}/tasks.json — that file lives in GeneralStaff's repo,
+  not this worktree, and line-oriented edits have corrupted the JSON
+  structure on multiple occasions (dropped commas between sibling objects,
+  2026-04-20). The CLI parses, mutates, and writes back a well-formed file:
+
+    bun \\\"\\\$GENERALSTAFF_ROOT/src/cli.ts\\\" task done --project=${projectId} --task=<task-id>
+
+  GENERALSTAFF_ROOT is set by the dispatcher. If the CLI errors, fall back
+  to opening \\\$GENERALSTAFF_ROOT/state/${projectId}/tasks.json, parsing
+  as JSON, mutating the target task's status to 'done', and writing back
+  with 2-space indent + trailing newline. Never line-edit tasks.json.
 
 ## What you must NOT do
 - Modify any file matching a pattern in hands_off.yaml.

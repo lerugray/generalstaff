@@ -2007,7 +2007,7 @@
   {
     "id": "gs-282",
     "title": "gs-282 — **Harden engineer prompt re: tasks.json editing.** Bot's line-oriented edits to state/<project>/tasks.json consistently drop the closing `},` between sibling task objects (observed 2026-04-20, twice in two sessions on bookfinder-general). Prompt currently says 'Update the task's status to done in state/<project>/tasks.json after committing' — insufficient guidance. Fix: in scripts/run_bot.sh AND any project-local engineer_command.sh, add an explicit instruction like 'When editing tasks.json, use the generalstaff CLI (bun src/cli.ts task done --project=<id> --task=<task-id>) rather than raw text editing — the CLI preserves JSON structure. Only fall back to raw editing if the CLI is unavailable, and in that case read the whole file, parse as JSON, mutate the parsed object, and write back formatted JSON.' Interactive-only because scripts/ is hands_off. Expected diff: ~15 lines (prompt text only).",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": true
   },

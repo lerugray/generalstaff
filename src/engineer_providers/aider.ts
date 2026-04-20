@@ -99,8 +99,15 @@ task — draft only what the task's brief names.
 - Read voice-reference files listed above (outside ${context.draftsDir}).
 - Run the verification command (if any): ${project.verification_command}
 - Commit with a message describing the draft you produced.
-- Update the task's status to 'done' in state/${project.id}/tasks.json
-  after committing.
+- Mark the task done via the GeneralStaff CLI — do NOT line-edit
+  state/${project.id}/tasks.json. Line-oriented edits have corrupted the
+  JSON structure on multiple occasions (dropped commas between sibling
+  objects, 2026-04-20). Use:
+    bun "$GENERALSTAFF_ROOT/src/cli.ts" task done --project=${project.id} --task=<task-id>
+  GENERALSTAFF_ROOT is set by the dispatcher. If the CLI errors, fall back
+  to opening GENERALSTAFF_ROOT/state/${project.id}/tasks.json, parsing as
+  JSON, mutating status to 'done', writing back with 2-space indent.
+  Never line-edit tasks.json.
 
 ## What you must NOT do
 - Modify any file matching a pattern in this hands_off list:
@@ -138,8 +145,15 @@ tasks, lowest id first). Work on exactly that task — no scope creep.
 - Add test files that support the claimed work.
 - Run the verification command: ${project.verification_command}
 - Commit with a message describing the task you completed.
-- Update the task's status to 'done' in state/${project.id}/tasks.json after
-  committing.
+- Mark the task done via the GeneralStaff CLI — do NOT line-edit
+  state/${project.id}/tasks.json. Line-oriented edits have corrupted the
+  JSON structure on multiple occasions (dropped commas between sibling
+  objects, 2026-04-20). Use:
+    bun "$GENERALSTAFF_ROOT/src/cli.ts" task done --project=${project.id} --task=<task-id>
+  GENERALSTAFF_ROOT is set by the dispatcher. If the CLI errors, fall back
+  to opening GENERALSTAFF_ROOT/state/${project.id}/tasks.json, parsing as
+  JSON, mutating status to 'done', writing back with 2-space indent.
+  Never line-edit tasks.json.
 
 ## What you must NOT do
 - Modify any file matching a pattern in this hands_off list:

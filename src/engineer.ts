@@ -4,7 +4,7 @@
 import { spawn } from "child_process";
 import { createWriteStream, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
-import { ensureCycleDir, writeCycleFile } from "./state";
+import { ensureCycleDir, writeCycleFile, getRootDir } from "./state";
 import { appendProgress } from "./audit";
 import {
   setActiveEngineerChild,
@@ -202,10 +202,20 @@ export async function runEngineer(
         }
       : {};
 
+    // gs-282: expose GeneralStaff's own root so engineer prompts can point
+    // the bot at the `task done` CLI regardless of which project's worktree
+    // it's running inside. Line-oriented edits to `state/<id>/tasks.json`
+    // repeatedly corrupted JSON (dropped commas between siblings, 2026-04-20);
+    // the CLI reads+parses+writes a well-formed file. Always set, both
+    // providers, both cycle types.
+    const rootEnv: Record<string, string> = {
+      GENERALSTAFF_ROOT: getRootDir(),
+    };
+
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...creativeEnv },
+      env: { ...process.env, ...rootEnv, ...creativeEnv },
     });
     setActiveEngineerChild(child);
 
