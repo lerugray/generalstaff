@@ -4,6 +4,7 @@ import {
   summarizeBenchmark,
   findPreTaskSha,
   loadTasksJsonAtSha,
+  findMissingExpectedTouches,
   runEngineerBenchmark,
   type BenchmarkTaskResult,
 } from "../src/benchmark";
@@ -86,6 +87,79 @@ describe("decideBenchmarkVerdict", () => {
       }),
     ).toBe("engineer_failed");
   });
+
+  // gs-276: gamed verdict — all signals pass but declared touches missing
+  it("returns 'gamed' when everything passes but expected_touches are missing", () => {
+    expect(
+      decideBenchmarkVerdict({ ...baseInput, missingExpectedTouches: 1 }),
+    ).toBe("gamed");
+  });
+
+  it("returns 'verified' when missingExpectedTouches is 0", () => {
+    expect(
+      decideBenchmarkVerdict({ ...baseInput, missingExpectedTouches: 0 }),
+    ).toBe("verified");
+  });
+
+  it("returns 'verified' when missingExpectedTouches is omitted (legacy tasks)", () => {
+    expect(decideBenchmarkVerdict(baseInput)).toBe("verified");
+  });
+
+  it("verification_failed beats gamed (ordering — trust the gate first)", () => {
+    expect(
+      decideBenchmarkVerdict({
+        ...baseInput,
+        verificationExitCode: 1,
+        missingExpectedTouches: 2,
+      }),
+    ).toBe("verification_failed");
+  });
+
+  it("empty_diff beats gamed (no work at all is worse than gaming)", () => {
+    expect(
+      decideBenchmarkVerdict({
+        ...baseInput,
+        diffFilesChanged: 0,
+        missingExpectedTouches: 2,
+      }),
+    ).toBe("empty_diff");
+  });
+});
+
+describe("findMissingExpectedTouches", () => {
+  const FIXTURE = join(tmpdir(), `gs-missing-touches-${Date.now()}`);
+
+  beforeAll(() => {
+    mkdirSync(join(FIXTURE, "src"), { recursive: true });
+    writeFileSync(join(FIXTURE, "src", "exists.ts"), "export {};\n", "utf8");
+  });
+
+  afterAll(() => {
+    rmSync(FIXTURE, { recursive: true, force: true });
+  });
+
+  it("returns [] when expected_touches is undefined (legacy task)", () => {
+    expect(findMissingExpectedTouches(FIXTURE, undefined)).toEqual([]);
+  });
+
+  it("returns [] when expected_touches is empty", () => {
+    expect(findMissingExpectedTouches(FIXTURE, [])).toEqual([]);
+  });
+
+  it("returns [] when every declared path exists", () => {
+    expect(
+      findMissingExpectedTouches(FIXTURE, ["src/exists.ts"]),
+    ).toEqual([]);
+  });
+
+  it("returns the subset of paths that don't exist", () => {
+    const missing = findMissingExpectedTouches(FIXTURE, [
+      "src/exists.ts",
+      "src/ghost.ts",
+      "tests/ghost.test.ts",
+    ]);
+    expect(missing).toEqual(["src/ghost.ts", "tests/ghost.test.ts"]);
+  });
 });
 
 describe("summarizeBenchmark", () => {
@@ -120,10 +194,12 @@ describe("summarizeBenchmark", () => {
       { ...baseResult, task_id: "e", verdict: "engineer_failed" },
       { ...baseResult, task_id: "f", verdict: "engineer_timeout" },
       { ...baseResult, task_id: "g", verdict: "setup_failed" },
+      { ...baseResult, task_id: "h", verdict: "gamed" },
     ];
     const s = summarizeBenchmark(tasks);
-    expect(s.total).toBe(7);
+    expect(s.total).toBe(8);
     expect(s.verified).toBe(2);
+    expect(s.gamed).toBe(1);
     expect(s.verification_failed).toBe(1);
     expect(s.empty_diff).toBe(1);
     expect(s.engineer_failed).toBe(1);

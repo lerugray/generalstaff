@@ -1941,7 +1941,7 @@
   {
     "id": "gs-276",
     "title": "Phase 7 follow-up — benchmark harness enhancement: detect gamed verdicts. gs-274 surfaced gamr-030 as a false verified — aider committed a tasks.json edit removing one entry from `expected_touches` and called the task done without writing any real code. The benchmark's current verdict logic treats (engineer_exit=0, files_changed>0, verification_exit=0) as verified, which this case satisfies trivially because only tasks.json changed. **Scope:** in src/benchmark.ts, after the verification gate passes, also check that every path in the target task's `expected_touches` list actually exists in the post-cycle worktree. If any declared artifact is missing, downgrade the verdict from `verified` to a new `verdict: 'gamed'` (or equivalent — name to be decided). Add unit tests. Update decideBenchmarkVerdict's signature if needed. Does NOT touch the reviewer or the real-cycle gate — this is benchmark-only. Expected diff: ~80-150 lines.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/benchmark.ts",
