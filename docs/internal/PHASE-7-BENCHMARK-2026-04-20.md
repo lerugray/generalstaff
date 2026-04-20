@@ -1,22 +1,21 @@
 # Phase 7 engineer-benchmark results (2026-04-20)
 
-**Status:** **REJECT** — after re-running the 3 bug-affected tasks
-with the unicode fix in place, the combined honest verified rate
-is **5/10 = 50%**, which does not clear the 70% acceptance bar.
-aider+Qwen3 Coder Plus is real-useful for a bounded subset of
-task types (type scaffolds, fixture data, e2e tests, CSS fixes)
-and unreliable for others (multi-file React component scaffolds
-with Next.js path aliases + testing-library setup). Recommended
-action: **do NOT flip gamr's default to aider**; keep the
-`engineer_provider: aider` option in code for future per-task
-routing if we ever build that mechanism.
+**Status:** **ACCEPT** with model `openrouter/qwen/qwen3.6-plus`
+— 8/10 = 80% verified, clears the 70% acceptance bar. Default
+engineer model for the aider path should swap from qwen3-coder-plus
+to qwen3.6-plus. Flipping gamr's `engineer_provider` default to
+`aider` (with the new model) is now a real option, pending Ray's
+strategic go-ahead.
 
-The 2026-04-20 04:32 run (first) hit a Windows unicode bug in
-our own bash wrapper that took down 3 of 10 tasks — this was
-GS's defect, not aider's. The fix (setting
-`PYTHONIOENCODING=utf-8`) landed the same commit and the 08:00
-re-run of the 3 affected tasks gave clean, unambiguous data.
-Full combined results below.
+**Earlier result this same day:** qwen3-coder-plus REJECTED at
+5/10 = 50%. The REJECT verdict below was specifically for that
+model. qwen3.6-plus was tested as a follow-up (gs-277) and
+produced a very different picture — see "Model comparison" below.
+
+The 2026-04-20 04:32 qwen3-coder-plus run also hit a Windows
+unicode bug in our own bash wrapper that took down 3 of 10 tasks
+— this was GS's defect, not aider's. The fix (setting
+`PYTHONIOENCODING=utf-8`) landed before the re-run.
 
 **Acceptance bar (from `docs/internal/PHASE-7-SKETCH-2026-04-19.md`):**
 - verified_rate ≥ 70% on 10 replayed shipped tasks
@@ -104,18 +103,16 @@ Raw reports: `logs/benchmark-phase7-2026-04-20.json` and
 
 ---
 
-## Verdict: **REJECT** the 70% bar
+## Verdict round 1: REJECT on qwen3-coder-plus
 
-Honest 50% (or raw 60% if you count gamr-030) does not clear the
-acceptance bar. **Do not flip gamr's `engineer_provider` default
-to `aider`.** Keep the option in code so it's available for
-future per-task routing, but the dispatcher's default engineer
-stays on claude for all current projects.
+Honest 50% (or raw 60% if you count gamr-030) did not clear the
+acceptance bar for this model. The useful pattern was the
+task-type boundary revealed below.
 
-**Don't over-update on this.** The benchmark is 10 tasks on
-one codebase at one model; a different mix (more type scaffolds,
-fewer React components) would land differently. The useful
-pattern is the task-type boundary revealed below.
+**Not the final word though** — same-day re-benchmark with
+qwen3.6-plus flipped the verdict (see "Model comparison" section
+at the bottom). The "reject aider" read applied specifically to
+qwen3-coder-plus, not to the aider path in general.
 
 ---
 
@@ -328,3 +325,123 @@ Per-task engineer logs land at
 logs at `logs/benchmark-phase7-<date>.<task_id>.verification.log`.
 Use `--keep-worktree` on individual debug runs to preserve the
 temp clone for post-mortem inspection.
+
+---
+
+## Run 2 — qwen3.6-plus (gs-277, 2026-04-20 08:13–09:39 UTC)
+
+Raw report: `logs/benchmark-phase7-qwen36-2026-04-20.json`.
+
+Same 10-task benchmark as run 1, same harness, only difference:
+`--model=openrouter/qwen/qwen3.6-plus` (Qwen's newer flagship
+general-purpose model, 2026-04-02 release). No code changes
+between runs — every fix that enabled run 1 (udiff edit format,
+PYTHONIOENCODING=utf-8) was already landed.
+
+| task | verdict | engineer_s | verify_s | files | +ins | −del | notes |
+|---|---|---|---|---|---|---|---|
+| gamr-020 | **verified** | 368.9 | 2.6 | 3 | 53 | 9 | CSS + e2e, clean |
+| gamr-021 | **verified** | 133.8 | 2.6 | 2 | 52 | 0 | type scaffold — note: qwen3-coder-plus flaked this one |
+| gamr-022 | **verified** | 234.5 | 2.9 | 1 | 1 | 1 | type scaffold |
+| gamr-023 | **verified** | 420.3 | 3.0 | 3 | 48 | 2 | keyboard-shortcut e2e |
+| gamr-025 | empty_diff | 157.7 | 4.3 | 0 | 0 | 0 | flaked — model decided task was already done (same failure mode qwen3-coder-plus had on gamr-021) |
+| gamr-026 | **verified** | 441.6 | 4.4 | 3 | 396 | 2 | fixtures expansion |
+| gamr-028 | **verified** | 898.1 | 3.5 | 5 | 336 | 0 | **ProfileCreateForm — was engineer_failed on qwen3-coder-plus** |
+| gamr-029 | **verified** | 860.1 | 3.3 | 5 | 202 | 1 | **MessageThreadView — was engineer_failed on qwen3-coder-plus** |
+| gamr-030 | verification_failed | 967.6 | 3.6 | 5 | 419 | 1 | ProfileEditForm — real work committed but tests failed. This is an honest failure, in contrast to qwen3-coder-plus which gamed the verdict on this same task |
+| gamr-031 | **verified** | 601.7 | 3.6 | 3 | 160 | 0 | **MessageComposer — was verification_failed on qwen3-coder-plus** |
+
+### Summary — qwen3.6-plus
+
+- **Total:** 10
+- **Verified:** 8 / 10 = **80.0%** — clears the 70% bar
+- **Verification_failed:** 1 (gamr-030)
+- **Empty_diff:** 1 (gamr-025 — flake)
+- **Engineer_failed:** 0
+- **Engineer_timeout:** 0
+- **Setup_failed:** 0
+- **Mean engineer duration:** 508.4 seconds (~3-5× slower per task than qwen3-coder-plus's 107.1s)
+- **Mean verification duration:** 3.4 seconds
+- **Wall clock for full run:** 86 minutes
+- **OpenRouter spend:** estimated ~$0.50-1.00 (longer cycles, but qwen3.6-plus is ~50% cheaper per input token than qwen3-coder-plus, so net is similar-to-slightly-higher)
+
+### Verdict: **ACCEPT** with `engineer_model: openrouter/qwen/qwen3.6-plus`
+
+Clears the 70% bar. Recommended actions:
+
+1. **Swap the aider module's DEFAULT_AIDER_MODEL** from
+   `openrouter/qwen/qwen3-coder-plus` to
+   `openrouter/qwen/qwen3.6-plus` in
+   `src/engineer_providers/aider.ts`. Projects that set
+   `engineer_provider: aider` without specifying a model should
+   get the better default from day one.
+2. **Consider flipping gamr's default** to
+   `engineer_provider: aider` + no explicit model (inherits the
+   new default). This is Ray's strategic call — quota savings
+   are real but the 3-5× slower wall clock per task changes the
+   session throughput math.
+3. **Per-task routing (gs-275) remains valuable.** Even at 80%,
+   the tasks that genuinely need claude's handle (algorithmic
+   work, cross-file refactors) can still opt up on a per-task
+   basis via `task.engineer_provider: claude`.
+
+### Model comparison — qwen3-coder-plus vs qwen3.6-plus
+
+| metric | qwen3-coder-plus | qwen3.6-plus | delta |
+|---|---|---|---|
+| verified rate (honest) | 50% | 80% | +30pp |
+| component-scaffold success | 0/4 | 3/4 | +3 tasks |
+| gamed-verdict failures | 1 (gamr-030) | 0 | cleaner failure mode |
+| mean engineer duration | 107s | 508s | 4.75× slower |
+| total wall clock | ~18 min | ~86 min | 4.8× longer |
+| per-token OpenRouter price | $0.65/$3.25 per M | $0.325/$1.95 per M | ~50% cheaper in, ~40% cheaper out |
+
+**Why qwen3.6-plus probably won where qwen3-coder-plus lost:**
+Qwen3-coder-plus is a specialized code model with aggressive
+latency optimization (hence the fast cycles). qwen3.6-plus is a
+bigger general-purpose flagship — slower per-token but deeper
+reasoning, better instruction-following, better at multi-file
+scope like React component scaffolding where you need
+`page.tsx` + `Component.tsx` + `Component.module.css` + test
++ tasks.json all coherent with each other. The speed penalty
+is the cost of admission for the better quality on non-trivial
+tasks.
+
+**Why qwen3.6-plus still missed gamr-030:** Same task both
+models choked on. ProfileEditForm was a mirror of gamr-028's
+ProfileCreateForm scope plus a "prefill from existing profile"
+twist. qwen3.6-plus produced substantially more code this round
+(5 files, 419 lines vs qwen3-coder-plus's 7 files/467 lines
+that didn't actually do the work) but tests still didn't pass.
+Possible root cause: this task relies on a route-parameter
+read-then-prefill pattern that may be under-represented in both
+models' training distributions for gamr's specific Next.js
+14 App Router shape. This is the kind of miss the reviewer gate
+is designed to catch — not a reason to reject the engineer
+wholesale.
+
+### Next steps (post-qwen3.6-plus ACCEPT)
+
+**Immediate (Ray's call):**
+- Swap `DEFAULT_AIDER_MODEL` to qwen3.6-plus in
+  `src/engineer_providers/aider.ts`. One-line change + a test
+  update. Trivial commit.
+- Decide whether to flip gamr's `engineer_provider` default to
+  `aider`. Factors: quota savings (real), wall-clock
+  per-session (4-5× slower cycles), operator attention
+  (longer cycles mean longer waits for feedback).
+
+**Medium-term:**
+- gs-276 (gamed-verdict detection in benchmark harness) is
+  still worth doing. Even though qwen3.6-plus didn't game any
+  verdicts in this run, a future model change or task shape
+  could trigger the failure mode. The `expected_touches` check
+  is cheap insurance.
+- Re-benchmark periodically when new models land. `qwen4`,
+  whatever GPT-5 variants land on OpenRouter, etc. The
+  infrastructure is in place now — rerunning is a one-line
+  command.
+- Register Bookfinder (per plan) and verify the
+  engineer_provider: aider path holds up on a second codebase.
+  Bookfinder is Python, not TypeScript, so it's a useful
+  generality check.
