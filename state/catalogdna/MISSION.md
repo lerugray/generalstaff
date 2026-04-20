@@ -30,26 +30,27 @@ that bot. GS wraps it only when Ray explicitly opts a task to
   regenerations after template changes, reference-DB population
   of new artists, systematic audits, new-module scaffolding. All
   flagged `interactive_only: true` unless explicitly opted in.
-- **Mode-transition candidates** — mechanical tasks that benefit
-  from bot automation when Ray's queue drains. The canonical
-  example as of registration (2026-04-20):
-  - **Reference-DB populate cycles**: `scripts/find_album_urls.py`
-    + `populate_reference_db.py` together produce a fully
-    mechanical download+convert+analyze+fingerprint pipeline per
-    album. No Claude-language decisions inside the scripts. The
-    bot picks one unpopulated entry from `wanted_artists.json`,
-    runs the two scripts, verifies the reference-db JSON, commits.
-    5-15 min per album. See `cdna-004` in tasks.json for the
-    concrete task shape.
-  - **Playlist-URL retrieval is bot-safe via YouTube Data API**;
-    the "song-by-song fallback when playlist_url is flaky" is
-    NOT bot-safe (needs interactive judgment about which track
-    videos are legitimate). Ray handles the fallback; the bot
-    handles the common case.
-  - Other mechanical opt-ins (type hints on non-load-bearing
-    modules, ruff cleanups on bot-safe areas) can follow the
-    same pattern: audit surfaces the task, flip
-    `interactive_only` to false, let GS cycle it.
+- **Mode-transition trigger** — catalogdna has its own
+  pre-existing autonomous bot (predates GS). The bot reads its
+  own `bot_tasks.md` queue, not GS's `tasks.json`. GS can
+  *launch* catalogdna's bot opportunistically (when higher-
+  priority fleets are drained) but cannot steer what task the
+  bot picks — `run_bot.sh` hardcodes its own prompt.
+  - The `cdna-004`-style trigger task in `tasks.json` is
+    "permission for GS to launch catalogdna's bot." It does not
+    describe specific work. Ray maintains `bot_tasks.md`
+    independently; whatever's top-priority there is what runs.
+  - Natural workflow: Ray queues populate / test / audit
+    entries in `bot_tasks.md` as he normally would. When he
+    wants GS to opportunistically fire a catalogdna cycle, he
+    queues a `cdna-XXX` trigger in GS's `tasks.json`. GS picks
+    the trigger, runs `run_bot.sh`, bot does its thing, GS
+    verifies + reviews + audits. Trigger closes after the cycle.
+  - If `bot_tasks.md` is empty or all-[x]'d when the cycle
+    fires, the bot produces an empty diff and the trigger
+    still closes cleanly (as `verified_weak`).
+  - Re-queue `cdna-005`, `cdna-006`, etc. for subsequent
+    bot-launch opportunities.
 
 ## Out of scope (Ray only, never bot)
 

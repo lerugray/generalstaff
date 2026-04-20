@@ -9,7 +9,7 @@
   },
   {
     "id": "cdna-002",
-    "title": "Reference-DB per-track fallback populates — when cdna-004 (playlist populate) flags an album as 'find_album_urls failed' or 'playlist fetch returned bad candidate', take over the song-by-song workaround: (a) search YouTube for each track individually, (b) record per-track video IDs, (c) invoke the track-level downloader with those explicit URLs, (d) verify + commit. This is the judgment-heavy fallback that belongs to Ray, not the bot — the common-case playlist populate is cdna-004.",
+    "title": "Reference-DB per-track fallback populates — when catalogdna's bot (launched via cdna-XXX trigger) can't find a clean playlist_url for a target album in bot_tasks.md populate work, take over the song-by-song workaround: (a) search YouTube for each track individually, (b) record per-track video IDs, (c) invoke the track-level downloader with those explicit URLs, (d) verify + commit. Judgment-heavy — the bot handles the common playlist-URL case; Ray handles the per-track fallback when the playlist path is flaky.",
     "status": "pending",
     "priority": 2,
     "interactive_only": true,
@@ -25,13 +25,10 @@
   },
   {
     "id": "cdna-004",
-    "title": "Populate ONE unpopulated album into reference-db. **Step 1:** Read wanted_artists.json and pick the first entry whose `slug` has no corresponding reference-db/artists/<slug>.json file. If the entry lacks `playlist_url`, run `PYTHONIOENCODING=utf-8 python scripts/find_album_urls.py wanted_artists.json --write` first to fill missing URLs via YouTube Data API v3 (YOUTUBE_API_KEY sourced from MiroShark/.env per catalogdna's convention). If playlist_url was flaky / returned no good candidate, flag the task as stale and move on. **Step 2:** Run `.venv/Scripts/python.exe populate_reference_db.py --artist='<artist>' --album='<album>'` for that single entry. Takes 5-15 min for download + MIDI conversion + analysis. **Step 3:** Verify `reference-db/artists/<slug>.json` exists, has track_count > 5, and has non-zero values on at least chord_pct_major / mode_major_ratio / register_low_pct. **Step 4:** Commit wanted_artists.json (if find_album_urls.py changed it) + the new reference-db entry. Message like 'populate: <artist> — <album> (<N> tracks)'. **Do NOT batch** — one album per cycle. Per-track URL workaround (when playlist_url keeps failing) is a separate interactive-only task Ray handles manually. Clone/re-add this task for the next album once done.",
+    "title": "GS cycle trigger — permission for the dispatcher to launch catalogdna's existing autonomous bot. This task does NOT describe specific work; catalogdna's bot (run_bot.sh + CLAUDE-AUTONOMOUS.md) has its own native task queue in bot_tasks.md and picks from that. When GS's dispatcher picks this trigger, it runs `bash run_bot.sh ${cycle_budget_minutes}`, catalogdna's bot reads bot_tasks.md, does whatever's highest priority there (populate, test coverage, bug fix, audit, etc.), commits to bot/work, and exits. GS then runs its verification gate + reviewer on whatever diff landed. Ray maintains bot_tasks.md independently — that's where specific populate entries, test-coverage entries, etc. live. Re-add cdna-XXX triggers (cdna-005, cdna-006, ...) whenever Ray wants GS to kick off catalogdna's bot opportunistically. Empty bot_tasks.md → empty-diff cycle → verified_weak → task closes cleanly.",
     "status": "pending",
     "priority": 4,
     "interactive_only": false,
-    "expected_touches": [
-      "wanted_artists.json",
-      "reference-db/artists/"
-    ]
+    "expected_touches": []
   }
 ]
