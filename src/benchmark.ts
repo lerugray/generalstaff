@@ -41,6 +41,7 @@ import type {
 
 export type BenchmarkVerdict =
   | "verified"
+  | "gamed"
   | "verification_failed"
   | "empty_diff"
   | "engineer_failed"
@@ -59,6 +60,13 @@ export interface BenchmarkTaskResult {
   diff_files_changed: number;
   diff_insertions: number;
   diff_deletions: number;
+  // gs-276: paths from the target task's `expected_touches` that
+  // didn't exist in the post-cycle worktree. Populated when the
+  // task declared `expected_touches` and at least one path is
+  // missing — used to detect `gamed` verdicts where the engineer
+  // committed a trivial change (e.g. a tasks.json edit) rather
+  // than the declared artifact.
+  missing_expected_touches?: string[];
   error?: string;
   worktree_path?: string;
 }
@@ -66,6 +74,7 @@ export interface BenchmarkTaskResult {
 export interface BenchmarkSummary {
   total: number;
   verified: number;
+  gamed: number;
   verification_failed: number;
   engineer_failed: number;
   engineer_timeout: number;
@@ -111,11 +120,21 @@ export interface BenchmarkOptions {
 // decide the benchmark verdict. Pure function — no I/O. The ordering
 // matters: engineer failure short-circuits before diff/verification
 // because a failed spawn means we can't trust downstream signals.
+//
+// gs-276: the verified/gamed distinction catches engineers that
+// trivially satisfy (engineerExit=0, diff>0, verificationExit=0) by
+// editing only unrelated files (e.g. pruning tasks.json to declare
+// the task done without producing the declared artifact). When the
+// task declared `expected_touches` and any of those paths are
+// missing in the post-cycle worktree, the verdict downgrades from
+// `verified` to `gamed`. Tasks without `expected_touches` or with
+// missingExpectedTouches=0 behave exactly as before.
 export function decideBenchmarkVerdict(input: {
   engineerExitCode: number | null;
   engineerTimedOut: boolean;
   diffFilesChanged: number;
   verificationExitCode: number | null;
+  missingExpectedTouches?: number;
 }): BenchmarkVerdict {
   if (input.engineerTimedOut) return "engineer_timeout";
   if (input.engineerExitCode === null || input.engineerExitCode !== 0) {
@@ -125,7 +144,25 @@ export function decideBenchmarkVerdict(input: {
   if (input.verificationExitCode === null || input.verificationExitCode !== 0) {
     return "verification_failed";
   }
+  if ((input.missingExpectedTouches ?? 0) > 0) return "gamed";
   return "verified";
+}
+
+// Check which declared `expected_touches` paths are missing in the
+// post-cycle worktree. Returns [] when the task has no declared
+// touches, or when every declared path exists. Paths are resolved
+// relative to `worktreePath` — the same cwd the verification gate
+// ran in.
+export function findMissingExpectedTouches(
+  worktreePath: string,
+  expectedTouches: string[] | undefined,
+): string[] {
+  if (!expectedTouches || expectedTouches.length === 0) return [];
+  const missing: string[] = [];
+  for (const rel of expectedTouches) {
+    if (!existsSync(join(worktreePath, rel))) missing.push(rel);
+  }
+  return missing;
 }
 
 // Aggregate per-task results into a summary — counts, verified rate,
@@ -135,6 +172,7 @@ export function summarizeBenchmark(
 ): BenchmarkSummary {
   const counts: Record<BenchmarkVerdict, number> = {
     verified: 0,
+    gamed: 0,
     verification_failed: 0,
     engineer_failed: 0,
     engineer_timeout: 0,
@@ -153,6 +191,7 @@ export function summarizeBenchmark(
   return {
     total,
     verified: counts.verified,
+    gamed: counts.gamed,
     verification_failed: counts.verification_failed,
     engineer_failed: counts.engineer_failed,
     engineer_timeout: counts.engineer_timeout,
@@ -513,11 +552,17 @@ async function runOneBenchmarkTask(
       verLogPath,
     );
 
+    const missingExpectedTouches = findMissingExpectedTouches(
+      verCwd,
+      targetTask.expected_touches,
+    );
+
     const verdict = decideBenchmarkVerdict({
       engineerExitCode: engResult.exitCode,
       engineerTimedOut: engResult.timedOut,
       diffFilesChanged: diff.files,
       verificationExitCode: verResult.exitCode,
+      missingExpectedTouches: missingExpectedTouches.length,
     });
 
     return {
@@ -534,6 +579,9 @@ async function runOneBenchmarkTask(
       diff_files_changed: diff.files,
       diff_insertions: diff.insertions,
       diff_deletions: diff.deletions,
+      ...(missingExpectedTouches.length > 0
+        ? { missing_expected_touches: missingExpectedTouches }
+        : {}),
       worktree_path: clonePath,
     };
   } catch (err) {
