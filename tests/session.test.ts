@@ -18,6 +18,7 @@ import {
   computeParallelEfficiency,
   estimateReviewerSpendUSD,
   flushSessionEndMerges,
+  commitSessionEndState,
 } from "../src/session";
 import { $ } from "bun";
 import { tmpdir } from "os";
@@ -2134,4 +2135,66 @@ describe("flushSessionEndMerges (gs-254)", () => {
   // 5s cap, the suite exit was non-zero, and the cycle rolled back.
   // In isolation the test runs in ~5.45s; the bump is margin against
   // concurrent-load slowdown, not a change in what the test exercises.
+});
+
+describe("commitSessionEndState (gs-288)", () => {
+  async function makeRepoWithState(): Promise<string> {
+    const repo = join(tmpdir(), `gs-ses-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    mkdirSync(repo, { recursive: true });
+    await $`git -C ${repo} init -b master`.quiet();
+    await $`git -C ${repo} config user.email test@example.com`.quiet();
+    await $`git -C ${repo} config user.name test`.quiet();
+    await $`git -C ${repo} config commit.gpgsign false`.quiet();
+    writeFileSync(join(repo, "seed.txt"), "seed", "utf8");
+    await $`git -C ${repo} add seed.txt`.quiet();
+    await $`git -C ${repo} commit -m ${"initial"}`.quiet();
+    return repo;
+  }
+
+  it("commits PROGRESS.jsonl session_end lines so they survive a PC switch", async () => {
+    const repo = await makeRepoWithState();
+    setRootDir(repo);
+    try {
+      const projectDir = join(repo, "state", "testproj");
+      mkdirSync(projectDir, { recursive: true });
+      const progressPath = join(projectDir, "PROGRESS.jsonl");
+      writeFileSync(
+        progressPath,
+        JSON.stringify({ event: "session_end", duration_minutes: 42 }) + "\n",
+        "utf8",
+      );
+      const committed = await commitSessionEndState(42, 3);
+      expect(committed).toBe(true);
+      const headFile = (
+        await $`git -C ${repo} show HEAD:state/testproj/PROGRESS.jsonl`.quiet()
+      ).stdout.toString();
+      expect(headFile).toContain("session_end");
+      const status = (await $`git -C ${repo} status --porcelain`.quiet())
+        .stdout.toString()
+        .trim();
+      expect(status).toBe("");
+      const subject = (await $`git -C ${repo} log -1 --format=%s`.quiet())
+        .stdout.toString()
+        .trim();
+      expect(subject).toContain("session_end");
+      expect(subject).toContain("3 cycle");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("returns false when state/ has no changes to commit", async () => {
+    const repo = await makeRepoWithState();
+    setRootDir(repo);
+    try {
+      const committed = await commitSessionEndState(0, 0);
+      expect(committed).toBe(false);
+      const subject = (await $`git -C ${repo} log -1 --format=%s`.quiet())
+        .stdout.toString()
+        .trim();
+      expect(subject).toBe("initial");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
 });

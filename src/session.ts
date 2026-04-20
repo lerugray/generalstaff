@@ -1122,6 +1122,16 @@ export async function runSession(options: SessionOptions) {
     ...parallelMetrics,
   });
 
+  // gs-288: commit the session_end + session_complete PROGRESS.jsonl
+  // lines we just appended. autoCommitState runs per-cycle inside
+  // executeCycle, but the session-end events fire after the last
+  // cycle's commit, so without this belt-and-suspenders pass they'd
+  // sit uncommitted until the next session on this PC — and vanish
+  // entirely when Ray switches machines via git.
+  if (!dryRun) {
+    await commitSessionEndState(elapsed, allResults.length);
+  }
+
   // End-of-session Telegram notification. Moved here from the .bat
   // wrapper because post-bun steps in run_session.bat weren't reliably
   // reached when the .bat was spawned from a detached context. Running
@@ -1760,6 +1770,31 @@ function resultFromDigestCycle(c: ParsedDigestCycle): CycleResult | null {
 // failure, log plainly and emit an audit event — never crash the
 // session. Returns per-project results so tests can assert behavior
 // without grepping stdout.
+// gs-288: commit the PROGRESS.jsonl state/ changes produced by the
+// session_end (per-project) + session_complete (fleet) events. Mirrors
+// autoCommitState in cycle.ts — non-fatal on failure, skipped when
+// nothing is staged.
+export async function commitSessionEndState(
+  durationMinutes: number,
+  totalCycles: number,
+): Promise<boolean> {
+  try {
+    const root = getRootDir();
+    await $`git -C ${root} add --ignore-errors state/`.quiet().nothrow();
+    const hasStagedChanges = await $`git -C ${root} diff --cached --quiet`
+      .quiet()
+      .nothrow()
+      .then((r) => r.exitCode !== 0);
+    if (!hasStagedChanges) return false;
+    const msg = `state: session_end (${totalCycles} cycle(s), ${Math.round(durationMinutes)}m)`;
+    await $`git -C ${root} commit -m ${msg}`.quiet();
+    return true;
+  } catch {
+    console.log("Warning: could not auto-commit session_end state");
+    return false;
+  }
+}
+
 export interface SessionEndMergeResult {
   project_id: string;
   branch: string;
