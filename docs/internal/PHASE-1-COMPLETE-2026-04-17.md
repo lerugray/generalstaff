@@ -137,18 +137,16 @@ Honest assessment; no triumphalism.
    The gate was mandatory from cycle 1. Every failure was
    a cheap loss (wasted cycle budget) not an expensive
    loss (polluted master). Exception: see deviation #4.
-5. **Ray's constraint structure.** Phase 1 shipped under
-   a 10hr/day minimum-wage job + Bed-Stuy ↔ Canarsie
-   commute. That's roughly 12hr/day unavailable for the
-   project. Phase 1 still closed in 48hrs because the
-   autonomous bot did the work Ray couldn't: overnight
-   runs produced most of the 212 cycles, Ray reviewed +
-   curated tasks during brief windows. The speed isn't
-   hero-effort; it's evidence that the GeneralStaff
-   pattern multiplies a constrained human's output. That's
-   the load-bearing claim for the anti-Polsia positioning:
-   *"this works for people who aren't VC-funded founders
-   with unlimited focus time."*
+5. **The constrained-founder thesis.** Phase 1 shipped in
+   48 hrs while the operator had only brief daily windows
+   available for active work. Overnight autonomous runs
+   produced most of the 212 cycles; the operator reviewed
+   and curated tasks during the short windows they had.
+   The speed isn't hero-effort; it's evidence that the
+   GeneralStaff pattern multiplies a constrained human's
+   output. That's the load-bearing claim for the
+   anti-Polsia positioning: *"this works for people who
+   aren't VC-funded founders with unlimited focus time."*
 
 ## What didn't work as expected
 

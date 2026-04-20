@@ -484,9 +484,9 @@ root.
   Prussian wargaming. See
   [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
 - **Public launch:** gated on README polish, `SUPPORTERS.md`, and
-  `LICENSE` per [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md).
-  CLI + dashboard both feature-complete for MVP value; launch
-  timing is separate from phase completion.
+  `LICENSE`. Repo is public at `github.com/lerugray/generalstaff`
+  as of 2026-04-20. CLI + dashboard both feature-complete for MVP
+  value; launch timing is separate from phase completion.
 
 ## Documentation
 
@@ -499,8 +499,6 @@ root.
 - [`docs/internal/PHASE-4-COMPLETE-2026-04-18.md`](docs/internal/PHASE-4-COMPLETE-2026-04-18.md)
   -- parallel worktrees closure narrative, including the three
   design-decision resolutions and the gs-188 observability surface
-- [`docs/internal/LAUNCH-PLAN.md`](docs/internal/LAUNCH-PLAN.md) -- pre-launch gates, positioning,
-  narrative hooks, and the append-only launch retrospective
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
   reference, including the `max_parallel_slots` opt-in
 - [`docs/phase-5-references/`](docs/phase-5-references/) -- Phase 5

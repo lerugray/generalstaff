@@ -5,12 +5,19 @@ both a project workspace and an Obsidian-compatible vault. Open it
 in Obsidian via **File → Open folder as vault** and point at this
 directory.
 
-**Cross-machine sync uses git, not OneDrive.** The folder happens
-to live in a `OneDrive\Documents\` path but OneDrive sync is not
-relied on. Ray moves work between his home and work PCs via git —
-commit and push on one machine, pull on the other. The repo is
-at `github.com/lerugray/generalstaff` (private) as of
-2026-04-15 evening.
+**Note on moved docs.** Some historical docs (append-only phase
+closures, future-directions notes) reference files that now live
+in the maintainer's private companion repo at
+`github.com/lerugray/generalstaff-private`: the first-person
+observation log (Hammerstein log), per-session notes
+(`docs/sessions/`), launch planning, and editorial voice
+calibration. Those references are preserved as historical
+context; the moved docs are not required to understand the
+public-facing material.
+
+**Cross-machine sync uses git.** Commit and push on one machine,
+pull on the other. The repo is public at
+`github.com/lerugray/generalstaff` as of 2026-04-20.
 
 ## Start here
 
@@ -19,10 +26,6 @@ at `github.com/lerugray/generalstaff` (private) as of
   personal infra to open-source product
 - [[RULE-RELAXATION-2026-04-15]] — current 10 Hard Rules with
   rationale for each change
-- [[VOICE]] — editorial voice calibration for public writing
-  (README, landing copy, release notes). Captures the anti-Polsia
-  positioning, the Prussian/Marxist intellectual juxtaposition,
-  and the human-livability thesis that connects them
 
 ## Architecture
 
@@ -92,43 +95,6 @@ at `github.com/lerugray/generalstaff` (private) as of
 
 - [[research-notes]] — verbatim findings on nightcrawler,
   parallel-cc, Polsia, Continuous-Claude-v3 (append-only, dated)
-
-## Hammerstein logs (`docs/internal/`)
-
-- [[Hammerstein Observations Log]] — Ray's first-person
-  reflective log (append-only, hands-off for autonomous bots)
-- [[Hammerstein Observations - Claude]] — Claude/bot-side
-  observations (interactive sessions + future autonomous runs)
-
-## Session history (`docs/sessions/`)
-
-- [[2026-04-15]] — pivot session (home PC, evening, Opus 4.6).
-  Phase 0 design pass, Polsia deep-dive, Phase 1 plan, all 5
-  open questions resolved, future directions captured.
-- [[2026-04-16]] — first build session (work PC, morning, Opus
-  4.6). Phase 1 code landed, dogfooding setup, 7+ verified
-  autonomous cycles, 121+ tests, 3 bugs found and fixed.
-- [[2026-04-17]] — Phase 1 close + Phase 2 chain + Phase 3
-  kickoff (work PC, full-day arc, Opus 4.6). Phase 1 formally
-  closed, Phase 2 (reviewer pass, verification gate,
-  multi-provider routing) shipped in a 3.5h chain=3 session,
-  Phase 3 kicked off by attempting to register `gamr` as the
-  first non-dogfood project — which surfaced the state-path
-  architectural finding (gs-166..gs-170 queued for overnight).
-- [[2026-04-18-evening]] — launch-prep taste pass (home PC,
-  Opus 4.7). Gates #4 (README voice pass per VOICE.md §9) and
-  #5 (LICENSE AGPL-3.0, SUPPORTERS, CONTRIBUTING) closed. Five
-  Phase 6 data-contract tasks queued (`gs-221..225`);
-  autonomous bot landed 2/5 (`gs-221` fleet_overview,
-  `gs-222` task_queue) before hitting empty-cycles soft-stop.
-  VOICE.md confirmed public-by-intent.
-- [[2026-04-19-overnight]] — autonomous reseed-loop arc (home PC,
-  Opus 4.7). 10 waves, ~5 hrs wall clock, 30 tasks queued / 27
-  shipped / 3 correctly flagged interactive-only. Full Phase 6
-  data contract + CLI wiring shipped (`gs-221..230`). Picker-
-  padding fix (`gs-232`) jumped `parallel_efficiency` from 0.54 →
-  0.99. Verification gate self-corrected twice on hands-off-
-  violating task specs (`gs-237`, `gs-249`) without retry-spin.
 
 ## Conventions for working in this folder
 

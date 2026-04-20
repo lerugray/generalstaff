@@ -1,8 +1,7 @@
 # GeneralStaff — Project Conventions
 
 This is the cross-project autonomous bot dispatcher that runs Claude
-Code agents across multiple of Ray's local projects. **Currently
-scaffold + Phase 0 design docs — no executable code yet.**
+Code agents across the maintainer's local projects.
 
 The project was **pivoted on 2026-04-15** from "personal nightly
 meta-dispatcher" to "open-source product alternative to Polsia." See
@@ -10,6 +9,16 @@ meta-dispatcher" to "open-source product alternative to Polsia." See
 `docs/internal/RULE-RELAXATION-2026-04-15.md` for the rule
 changes that came with it. Future sessions
 must read both before making structural changes.
+
+**Maintainer extensions (Ray only).** When this repo is cloned on
+Ray's machines alongside the private companion repo at
+`github.com/lerugray/generalstaff-private`, that private clone lives
+at `.claude/local/` and its `CLAUDE.local.md` extends this file with
+maintainer-specific environment, workflow preferences, credential
+plumbing, and project-stakes context. Missing on fresh clones — the
+public file stands alone for contributors and readers.
+
+@.claude/local/CLAUDE.local.md
 
 ## Read first (in this order)
 
@@ -73,42 +82,19 @@ an explicit `docs/internal/RULE-RELAXATION-<date>.md` log file documenting why.*
 - Research that informs the design goes into `docs/internal/research-notes.md`
   (append with date headers — don't rewrite history).
 - The folder is also an **Obsidian vault** — see `docs/internal/INDEX.md` for
-  the map of content. Cross-PC sync uses **git** (the folder lives
-  in a OneDrive path but OneDrive sync is not relied on). The
-  repo is at `github.com/lerugray/generalstaff` (private) as of
-  2026-04-15 evening.
+  the map of content. The repo is public at
+  `github.com/lerugray/generalstaff` as of 2026-04-20.
 
 ## Session context (persistence across machines)
 
-Ray syncs between home and work PCs via git (not OneDrive). The
-`~/.claude/projects/.../memory/` memory system on either machine
-does NOT sync automatically — memory lives in `.claude` which is
-per-machine. **Context that needs to persist across machines
-must live in the project wiki itself (this file or one of the
-design docs committed to the repo).**
+The `~/.claude/projects/.../memory/` memory system is per-machine
+and does not sync. **Context that needs to persist across machines
+must live in the project wiki itself** (this file or a design doc
+committed to the repo). The Claude Code memory directory is for
+transient local state; the wiki is for anything a future session
+would need to avoid expensive reconstruction.
 
-The following context is relevant for all future GeneralStaff
-sessions regardless of which machine they run on, and is
-captured here specifically so git carries it between the home
-and work PCs.
-
-**Memory discipline (Ray, 2026-04-16):** the `~/.claude/projects/
-.../memory/` directory is **per-machine, local-only**. It is NOT
-a mirror of cross-machine context — duplication wastes context and
-risks drift. The rule is:
-
-- **Cross-machine context → this file (or another committed
-  design doc).** Git carries it. Auto-loaded every session.
-- **Local-only context → `~/.claude/memory/`.** E.g. things
-  specific to this PC's paths, transient local state, personal
-  notes that shouldn't be public. Do not put anything here that
-  a work-PC session would also need.
-
-When you're about to save a memory, ask: "would the work-PC
-session need this?" If yes, save it here in CLAUDE.md (or a
-committed doc) instead.
-
-### End-of-session Ingest obligation (Ray, 2026-04-17)
+### End-of-session Ingest obligation
 
 The project vault (this file + `docs/internal/research-notes.md` + `DESIGN.md`
 + `docs/internal/FUTURE-DIRECTIONS-*.md` + `docs/internal/PHASE-*.md`) is an **LLM-maintained
@@ -151,58 +137,13 @@ reconstruction?"* If yes, commit it.
 
 **Hands-off surfaces the Ingest pass never touches:** the full
 hands-off list in `projects.yaml` applies to bot cycles but NOT
-to interactive-session doc updates; however, `docs/internal/` and
-`docs/sessions/` are hands-off by convention for both the bot and
-for Ingest — if session notes are ever wanted there, Ray asks
+to interactive-session doc updates; however, `docs/internal/` is
+hands-off by convention for both the bot and for Ingest — if
+maintainer notes are wanted there, the maintainer asks
 explicitly, don't proactively write.
 
-### Ray's workflow conventions
+### Task-queueing and dispatch conventions
 
-- **Git, not OneDrive, for cross-machine sync.** The GeneralStaff
-  folder lives in `OneDrive\Documents\` but OneDrive sync is not
-  relied on. Ray commits + pushes on one machine, pulls on the
-  other. Don't assume OneDrive handles anything.
-- **Private repo at `github.com/lerugray/generalstaff`.** Push
-  before switching machines.
-- **Default branch is `master`**, not `main`. Ray's git
-  convention. Don't rename.
-- **Detached bot launches default to visible cmd windows.** When
-  launching a bot session from an interactive Claude Code session
-  so it survives the session closing (e.g. PowerShell
-  `Start-Process` driving `scripts\run_session.bat`), leave the
-  cmd window visible — Ray uses the window's presence as ambient
-  confirmation that the bot is actually running. Do NOT use
-  `-WindowStyle Hidden`. Detachment is handled by Start-Process
-  itself regardless of window style; hiding the window sacrifices
-  observability for no detachment benefit. Rationale captured
-  2026-04-17 after a hidden-window launch left Ray unable to
-  visually confirm the session had started.
-- **Model routing:** Ray has detailed provider routing rules in
-  `~/.claude/CLAUDE.md` (Gemini for summaries, OpenRouter Qwen
-  for code delegation, Ollama for tiny tasks, Claude for
-  high-stakes work). GeneralStaff Phase 2+ inherits these rules
-  via `provider_config.yaml` per
-  `docs/internal/FUTURE-DIRECTIONS-2026-04-15.md` §2.
-- **Report fidelity — read the full relevant span, not just the
-  tail.** When summarizing `PROGRESS.jsonl`, commit history, or
-  any sequence of events for Ray, read enough of the source to
-  ground the summary. Tail-only is fine when the tail is
-  genuinely all that matters (e.g. "what was the last error?").
-  It is NOT fine for session summaries, outcome reports, or
-  "how did the overnight run go" style questions. Rationale
-  captured 2026-04-18 after I reported on an overnight session
-  by reading only the last ~20 log lines + last ~40 commits;
-  that tail showed 3 empty-diff cycles, 2 failures, 1 success,
-  so I framed it as "only one task landed". The truth — visible
-  once Ray pushed back and I re-read structurally — was that all
-  5 queued tasks (gs-166..gs-170) had completed; the "failures"
-  were two retries on the same task, not four abandoned ones.
-  Mischaracterizing the bot's actual output is expensive: Ray
-  may re-queue shipped work, or tune a subsystem that isn't
-  broken. When in doubt, grep structurally (every `cycle_end`
-  in a time range, every commit touching a file, every state
-  transition) rather than reading the last N lines. Structural
-  queries scale; tail-reads lie.
 - **Hands-off-aware task queueing.** When queueing tasks for the
   bot, check whether the task's expected file touches the
   hands-off list in `projects.yaml` (`src/safety.ts`,
@@ -211,14 +152,10 @@ explicitly, don't proactively write.
   **interactive-only at queue time** rather than discovering
   the conflict at cycle time. The bot will dutifully attempt
   the task, write good code, and then have its own verification
-  gate roll the work back as a hands-off violation —
+  gate roll the work back as a hands-off violation,
   burning a full engineer cycle (~6-13 min wall clock) for no
-  net progress. Rationale captured 2026-04-18 after the morning
-  bot batch (gs-171..gs-173) had 3 of 4 tasks structurally
-  unrunnable for exactly this reason. The hands-off design is
-  load-bearing; don't paper over it with per-task exceptions.
-  The right move is to recognize at queue time that some tasks
-  are interactive and route them accordingly.
+  net progress. The hands-off design is load-bearing; don't
+  paper over it with per-task exceptions.
 
   **As of gs-195, `tasks.json` carries two optional fields that
   formalize this (see `src/types.ts` `GreenfieldTask`):**
@@ -235,8 +172,8 @@ explicitly, don't proactively write.
     the picker can verify statically).
 
   The filter is applied inside `greenfieldHasMoreWork` /
-  `greenfieldCountRemaining` via `isTaskBotPickable` — so a
-  project with only interactive-only work left correctly reports
+  `greenfieldCountRemaining` via `isTaskBotPickable`. A project
+  with only interactive-only work left correctly reports
   "0 bot-pickable tasks remaining" to the dispatcher and the
   session moves on rather than trying and failing. Legacy tasks
   without either field remain bot-pickable by default (matches
@@ -246,82 +183,27 @@ explicitly, don't proactively write.
   dispatcher supports running N cycles per round in parallel
   via `dispatcher.max_parallel_slots: N` in `projects.yaml`.
   The default is 1 (sequential, bit-for-bit identical to
-  Phases 1-3). The design is round-based strict-wait — all
+  Phases 1-3). The design is round-based strict-wait: all
   slots in a round must finish before the next round starts.
 
   When to turn it on: when the fleet has ≥2 projects with real
-  backlogs each and session wall-clock is the bottleneck.
-  Don't turn it on just because more is more — parallel N
-  roughly multiplies reviewer-step API spend by N on external
-  providers (OpenRouter / paid Claude). Hard Rule 8 (BYOK)
-  applies: the user pays. Start conservative: 2 slots on a
-  3-project fleet, watch `slot_idle_seconds` in the digest +
+  backlogs each and session wall-clock is the bottleneck. Don't
+  turn it on just because more is more; parallel N roughly
+  multiplies reviewer-step API spend by N on external providers
+  (OpenRouter / paid Claude). Hard Rule 8 (BYOK) applies: the
+  user pays. Start conservative: 2 slots on a 3-project fleet,
+  watch `slot_idle_seconds` in the digest +
   `status --sessions` table, bump if utilization is high.
 
-  Chaining is disabled in parallel mode — each round picks
-  fresh projects. gs-187's per-provider semaphore prevents
-  reviewer stampedes (OpenRouter free-tier 429s in particular);
-  see `GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>` below to
-  tune it.
+  Chaining is disabled in parallel mode; each round picks fresh
+  projects. gs-187's per-provider semaphore prevents reviewer
+  stampedes (OpenRouter free-tier 429s in particular); see
+  `GENERALSTAFF_REVIEWER_CONCURRENCY_<PROVIDER>` below to tune
+  it.
 
   The full Phase 4 narrative, including the decision rationale
   for defaults and the open measurement questions, lives in
   **docs/internal/PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
-
-- **Public-facing copy gets a stop-slop pass before Ray
-  reviews.** Any text meant for a public audience (launch posts,
-  landing page copy, README hero sections, Twitter threads,
-  anything that might show up on HN / Reddit / social feeds)
-  runs through `/stop-slop` before Ray sees a v1. Modern readers
-  pattern-match em-dashes, LLM cadence, and throat-clearing as
-  AI slop; the stop-slop skill catches them before they land.
-  Rationale captured 2026-04-19 after the first draft of
-  `docs/launch-posts/polsia-alternative.md` had 6+ em-dashes
-  and Ray flagged them as the modern LLM tell. The stop-slop
-  pass took ~30s and lifted the score from 30/50 to 40+.
-
-  **Exempt** (no slop-pass needed):
-  - Internal design docs (`DESIGN.md`, `docs/internal/PHASE-*.md`,
-    `docs/internal/research-notes.md`, `docs/internal/FUTURE-DIRECTIONS-*.md`). These
-    are for future Claude sessions, not public readers.
-  - `PROGRESS.jsonl` and other structured audit output.
-  - Git commit messages (Co-Authored-By still required).
-  - Error messages and CLI help text in code (separate
-    discipline; handled by code-review rules).
-
-  **Applies to** any managed project, not just GeneralStaff:
-  gamr's landing page copy, catalogdna's public-facing blurbs,
-  Retrogaze if it ever ships, etc. Ray does his own voice pass
-  after the slop-pass; the slop-pass is the floor, not the
-  ceiling.
-
-- **Calibrate to Ray's availability before rushing session
-  wrap-ups.** The system reminder surfaces the current date; if
-  the time-of-day matters (e.g. "do you have an hour before
-  work?", "is this a tomorrow thing?"), ask Ray instead of
-  guessing from context clues. Rationale captured 2026-04-20
-  after I assumed Ray was about to leave for work and tried to
-  rush a session wrap-up when he actually had 2 hours of useful
-  focus time. Cost of asking "how much time do you have?" is 5
-  seconds; cost of mis-assuming is an over-packed or
-  under-packed session plan.
-
-- **Structural code decisions are Claude's call in interactive
-  sessions.** When hitting a tradeoff internal to the code —
-  API shape, file organization, refactor pattern, worktree
-  isolation strategy, test-double approach, how to thread a
-  new field through a module graph — default to making the
-  call and moving. Ask only for **strategic / product**
-  decisions: which features to build, user-facing copy, which
-  N tasks to benchmark, when to cut a release, which project
-  to register next. Rationale captured 2026-04-20 — Ray
-  self-identifies as a game designer, not a programmer; asking
-  him to arbitrate structural code choices both slows the
-  session down and asks for judgment he's explicitly deferring.
-  This is the interactive-session analog of the Hammerstein
-  framing that already governs bot cycles: execution decisions
-  belong to the staff officer, strategic decisions belong to
-  command.
 
 ### Reviewer provider configuration
 
@@ -334,15 +216,15 @@ free, offline). The Hard-Rule 8 BYOK principle applies: nothing
 about the reviewer is hosted, no key is shipped, every credential
 is sourced from the user's own environment at launch.
 
-**Observed cost calibration (Ray, 2026-04-18 afternoon):** after
-22 verified morning cycles + a 2-cycle parallel validation run,
-Ray's OpenRouter account had been charged **~$0.06 total** across
-the day's sessions. That's the real data point behind the
+**Observed cost calibration (2026-04-18):** after 22 verified
+morning cycles plus a 2-cycle parallel validation run, the
+maintainer's OpenRouter account had been charged ~$0.06 total
+across the day. That's the data point behind the
 "reviewer=openrouter keeps pressure off Claude subscription
 quota" routing default. For **unattended or high-volume runs**
 (overnight, long chain sessions, parallel mode where the
-semaphore would otherwise stampede claude -p), route the
-reviewer to OpenRouter — the per-session spend is a rounding
+semaphore would otherwise stampede `claude -p`), route the
+reviewer to OpenRouter; the per-session spend is a rounding
 error against the subscription-quota cost of doing the same
 work on Claude. Reserve `reviewer=claude` for attended
 interactive sessions where the operator is actively watching
@@ -376,13 +258,11 @@ and low cycle-count means quota isn't at risk.
   > 1` in `projects.yaml`; sequential sessions acquire at most
   one token and the limit never binds.
 
-**Credential sourcing on Ray's machines.** The OpenRouter
-key is stored in the MiroShark `.env` at
-`C:\Users\rweis\OneDrive\Documents\MiroShark\.env` under the
-field name `OPENAI_API_KEY` (the field name predates this
-routing — don't rename it). `scripts/run_session.bat` loads
-the key into the subprocess scope only; it is not written
-session-wide.
+**Credential sourcing.** Credentials are never shipped and never
+session-wide. The user supplies them via their own env or a
+dotfile. The key is loaded into the bot subprocess scope only,
+then discarded. `scripts/run_session.bat` encapsulates this on
+Windows; Unix shells use the standard env-var approach.
 
 **How `scripts/run_session.bat` wires it up (as of 2026-04-19
 subroutine refactor).** The launcher takes two positional
@@ -396,7 +276,8 @@ defaults to `openrouter`. The .bat:
    - a. `OPENROUTER_ENV_FILE` env var (if set and file exists)
    - b. `%USERPROFILE%\.generalstaff\.env` (default fallback)
 3. For each file, `findstr`-parses `OPENROUTER_API_KEY=` first,
-   falls back to `OPENAI_API_KEY=` (MiroShark's field name).
+   falls back to `OPENAI_API_KEY=` (an alternate field name
+   some users standardize on).
 4. If no file yielded a key, calls `:warn_openrouter_missing`
    which prints a loud warning listing the checked paths and
    the session still proceeds (every cycle will fail-safe to
@@ -417,53 +298,11 @@ coming back valid). The refactor pulls the loading into
 they execute in a fresh subroutine context without the nested-
 block scoping issue.
 
-**Ray's one-time setup.** Either:
-- Set `OPENROUTER_ENV_FILE` persistently via
-  `setx OPENROUTER_ENV_FILE "C:\Users\rweis\OneDrive\Documents\MiroShark\.env"`
-  (new shells only; current shell won't see it).
-- Or create `C:\Users\rweis\.generalstaff\.env` as a copy or
-  a symlink (`mklink`) of MiroShark's `.env`. The default
-  path means no env var is needed per launch.
-- Or keep passing `OPENROUTER_ENV_FILE` explicitly via
-  PowerShell Start-Process (`$env:OPENROUTER_ENV_FILE = "..."
-  ; Start-Process ...`), as the interactive-Claude launches
-  have been doing.
-
 When adding a new provider, mirror this pattern: env-var
 selection in `reviewer.ts`, credential loading in the .bat
 via a `call :label` subroutine (scoped to the subprocess,
 never session-wide), and a clear fallback to
 `verification_failed` if credentials are absent.
-
-### Project stakes (why this isn't just a hobby)
-
-GeneralStaff, catalogdna, and Retrogaze are Ray's dev-adjacent
-portfolio. He's primarily a game designer, currently working a
-minimum wage day job, and uses these projects to build a profile
-as a vibecoder and open paths to better opportunities. He
-acknowledged this on 2026-04-15 evening: *"if it helps build my
-profile at all, launch one of my ideas or leads to some kind of
-better opportunity down the road other than my minimum wage
-job, it will be worth it."*
-
-Calibrate future sessions accordingly:
-
-- **Shipping matters more than perfecting.** A soft-launched
-  Phase 1 in public view is more valuable to Ray's career than
-  a perfect Phase 5 that no one sees. When choosing between
-  "ship it rougher but real" and "polish it more," default to
-  the former.
-- **The open-source story is load-bearing.** The GitHub presence,
-  README framing, and the ability to show concrete shipped work
-  all matter more than they would for a pure hobby project.
-- **But the Hard Rules still matter.** Career stakes don't
-  override scope discipline. The goal is real work that ships,
-  not vaporware dressed up as portfolio material. The
-  anti-slop architecture *is* the portfolio piece.
-- **Don't treat catalogdna or Retrogaze as speculative testbeds.**
-  They have real users and real stakes. Any GeneralStaff work
-  against them needs to be safe and reversible, not just
-  interesting.
 
 ### Test-project constraints
 
@@ -478,10 +317,8 @@ candidate set is narrow:
   of GS on other projects (generalstaff dogfood, gamr, raybrain
   Phase 1, bookfinder-general bf-001..005) demonstrated the
   verification-gate + hands_off + reviewer discipline does what
-  the off-limits rule was indirectly protecting against. Ray
-  authorized the relaxation with the reasoning "I trust the work
-  GS has been doing and organizationally it will help catalogDNA
-  regardless." catalogdna's registration will default to **Mode B**
+  the off-limits rule was indirectly protecting against.
+  catalogdna's registration defaults to **Mode B**
   (interactive-primary with GS as discipline layer — see
   `docs/internal/USE-MODES-2026-04-20.md` for the mode taxonomy),
   not Mode A bot-primary. Ray's taste authority over

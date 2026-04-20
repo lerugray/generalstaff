@@ -42,9 +42,9 @@ the shape.
 
 Design documents (`DESIGN.md`, `docs/internal/PIVOT-*.md`,
 `docs/internal/PHASE-*.md`, `docs/internal/FUTURE-DIRECTIONS-*.md`,
-`docs/internal/UI-VISION-*.md`, `docs/internal/VOICE.md`,
-`docs/internal/LAUNCH-PLAN.md`) are append-only. New sections with date headers are
-the right shape; rewrites of earlier sections are not.
+`docs/internal/UI-VISION-*.md`) are append-only. New sections with
+date headers are the right shape; rewrites of earlier sections are
+not.
 
 ## Filing issues
 
