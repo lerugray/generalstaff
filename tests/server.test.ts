@@ -687,6 +687,18 @@ describe("startServer — gs-286 GET /inbox", () => {
 });
 
 describe("startServer — gs-269 layout + / route + static stylesheet", () => {
+  // Reset rootDir each test so earlier describe-blocks that call
+  // setRootDir(FIXTURE_DIR) don't leak into / which reads projects.yaml
+  // via getFleetOverview (cycle-404 fix side-effect, 2026-04-20).
+  let originalRoot: string;
+  beforeEach(() => {
+    originalRoot = getRootDir();
+    setRootDir(process.cwd());
+  });
+  afterEach(() => {
+    setRootDir(originalRoot);
+  });
+
   it("serves /static/style.css with 200 + text/css content-type", async () => {
     const server = await startServer({ port: 0 });
     try {
@@ -729,6 +741,40 @@ describe("startServer — gs-269 layout + / route + static stylesheet", () => {
       // Fleet link should be active; Inbox should not.
       expect(body).toMatch(/<a href="\/"\s+aria-current="page">Fleet<\/a>/);
       expect(body).toMatch(/<a href="\/inbox">Inbox<\/a>/);
+    } finally {
+      server.stop();
+    }
+  });
+
+  it("GET / renders fleet overview content: aggregate stats, project table headings, and Dispatch Orders CLI hints", async () => {
+    // Regression test for the 2026-04-20 pre-HN audit finding that / was
+    // just a "Dashboard scaffolding" placeholder. The / route now pulls
+    // data via getFleetOverview and renders fleet aggregates + a per-project
+    // table + CLI dispatch hints. This test locks in that structure so the
+    // placeholder can't regress.
+    const server = await startServer({ port: 0 });
+    try {
+      const res = await fetch(`${server.url}/`);
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      // No more placeholder text.
+      expect(body).not.toContain("Dashboard scaffolding");
+      // Fleet aggregates section.
+      expect(body).toContain("Fleet overview");
+      expect(body).toMatch(/projects/i);
+      expect(body).toMatch(/cycles/i);
+      expect(body).toMatch(/pass rate/i);
+      // Per-project table headings.
+      expect(body).toContain("Projects");
+      expect(body).toMatch(/<th>Project<\/th>/);
+      expect(body).toMatch(/<th>Pri<\/th>/);
+      expect(body).toMatch(/<th>Bot-pickable<\/th>/);
+      // Dispatch Orders section with CLI hints.
+      expect(body).toContain("Dispatch orders");
+      expect(body).toContain("generalstaff task add");
+      expect(body).toContain("generalstaff session");
+      expect(body).toContain("generalstaff cycle");
+      expect(body).toContain("generalstaff stop");
     } finally {
       server.stop();
     }

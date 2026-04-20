@@ -13,6 +13,8 @@ import { renderProjectPage } from "./server/routes/project";
 import { renderCyclePage } from "./server/routes/cycle";
 import { renderTailPage, openTailStream } from "./server/routes/tail";
 import { renderInboxPage } from "./server/routes/inbox";
+import { getFleetOverview } from "./views/fleet_overview";
+import type { FleetOverviewProjectRow } from "./views/fleet_overview";
 
 export interface StartServerOptions {
   port?: number;
@@ -58,16 +60,103 @@ function loadTailJs(): string {
   return cachedTailJs;
 }
 
-function renderIndex(): string {
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderProjectRow(p: FleetOverviewProjectRow): string {
+  const id = escHtml(p.id);
+  const outcome = p.last_cycle_outcome
+    ? `<span class="outcome-${escHtml(p.last_cycle_outcome)}">${escHtml(p.last_cycle_outcome)}</span>`
+    : "—";
+  const passRate =
+    p.verified + p.failed > 0
+      ? `${Math.round((100 * p.verified) / (p.verified + p.failed))}%`
+      : "—";
+  const autoMerge = p.auto_merge ? "on" : "off";
+  return `<tr>
+<td><a href="/project/${id}"><code>${id}</code></a></td>
+<td>P${p.priority}</td>
+<td>${p.cycles_total}</td>
+<td>${passRate}</td>
+<td>${p.bot_pickable}</td>
+<td>${outcome}</td>
+<td>${autoMerge}</td>
+</tr>`;
+}
+
+async function renderIndex(): Promise<string> {
+  let data;
+  try {
+    data = await getFleetOverview();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return layout({
+      title: "GeneralStaff — Fleet",
+      activeNav: "fleet",
+      body: `<section class="panel" aria-labelledby="fleet-heading">
+<h2 id="fleet-heading">Fleet overview</h2>
+<p class="empty">Could not load projects.yaml: <code>${escHtml(msg)}</code></p>
+<p>Run <code>generalstaff doctor</code> to diagnose, or check <code>projects.yaml.example</code> for the schema.</p>
+</section>`,
+    });
+  }
+
+  const agg = data.aggregates;
+  const passRatePct =
+    agg.total_verified + agg.total_failed > 0
+      ? `${Math.round(100 * agg.pass_rate)}%`
+      : "—";
+  const slotLine =
+    agg.slot_efficiency_recent !== null
+      ? ` · Parallel efficiency ${Math.round(agg.slot_efficiency_recent * 100)}%`
+      : "";
+
+  const projectsBody =
+    data.projects.length === 0
+      ? `<p class="empty">No projects registered. See <code>projects.yaml.example</code> or run <code>generalstaff bootstrap</code>.</p>`
+      : `<table class="dispatch-table">
+<thead><tr>
+<th>Project</th><th>Pri</th><th>Cycles</th><th>Pass rate</th>
+<th>Bot-pickable</th><th>Last outcome</th><th>Auto-merge</th>
+</tr></thead>
+<tbody>${data.projects.map(renderProjectRow).join("")}</tbody>
+</table>`;
+
+  const body = `<section class="panel" aria-labelledby="fleet-heading">
+<h2 id="fleet-heading">Fleet overview</h2>
+<p>
+<strong>${agg.project_count}</strong> projects
+ · <strong>${agg.total_cycles}</strong> cycles
+ · <strong>${passRatePct}</strong> pass rate
+ (${agg.total_verified} verified / ${agg.total_failed} failed)${slotLine}
+</p>
+</section>
+<section class="panel" aria-labelledby="projects-heading">
+<h2 id="projects-heading">Projects</h2>
+${projectsBody}
+</section>
+<section class="panel" aria-labelledby="orders-heading">
+<h2 id="orders-heading">Dispatch orders</h2>
+<p>Actions are CLI-first. Copy the command, paste in your terminal:</p>
+<dl class="project-meta">
+<dt>Queue a task</dt><dd><code>generalstaff task add --project=&lt;id&gt; --priority=&lt;1-5&gt; "&lt;title&gt;"</code></dd>
+<dt>Launch a session</dt><dd><code>generalstaff session --budget=60</code></dd>
+<dt>Run one cycle</dt><dd><code>generalstaff cycle --project=&lt;id&gt;</code></dd>
+<dt>Stop the dispatcher</dt><dd><code>generalstaff stop</code></dd>
+<dt>Tail live events</dt><dd><a href="/inbox">/inbox</a> (attention items) or <code>generalstaff status --watch</code></dd>
+</dl>
+</section>`;
+
   return layout({
     title: "GeneralStaff — Fleet",
     activeNav: "fleet",
-    body: `<section class="panel" aria-labelledby="fleet-overview-heading">
-  <h2 id="fleet-overview-heading">Fleet overview</h2>
-  <p>Dashboard scaffolding. Per-project cards and the live session
-  stream will land in gs-270+ (see
-  <code>docs/internal/PHASE-6-SKETCH-2026-04-19.md</code>).</p>
-</section>`,
+    body,
   });
 }
 
@@ -109,7 +198,7 @@ export async function startServer(
         });
       }
       if (req.method === "GET" && url.pathname === "/") {
-        return new Response(renderIndex(), {
+        return new Response(await renderIndex(), {
           status: 200,
           headers: {
             "Content-Type": "text/html; charset=utf-8",
