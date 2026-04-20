@@ -393,37 +393,74 @@ export interface GetDispatchDetailOptions {
   fleetLogPath?: string;
 }
 
+/**
+ * Collect the progress-log paths that might contain events for a cycle_id.
+ *
+ * Sequential-mode sessions (max_parallel_slots=1) write cycle events ONLY to
+ * `state/<project>/PROGRESS.jsonl` and emit a `session_complete` summary to
+ * `state/_fleet/PROGRESS.jsonl`. Parallel-mode sessions emit to both. Prior
+ * to this fix `getDispatchDetail` read only the fleet log, so every cycle
+ * drill-down in sequential mode returned `cycle not found`.
+ *
+ * The resolver unions the fleet log with every registered project's
+ * per-project log. Cycle IDs are unique across the fleet, so whichever log
+ * contains the cycle's events is the source of truth — the caller walks the
+ * union and the matching events all have the same cycle_id.
+ *
+ * Exported for tests; respects `opts.fleetLogPath` for fixture-driven cases
+ * (tests can bypass the per-project hunt by passing a single log path).
+ */
+export async function collectProgressLogPaths(
+  opts: GetDispatchDetailOptions = {},
+): Promise<string[]> {
+  if (opts.fleetLogPath) {
+    return [opts.fleetLogPath];
+  }
+  const root = getRootDir();
+  const paths: string[] = [join(root, "state", "_fleet", "PROGRESS.jsonl")];
+  try {
+    const projects = await loadProjects();
+    for (const p of projects) {
+      paths.push(join(root, "state", p.id, "PROGRESS.jsonl"));
+    }
+  } catch {
+    // loadProjects() can throw when projects.yaml is missing/invalid —
+    // fall back to fleet-only so at least parallel-mode cycles resolve.
+  }
+  return paths.filter((p) => existsSync(p));
+}
+
 export async function getDispatchDetail(
   cycleId: string,
   opts: GetDispatchDetailOptions = {},
 ): Promise<DispatchDetailData> {
-  const path =
-    opts.fleetLogPath ??
-    join(getRootDir(), "state", "_fleet", "PROGRESS.jsonl");
+  const paths = await collectProgressLogPaths(opts);
 
-  if (!existsSync(path)) {
-    throw new DispatchDetailError(`cycle not found: ${cycleId}`);
-  }
-
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch {
+  if (paths.length === 0) {
     throw new DispatchDetailError(`cycle not found: ${cycleId}`);
   }
 
   const acc = newAccumulator(cycleId);
   let matched = false;
-  const lines = raw.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const evt = parseRawEvent(trimmed);
-    if (!evt) continue;
-    const evtCycleId = evt.cycle_id ?? asString(evt.data.cycle_id);
-    if (evtCycleId !== cycleId) continue;
-    matched = true;
-    applyEvent(acc, evt);
+
+  for (const path of paths) {
+    let raw: string;
+    try {
+      raw = await readFile(path, "utf8");
+    } catch {
+      continue;
+    }
+    const lines = raw.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const evt = parseRawEvent(trimmed);
+      if (!evt) continue;
+      const evtCycleId = evt.cycle_id ?? asString(evt.data.cycle_id);
+      if (evtCycleId !== cycleId) continue;
+      matched = true;
+      applyEvent(acc, evt);
+    }
   }
 
   if (!matched) {

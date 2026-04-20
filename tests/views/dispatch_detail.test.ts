@@ -315,6 +315,54 @@ describe("getDispatchDetail", () => {
     );
   });
 
+  it("sequential-mode: events in per-project PROGRESS.jsonl resolve when fleet log is missing the cycle", async () => {
+    // Regression test for the 2026-04-20 /cycle/:id 404 bug. Sequential-mode
+    // sessions (max_parallel_slots=1) emit cycle events ONLY to
+    // state/<project>/PROGRESS.jsonl. The previous getDispatchDetail only
+    // read state/_fleet/PROGRESS.jsonl, so every sequential-mode cycle
+    // drill-down in the /cycle/:id route returned 404.
+    const projDir = writeProjectTasks("generalstaff", [
+      { id: "gs-100", title: "seq-only task", status: "done", priority: 1 },
+    ]);
+    writeProjectsYaml([{ id: "generalstaff", path: projDir }]);
+
+    // Fleet log present but cycle not in it (matches real sequential-mode).
+    writeFleetLog([
+      {
+        timestamp: "2026-04-20T10:00:00Z",
+        event: "session_complete",
+        project_id: "_fleet",
+        data: { duration_minutes: 5 },
+      },
+    ]);
+
+    // Cycle events live in state/generalstaff/PROGRESS.jsonl only.
+    const projStateDir = join(FIXTURE_DIR, "state", "generalstaff");
+    mkdirSync(projStateDir, { recursive: true });
+    const events = [
+      cycleStart("seq-c1", "2026-04-20T10:30:00Z"),
+      engineerInvoked("seq-c1", "2026-04-20T10:30:01Z"),
+      engineerCompleted("seq-c1", "2026-04-20T10:35:00Z", 299),
+      verificationRun("seq-c1", "2026-04-20T10:35:01Z"),
+      verificationOutcome("seq-c1", "2026-04-20T10:36:00Z", "passed"),
+      reviewerInvoked("seq-c1", "2026-04-20T10:36:01Z"),
+      reviewerVerdict("seq-c1", "2026-04-20T10:36:05Z", "verified"),
+      cycleEnd("seq-c1", "2026-04-20T10:36:05.500Z", "verified"),
+    ];
+    writeFileSync(
+      join(projStateDir, "PROGRESS.jsonl"),
+      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    );
+
+    const data = await getDispatchDetail("seq-c1");
+    expect(data.cycle_id).toBe("seq-c1");
+    expect(data.verdict).toBe("verified");
+    expect(data.project_id).toBe("generalstaff");
+    expect(data.task_id).toBe("gs-100");
+    expect(data.task_title).toBe("seq-only task");
+    expect(data.engineer.duration_seconds).toBe(299);
+  });
+
   it("cycle with null task_id returns task_title: null without throwing", async () => {
     writeProjectsYaml([
       { id: "generalstaff", path: writeProjectTasks("generalstaff", []) },
