@@ -73,8 +73,8 @@ things the architecture does that I couldn't find in one package:
 3. **Built by itself.** I registered GeneralStaff as its own
    first managed project. The repo went from scaffold to v0.1.0
    in 4 days, largely by itself, under the same gate it ships
-   with. 1,441 passing tests. 9% self-rejection rate on proposed
-   diffs: 190 verified, 19 rejected, 1 weak. Grep
+   with. 1,609 passing tests. 9% self-rejection rate on proposed
+   diffs: 210 verified, 20 rejected, 1 weak. Grep
    `'"verdict":"verification_failed"'` in
    `state/generalstaff/PROGRESS.jsonl` and count. Real catches:
    it tried to modify `src/safety.ts`, `src/reviewer.ts`, and

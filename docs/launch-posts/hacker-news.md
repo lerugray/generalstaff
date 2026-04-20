@@ -50,8 +50,9 @@ not instructions. Tests fail, empty diff, hands-off violation: cycle
 rolls back and nothing reaches master. Every prompt, response, tool
 call, and diff lands in a `PROGRESS.jsonl` file inside your repo.
 
-1,575 passing tests. 9% self-rejection rate on proposed diffs. The
-repo is registered as its own first managed project, so the audit log
+1,609 passing tests. 9% self-rejection rate on proposed diffs (20 of
+231 reviewer verdicts came back `verification_failed`). The repo is
+registered as its own first managed project, so the audit log
 contains every cycle where the gate rejected a bad diff. You don't
 have to trust the claim. Grep the log.
 
@@ -98,8 +99,9 @@ thought of yet.
 
 - [ ] **Numbers fresh.** Re-grep `state/generalstaff/PROGRESS.jsonl`
       for current verified/rejected/weak counts. The draft says
-      1,575 passing tests and 9% self-rejection; confirm both are
-      still accurate within 24 hours of posting.
+      1,609 passing tests and 9% self-rejection (20 of 231 reviewer
+      verdicts). Re-verify within 24 hours of posting; absolute
+      counts drift daily, rate has held 8.7-9.1% since 2026-04-17.
 - [ ] **Front page scan.** Check HN front page 30 minutes before
       posting. If it's saturated with Anthropic/OpenAI news, wait a
       day — your angle gets eaten.

@@ -93,9 +93,9 @@ reviewer's interpretation. An LLM reviewer can hallucinate
 "verified"; a Boolean exit code cannot.
 
 **Built by itself.** I registered GeneralStaff as its own first
-managed project. Scaffold to v0.1.0 in 4 days. 1,441 passing
-tests. 9% self-rejection rate on its own proposed diffs (19 of
-210 reviewer verdicts came back `verification_failed`). Real
+managed project. Scaffold to v0.1.0 in 4 days. 1,609 passing
+tests. 9% self-rejection rate on its own proposed diffs (20 of
+231 reviewer verdicts came back `verification_failed`). Real
 catches: the bot tried to modify `src/safety.ts`,
 `src/reviewer.ts`, and `src/prompts/` at different points. The
 hands-off list blocked each. Grep
