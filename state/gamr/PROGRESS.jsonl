@@ -810,3 +810,5 @@
 {"timestamp":"2026-04-20T15:05:21.947Z","event":"session_start","project_id":"gamr","data":{"budget_minutes":90,"dry_run":false,"registered_projects":["generalstaff","gamr","bookfinder-general"]}}
 {"timestamp":"2026-04-20T16:12:43.858Z","event":"session_end","project_id":"gamr","data":{"duration_minutes":67,"total_cycles":0,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-20T16:16:11.573Z","event":"session_start","project_id":"gamr","data":{"budget_minutes":90,"dry_run":false,"registered_projects":["generalstaff","gamr","bookfinder-general"]}}
+{"timestamp":"2026-04-20T17:15:54.081Z","event":"session_end","project_id":"gamr","data":{"duration_minutes":60,"total_cycles":0,"total_verified":0,"total_failed":0}}
+{"timestamp":"2026-04-20T17:18:13.152Z","event":"session_start","project_id":"gamr","data":{"budget_minutes":75,"dry_run":false,"registered_projects":["generalstaff","gamr","bookfinder-general"]}}
