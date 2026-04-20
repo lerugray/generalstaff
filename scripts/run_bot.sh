@@ -84,6 +84,7 @@ changes, and commit when tests pass.
 - Budget: ${BUDGET_MINUTES} minutes. Stop before the budget runs out.
 - After committing, update the task status in state/generalstaff/tasks.json." \
   --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \
+  --dangerously-skip-permissions \
   --output-format text
 
 echo ""
