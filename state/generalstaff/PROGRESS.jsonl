@@ -3136,3 +3136,5 @@
 {"timestamp":"2026-04-19T17:58:09.738Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":45,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
 {"timestamp":"2026-04-19T18:05:57.579Z","event":"session_end","project_id":"generalstaff","data":{"duration_minutes":8,"total_cycles":0,"total_verified":0,"total_failed":0}}
 {"timestamp":"2026-04-20T02:37:12.908Z","event":"session_start","project_id":"generalstaff","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain"]}}
+{"timestamp":"2026-04-20T02:47:02.684Z","event":"cycle_start","cycle_id":"20260420024702_awrv","project_id":"generalstaff","data":{"start_sha":"22e8cbc581199e61ead24cd2d6904ee7b787893f","branch":"bot/work"}}
+{"timestamp":"2026-04-20T02:47:02.685Z","event":"engineer_invoked","cycle_id":"20260420024702_awrv","project_id":"generalstaff","data":{"command":"bash scripts/run_bot.sh ${cycle_budget_minutes}","cycle_budget_minutes":30,"dry_run":false}}
