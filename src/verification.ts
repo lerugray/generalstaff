@@ -116,8 +116,18 @@ export async function runVerification(
   }
 
   const startTime = Date.now();
-  // 5-minute timeout for verification (it should be fast)
-  const timeoutMs = 5 * 60 * 1000;
+  // 20-minute timeout for verification. The original 5-minute cap was
+  // written when "it should be fast" — generalstaff's own suite has
+  // since grown to 1,579 tests / 47 files and runs in ~6 min on
+  // Windows, which SIGKILL'd verification subprocesses mid-run
+  // despite tests passing (observed 2026-04-20 work-PC session: all
+  // three cycles on gs-276 produced clean diffs + reviewer verdict
+  // "verified", rolled back because of exit null). 20 min is ~3x
+  // headroom over the current worst case; matches the reviewer's
+  // own 10-min / 10-sec typical ratio. Future: promote to a
+  // per-project `verification_timeout_minutes` field in
+  // ProjectConfig if a project's suite grows past 15 min.
+  const timeoutMs = 20 * 60 * 1000;
 
   return new Promise<VerificationResult>((resolve) => {
     const logStream = createWriteStream(logPath, { flags: "w" });
