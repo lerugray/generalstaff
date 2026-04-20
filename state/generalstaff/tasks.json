@@ -1991,5 +1991,24 @@
     ],
     "completed_at": "2026-04-20T11:45:00Z",
     "outcome_notes": "Landed on the work PC. All four Phase B behaviors shipped as specified: CREATIVE_WORK warning emission in cycle.ts, branch override to project.creative_work_branch for creative cycles, reviewer-skip with outcome derived from verification alone, voice-reference prompt prepend in the aider provider. Extended slightly beyond scope: (a) task peek moved earlier in runCycle so effectiveBranch resolves before branch handling (enables creative branch to accumulate/reset correctly), (b) claude-path creative cycles get GENERALSTAFF_CREATIVE_CYCLE=1 + GENERALSTAFF_BOT_BRANCH + GENERALSTAFF_DRAFTS_DIR + GENERALSTAFF_VOICE_REFERENCE_PATHS env vars (documented contract; projects opt in by reading them from their engineer_command.sh). 16 new tests in tests/engineer.test.ts cover prompt variants, branch override, audit trail, and context threading. 1575/1576 pass — the 1 fail is pre-existing `flushSessionEndMerges handles mix of projects` flaky timeout that passes in isolation (5.45s, Windows git-worktree timing under concurrent test load)."
+  },
+  {
+    "id": "gs-280",
+    "title": "gs-280 — **Verification-gate JSON syntax check.** Root cause of 2026-04-20 cascading bug: bot's engineer edit to state/<project>/tasks.json left the file malformed (missing `},` between sibling task objects). Verification (pytest/ruff/etc.) doesn't parse tasks.json, so malformed state landed. Downstream cycles' `loadTasks` threw, silent try/catch in cycle.ts set `nextTask=undefined`, and creative-cycle branch routing (gs-279) never fired because it keys off nextTask.creative. Fix: in src/cycle.ts before reviewer runs, or as a new preflight gate, run `JSON.parse` on every `.json` file in the diff. If any fail, downgrade the cycle to `verification_failed` with reason `malformed_json: <path>`. Add unit test covering the gate. Does NOT touch src/verification.ts (keep the external verification command untouched). Expected diff: ~60-100 lines across src/cycle.ts + tests/cycle.test.ts.",
+    "status": "pending",
+    "priority": 2
+  },
+  {
+    "id": "gs-281",
+    "title": "gs-281 — **Fail-loud on task-peek failure in cycle.ts.** The try/catch around `loadTasks` + `nextBotPickableTask` in cycle.ts silently swallows parse errors and sets nextTask=undefined. That's correct behavior for non-greenfield projects (no tasks.json expected), but it's WRONG when a tasks.json exists but is malformed — the silent-swallow masks the issue and kills gs-279's creative-cycle routing downstream. Fix: distinguish 'file doesn't exist' (silent, expected) from 'file exists but unparseable' (log a `task_peek_failed` progress event with the error message, still fall through to undefined so cycle proceeds but operator has a grep-able signal). Add `task_peek_failed` to ProgressEventType union in src/types.ts. Unit-test the two branches. Expected diff: ~40-70 lines.",
+    "status": "pending",
+    "priority": 3
+  },
+  {
+    "id": "gs-282",
+    "title": "gs-282 — **Harden engineer prompt re: tasks.json editing.** Bot's line-oriented edits to state/<project>/tasks.json consistently drop the closing `},` between sibling task objects (observed 2026-04-20, twice in two sessions on bookfinder-general). Prompt currently says 'Update the task's status to done in state/<project>/tasks.json after committing' — insufficient guidance. Fix: in scripts/run_bot.sh AND any project-local engineer_command.sh, add an explicit instruction like 'When editing tasks.json, use the generalstaff CLI (bun src/cli.ts task done --project=<id> --task=<task-id>) rather than raw text editing — the CLI preserves JSON structure. Only fall back to raw editing if the CLI is unavailable, and in that case read the whole file, parse as JSON, mutate the parsed object, and write back formatted JSON.' Interactive-only because scripts/ is hands_off. Expected diff: ~15 lines (prompt text only).",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
   }
 ]

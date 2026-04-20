@@ -31,6 +31,7 @@
     "expected_touches": ["bookfinder_general/library.py"],
     "completed_at": "2026-04-20T10:45:00Z",
     "outcome_notes": "Bot commit 31d9fb8 on bot/work. library.py already had partial typing (dataclass fields, most signatures). Delta from spec: (1) No module-level constants in this file, so no Final[...] annotations needed. (2) No async functions, so no async typing. (3) Added `from __future__ import annotations`, imported TypedDict. (4) Added SearchHit TypedDict for search_library's previously-typed `list[dict]` return. (5) Switched path-taking params from `str` / `str | None` to `Path` / `Path | None` per spec: save_book.filepath, save_book.project_dir, _copy_to_project.project_dir. Runtime unchanged — os.path.join, shutil.copy2, open(), os.path.basename all accept path-like. (6) Added `-> None` to _save_metadata and _copy_to_project. Diff: 19 insertions, 6 deletions (25 lines touched, under the 50-100 band because most signatures were already typed). Verification: pytest 4 passed, ruff clean."
+  },
   {
     "id": "bf-004",
     "title": "Add PEP 257 docstrings to public functions in `bookfinder_general/cli.py`. Docstring each public function with: one-line summary, Args block listing each parameter with type and purpose, Returns block describing return shape, Raises block for documented exceptions. Private functions (leading underscore) get one-line docstrings only. Verify with `python -m ruff check bookfinder_general/cli.py` (pydocstyle rules if enabled). Expected diff: ~40-90 lines.",
