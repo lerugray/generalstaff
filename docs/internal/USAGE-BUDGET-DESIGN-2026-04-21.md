@@ -278,9 +278,11 @@ roughly in dependency order:
 
 **gs-296 — Provider abstraction + Claude Code JSONL reader (bot-pickable)**
 - New `src/usage/` directory with `types.ts`, `claude_code.ts`
-- Reader implementation + tests against synthetic JSONL fixtures
-- `expected_touches: ["src/usage/", "tests/usage/"]`
-- ~400-600 LOC
+- `types.ts` defines `ConsumptionReader` interface + `ConsumptionSnapshot` type
+- `claude_code.ts` imports `ccusage/data-loader` (add `ccusage` to dependencies), calls `loadSessionBlockData()`, maps the active block to `ConsumptionSnapshot`, handles source-unavailable case by returning null (session loop converts to fail-open warning)
+- Tests mock `ccusage/data-loader` exports and verify the mapping layer — DON'T re-test ccusage itself, that's their test suite's job
+- `expected_touches: ["src/usage/", "tests/usage/", "package.json"]`
+- ~200-300 LOC (shrunk from 400-600 because ccusage does the heavy lifting)
 
 **gs-297 — DispatcherConfig + ProjectConfig schema (bot-pickable)**
 - Add `session_budget` fields to types in `src/types.ts`
@@ -339,17 +341,56 @@ Suggested order for the first focused session:
 Order can shift if someone wants to do docs-first TDD-style, but
 the consumption-reader-before-integration order is load-bearing.
 
-## Open questions
+## Resolved questions (ccusage research, 2026-04-21)
 
-1. **Claude Code JSONL location cross-platform.** ccusage solved
-   this; worth reading their approach before guessing. Check if
-   any Claude Code environment variables (e.g.,
-   `CLAUDE_CODE_DATA_DIR`) are documented.
-2. **Cost-per-call for mixed-model sessions.** If a session uses
-   Sonnet + Opus mixed, the cost math depends on knowing
-   per-model pricing at reader time. Could be hardcoded (brittle)
-   or fetched from an external pricing source (complex).
-3. **Token-estimate accuracy for pre-cycle gating.** To check
+Answers from reading `github.com/ryoppippi/ccusage` source.
+These were "open" in the first draft of this doc; captured here
+so implementation (gs-296) starts from known ground.
+
+1. **Claude Code JSONL location.** Env-var override is
+   `CLAUDE_CONFIG_DIR` (comma-separated for multiple dirs), NOT
+   `CLAUDE_CODE_DATA_DIR`. Defaults that coexist and must both
+   be probed + deduped:
+   - `$XDG_CONFIG_HOME/claude` (fallback `~/.config/claude`) —
+     newer default.
+   - `~/.claude` — legacy default, still where Windows Claude
+     Code writes.
+   JSONL glob pattern is `<claudePath>/projects/**/*.jsonl`.
+   Project name extracts from the path segment after
+   `projects/` — directory-based, not a field in the JSONL
+   itself. Windows paths encode cwd with dashes (e.g.
+   `C--Users-rweiss-Documents-Dev-Work-generalstaff`).
+2. **JSONL line shape.** No top-level `total_tokens_used`.
+   Token counts live at `message.usage.{input_tokens,
+   output_tokens, cache_creation_input_tokens,
+   cache_read_input_tokens}` — sum the four yourself. Model at
+   `message.model` (also nested, not top-level). `costUSD` is
+   OPTIONAL and version-dependent — newer Claude Code writes
+   tokens-only; reader must compute cost from pricing. Dedup
+   key tuple: `(message.id, requestId)`.
+3. **5-hour window math.** Block-based, not sliding. Block
+   starts at `floorToHour(firstEntryTimestamp)` — entry at
+   14:37 → block `[14:00, 19:00)`. New block opens when the
+   next entry is >5h after block start OR >5h after the
+   previous entry. ccusage exposes `loadSessionBlockData`
+   returning fully-computed blocks with `{startTime, endTime,
+   isGap, cost, tokens, entries}`.
+4. **Mixed-model pricing.** ccusage fetches from LiteLLM at
+   runtime (or uses prefetched cache via `--offline` flag).
+   Per-entry cost is computed, then summed across the block.
+   Sonnet+Opus mixed just works — no special handling.
+5. **Library mode.** YES. `ccusage/data-loader` subpath export
+   provides `loadSessionBlockData`, `getClaudePaths`,
+   `globUsageFiles`, `extractProjectFromPath`, `usageDataSchema`.
+   MIT license, Node >=20.19.4 (compatible with Bun). **Least-
+   code path for gs-296: import ccusage as a dependency rather
+   than reimplementing the reader.** Pulls valibot + tinyglobby
+   + xdg-basedir + LiteLLM pricing — acceptable dep weight for
+   saving a few hundred lines of JSONL-handling edge cases.
+
+## Remaining open questions
+
+1. **Token-estimate accuracy for pre-cycle gating.** To check
    "would this cycle exceed budget" *before* running the cycle,
    we need an estimate of its cost. Options: (a) upper-bound
    based on `cycle_budget_minutes` × max-tokens-per-minute; (b)
@@ -357,14 +398,21 @@ the consumption-reader-before-integration order is load-bearing.
    pre-estimation, just check post-each-cycle. Option (c) is
    simplest but means the last cycle always overshoots the
    budget by one cycle's worth. Probably acceptable for v1.
-4. **How to report the new feature in launch copy.** "Respects
+2. **How to report the new feature in launch copy.** "Respects
    your subscription limits" is the core message but needs
    sharpening without overclaiming (we don't PREVENT
    oversending, we stop BEFORE cycles if the cap is hit).
-5. **Interaction with gs-290 (session-local empty-diff task
+3. **Interaction with gs-290 (session-local empty-diff task
    exclusion).** If both features ship, the cycle-gating logic
    sits in a similar spot in session.ts — worth checking they
    compose cleanly rather than fighting for the same hook.
+4. **DST / clock-change edge case.** ccusage's block logic is
+   purely timestamp-driven with no special handling for
+   clock-change events. If the machine's clock jumps backward
+   during a session (rare but possible on DST or NTP
+   corrections), blocks could split or collapse. For v1,
+   accept same behavior as ccusage; revisit only if a user
+   reports weirdness.
 
 ## Test matrix sketch (for gs-301)
 
@@ -393,6 +441,11 @@ the consumption-reader-before-integration order is load-bearing.
 - `docs/conventions/skills-first.md` — related pattern; usage
   backends aren't skills but the "plug provider-specific code
   behind a shared interface" shape is the same
-- ccusage: https://github.com/ryoppippi/ccusage — reference
-  implementation for Claude Code consumption reading (CLI-only
-  but the JSONL-reading approach is the pattern we follow)
+- ccusage: https://github.com/ryoppippi/ccusage — consumed as
+  a library dependency via `ccusage/data-loader` subpath export
+  (MIT, Node >=20.19.4). Key internals referenced:
+  `src/data-loader.ts` (`getClaudePaths`, `usageDataSchema`),
+  `src/_session-blocks.ts` (`DEFAULT_SESSION_DURATION_HOURS = 5`,
+  `identifySessionBlocks`), `src/_pricing-fetcher.ts` (LiteLLM
+  pricing integration). See §Resolved questions for the specific
+  schema + window semantics.
