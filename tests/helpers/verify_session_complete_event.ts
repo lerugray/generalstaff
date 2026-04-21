@@ -141,6 +141,9 @@ async function run() {
     const completeEvents = capturedEvents.filter(
       (e) => e.event === "session_complete",
     );
+    const sessionEndEvents = capturedEvents.filter(
+      (e) => e.event === "session_end",
+    );
 
     const errors: string[] = [];
     if (completeEvents.length !== 1) {
@@ -183,9 +186,35 @@ async function run() {
       }
     }
 
+    // Per-project session_end events must also carry stop_reason so
+    // retrospective analyses can slice by project without joining
+    // against _fleet/session_complete.
+    const fleetStopReason = ev?.data.stop_reason as string | undefined;
+    for (const se of sessionEndEvents) {
+      if (se.projectId === "_fleet") {
+        errors.push(
+          `session_end should be per-project, not _fleet (got "${se.projectId}")`,
+        );
+        continue;
+      }
+      if (!("stop_reason" in se.data)) {
+        errors.push(
+          `session_end for ${se.projectId} missing stop_reason`,
+        );
+        continue;
+      }
+      if (se.data.stop_reason !== fleetStopReason) {
+        errors.push(
+          `session_end for ${se.projectId} stop_reason mismatch: ` +
+            `got "${se.data.stop_reason}", fleet says "${fleetStopReason}"`,
+        );
+      }
+    }
+
     const output = {
       pass: errors.length === 0,
       complete_event_count: completeEvents.length,
+      session_end_event_count: sessionEndEvents.length,
       execute_cycle_calls: executeCycleCalls,
       fleet_project_id: ev?.projectId ?? null,
       event_data: ev?.data ?? null,

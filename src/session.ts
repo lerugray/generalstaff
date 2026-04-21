@@ -1077,7 +1077,9 @@ export async function runSession(options: SessionOptions) {
     project_paths: projectPaths,
   });
 
-  // Log session end for each project
+  // Log session end for each project. stop_reason is session-wide
+  // but duplicated per project so analyses can slice by project
+  // without joining against _fleet/session_complete.
   for (const p of projects) {
     const projectResults = allResults.filter((r) => r.project_id === p.id);
     const buckets = categorizeResults(projectResults);
@@ -1086,6 +1088,7 @@ export async function runSession(options: SessionOptions) {
       total_cycles: projectResults.length,
       total_verified: buckets.verified.length,
       total_failed: buckets.failed.length,
+      stop_reason: stopReason,
     });
   }
 
