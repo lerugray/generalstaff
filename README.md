@@ -253,6 +253,33 @@ generalstaff history --lines=20           # inspect what happened
 The bot only pushes to `bot/work` on your own remote. Export equals
 `git clone`. There is no GeneralStaff server.
 
+### Tested configurations
+
+The full dogfood trail (211 verified cycles, 1,628 passing tests)
+ran on **Windows 11 + Claude Code** as the primary engineer. Every
+other combination is wired end-to-end and has working test
+coverage, but has less real-cycle mileage on it:
+
+- **OS.** macOS and Linux paths exist throughout (shell scripts,
+  path resolution, install.sh). The install script smoke-tests
+  clean on all three. Expect rougher edges on macOS/Linux than on
+  Windows until the community shakes them out.
+- **Engineer.** `claude -p` is the default. `engineer_provider: aider`
+  with OpenRouter (Qwen 3.6+ Plus) cleared 80% verified on a 10-task
+  benchmark (`docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`); it's
+  production-ready for bulk scaffolding, not yet the default.
+- **Reviewer.** OpenRouter and Ollama are first-class; both ship with
+  pre-flight reachability checks. Claude as reviewer is the default
+  for interactive sessions; OpenRouter for unattended runs to keep
+  pressure off the Claude subscription quota.
+
+If you hit a rough edge on a configuration that isn't the Windows +
+Claude default, file it at
+[github.com/lerugray/generalstaff/issues](https://github.com/lerugray/generalstaff/issues)
+with your `generalstaff version` output and the relevant
+`PROGRESS.jsonl` lines. The architecture supports the whole matrix;
+the shakedown just hasn't been done for every cell of it yet.
+
 ## Why this over the alternatives
 
 - **Polsia, Devin, and similar closed SaaS:** your code lives on their

@@ -6,6 +6,7 @@ import { getRootDir } from "./state";
 import { loadProgressEvents, readJsonl } from "./audit";
 import { formatBytes, formatDuration, formatPercent } from "./format";
 import { isProgressEntry } from "./types";
+import { loadProjects } from "./projects";
 
 export interface OutcomeCounts {
   verified: number;
@@ -125,6 +126,20 @@ export async function buildFleetSummary(
       return false;
     }
   });
+
+  // Filter to registered projects only. Orphan state dirs (e.g.
+  // left over from a deregistered project or test fixtures) would
+  // otherwise inflate the project count and confuse anyone reading
+  // `summary`. If projects.yaml is missing or unreadable, fall back
+  // to the full set of state dirs so a partly-configured install
+  // still reports something useful.
+  try {
+    const registered = await loadProjects();
+    const registeredIds = new Set(registered.map((p) => p.id));
+    projectDirs = projectDirs.filter((name) => registeredIds.has(name));
+  } catch {
+    // projects.yaml missing or malformed — fall back silently.
+  }
 
   if (projectFilter) {
     projectDirs = projectDirs.filter((name) => name === projectFilter);

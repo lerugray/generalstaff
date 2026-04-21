@@ -1875,10 +1875,12 @@ switch (command) {
         project_id: string;
         task_id: string | null;
         title: string | null;
+        reason: string | null;
       }> = [];
       for (const pick of picks) {
         let taskId: string | null = null;
         let taskTitle: string | null = null;
+        let reason: string | null = null;
         try {
           const tasks = await loadTasks(pick.project.id);
           const pickable = botPickableTasks(tasks, pick.project.hands_off);
@@ -1893,6 +1895,15 @@ switch (command) {
           if (top) {
             taskId = top.id;
             taskTitle = top.title;
+          } else {
+            // Picker ranked this project first on priority/staleness but
+            // it has zero bot-pickable tasks (all done, all
+            // interactive_only, or all hands_off_intersect). Surface the
+            // "why" so JSON consumers can distinguish "no slot" from
+            // "slot with work pending".
+            reason = tasks.length === 0
+              ? "no_tasks_json_entries"
+              : "no_bot_pickable_tasks";
           }
         } catch (err) {
           if (err instanceof TasksLoadError) {
@@ -1900,6 +1911,7 @@ switch (command) {
             // (preview should never fail-hard on per-project load errors).
             taskId = null;
             taskTitle = null;
+            reason = "tasks_json_load_error";
           } else {
             throw err;
           }
@@ -1908,6 +1920,7 @@ switch (command) {
           project_id: pick.project.id,
           task_id: taskId,
           title: taskTitle,
+          reason,
         });
       }
       if (nextValues.json) {
@@ -1916,6 +1929,7 @@ switch (command) {
             project_id: s.project_id,
             task_id: s.task_id,
             title: s.title,
+            ...(s.reason ? { reason: s.reason } : {}),
           })),
         };
         console.log(JSON.stringify(payload, null, 2));
@@ -1925,7 +1939,10 @@ switch (command) {
         } else {
           for (const s of slots) {
             if (s.task_id === null) {
-              console.log(`${s.project_id}  (no bot-pickable task)`);
+              const detail = s.reason
+                ? `(${s.reason.replace(/_/g, " ")})`
+                : "(no bot-pickable task)";
+              console.log(`${s.project_id}  ${detail}`);
             } else {
               const title = (s.title ?? "").slice(0, 80);
               console.log(`${s.project_id}  ${s.task_id}  ${title}`);
@@ -2769,6 +2786,31 @@ switch (command) {
       process.exit(1);
     }
 
+    // Per-view usage hints — shown when parseArgs rejects an unknown
+    // option. task-queue and dispatch-detail take positional args
+    // (not --project or --cycle), and new users (reasonably) guess
+    // the flag form. Surface a friendly error instead of a raw
+    // ERR_PARSE_ARGS_UNKNOWN_OPTION stack trace.
+    const VIEW_USAGE: Record<string, string> = {
+      "fleet-overview": "view fleet-overview [--json]",
+      "task-queue": "view task-queue <project-id> [--json]",
+      "session-tail": "view session-tail [--limit=N] [--json]",
+      "dispatch-detail": "view dispatch-detail <cycle-id> [--json]",
+      "inbox": "view inbox [--since=<iso>] [--json]",
+    };
+    const handleViewParseError = (err: unknown): never => {
+      const anyErr = err as { code?: string; message?: string };
+      if (anyErr?.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+        console.error(
+          `Error: ${anyErr.message}\n` +
+            `Usage: generalstaff ${VIEW_USAGE[viewName] ?? `view ${viewName}`}`,
+        );
+        process.exit(1);
+      }
+      throw err;
+    };
+
+    try {
     if (viewName === "fleet-overview") {
       const { values: viewValues } = parseArgs({
         args: viewArgs,
@@ -3071,6 +3113,9 @@ switch (command) {
         }
       }
       break;
+    }
+    } catch (err) {
+      handleViewParseError(err);
     }
 
     // Unreachable — VALID_VIEWS guard above catches unknown names.
