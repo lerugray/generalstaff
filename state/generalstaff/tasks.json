@@ -2077,5 +2077,12 @@
     "title": "Make MAX_CONSECUTIVE_EMPTY configurable via DispatcherConfig. Currently hardcoded to 3 at src/session.ts line 452. Expose as dispatcher.max_consecutive_empty in projects.yaml (default 3). Optional per-project override via projects.yaml[<id>].max_consecutive_empty for projects with high legitimate empty-diff rates. Wiring: add field to DispatcherConfig in src/types.ts, add optional field to ProjectConfig, thread through to session.ts sequential + parallel loops (both hardcode the constant today). Tests: verify config value is respected, default preserved when unset. Small scope, bot-pickable candidate.",
     "status": "pending",
     "priority": 5
+  },
+  {
+    "id": "gs-293",
+    "title": "In-app intervention channel â operator UI pauses running CC session for real-time judgment input. When a bot cycle hits an ambiguity it currently would abandon (proposal to bot-proposals/) or push through, instead: bot writes waiting-for-input signal with question context, dashboard surfaces prompt to operator, operator responds via UI, bot resumes. Real-time human-in-loop without abandoning the session. Polsia-differentiating feature â acknowledges the Hammerstein ceiling exists (per launch copy framing) and makes it permeable instead of hard-stop. Design sketch: (a) file-based IPC â engineer prompt knows to write .bot-waiting-input with {question, options, task_id, cycle_id}, polls for .operator-response; (b) server-side detector surfaces waiting sessions via existing SSE channel; (c) UI dashboard adds pending-interventions panel with text input; (d) PROGRESS.jsonl logs intervention_request + intervention_response events for audit; (e) timeout default ~N minutes â if no operator response, either abandon to bot-proposals (safe fallback) or proceed with bot's best guess (configurable per-project). Open questions: polling interval vs fs.watch; per-project opt-in; how does engineer prompt decide WHEN to ask vs push through; does waiting time count toward cycle_budget. Cross-cutting change (server + UI + engineer prompt + session loop) â Phase 6.5+ territory, not bot-delegatable. Interactive because src/prompts/ + server + UI touch hands_off.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
   }
 ]
