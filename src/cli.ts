@@ -517,6 +517,58 @@ switch (command) {
     break;
   }
 
+  case "session-report": {
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff session-report [options]\n" +
+          "\n" +
+          "Summarize past session_complete events from state/_fleet/PROGRESS.jsonl:\n" +
+          "stop-reason distribution, avg duration + cycles per reason, and the\n" +
+          "empty-cycles share (sessions that hit the 3-consecutive-empty guard —\n" +
+          "the canary for 'bot kept picking stuck tasks').\n" +
+          "\n" +
+          "Options:\n" +
+          "  --last=<n>    Only include the last N sessions (default: all)\n" +
+          "  --json        Machine-readable output\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff session-report              # full history, table\n" +
+          "  generalstaff session-report --last=20    # last 20 sessions\n" +
+          "  generalstaff session-report --json       # for scripting\n",
+      );
+      process.exit(0);
+    }
+    const { values: reportValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        last: { type: "string" },
+        json: { type: "boolean", default: false },
+      },
+      allowPositionals: false,
+    });
+    let lastN: number | undefined;
+    if (reportValues.last !== undefined) {
+      const n = Number(reportValues.last);
+      if (!Number.isInteger(n) || n <= 0) {
+        console.error(
+          `Error: --last must be a positive integer, got: ${reportValues.last}`,
+        );
+        process.exit(1);
+      }
+      lastN = n;
+    }
+    const { buildSessionReport, formatSessionReport } = await import(
+      "./session_report"
+    );
+    const report = await buildSessionReport({ lastN });
+    if (reportValues.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(formatSessionReport(report));
+    }
+    break;
+  }
+
   case "cycle": {
     // gs-244: subcommand-level --help / help matching gs-233's view pattern.
     if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
