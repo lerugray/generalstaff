@@ -30,5 +30,13 @@
     "priority": 4,
     "interactive_only": false,
     "expected_touches": []
+  },
+  {
+    "id": "cdna-005",
+    "title": "PDF-export + Obsidian-wiki tier split — 2026-04-21 product-direction idea from Ray (captured during a walk). Current default output is the full Obsidian wiki. New direction: default output becomes an electronic PDF styled AS IF it were an Obsidian wiki (hyperlinked, branching, graph-feel visual language) — and the actual editable Obsidian wiki graduates to a higher-paid tier. Rationale: (a) more control over the PDF output — we own rendering, users don't edit around us; (b) a Claude Design pass can produce the PDF visual aesthetic cleanly (per CLAUDE.local.md §Skills-first tool integration — save a SKILL.md to catalogdna/.claude/skills/ once the aesthetic lands); (c) free/basic tier delivers real value without giving away the richer artifact; (d) monetization tier structure emerges naturally from format difference rather than feature-gate fiction. Existing tool options worth surveying: react-pdf skill at ~/.claude/skills/react-pdf/ (already proven via VC's manual generation); devforge has PDF tools per Ray mention; other OSS PDF-from-markdown generators possibly worth a look. Scope for this task (design spec, not build): (1) decide default-tier format (PDF-only vs PDF-+-basic-wiki-vs-something-else), (2) scope the Claude Design pass on the PDF aesthetic — pick a starter from awesome-claude-design that evokes the Obsidian-wiki feel (dark + typographic + graph-referential — Raycast, The Verge, or a custom brief are plausible vibes), (3) spec the tier gating (what content lives where, how the upgrade path works, pricing signal), (4) scope build effort against current catalogdna architecture + where render code lives. Does NOT commit to building — this is direction capture + spec. Interactive — product-tier direction is taste + business judgment.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Product-tier direction + monetization design. Taste call on where the free/paid line draws; format decisions interact with current render architecture and cannot be automated away."
   }
 ]
