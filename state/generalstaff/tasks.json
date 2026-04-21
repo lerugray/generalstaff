@@ -2057,5 +2057,25 @@
     "status": "pending",
     "priority": 3,
     "interactive_only": true
+  },
+  {
+    "id": "gs-290",
+    "title": "Session-local empty-diff task exclusion. When a cycle ends with verified_weak + empty diff, the picker should exclude that specific task from subsequent picks in the same session, so the next cycle tries a DIFFERENT task instead of the same stuck one. Prevents MAX_CONSECUTIVE_EMPTY from stopping sessions that still have other bot-pickable work. Requires: (1) engineer-side change to emit attempted_task_id in cycle_end event (currently not logged â see gs-291), (2) session-loop in src/session.ts tracks Set<string> of excluded-this-session task ids, (3) isTaskBotPickable accepts optional session-excluded set, (4) dispatcher picker passes it through. Data motivation: 2026-04-21 session-report found 20 of 80 sessions (25%) end on 3-consecutive-empties averaging 7.5 cycles; if the picker had excluded the stuck task after first empty, many would continue on other tasks. Interactive because touches src/prompts/ (hands_off) for engineer claim-signal.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true
+  },
+  {
+    "id": "gs-291",
+    "title": "Add attempted_task_id to cycle_end progress event. Currently cycle_end records outcome + reason + duration but NOT which task the engineer claimed. Without this, retrospective analysis cannot correlate empty-diff patterns with specific tasks (is the same task producing empty diffs repeatedly? which tasks routinely go to empty?). Implementation: engineer prompt change to emit a structured claim signal (JSON header on stdout or a side-channel file), session.ts/cycle.ts parse and thread it into ProgressEntry.data. Load-bearing for gs-290 (can't exclude what you didn't record). Interactive because src/prompts/ is hands_off.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true
+  },
+  {
+    "id": "gs-292",
+    "title": "Make MAX_CONSECUTIVE_EMPTY configurable via DispatcherConfig. Currently hardcoded to 3 at src/session.ts line 452. Expose as dispatcher.max_consecutive_empty in projects.yaml (default 3). Optional per-project override via projects.yaml[<id>].max_consecutive_empty for projects with high legitimate empty-diff rates. Wiring: add field to DispatcherConfig in src/types.ts, add optional field to ProjectConfig, thread through to session.ts sequential + parallel loops (both hardcode the constant today). Tests: verify config value is respected, default preserved when unset. Small scope, bot-pickable candidate.",
+    "status": "pending",
+    "priority": 5
   }
 ]
