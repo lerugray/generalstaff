@@ -353,11 +353,13 @@ if (args.includes("--version") || args.includes("-v")) {
 const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "view",
   "session",
+  "session-report",
   "cycle",
   "status",
   "task",
   "todo",
   "serve",
+  "integrations",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -567,6 +569,138 @@ switch (command) {
       console.log(formatSessionReport(report));
     }
     break;
+  }
+
+  case "integrations": {
+    const sub = args[1];
+    const rest = args.slice(2);
+    if (!sub || sub === "--help" || sub === "-h" || sub === "help") {
+      console.log(
+        "Usage: generalstaff integrations <provider> <subcommand> [options]\n" +
+          "\n" +
+          "Connect GeneralStaff projects to the external tools your human team\n" +
+          "already uses. Integrations are OPTIONAL — the dispatcher does not\n" +
+          "depend on any of them. Tokens live in the calling directory's .env.\n" +
+          "\n" +
+          "Providers:\n" +
+          "  basecamp   Basecamp 4 (see docs/integrations/basecamp.md)\n" +
+          "\n" +
+          "Subcommands per provider:\n" +
+          "  auth       One-shot browser OAuth flow to get tokens\n" +
+          "  projects   List visible projects (validates tokens)\n" +
+          "  whoami     Dump authorization info (accounts + identity)\n" +
+          "\n" +
+          "Examples:\n" +
+          "  cd my-project && generalstaff integrations basecamp auth\n" +
+          "  generalstaff integrations basecamp projects --json\n",
+      );
+      process.exit(sub ? 0 : 1);
+    }
+    if (sub !== "basecamp") {
+      console.error(`Error: unknown integration provider: ${sub}`);
+      console.error("  Supported: basecamp");
+      process.exit(1);
+    }
+    const action = rest[0];
+    if (!action || action === "--help" || action === "-h" || action === "help") {
+      console.log(
+        "Usage: generalstaff integrations basecamp <subcommand> [options]\n" +
+          "\n" +
+          "Subcommands:\n" +
+          "  auth       Interactive browser OAuth flow. Requires\n" +
+          "             BASECAMP_CLIENT_ID + BASECAMP_CLIENT_SECRET in ./.env.\n" +
+          "             See docs/integrations/basecamp.md for registration steps.\n" +
+          "  projects   List all projects visible to the current tokens.\n" +
+          "             Pass --json for machine-readable output.\n" +
+          "  whoami     Print the accounts + identity the token sees.\n" +
+          "\n" +
+          "Tokens are stored in ./.env (the calling directory), not\n" +
+          "the GeneralStaff repo root. Run this from the project whose\n" +
+          "Basecamp you want to access.\n",
+      );
+      process.exit(action ? 0 : 1);
+    }
+    const envPath = resolve(".env");
+    if (action === "auth") {
+      const { runAuth } = await import("./integrations/basecamp/auth");
+      console.log("Opening browser to Basecamp authorization...");
+      console.log(`  Tokens will be saved to: ${envPath}`);
+      const result = await runAuth({
+        envPath,
+        onAuthUrl: (url) => console.log(`  URL (also opened in browser): ${url}`),
+      });
+      console.log();
+      console.log("=".repeat(60));
+      console.log("SUCCESS: Basecamp tokens saved to .env");
+      console.log("=".repeat(60));
+      const acc = result.accounts[0]!;
+      console.log(`  account_id:    ${acc.id}`);
+      console.log(`  account_name:  ${acc.name}`);
+      console.log(`  account_href:  ${acc.href}`);
+      console.log(
+        `  expires_at:    ${result.tokens.expiresAt} ` +
+          `(~${Math.round((result.tokens.expiresAt - Date.now() / 1000) / 60)} min from now)`,
+      );
+      if (result.accounts.length > 1) {
+        console.log();
+        console.log(
+          `  Note: ${result.accounts.length} accessible accounts; saved the first.`,
+        );
+        console.log("  Others:");
+        for (const a of result.accounts.slice(1)) {
+          console.log(`    - id=${a.id} name=${a.name}`);
+        }
+      }
+      console.log();
+      console.log("Next: generalstaff integrations basecamp projects");
+      break;
+    }
+    if (action === "projects") {
+      const jsonOut = rest.includes("--json");
+      const { loadClientConfig, listProjects } = await import(
+        "./integrations/basecamp/client"
+      );
+      const config = loadClientConfig(envPath);
+      const projects = await listProjects(config);
+      if (jsonOut) {
+        console.log(JSON.stringify(projects, null, 2));
+      } else {
+        console.log(`Account: ${config.accountId}`);
+        console.log(`Projects visible: ${projects.length}`);
+        console.log();
+        console.log(
+          `${"id".padStart(12)}  ${"created".padEnd(12)}  ${"name".padEnd(40)}  status`,
+        );
+        console.log("-".repeat(78));
+        for (const p of projects) {
+          const name = (p.name || "").slice(0, 40).padEnd(40);
+          const created = (p.created_at || "").slice(0, 10).padEnd(12);
+          const id = String(p.id).padStart(12);
+          console.log(`${id}  ${created}  ${name}  ${p.status}`);
+        }
+      }
+      break;
+    }
+    if (action === "whoami") {
+      const jsonOut = rest.includes("--json");
+      const { loadClientConfig, whoAmI } = await import(
+        "./integrations/basecamp/client"
+      );
+      const config = loadClientConfig(envPath);
+      const info = await whoAmI(config);
+      if (jsonOut) {
+        console.log(JSON.stringify(info, null, 2));
+      } else {
+        console.log(`Accounts visible: ${info.accounts.length}`);
+        for (const a of info.accounts) {
+          console.log(`  - id=${a.id} name=${a.name} href=${a.href}`);
+        }
+      }
+      break;
+    }
+    console.error(`Error: unknown basecamp subcommand: ${action}`);
+    console.error("  Supported: auth, projects, whoami");
+    process.exit(1);
   }
 
   case "cycle": {
