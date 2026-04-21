@@ -39,6 +39,13 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 >   their own bot infrastructure (catalogdna pattern). It acts as a
 >   discipline layer around the existing loop, not a replacement.
 >   See `docs/internal/USE-MODES-2026-04-20.md`.
+> - **Usage-budget gate (2026-04-21):** cap what a session spends
+>   against your Claude / OpenRouter allotment. Fleet-wide + per-
+>   project scopes, hard-stop and advisory modes, and a
+>   `skip-project` option so one project hitting its cap doesn't
+>   end the whole session. Reads Claude Code's own session blocks
+>   via `ccusage` so the gate reflects real spend, not an estimate.
+>   Design in `docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`.
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
@@ -352,6 +359,7 @@ reference:
 | `engineer_provider: aider` | Route cycles through aider + OpenRouter (Qwen3 / 3.6 Plus) instead of `claude -p` | `claude` | You'd rather not burn Claude subscription quota on bulk scaffolding. Per-cycle OpenRouter cost ~$0.05-0.10. |
 | `creative_work_allowed: true` | Allow `creative: true` tasks to dispatch creative-draft cycles (README sections, blog posts, launch copy) with voice references + human-in-the-loop review | `false` | You want bot drafts you can edit, and you've read `docs/internal/RULE-RELAXATION-2026-04-20.md` to understand the guardrails. |
 | `auto_merge: true` | Dispatcher auto-merges `bot/work` into your default branch after a clean cycle | `false` (Hard Rule 4 — opt in after 5 clean cycles) | You've watched the bot run cleanly and want to stop merging manually. |
+| `dispatcher.session_budget` (also per-project) | Cap a session's consumption in USD, tokens, or cycles. Session stops at the cap. Per-project overrides can add `on_exhausted: skip-project` so one project hitting its cap drops that project from the picker instead of ending the whole session. | unset (no cap) | You want unattended runs without a Claude subscription or OpenRouter credit surprise. |
 | `dispatcher.max_parallel_slots: N` | Run N cycles per round in parallel | `1` | You have ≥2 projects with real backlogs and wall-clock is the bottleneck. Multiplies reviewer API spend by N. |
 | `task.engineer_provider`, `task.engineer_model` | Per-task engineer override | inherits project | Use `claude` for gnarly refactors, `aider` for scaffold work, picking per task. |
 | `task.interactive_only: true` | Mark a task bot-unpickable; you handle it interactively | `false` | Tasks that need your taste / judgment but you still want tracked in the queue. |
@@ -504,6 +512,16 @@ root.
   creative cycle (bookfinder-general's bf-005) drafted a
   usable-with-light-edit README section now live on public main.
   See [`docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`](docs/internal/PHASE-7-BENCHMARK-2026-04-20.md).
+- ✓ **Usage-budget gate** (closed 2026-04-21): session-level
+  consumption cap wired into the dispatcher loop. Fleet-wide and
+  per-project `session_budget` config with exactly-one-unit
+  validation (max_usd / max_tokens / max_cycles), hard-stop and
+  advisory enforcement modes, and a `skip-project` option on
+  per-project caps so one project exhausting its share drops off
+  the picker without ending the session. Reads Claude Code's own
+  5-hour session blocks via the `ccusage` library, so the gate
+  reflects real spend rather than a pre-cycle estimate. Design in
+  [`docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`](docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md).
 - **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
   the dashboard, edit `tasks.json` from the UI, merge `bot/work`
   with a button. Read-only v1 is the current dashboard; actions
