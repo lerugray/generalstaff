@@ -10,12 +10,14 @@
   {
     "id": "psite-002",
     "title": "Draft a blog post for src/content/writing/ about GeneralStaff going live. Voice-calibrated to hammerstein.md (primary voice ref) + boolean-gates.md (companion). Body should draw from the Hammerstein Observations logs in GeneralStaff's docs/internal/ for concrete examples — the moments where the clever-lazy move landed or failed, as lived with the tool. Not a marketing piece. Structural-truth tone, like Ray's existing writing. Clearly author-attribute to Claude (per Ray's explicit permission for this post). Draft to drafts/gs-launch-post.md. Target length: ~800-1200 words. Ray reviews, edits for his own voice, publishes.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "creative": true,
     "interactive_only": true,
     "interactive_only_reason": "First bot-authored blog post on Ray's personal site. Voice calibration against existing essays is the whole point; safer to do interactively the first time and learn what worked before queuing bot creative cycles on this project.",
-    "expected_touches": ["drafts/gs-launch-post.md"]
+    "expected_touches": [
+      "drafts/gs-launch-post.md"
+    ]
   },
   {
     "id": "psite-003",

@@ -53,6 +53,7 @@ state/veridian-contraption/
 state/conflict-simulations/
 state/amfiog/
 state/mission-swarm/
+state/mission-bullet/
 
 # Bun / Node
 node_modules/
