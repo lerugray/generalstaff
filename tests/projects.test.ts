@@ -1285,5 +1285,72 @@ dispatcher:
     await expect(loadProjectsYaml(path)).rejects.toThrow(/must be an object/);
     cleanup();
   });
+
+  it("accepts on_exhausted='skip-project' on a per-project cap (gs-298)", async () => {
+    const path = writeYaml(
+      "budget-skip-project.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_usd: 2.00
+      on_exhausted: skip-project
+dispatcher:
+  session_budget:
+    max_usd: 5.00
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].session_budget?.on_exhausted).toBe("skip-project");
+    cleanup();
+  });
+
+  it("accepts on_exhausted='break-session' on a per-project cap", async () => {
+    const path = writeYaml(
+      "budget-break-session.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_cycles: 5
+      on_exhausted: break-session
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].session_budget?.on_exhausted).toBe("break-session");
+    cleanup();
+  });
+
+  it("rejects on_exhausted set on the fleet-wide dispatcher scope", async () => {
+    const path = writeYaml(
+      "budget-fleet-on-exhausted.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 5.00
+    on_exhausted: skip-project
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /on_exhausted.*only valid on per-project/,
+    );
+    cleanup();
+  });
+
+  it("rejects invalid on_exhausted value on a per-project cap", async () => {
+    const path = writeYaml(
+      "budget-bad-on-exhausted.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_usd: 2.00
+      on_exhausted: skip-everything
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/on_exhausted/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /break-session, skip-project/,
+    );
+    cleanup();
+  });
 });
 

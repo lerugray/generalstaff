@@ -25,11 +25,13 @@ import type {
   SessionBudget,
   BudgetEnforcement,
   BudgetProviderSource,
+  BudgetOnExhausted,
 } from "./types";
 import {
   VALID_ENGINEER_PROVIDERS,
   VALID_BUDGET_ENFORCEMENTS,
   VALID_BUDGET_PROVIDER_SOURCES,
+  VALID_BUDGET_ON_EXHAUSTED,
 } from "./types";
 
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
@@ -192,6 +194,39 @@ function validateSessionBudget(
       );
     }
     budget.provider_source = o.provider_source as BudgetProviderSource;
+  }
+
+  if (o.on_exhausted !== undefined && o.on_exhausted !== null) {
+    // Only meaningful on per-project caps. Fleet-wide cap hit
+    // inherently ends the session (no surviving scope to fall back
+    // to), so on_exhausted on the dispatcher block is a config
+    // mistake — reject rather than silently ignore.
+    if (scope === "dispatcher") {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.on_exhausted",
+        "is only valid on per-project session_budget blocks — fleet-wide cap hits always end the session",
+      );
+    }
+    if (typeof o.on_exhausted !== "string") {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.on_exhausted",
+        `must be a string, got ${typeof o.on_exhausted}`,
+      );
+    }
+    if (
+      !VALID_BUDGET_ON_EXHAUSTED.includes(
+        o.on_exhausted as BudgetOnExhausted,
+      )
+    ) {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.on_exhausted",
+        `must be one of: ${VALID_BUDGET_ON_EXHAUSTED.join(", ")} — got "${o.on_exhausted}"`,
+      );
+    }
+    budget.on_exhausted = o.on_exhausted as BudgetOnExhausted;
   }
 
   return budget;

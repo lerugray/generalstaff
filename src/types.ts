@@ -77,12 +77,27 @@ export const VALID_BUDGET_PROVIDER_SOURCES: readonly BudgetProviderSource[] = [
   "ollama",
 ];
 
+// What to do when a per-project session_budget cap binds.
+// "break-session" (default) ends the whole session — matches the
+// fleet-wide cap behavior and is the simplest mental model.
+// "skip-project" removes only the over-budget project from picker
+// eligibility and lets the session keep running other projects
+// within the fleet-wide cap (if any). Only meaningful on per-project
+// blocks; fleet-wide caps always break the session (no per-project
+// machinery to fall back to).
+export type BudgetOnExhausted = "break-session" | "skip-project";
+export const VALID_BUDGET_ON_EXHAUSTED: readonly BudgetOnExhausted[] = [
+  "break-session",
+  "skip-project",
+];
+
 export interface SessionBudget {
   max_usd?: number;
   max_tokens?: number;
   max_cycles?: number;
   enforcement?: BudgetEnforcement;
   provider_source?: BudgetProviderSource;
+  on_exhausted?: BudgetOnExhausted;
 }
 
 export interface ProjectConfig {
@@ -240,7 +255,27 @@ export type ProgressEventType =
   // legacy non-creative path still runs, but the event preserves
   // the error for post-hoc grep so operators can spot the breakage
   // instead of it silently masking downstream creative-cycle routing.
-  | "task_peek_failed";
+  | "task_peek_failed"
+  // gs-298: usage-budget gate fired at a cycle boundary with
+  // enforcement=hard. The session is about to end with
+  // stopReason="usage-budget"; data carries {unit, budget, consumed,
+  // source, scope: "fleet" | "project"}.
+  | "session_budget_exceeded"
+  // gs-298: usage-budget gate fired with enforcement=advisory. Warns
+  // but does not break; emitted every cycle the cap is exceeded so
+  // gs-299's reporting can compute dwell-over-budget. Same data
+  // shape as session_budget_exceeded.
+  | "session_budget_advisory"
+  // gs-298: the ConsumptionReader returned null or threw (source
+  // unavailable — no data dir, no API key, etc.). Session continues
+  // without gating (fail-open). Emitted once per session only; the
+  // null condition is usually persistent.
+  | "session_budget_reader_unavailable"
+  // gs-298: per-project cap hit with on_exhausted="skip-project".
+  // Project is removed from picker eligibility for the rest of the
+  // session; the session continues with other projects. Data carries
+  // the same {unit, budget, consumed, source} as session_budget_exceeded.
+  | "session_budget_project_skipped";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -355,6 +390,9 @@ const VALID_EVENTS: readonly string[] = [
   "session_start", "session_end", "session_complete",
   "session_end_auto_merge",
   "malformed_json",
+  // gs-298: usage-budget gate event types
+  "session_budget_exceeded", "session_budget_advisory",
+  "session_budget_reader_unavailable", "session_budget_project_skipped",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

@@ -2124,7 +2124,7 @@
   {
     "id": "gs-298",
     "title": "Usage-budget feature â pre-cycle check integration in session loop. Modifies src/session.ts to: (a) construct a ConsumptionReader instance based on dispatcher.session_budget.provider_source at session start; (b) call reader.readCurrentWindow() before each cycle in both sequential AND parallel loops; (c) if any budget unit (max_usd/max_tokens/max_cycles) is hit AND enforcement='hard', break with new stopReason='budget'; if enforcement='advisory', log warning and continue; (d) if reader.readCurrentWindow() throws or returns null (source unavailable), emit loud warning and proceed as fail-open (no silent degrade). Plumbs the new stopReason='budget' through session_complete event. Tests in tests/session.test.ts mock the reader and verify all four branches. Interactive because it touches the core session loop â dispatcher-adjacent hands_off region â and the fail-open semantics + pre-cycle vs post-cycle timing want a human call. Depends on gs-296 + gs-297 both merged. Expected diff: ~150-250 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true
   },

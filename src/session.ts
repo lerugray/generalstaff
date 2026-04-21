@@ -39,6 +39,11 @@ import type {
   ProjectConfig,
   ProjectsYaml,
 } from "./types";
+// gs-298: usage-budget gate
+import type { ConsumptionReader, ConsumptionSnapshot } from "./usage/types";
+import { evaluateUsageBudget, resolveProviderSource } from "./usage/budget_gate";
+import type { BudgetOutcome } from "./usage/budget_gate";
+import { createConsumptionReader } from "./usage/factory";
 
 // Watchdog threshold multiplier. 2x the per-project cycle budget was picked as
 // a conservative "probably stuck, not just slow" signal — normal engineer
@@ -412,6 +417,87 @@ export async function runSession(options: SessionOptions) {
   const failureStreaks = new Map<string, FailureStreak>();
   const unproductiveStreaks = new Map<string, UnproductiveStreak>();
 
+  // gs-298: usage-budget outcome handler. Emits the progress event +
+  // console message + mutates the warn-once flags, and returns the
+  // action the caller loop should take:
+  //   - "proceed": run the cycle (ok / unavailable / advisory hit)
+  //   - "skip":    drop this project from picker eligibility for the
+  //                rest of the session, pick a new project next
+  //                iteration (project-scoped hit with
+  //                on_exhausted="skip-project")
+  //   - "stop":    break the loop with stopReason="usage-budget"
+  //                (fleet hit, or project hit with
+  //                on_exhausted="break-session")
+  async function handleBudgetOutcome(
+    outcome: BudgetOutcome,
+    project: ProjectConfig,
+  ): Promise<"proceed" | "skip" | "stop"> {
+    if (outcome.kind === "ok") return "proceed";
+    if (outcome.kind === "unavailable") {
+      if (!hasWarnedReaderUnavailable) {
+        hasWarnedReaderUnavailable = true;
+        const name = budgetReader?.name ?? "none";
+        console.warn(
+          `\n[usage-budget] consumption reader "${name}" unavailable — ` +
+            `session proceeding without gating (fail-open).`,
+        );
+        await appendProgress("_fleet", "session_budget_reader_unavailable", {
+          reader: name,
+        });
+      }
+      return "proceed";
+    }
+    const eventData: Record<string, unknown> = {
+      scope: outcome.scope,
+      unit: outcome.unit,
+      budget: outcome.budget,
+      consumed: outcome.consumed,
+      source: outcome.source,
+      enforcement: outcome.enforcement,
+    };
+    if (outcome.scope === "project") eventData.project_id = project.id;
+
+    if (outcome.enforcement === "advisory") {
+      if (!hasWarnedAdvisoryHit) {
+        hasWarnedAdvisoryHit = true;
+        console.warn(
+          `\n[usage-budget] advisory: ${outcome.unit}=${outcome.consumed} ` +
+            `exceeds ${outcome.budget} (${outcome.scope}` +
+            (outcome.scope === "project" ? ` — ${project.id}` : "") +
+            `); continuing.`,
+        );
+      }
+      await appendProgress(
+        outcome.scope === "project" ? project.id : "_fleet",
+        "session_budget_advisory",
+        eventData,
+      );
+      return "proceed";
+    }
+    // hard enforcement
+    if (outcome.scope === "project" && outcome.on_exhausted === "skip-project") {
+      await appendProgress(
+        project.id,
+        "session_budget_project_skipped",
+        eventData,
+      );
+      console.log(
+        `\n[usage-budget] ${project.id} skipped ` +
+          `(${outcome.unit}=${outcome.consumed} >= ${outcome.budget}); ` +
+          `session continuing with other projects.`,
+      );
+      return "skip";
+    }
+    await appendProgress("_fleet", "session_budget_exceeded", eventData);
+    console.log(
+      `\n[usage-budget] exceeded (${outcome.scope}` +
+        (outcome.scope === "project" ? ` — ${project.id}` : "") +
+        `): ${outcome.unit}=${outcome.consumed} >= ${outcome.budget}. ` +
+        `Ending session.`,
+    );
+    return "stop";
+  }
+
   function elapsedMinutes(): number {
     return (Date.now() - sessionStart) / 60_000;
   }
@@ -451,7 +537,27 @@ export async function runSession(options: SessionOptions) {
   let consecutiveEmptyCycles = 0;
   const MAX_CONSECUTIVE_EMPTY = 3;
 
-  let stopReason: "budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+  // gs-298: "usage-budget" joins the existing set for the
+  // consumption-cap gate. NOT renamed to disambiguate from the
+  // default "budget" (wall-clock exhausted); rename would ripple
+  // through every caller that pattern-matches stopReason.
+  let stopReason: "budget" | "usage-budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+
+  // gs-298: usage-budget state. budgetReader is null when no
+  // session_budget is configured anywhere — the hot path short-
+  // circuits at evaluateUsageBudget() so non-users pay zero
+  // overhead. Flags are "has warned at least once this session"
+  // so the fail-open and advisory warnings don't spam the console
+  // every cycle.
+  let budgetReader: ConsumptionReader | null = null;
+  {
+    const providerSource = resolveProviderSource(projects, config);
+    if (providerSource !== undefined) {
+      budgetReader = createConsumptionReader(providerSource);
+    }
+  }
+  let hasWarnedReaderUnavailable = false;
+  let hasWarnedAdvisoryHit = false;
 
   // gs-186: total wall-clock minutes during which at least one parallel
   // slot was waiting for a slower sibling cycle. Only non-zero when
@@ -557,7 +663,7 @@ export async function runSession(options: SessionOptions) {
       // won't fit in the remaining wall clock. In parallel mode the
       // slots share wall clock (Promise.all), so each is checked
       // independently — we don't sum budgets.
-      const eligible = picks.filter(
+      let eligible = picks.filter(
         (p) => remainingMinutes() >= p.project.cycle_budget_minutes + 5,
       );
       if (eligible.length === 0) {
@@ -566,6 +672,44 @@ export async function runSession(options: SessionOptions) {
         );
         stopReason = "insufficient-budget";
         break;
+      }
+
+      // gs-298: usage-budget filter. Evaluated per pick before cycles
+      // run. Fleet hits and project hits with on_exhausted="break-session"
+      // break the whole loop; project hits with on_exhausted="skip-project"
+      // drop the project from THIS round and add it to skippedProjects so
+      // the next round's pickNextProjects excludes it too. Reader-unavailable
+      // and advisory hits fall through (cycle runs; fail-open semantics).
+      {
+        const budgeted: typeof eligible = [];
+        let hitStop = false;
+        for (const p of eligible) {
+          const outcome = await evaluateUsageBudget(
+            budgetReader,
+            p.project,
+            config,
+          );
+          const action = await handleBudgetOutcome(outcome, p.project);
+          if (action === "stop") {
+            stopReason = "usage-budget";
+            hitStop = true;
+            break;
+          }
+          if (action === "skip") {
+            skippedProjects.add(p.project.id);
+            continue;
+          }
+          budgeted.push(p);
+        }
+        if (hitStop) break parallelLoop;
+        if (budgeted.length === 0) {
+          // Everything in this round was a skip-project hit. Don't run
+          // an empty round; next loop iteration will pickNextProjects
+          // fresh, skippedProjects is now larger, and either another
+          // project is eligible or we exit via stopReason="no-project".
+          continue;
+        }
+        eligible = budgeted;
       }
 
       parallelRounds++;
@@ -798,6 +942,29 @@ export async function runSession(options: SessionOptions) {
       );
       stopReason = "insufficient-budget";
       break;
+    }
+
+    // gs-298: usage-budget gate. evaluateUsageBudget short-circuits
+    // to "ok" when no session_budget is configured anywhere, so this
+    // costs nothing on fleets that don't use the feature.
+    {
+      const outcome = await evaluateUsageBudget(
+        budgetReader,
+        currentProject,
+        config,
+      );
+      const action = await handleBudgetOutcome(outcome, currentProject);
+      if (action === "stop") {
+        stopReason = "usage-budget";
+        break;
+      }
+      if (action === "skip") {
+        skippedProjects.add(currentProject.id);
+        currentProject = null;
+        pickReason = "";
+        continue;
+      }
+      // action === "proceed" — fall through to executeCycle
     }
 
     // Execute cycle
@@ -1115,6 +1282,32 @@ export async function runSession(options: SessionOptions) {
         parallel_efficiency: Math.round(parallelEfficiency * 1000) / 1000,
       }
     : {};
+
+  // gs-298: final consumption snapshot for the session_complete
+  // event. Only attempted when a reader exists; we swallow failures
+  // silently — session is ending anyway, and gs-299 will render
+  // whatever the reader gave us. Undefined summary just means the
+  // event carries no consumption data (same as pre-gs-298 behavior).
+  let consumptionSummary: ConsumptionSnapshot | undefined;
+  if (budgetReader) {
+    try {
+      const snap = await budgetReader.readCurrentWindow();
+      if (snap) consumptionSummary = snap;
+    } catch {
+      /* session-end snapshot is best-effort */
+    }
+  }
+  const consumptionPayload = consumptionSummary
+    ? {
+        consumption_summary: {
+          total_usd: consumptionSummary.total_usd,
+          total_tokens: consumptionSummary.total_tokens,
+          cycles_used: consumptionSummary.cycles_used,
+          source: consumptionSummary.source,
+        },
+      }
+    : {};
+
   await appendProgress("_fleet", "session_complete", {
     duration_minutes: Math.round(elapsed),
     total_cycles: allResults.length,
@@ -1123,6 +1316,7 @@ export async function runSession(options: SessionOptions) {
     stop_reason: stopReason,
     reviewer: reviewerLabel,
     ...parallelMetrics,
+    ...consumptionPayload,
   });
 
   // gs-288: commit the session_end + session_complete PROGRESS.jsonl
