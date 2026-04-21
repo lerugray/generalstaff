@@ -1,5 +1,7 @@
 # GeneralStaff
 
+![GeneralStaff — the local-first alternative to Polsia. Open Source · BYOK · No SaaS Tax](docs/images/banner.png)
+
 ![GeneralStaff Command Center — the dashboard showing current session, attention items, per-project fleet cards, and a preview of live-mode revenue metrics for post-launch projects](docs/images/dashboard-hero.png)
 
 **Open-source autonomous engineering that refuses to ship slop.**
