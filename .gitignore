@@ -48,6 +48,8 @@ state/retrogaze/
 state/devforge/
 state/gamr/
 state/raybrain/
+state/zero-page/
+state/veridian-contraption/
 
 # Bun / Node
 node_modules/
