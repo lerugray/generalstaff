@@ -2091,5 +2091,69 @@
     "status": "pending",
     "priority": 4,
     "interactive_only": true
+  },
+  {
+    "id": "gs-295",
+    "title": "Usage-budget feature â parent/tracking task. See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md for full spec. Feature adds dispatcher.session_budget config with max_usd/max_tokens/max_cycles enforcement across the session loop, sourcing consumption from Claude Code JSONL (primary, mirrors ccusage), OpenRouter API, Anthropic API (cycles-only), and Ollama (zero-cost). Hard-stop default + advisory opt-in; fail-open with loud warning if consumption source is unavailable. Polsia differentiator: GS runs on subscriptions you already have â no separate credit purchase. Sub-tasks gs-296 through gs-301 implement in dependency order: gs-297 (config schema) first, then gs-296 (provider abstraction + Claude Code reader), then gs-298 (session-loop integration), then gs-299 (reporting), then gs-301 (tests), then gs-300 (docs). Interactive because the coordination + open architecture decisions (cross-platform JSONL path, pre-cycle cost estimation, mixed-model pricing math) want a human eye.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true
+  },
+  {
+    "id": "gs-296",
+    "title": "Usage-budget feature â provider abstraction + Claude Code JSONL reader. Implements `src/usage/types.ts` exporting ConsumptionReader interface (readCurrentWindow() returning {total_usd, total_tokens, cycles_used, source, last_updated, window_start}) and `src/usage/claude_code.ts` reading Claude Code session JSONL files, summing usage over the 5-hour rolling window since first cycle. Cross-platform JSONL location â check ccusage approach + CLAUDE_CODE_DATA_DIR env var; fall back to ~/.claude/projects/**/*.jsonl default. Tests against synthetic JSONL fixtures under tests/usage/fixtures/ covering: single session summation, 5-hour rolling window boundary, multiple concurrent projects, Sonnet+Opus mixed-model pricing math. NO session loop integration (that's gs-298). NO config wiring (that's gs-297). Pure capability layer. Expected diff: ~400-600 LOC. See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md for full spec. Depends on gs-297 being merged first (types.ts changes land in gs-297).",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/usage/",
+      "tests/usage/"
+    ]
+  },
+  {
+    "id": "gs-297",
+    "title": "Usage-budget feature â DispatcherConfig + ProjectConfig schema. Adds `session_budget` field to DispatcherConfig in src/types.ts with sub-fields: max_usd (number, optional), max_tokens (number, optional), max_cycles (number, optional), enforcement ('hard' | 'advisory', default 'hard'), provider_source ('claude_code' | 'openrouter' | 'anthropic_api' | 'ollama', default 'claude_code'). Same optional shape on per-project override in ProjectConfig (projects.yaml entry). Validation rules in src/projects.ts: (a) exactly-one-unit â at most one of max_usd/max_tokens/max_cycles may be set in a given scope; (b) precedence â per-project overrides fleet-wide when both present; (c) per-project value must be â¤ fleet-wide value when both set with same unit. Tests in tests/projects.test.ts covering valid config, each validation rule's rejection path, precedence resolution. NO session loop integration (that's gs-298). NO provider reader (that's gs-296). Expected diff: ~200-300 LOC. See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/types.ts",
+      "src/projects.ts",
+      "tests/projects.test.ts"
+    ]
+  },
+  {
+    "id": "gs-298",
+    "title": "Usage-budget feature â pre-cycle check integration in session loop. Modifies src/session.ts to: (a) construct a ConsumptionReader instance based on dispatcher.session_budget.provider_source at session start; (b) call reader.readCurrentWindow() before each cycle in both sequential AND parallel loops; (c) if any budget unit (max_usd/max_tokens/max_cycles) is hit AND enforcement='hard', break with new stopReason='budget'; if enforcement='advisory', log warning and continue; (d) if reader.readCurrentWindow() throws or returns null (source unavailable), emit loud warning and proceed as fail-open (no silent degrade). Plumbs the new stopReason='budget' through session_complete event. Tests in tests/session.test.ts mock the reader and verify all four branches. Interactive because it touches the core session loop â dispatcher-adjacent hands_off region â and the fail-open semantics + pre-cycle vs post-cycle timing want a human call. Depends on gs-296 + gs-297 both merged. Expected diff: ~150-250 LOC.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true
+  },
+  {
+    "id": "gs-299",
+    "title": "Usage-budget feature â session-end reporting + session-report integration. (a) Augment session_complete event in src/session.ts with consumption_summary={total_usd, total_tokens, cycles_used, budget_remaining} sourced from a final ConsumptionReader.readCurrentWindow() call. (b) Update src/session_report.ts to surface budget-stop sessions distinctly (e.g. separate header or icon in the rendered section) and render the consumption summary per-session in the digest. (c) Tests in tests/session_report.test.ts covering budget-hit session rendering + normal session rendering (regression). Depends on gs-298 (needs stopReason='budget' plumbing to exist). Expected diff: ~100-150 LOC.",
+    "status": "pending",
+    "priority": 4,
+    "expected_touches": [
+      "src/session.ts",
+      "src/session_report.ts",
+      "tests/session_report.test.ts"
+    ]
+  },
+  {
+    "id": "gs-300",
+    "title": "Usage-budget feature â user-facing docs + README update. (a) New docs page at docs/conventions/usage-budget.md explaining config surface (max_usd/max_tokens/max_cycles + enforcement modes), how to pick hard vs advisory, how the Claude Code 5-hour rolling window works (not weekly), provider-abstraction roadmap (OpenRouter, Anthropic API, Ollama coming later). (b) README feature-list mention with one-line description. (c) CLAUDE.md update documenting the new dispatcher.session_budget config key + link to the docs page. (d) Cross-link from docs/integrations/ to usage-budget for Claude Code + OpenRouter users. Voice-bearing work; creative_work_allowed territory if GS ever flips that on. Interactive-only. Depends on gs-298 merged so the docs describe what actually shipped rather than planned shape.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true
+  },
+  {
+    "id": "gs-301",
+    "title": "Usage-budget feature â integration test matrix. Covers 11 scenarios from the test-matrix section of docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md: (1) no session_budget set â existing behavior unchanged (regression guard); (2) max_usd budget hit mid-session, enforcement='hard' â stops with stopReason='budget'; (3) max_usd budget hit, enforcement='advisory' â warning logged, continues to natural end; (4) max_tokens budget variant; (5) max_cycles budget variant; (6) per-project cap enforces correctly within fleet cap (project stops first); (7) per-project > fleet-wide validation rejection; (8) exactly-one-unit validation rejection (two units both set); (9) consumption source unavailable â fail-open with warning, session completes normally; (10) Claude Code JSONL file missing â same fail-open path; (11) fresh 5-hour window vs mid-window consumption math. Tests live in tests/integration/usage_budget.test.ts with shared fixtures under tests/usage/fixtures/. Depends on gs-298 + gs-299 both merged. Expected diff: ~300-500 LOC.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/session.test.ts",
+      "tests/usage/",
+      "tests/integration/"
+    ]
   }
 ]
