@@ -35,6 +35,20 @@ state/session.pid
 state/*/cycles/
 state/_fleet/cycles/
 
+# Maintainer-private project state (per-machine). For projects where
+# tasks.json / MISSION.md / PROGRESS.jsonl contain IP-sensitive or
+# personally-identifying content that shouldn't land on the public repo.
+# The canonical copy lives in the sibling private repo at
+# `.claude/local/state/<id>/` (see `.claude/local/CLAUDE.local.md`
+# §"Private-state projects" for the convention + sync procedure).
+# Contributors on a fresh public clone simply won't see these dirs;
+# the CLI falls back to empty tasks.json / missing MISSION.md
+# gracefully for projects that aren't locally populated.
+state/retrogaze/
+state/devforge/
+state/gamr/
+state/raybrain/
+
 # Bun / Node
 node_modules/
 bun.lock
