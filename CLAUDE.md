@@ -13,12 +13,13 @@ must read both before making structural changes.
 **Maintainer extensions (Ray only).** When this repo is cloned on
 Ray's machines alongside the private companion repo at
 `github.com/lerugray/generalstaff-private`, that private clone lives
-at `.claude/local/` and its `CLAUDE.local.md` extends this file with
-maintainer-specific environment, workflow preferences, credential
-plumbing, and project-stakes context. Missing on fresh clones — the
-public file stands alone for contributors and readers.
+as a sibling directory (e.g. `../generalstaff-private/`) and its
+`CLAUDE.local.md` extends this file with maintainer-specific
+environment, workflow preferences, credential plumbing, and
+project-stakes context. Missing on fresh clones — the public file
+stands alone for contributors and readers.
 
-@.claude/local/CLAUDE.local.md
+@../generalstaff-private/CLAUDE.local.md
 
 ## Read first (in this order)
 
