@@ -2084,5 +2084,12 @@
     "status": "pending",
     "priority": 3,
     "interactive_only": true
+  },
+  {
+    "id": "gs-294",
+    "title": "mission-bullet scaffold â future personal-tool project. AI-assisted bullet journal sitting alongside GS and raybrain. NOT a project management tool (GS covers that), NOT a second brain (raybrain covers that). It fills the daily-capture-to-weekly-process-to-monthly-reflection gap between in-the-moment thought and structured memory. Bullet-journal prior art: Ryder Carroll's rapid-log + migration-forward method. Pattern: captures Ray's raw private thoughts and priorities, refines on-demand (never automatic) separate from the source, runs weekly/monthly reviews, migrates incomplete items forward, surfaces cross-time-scale drift (e.g. 'you mentioned X goal in April, haven't returned to it'). Stack: TS/Bun matching mission-swarm. Local JSON or SQLite persistence, no server. Private GS Mode B registration. Name: mission-bullet (mission-* family). Scaffold pass (~30 min) mirrors mission-swarm scaffold: folder + README + skeleton + private GitHub remote + GS registration + seed tasks. Then Ray drives real implementation in dedicated sessions. Where AI adds real value beyond 'LLM-wrapped notebook': raw-vs-refined separation (source stays verbatim), cross-scale reflection surfacing, gentle drift-detection without nagging, migration-candidate proposals, emergent theme discovery from un-tagged entries. Interactive because scaffold decisions (data schema, review rituals, AI touch points) are taste calls; implementation belongs to a future focused session when Ray has bandwidth.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true
   }
 ]
