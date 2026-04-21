@@ -32,6 +32,7 @@ import {
   pendingTasks,
   addTask,
   botPickableTasks,
+  interactiveTasks,
   markTaskDone,
   markTaskInteractive,
   markTaskPending,
@@ -83,7 +84,7 @@ import {
   ProviderConfigError,
 } from "./providers/registry";
 import type { ProviderHealth, ProviderRole } from "./providers/types";
-import type { EngineerProvider } from "./types";
+import type { EngineerProvider, GreenfieldTask } from "./types";
 import { appendFleetMessage } from "./fleet_messages";
 
 const VERSION = "0.1.0";
@@ -136,6 +137,14 @@ Usage:
     # discipline surface. Re-run after changing MISSION, hands_off, or
     # the task queue. Reference via \`@.claude/CLAUDE-GS.md\` import in
     # the project's CLAUDE.md, or cite the file path in the first prompt.
+
+  generalstaff todo [--project=<id>] [--limit=<n>]        List pending tasks the bot won't pick (for the operator)
+    Example: generalstaff todo                          # interactive queue across the fleet
+    Example: generalstaff todo --project=devforge       # just one project
+    Example: generalstaff todo --limit=25               # show up to 25 rows
+    # Tasks land here when flagged \`interactive_only\`, when \`expected_touches\`
+    # intersects hands_off, or when a creative task hits a project without
+    # \`creative_work_allowed\`. Complements the bot-pickable queue.
 
   generalstaff init <path> [--id=<id>] [--priority=N]     Scaffold state dir for a new project
     Example: generalstaff init ./myapp
@@ -347,6 +356,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "cycle",
   "status",
   "task",
+  "todo",
   "serve",
 ]);
 if (
@@ -1098,6 +1108,114 @@ switch (command) {
         console.error(`sync failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       process.exit(1);
+    }
+    break;
+  }
+
+  case "todo": {
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff todo [--project=<id>] [--limit=<n>]\n" +
+          "\n" +
+          "List pending tasks the bot won't pick — work that needs the operator.\n" +
+          "A task lands here when it's flagged `interactive_only`, when its\n" +
+          "`expected_touches` intersects the project's hands_off list, or when a\n" +
+          "`creative: true` task is queued on a project without creative_work_allowed.\n" +
+          "\n" +
+          "Options:\n" +
+          "  --project=<id>  Filter to one project (default: all registered)\n" +
+          "  --limit=<n>     Max rows to print (default: 10)\n" +
+          "\n" +
+          "Output: `<project>/<task-id>  p<priority>  [<reason>]  <title>`\n" +
+          "Sorted by priority asc, then project, then task id.\n",
+      );
+      process.exit(0);
+    }
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        project: { type: "string" },
+        limit: { type: "string" },
+      },
+      strict: false,
+    });
+    let limit = 10;
+    if (values.limit !== undefined) {
+      const parsed = parseInt(String(values.limit), 10);
+      if (
+        isNaN(parsed) ||
+        parsed < 1 ||
+        String(parsed) !== String(values.limit).trim()
+      ) {
+        console.error("Error: --limit must be a positive integer");
+        process.exit(1);
+      }
+      limit = parsed;
+    }
+    const allProjects = await loadProjects();
+    const scoped = values.project
+      ? allProjects.filter((p) => p.id === values.project)
+      : allProjects;
+    if (values.project && scoped.length === 0) {
+      const ids = allProjects.map((p) => p.id).join(", ") || "(none)";
+      console.error(
+        `Error: project '${values.project}' not found. Registered: ${ids}`,
+      );
+      process.exit(1);
+    }
+    interface TodoRow {
+      projectId: string;
+      task: GreenfieldTask;
+      reason: "interactive_only" | "hands_off" | "creative";
+    }
+    const rows: TodoRow[] = [];
+    for (const proj of scoped) {
+      let tasks;
+      try {
+        tasks = await loadTasks(proj.id);
+      } catch (err) {
+        if (err instanceof TasksLoadError) {
+          console.error(`warn: ${proj.id}: ${err.message}`);
+          continue;
+        }
+        throw err;
+      }
+      const ctx = {
+        creativeWorkAllowed: proj.creative_work_allowed === true,
+      };
+      const items = interactiveTasks(tasks, proj.hands_off ?? [], ctx);
+      for (const it of items) {
+        rows.push({ projectId: proj.id, task: it.task, reason: it.reason });
+      }
+    }
+    rows.sort((a, b) => {
+      if (a.task.priority !== b.task.priority)
+        return a.task.priority - b.task.priority;
+      if (a.projectId !== b.projectId)
+        return a.projectId.localeCompare(b.projectId);
+      return a.task.id.localeCompare(b.task.id);
+    });
+    if (rows.length === 0) {
+      console.log(
+        values.project
+          ? `No interactive tasks for ${values.project}.`
+          : "No interactive tasks across the fleet.",
+      );
+      break;
+    }
+    const REASON_LABEL: Record<TodoRow["reason"], string> = {
+      interactive_only: "interactive",
+      hands_off: "hands-off",
+      creative: "creative",
+    };
+    const slice = rows.slice(0, limit);
+    for (const r of slice) {
+      console.log(
+        `${r.projectId}/${r.task.id}  p${r.task.priority}  [${REASON_LABEL[r.reason].padEnd(11)}]  ${r.task.title}`,
+      );
+    }
+    if (rows.length > limit) {
+      console.log(`\n... ${rows.length - limit} more (use --limit=<n>)`);
     }
     break;
   }

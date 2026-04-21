@@ -298,6 +298,45 @@ export function botPickableTasks(
   return tasks.filter((t) => isTaskBotPickable(t, handsOff, projectCtx).ok);
 }
 
+// Reason a pending task is surfaced to the operator instead of the bot:
+// - `interactive_only` — task was explicitly flagged interactive_only
+// - `hands_off`        — expected_touches intersects the project's hands_off
+// - `creative`         — creative: true on a project without creative_work_allowed
+export type InteractiveReason = "interactive_only" | "hands_off" | "creative";
+
+export interface InteractiveTaskRow {
+  task: GreenfieldTask;
+  reason: InteractiveReason;
+}
+
+/**
+ * List pending tasks the bot *won't* pick — i.e. work that needs the operator.
+ *
+ * Complements `botPickableTasks`: together they partition `pendingTasks(...)`
+ * into the two Hammerstein quadrants (bot-correctness vs operator-taste).
+ * Done/skipped tasks are filtered out regardless.
+ */
+export function interactiveTasks(
+  tasks: GreenfieldTask[],
+  handsOff: string[],
+  projectCtx?: BotPickabilityProjectContext,
+): InteractiveTaskRow[] {
+  const rows: InteractiveTaskRow[] = [];
+  for (const task of tasks) {
+    const p = isTaskBotPickable(task, handsOff, projectCtx);
+    if (p.ok) continue;
+    if (p.reason === "not_pending") continue;
+    if (p.reason === "interactive_only") {
+      rows.push({ task, reason: "interactive_only" });
+    } else if (p.reason === "hands_off_intersect") {
+      rows.push({ task, reason: "hands_off" });
+    } else if (p.reason === "creative_work_not_allowed_for_project") {
+      rows.push({ task, reason: "creative" });
+    }
+  }
+  return rows;
+}
+
 // Parse the numeric suffix from a task id like "gamr-027" → 27 or
 // "gs-270" → 270 for deterministic ordering among same-priority tasks.
 // Falls back to Infinity when the id doesn't carry a numeric suffix so

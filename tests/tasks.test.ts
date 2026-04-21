@@ -20,6 +20,7 @@ import {
   countTasks,
   isTaskBotPickable,
   botPickableTasks,
+  interactiveTasks,
   nextBotPickableTask,
   TasksLoadError,
   TaskValidationError,
@@ -1603,5 +1604,338 @@ describe("validateTaskEntry — gs-275 engineer override fields", () => {
     const tasks = await loadTasks("p");
     expect(tasks[0].engineer_provider).toBeUndefined();
     expect(tasks[0].engineer_model).toBeUndefined();
+  });
+});
+
+describe("interactiveTasks (operator queue)", () => {
+  function task(overrides: Partial<GreenfieldTask> = {}): GreenfieldTask {
+    return {
+      id: "t-001",
+      title: "sample task",
+      status: "pending",
+      priority: 1,
+      ...overrides,
+    };
+  }
+
+  it("returns tasks flagged interactive_only with reason interactive_only", () => {
+    const rows = interactiveTasks([task({ interactive_only: true })], []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("interactive_only");
+    expect(rows[0].task.id).toBe("t-001");
+  });
+
+  it("returns hands_off_intersect tasks with reason hands_off", () => {
+    const rows = interactiveTasks(
+      [task({ expected_touches: ["src/prompts/foo.ts"] })],
+      ["src/prompts/"],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("hands_off");
+  });
+
+  it("returns creative tasks on non-opted-in project with reason creative", () => {
+    const rows = interactiveTasks([task({ creative: true })], [], {
+      creativeWorkAllowed: false,
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("creative");
+  });
+
+  it("excludes creative tasks when project has opted in", () => {
+    const rows = interactiveTasks([task({ creative: true })], [], {
+      creativeWorkAllowed: true,
+    });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("excludes done and skipped tasks", () => {
+    const rows = interactiveTasks(
+      [
+        task({ id: "t-001", status: "done", interactive_only: true }),
+        task({ id: "t-002", status: "skipped", interactive_only: true }),
+        task({ id: "t-003", status: "pending", interactive_only: true }),
+      ],
+      [],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].task.id).toBe("t-003");
+  });
+
+  it("excludes bot-pickable tasks (Hammerstein partition)", () => {
+    const rows = interactiveTasks(
+      [
+        task({ id: "t-001" }),
+        task({ id: "t-002", interactive_only: true }),
+      ],
+      [],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].task.id).toBe("t-002");
+  });
+
+  it("botPickableTasks + interactiveTasks partitions pending tasks", () => {
+    const tasks = [
+      task({ id: "t-001" }),
+      task({ id: "t-002", interactive_only: true }),
+      task({
+        id: "t-003",
+        expected_touches: ["src/prompts/p.ts"],
+      }),
+      task({ id: "t-004", creative: true }),
+      task({ id: "t-005", status: "done" }),
+    ];
+    const handsOff = ["src/prompts/"];
+    const botRows = botPickableTasks(tasks, handsOff, {
+      creativeWorkAllowed: false,
+    });
+    const opRows = interactiveTasks(tasks, handsOff, {
+      creativeWorkAllowed: false,
+    });
+    const pending = pendingTasks(tasks);
+    expect(botRows.length + opRows.length).toBe(pending.length);
+    const overlap = botRows.some((b) =>
+      opRows.some((o) => o.task.id === b.id),
+    );
+    expect(overlap).toBe(false);
+  });
+});
+
+describe("CLI todo command", () => {
+  const TEST_DIR = join(import.meta.dir, "fixtures", "todo_cli_test");
+
+  function writeProjectsYaml(yaml: string) {
+    writeFileSync(join(TEST_DIR, "projects.yaml"), yaml);
+  }
+
+  function writeTasks(projectId: string, tasks: unknown[]) {
+    const dir = join(TEST_DIR, "state", projectId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "tasks.json"), JSON.stringify(tasks, null, 2));
+  }
+
+  beforeEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+    setRootDir(TEST_DIR);
+  });
+
+  afterEach(() => {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+    setRootDir(process.cwd());
+  });
+
+  it("lists interactive tasks across registered projects", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [src/prompts/]\n" +
+        "  - id: beta\n" +
+        "    path: .\n" +
+        "    priority: 2\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    writeTasks("alpha", [
+      {
+        id: "a-001",
+        title: "bot-pickable",
+        status: "pending",
+        priority: 1,
+      },
+      {
+        id: "a-002",
+        title: "interactive here",
+        status: "pending",
+        priority: 1,
+        interactive_only: true,
+      },
+    ]);
+    writeTasks("beta", [
+      {
+        id: "b-001",
+        title: "hands-off work",
+        status: "pending",
+        priority: 2,
+        expected_touches: ["src/nowhere.ts"],
+      },
+    ]);
+    const r = await runCli(["todo"], TEST_DIR);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("alpha/a-002");
+    expect(r.stdout).toContain("interactive");
+    expect(r.stdout).toContain("interactive here");
+    expect(r.stdout).not.toContain("a-001");
+    expect(r.stdout).not.toContain("b-001");
+  });
+
+  it("reports empty state with clear message", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    writeTasks("alpha", [
+      { id: "a-001", title: "bot work", status: "pending", priority: 1 },
+    ]);
+    const r = await runCli(["todo"], TEST_DIR);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("No interactive tasks across the fleet.");
+  });
+
+  it("rejects unknown --project with registered list", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    const r = await runCli(["todo", "--project=ghost"], TEST_DIR);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("project 'ghost' not found");
+    expect(r.stderr).toContain("alpha");
+  });
+
+  it("sorts by priority ascending, then project, then task id", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: zeta\n" +
+        "    path: .\n" +
+        "    priority: 2\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    writeTasks("alpha", [
+      {
+        id: "a-003",
+        title: "p2 alpha",
+        status: "pending",
+        priority: 2,
+        interactive_only: true,
+      },
+      {
+        id: "a-001",
+        title: "p1 alpha first",
+        status: "pending",
+        priority: 1,
+        interactive_only: true,
+      },
+    ]);
+    writeTasks("zeta", [
+      {
+        id: "z-001",
+        title: "p1 zeta",
+        status: "pending",
+        priority: 1,
+        interactive_only: true,
+      },
+    ]);
+    const r = await runCli(["todo"], TEST_DIR);
+    expect(r.exitCode).toBe(0);
+    const lines = r.stdout.trim().split("\n").filter((l) => l.includes("/"));
+    expect(lines[0]).toContain("alpha/a-001");
+    expect(lines[1]).toContain("zeta/z-001");
+    expect(lines[2]).toContain("alpha/a-003");
+  });
+
+  it("--limit truncates output and prints overflow note", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    writeTasks(
+      "alpha",
+      Array.from({ length: 5 }, (_, i) => ({
+        id: `a-${String(i + 1).padStart(3, "0")}`,
+        title: `task ${i + 1}`,
+        status: "pending",
+        priority: 1,
+        interactive_only: true,
+      })),
+    );
+    const r = await runCli(["todo", "--limit=2"], TEST_DIR);
+    expect(r.exitCode).toBe(0);
+    const rowLines = r.stdout
+      .trim()
+      .split("\n")
+      .filter((l) => l.includes("alpha/"));
+    expect(rowLines).toHaveLength(2);
+    expect(r.stdout).toContain("... 3 more");
+  });
+
+  it("rejects non-positive --limit", async () => {
+    writeProjectsYaml(
+      "projects:\n" +
+        "  - id: alpha\n" +
+        "    path: .\n" +
+        "    priority: 1\n" +
+        '    engineer_command: "x"\n' +
+        '    verification_command: "y"\n' +
+        "    cycle_budget_minutes: 30\n" +
+        "    work_detection: tasks_json\n" +
+        "    concurrency_detection: worktree\n" +
+        "    hands_off: [CLAUDE.md]\n",
+    );
+    const r = await runCli(["todo", "--limit=0"], TEST_DIR);
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain("--limit must be a positive integer");
+  });
+
+  it("--help prints usage and exits 0", async () => {
+    const r = await runCli(["todo", "--help"], TEST_DIR);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("Usage: generalstaff todo");
+    expect(r.stdout).toContain("--project=<id>");
+    expect(r.stdout).toContain("--limit=<n>");
+  });
+
+  it("is listed in global --help output", async () => {
+    const r = await runCli(["--help"], TEST_DIR);
+    expect(r.stdout).toContain("generalstaff todo");
   });
 });
