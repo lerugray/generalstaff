@@ -50,6 +50,7 @@ state/gamr/
 state/raybrain/
 state/zero-page/
 state/veridian-contraption/
+state/conflict-simulations/
 
 # Bun / Node
 node_modules/
