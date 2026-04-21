@@ -12,6 +12,7 @@
     "typecheck": "bun x tsc --noEmit"
   },
   "dependencies": {
+    "ccusage": "^18.0.11",
     "yaml": "^2.7.1"
   },
   "devDependencies": {

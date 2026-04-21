@@ -2102,7 +2102,7 @@
   {
     "id": "gs-296",
     "title": "Usage-budget feature â provider abstraction + Claude Code consumption reader (uses ccusage as library). Research closed (2026-04-21) on the JSONL-shape + 5-hour window math â ccusage solves both and exposes them via `ccusage/data-loader` subpath export (MIT, Node >=20.19.4, Bun-compatible). Least-code path: import ccusage as a dependency rather than reimplementing. Implementation: (a) add `ccusage` to package.json deps; (b) create `src/usage/types.ts` exporting ConsumptionReader interface (readCurrentWindow() returning {total_usd, total_tokens, cycles_used, source, last_updated, window_start} | null) + ConsumptionSnapshot type; (c) create `src/usage/claude_code.ts` calling ccusage's loadSessionBlockData(), filtering to the active non-gap block, mapping to ConsumptionSnapshot â return null if source unavailable (session loop converts to fail-open warning); (d) tests mock ccusage exports and verify the mapping layer only â do NOT re-test ccusage's own logic. Env-var: CLAUDE_CONFIG_DIR (NOT CLAUDE_CODE_DATA_DIR). Defaults probe both $XDG_CONFIG_HOME/claude and ~/.claude and dedupe. NO session loop integration (gs-298). NO config wiring (gs-297). Expected diff: ~200-300 LOC (shrunk from 400-600 because ccusage does the heavy lifting). Depends on gs-297 merged first (types.ts changes land there). See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md Â§Resolved questions.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/usage/",
