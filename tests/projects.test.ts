@@ -1049,3 +1049,241 @@ projects:
   });
 });
 
+describe("session_budget parsing (gs-297)", () => {
+  // Minimal valid project stanza used across these tests. Callers
+  // append per-scenario fields (session_budget, etc.) below.
+  const BASE_PROJECT = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("loads without session_budget — existing behavior preserved", async () => {
+    const path = writeYaml(
+      "budget-absent.yaml",
+      `
+projects:${BASE_PROJECT}
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].session_budget).toBeUndefined();
+    expect(yaml.dispatcher.session_budget).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts fleet-wide max_usd only", async () => {
+    const path = writeYaml(
+      "budget-fleet-usd.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 5.50
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.dispatcher.session_budget?.max_usd).toBe(5.5);
+    expect(yaml.dispatcher.session_budget?.max_tokens).toBeUndefined();
+    expect(yaml.dispatcher.session_budget?.max_cycles).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts per-project max_cycles without a fleet cap", async () => {
+    const path = writeYaml(
+      "budget-project-cycles.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_cycles: 10
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].session_budget?.max_cycles).toBe(10);
+    expect(yaml.dispatcher.session_budget).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts fleet + per-project when project ≤ fleet (same unit)", async () => {
+    const path = writeYaml(
+      "budget-both-same-unit.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_usd: 2.00
+dispatcher:
+  session_budget:
+    max_usd: 5.00
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.dispatcher.session_budget?.max_usd).toBe(5);
+    expect(yaml.projects[0].session_budget?.max_usd).toBe(2);
+    cleanup();
+  });
+
+  it("accepts per-project value equal to fleet value (boundary)", async () => {
+    const path = writeYaml(
+      "budget-equal.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_cycles: 10
+dispatcher:
+  session_budget:
+    max_cycles: 10
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].session_budget?.max_cycles).toBe(10);
+    cleanup();
+  });
+
+  it("preserves explicit enforcement and provider_source values", async () => {
+    const path = writeYaml(
+      "budget-full.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 3.00
+    enforcement: advisory
+    provider_source: openrouter
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.dispatcher.session_budget?.enforcement).toBe("advisory");
+    expect(yaml.dispatcher.session_budget?.provider_source).toBe("openrouter");
+    cleanup();
+  });
+
+  it("rejects setting multiple units in the fleet scope", async () => {
+    const path = writeYaml(
+      "budget-multi-unit-fleet.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 5
+    max_tokens: 100000
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/exactly one of/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/dispatcher/);
+    cleanup();
+  });
+
+  it("rejects setting multiple units in a per-project scope", async () => {
+    const path = writeYaml(
+      "budget-multi-unit-project.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_cycles: 10
+      max_tokens: 50000
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/exactly one of/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"test"/);
+    cleanup();
+  });
+
+  it("rejects non-positive max_usd", async () => {
+    const path = writeYaml(
+      "budget-zero-usd.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 0
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /must be a positive finite number/,
+    );
+    cleanup();
+  });
+
+  it("rejects fractional max_tokens", async () => {
+    const path = writeYaml(
+      "budget-fractional-tokens.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_tokens: 1000.5
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/must be an integer/);
+    cleanup();
+  });
+
+  it("rejects invalid enforcement value", async () => {
+    const path = writeYaml(
+      "budget-bad-enforcement.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 5
+    enforcement: hard-stop
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/enforcement/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/hard, advisory/);
+    cleanup();
+  });
+
+  it("rejects invalid provider_source value", async () => {
+    const path = writeYaml(
+      "budget-bad-provider.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    max_usd: 5
+    provider_source: claude-code
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/provider_source/);
+    cleanup();
+  });
+
+  it("rejects per-project value that exceeds fleet-wide (same unit)", async () => {
+    const path = writeYaml(
+      "budget-project-over-fleet.yaml",
+      `
+projects:${BASE_PROJECT}
+    session_budget:
+      max_usd: 10.00
+dispatcher:
+  session_budget:
+    max_usd: 5.00
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /exceeds fleet-wide value 5/,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/"test"/);
+    cleanup();
+  });
+
+  it("rejects session_budget given as an array", async () => {
+    const path = writeYaml(
+      "budget-as-array.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  session_budget:
+    - max_usd
+    - 5
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/must be an object/);
+    cleanup();
+  });
+});
+

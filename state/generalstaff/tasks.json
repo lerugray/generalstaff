@@ -2113,7 +2113,7 @@
   {
     "id": "gs-297",
     "title": "Usage-budget feature â DispatcherConfig + ProjectConfig schema. Adds `session_budget` field to DispatcherConfig in src/types.ts with sub-fields: max_usd (number, optional), max_tokens (number, optional), max_cycles (number, optional), enforcement ('hard' | 'advisory', default 'hard'), provider_source ('claude_code' | 'openrouter' | 'anthropic_api' | 'ollama', default 'claude_code'). Same optional shape on per-project override in ProjectConfig (projects.yaml entry). Validation rules in src/projects.ts: (a) exactly-one-unit â at most one of max_usd/max_tokens/max_cycles may be set in a given scope; (b) precedence â per-project overrides fleet-wide when both present; (c) per-project value must be â¤ fleet-wide value when both set with same unit. Tests in tests/projects.test.ts covering valid config, each validation rule's rejection path, precedence resolution. NO session loop integration (that's gs-298). NO provider reader (that's gs-296). Expected diff: ~200-300 LOC. See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/types.ts",

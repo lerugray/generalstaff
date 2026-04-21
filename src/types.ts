@@ -48,6 +48,43 @@ export const VALID_ENGINEER_PROVIDERS: readonly EngineerProvider[] = [
   "aider",
 ];
 
+// gs-297: Session usage budget. Caps how much of the user's LLM
+// subscription/quota/credit a GS session can consume. See
+// docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md. The whole
+// session_budget block is optional; the default (unset) preserves
+// current unlimited behavior. When set, exactly one of
+// max_usd/max_tokens/max_cycles must be chosen — mixing units in a
+// single scope is a validation error. A session_budget can sit on
+// the dispatcher (fleet-wide cap) and/or on a per-project override;
+// per-project values must be ≤ fleet-wide when both are set with
+// the same unit. Enforcement and provider_source are optional with
+// runtime defaults ("hard" / "claude_code").
+export type BudgetEnforcement = "hard" | "advisory";
+export const VALID_BUDGET_ENFORCEMENTS: readonly BudgetEnforcement[] = [
+  "hard",
+  "advisory",
+];
+
+export type BudgetProviderSource =
+  | "claude_code"
+  | "openrouter"
+  | "anthropic_api"
+  | "ollama";
+export const VALID_BUDGET_PROVIDER_SOURCES: readonly BudgetProviderSource[] = [
+  "claude_code",
+  "openrouter",
+  "anthropic_api",
+  "ollama",
+];
+
+export interface SessionBudget {
+  max_usd?: number;
+  max_tokens?: number;
+  max_cycles?: number;
+  enforcement?: BudgetEnforcement;
+  provider_source?: BudgetProviderSource;
+}
+
 export interface ProjectConfig {
   id: string;
   path: string;
@@ -80,6 +117,13 @@ export interface ProjectConfig {
   creative_work_branch?: string;
   creative_work_drafts_dir?: string;
   voice_reference_paths?: string[];
+  // gs-297: optional per-project usage budget. When set, caps this
+  // project's share of the session's LLM consumption; the session
+  // loop (gs-298) reads this alongside the fleet-wide cap and
+  // applies whichever binds first. Must fit within the fleet-wide
+  // dispatcher.session_budget when both are set with the same unit
+  // (validated at config load).
+  session_budget?: SessionBudget;
 }
 
 export interface DispatcherConfig {
@@ -96,6 +140,11 @@ export interface DispatcherConfig {
   // doubling of reviewer API calls on upgrade (Hard Rule 8 / BYOK).
   // Opt in per-fleet by setting this > 1 in projects.yaml.
   max_parallel_slots: number;
+  // gs-297: optional fleet-wide usage budget. Applies across all
+  // projects in a session. Per-project overrides (on ProjectConfig)
+  // carve out tighter caps for individual projects and must fit
+  // within this cap when both are set with the same unit.
+  session_budget?: SessionBudget;
 }
 
 export interface ProjectsYaml {

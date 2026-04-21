@@ -22,8 +22,15 @@ import type {
   WorkDetectionMode,
   ConcurrencyDetectionMode,
   EngineerProvider,
+  SessionBudget,
+  BudgetEnforcement,
+  BudgetProviderSource,
 } from "./types";
-import { VALID_ENGINEER_PROVIDERS } from "./types";
+import {
+  VALID_ENGINEER_PROVIDERS,
+  VALID_BUDGET_ENFORCEMENTS,
+  VALID_BUDGET_PROVIDER_SOURCES,
+} from "./types";
 
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
   "catalogdna_bot_tasks",
@@ -82,6 +89,142 @@ function requireString(
     throw new ProjectValidationError(projectId, field, "must not be empty");
   }
   return value;
+}
+
+// gs-297: Validate a session_budget block. Used for both the fleet-wide
+// dispatcher scope (scope = "dispatcher") and per-project scopes (scope =
+// project id). Returns undefined when the block is absent; throws a
+// ProjectValidationError on any shape problem so callers don't need to
+// branch on undefined vs invalid. Enforces "exactly one unit" and
+// rejects impossible values (non-positive, non-finite, fractional for
+// cycles/tokens). Cross-scope rules (per-project ≤ fleet-wide) are
+// handled separately in validateBudgetHierarchy after both scopes have
+// been parsed.
+function validateSessionBudget(
+  scope: string,
+  raw: unknown,
+): SessionBudget | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ProjectValidationError(
+      scope,
+      "session_budget",
+      `must be an object, got ${Array.isArray(raw) ? "array" : typeof raw}`,
+    );
+  }
+  const o = raw as Record<string, unknown>;
+  const budget: SessionBudget = {};
+
+  const unitKeys = ["max_usd", "max_tokens", "max_cycles"] as const;
+  const setUnits: string[] = [];
+  for (const key of unitKeys) {
+    const value = o[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "number") {
+      throw new ProjectValidationError(
+        scope,
+        `session_budget.${key}`,
+        `must be a number, got ${typeof value}`,
+      );
+    }
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new ProjectValidationError(
+        scope,
+        `session_budget.${key}`,
+        `must be a positive finite number, got ${value}`,
+      );
+    }
+    // Fractional dollars are meaningful for cost caps; fractional
+    // tokens and cycles are not.
+    if ((key === "max_tokens" || key === "max_cycles") && !Number.isInteger(value)) {
+      throw new ProjectValidationError(
+        scope,
+        `session_budget.${key}`,
+        `must be an integer, got ${value}`,
+      );
+    }
+    budget[key] = value;
+    setUnits.push(key);
+  }
+  if (setUnits.length > 1) {
+    throw new ProjectValidationError(
+      scope,
+      "session_budget",
+      `exactly one of max_usd / max_tokens / max_cycles may be set — got ${setUnits.join(" and ")}`,
+    );
+  }
+
+  if (o.enforcement !== undefined && o.enforcement !== null) {
+    if (typeof o.enforcement !== "string") {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.enforcement",
+        `must be a string, got ${typeof o.enforcement}`,
+      );
+    }
+    if (!VALID_BUDGET_ENFORCEMENTS.includes(o.enforcement as BudgetEnforcement)) {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.enforcement",
+        `must be one of: ${VALID_BUDGET_ENFORCEMENTS.join(", ")} — got "${o.enforcement}"`,
+      );
+    }
+    budget.enforcement = o.enforcement as BudgetEnforcement;
+  }
+
+  if (o.provider_source !== undefined && o.provider_source !== null) {
+    if (typeof o.provider_source !== "string") {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.provider_source",
+        `must be a string, got ${typeof o.provider_source}`,
+      );
+    }
+    if (
+      !VALID_BUDGET_PROVIDER_SOURCES.includes(
+        o.provider_source as BudgetProviderSource,
+      )
+    ) {
+      throw new ProjectValidationError(
+        scope,
+        "session_budget.provider_source",
+        `must be one of: ${VALID_BUDGET_PROVIDER_SOURCES.join(", ")} — got "${o.provider_source}"`,
+      );
+    }
+    budget.provider_source = o.provider_source as BudgetProviderSource;
+  }
+
+  return budget;
+}
+
+// gs-297: Cross-scope invariant — any per-project cap with the same
+// unit as a fleet-wide cap must be ≤ the fleet-wide value. Setting a
+// per-project cap HIGHER than the fleet cap is almost certainly a
+// config mistake: the tighter fleet cap still binds, so the project
+// value would be silently dead. Fail at load time so the operator
+// fixes the intent rather than finding out at runtime.
+function validateBudgetHierarchy(
+  dispatcher: DispatcherConfig,
+  projects: ProjectConfig[],
+): void {
+  const fleet = dispatcher.session_budget;
+  if (!fleet) return;
+  const unitKeys = ["max_usd", "max_tokens", "max_cycles"] as const;
+  for (const p of projects) {
+    const proj = p.session_budget;
+    if (!proj) continue;
+    for (const key of unitKeys) {
+      const fleetVal = fleet[key];
+      const projVal = proj[key];
+      if (fleetVal !== undefined && projVal !== undefined && projVal > fleetVal) {
+        throw new ProjectValidationError(
+          p.id,
+          `session_budget.${key}`,
+          `per-project value ${projVal} exceeds fleet-wide value ${fleetVal} — per-project budgets must fit within the fleet cap`,
+        );
+      }
+    }
+  }
 }
 
 function requirePositiveInt(
@@ -284,6 +427,11 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     voiceReferencePaths = raw.voice_reference_paths as string[];
   }
 
+  // gs-297: per-project usage-budget override. Validated here; the
+  // cross-scope invariant (per-project ≤ fleet-wide) is checked in
+  // validateBudgetHierarchy after both scopes are parsed.
+  const sessionBudget = validateSessionBudget(id, raw.session_budget);
+
   return {
     id,
     path,
@@ -303,6 +451,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     creative_work_branch: creativeWorkBranch,
     creative_work_drafts_dir: creativeWorkDraftsDir,
     voice_reference_paths: voiceReferencePaths,
+    session_budget: sessionBudget,
   };
 }
 
@@ -793,6 +942,13 @@ function validateDispatcher(
 ): DispatcherConfig {
   if (!raw) return { ...DISPATCHER_DEFAULTS };
 
+  // gs-297: fleet-wide usage budget. Unlike other dispatcher fields,
+  // which silently fall back to defaults on bad input, session_budget
+  // validation throws — a misconfigured budget could silently allow
+  // unbounded spend (Hard Rule 8 / BYOK), which is exactly the foot-gun
+  // the feature exists to prevent.
+  const sessionBudget = validateSessionBudget("dispatcher", raw.session_budget);
+
   return {
     state_dir: (raw.state_dir as string) ?? DISPATCHER_DEFAULTS.state_dir,
     fleet_state_file:
@@ -807,6 +963,7 @@ function validateDispatcher(
     log_dir: (raw.log_dir as string) ?? DISPATCHER_DEFAULTS.log_dir,
     digest_dir: (raw.digest_dir as string) ?? DISPATCHER_DEFAULTS.digest_dir,
     max_parallel_slots: normalizeParallelSlots(raw.max_parallel_slots),
+    session_budget: sessionBudget,
   };
 }
 
@@ -941,6 +1098,10 @@ export async function loadProjectsYaml(
   const dispatcher = validateDispatcher(
     parsed.dispatcher as Record<string, unknown> | undefined,
   );
+
+  // gs-297: cross-scope budget invariant must be checked after both
+  // dispatcher and projects are parsed.
+  validateBudgetHierarchy(dispatcher, projects);
 
   // Check for duplicate IDs
   const ids = new Set<string>();
