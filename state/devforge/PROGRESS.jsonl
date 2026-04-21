@@ -1,2 +1,0 @@
-{"timestamp":"2026-04-20T20:42:00.282Z","event":"session_start","project_id":"devforge","data":{"budget_minutes":60,"dry_run":false,"registered_projects":["generalstaff","gamr","raybrain","devforge","bookfinder-general","catalogdna"]}}
-{"timestamp":"2026-04-20T20:58:01.446Z","event":"session_end","project_id":"devforge","data":{"duration_minutes":16,"total_cycles":0,"total_verified":0,"total_failed":0}}
