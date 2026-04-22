@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GeneralStaff README visuals — preview</title>
+  <style>
+    :root {
+      --cream: #fdfbf7;
+      --ink: #2a2520;
+      --muted: #6b5d4f;
+      --rust: #7a3b1e;
+      --paper-edge: #e6dccb;
+      --gh-light: #ffffff;
+      --gh-dark: #0d1117;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+      color: var(--ink);
+      background: #f4efe6;
+      padding: 48px 56px 96px;
+      line-height: 1.5;
+    }
+    header {
+      max-width: 1260px;
+      margin: 0 auto 40px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #d9cfc0;
+    }
+    .eyebrow {
+      font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: lowercase;
+      font-variant: small-caps;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 500;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-style: italic;
+      font-size: 15px;
+    }
+    main {
+      max-width: 1260px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 56px;
+    }
+    section.asset {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .caption {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed #cfc3b0;
+    }
+    .caption h2 {
+      font-size: 15px;
+      letter-spacing: 0.22em;
+      text-transform: lowercase;
+      font-variant: small-caps;
+      font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+      color: var(--ink);
+      margin: 0;
+      font-weight: 400;
+    }
+    .caption .meta {
+      font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .surrounds {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      border: 1px solid var(--paper-edge);
+    }
+    .surround {
+      padding: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 340px;
+    }
+    .surround.light { background: var(--gh-light); }
+    .surround.dark  { background: var(--gh-dark); }
+    .surround img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      /* SVGs carry their own cream bg so they read on both surrounds */
+    }
+    .surround-tag {
+      position: relative;
+    }
+    .surround-tag::before {
+      content: attr(data-tag);
+      position: absolute;
+      top: 8px;
+      left: 10px;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: lowercase;
+    }
+    .surround.light.surround-tag::before { color: #57606a; }
+    .surround.dark.surround-tag::before  { color: #8b949e; }
+
+    .notes {
+      font-size: 13px;
+      color: var(--muted);
+      font-style: italic;
+      max-width: 80ch;
+    }
+
+    .markdown {
+      font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: #fbf6ed;
+      border: 1px solid #e6dccb;
+      padding: 10px 14px;
+      color: #3a332c;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    footer {
+      max-width: 1260px;
+      margin: 72px auto 0;
+      padding-top: 20px;
+      border-top: 1px solid #d9cfc0;
+      color: var(--muted);
+      font-size: 13px;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">claude design &#183; readme visuals</div>
+    <h1>GeneralStaff README visuals</h1>
+    <p>Three diagrams for the README, shown on GitHub-light and GitHub-dark surrounds so you can
+      check the cream-paper baking reads either way. Printed-paper register: warm cream, serif display,
+      mono data, a single rust accent per figure.</p>
+  </header>
+
+  <main>
+
+    <!-- Asset 1 -->
+    <section class="asset">
+      <div class="caption">
+        <h2>asset 1 &#183; the cycle flow</h2>
+        <div class="meta">docs/images/cycle-flow.svg &#183; 1200 &#215; 300</div>
+      </div>
+      <div class="surrounds">
+        <div class="surround light surround-tag" data-tag="github: light">
+          <img src="cycle-flow.svg" alt="Cycle flow">
+        </div>
+        <div class="surround dark surround-tag" data-tag="github: dark">
+          <img src="cycle-flow.svg" alt="Cycle flow">
+        </div>
+      </div>
+      <div class="notes">
+        Five nodes, four forward arrows, and a dashed return arrow labeled
+        <em>next cycle</em> closing the loop back to Dispatcher. Rust on the
+        Verification Gate only, with the real <span style="font-family:monospace">211 verified &#183; 20 rejected</span>
+        number as a quiet sub-stat.
+      </div>
+      <pre class="markdown">&lt;p align="center"&gt;
+  &lt;img src="docs/images/cycle-flow.svg" alt="The cycle: dispatcher \u2192 engineer \u2192 verification gate \u2192 reviewer \u2192 audit log, looped" width="900"&gt;
+&lt;/p&gt;</pre>
+    </section>
+
+    <!-- Asset 2 -->
+    <section class="asset">
+      <div class="caption">
+        <h2>asset 2 &#183; the hammerstein typology</h2>
+        <div class="meta">docs/images/hammerstein-quadrant.svg &#183; 800 &#215; 800</div>
+      </div>
+      <div class="surrounds">
+        <div class="surround light surround-tag" data-tag="github: light">
+          <img src="hammerstein-quadrant.svg" alt="Hammerstein 2x2" style="max-width:520px">
+        </div>
+        <div class="surround dark surround-tag" data-tag="github: dark">
+          <img src="hammerstein-quadrant.svg" alt="Hammerstein 2x2" style="max-width:520px">
+        </div>
+      </div>
+      <div class="notes">
+        Clever/Stupid on the vertical, Industrious/Lazy on the horizontal. Subtle cream-rust tint on
+        Clever+Industrious (where the tool lives); rust corner-rule on Stupid+Industrious (the warning).
+        Attribution line along the bottom, in the book-figure register.
+      </div>
+      <pre class="markdown">&lt;p align="center"&gt;
+  &lt;img src="docs/images/hammerstein-quadrant.svg" alt="The Hammerstein typology: Clever/Stupid \u00d7 Industrious/Lazy" width="560"&gt;
+&lt;/p&gt;</pre>
+    </section>
+
+    <!-- Asset 3 -->
+    <section class="asset">
+      <div class="caption">
+        <h2>asset 3 &#183; hard rules grid</h2>
+        <div class="meta">docs/images/hard-rules-grid.svg &#183; 1200 &#215; 500</div>
+      </div>
+      <div class="surrounds">
+        <div class="surround light surround-tag" data-tag="github: light">
+          <img src="hard-rules-grid.svg" alt="Hard rules grid">
+        </div>
+        <div class="surround dark surround-tag" data-tag="github: dark">
+          <img src="hard-rules-grid.svg" alt="Hard rules grid">
+        </div>
+      </div>
+      <div class="notes">
+        Ten index cards, 5 &#215; 2. Each card has <span style="font-family:monospace">HARD RULE</span>
+        small-caps plus a rust numeral, then the one-phrase gist in serif. The numbered list underneath
+        in the README is unchanged; this sits above it as a visual summary.
+      </div>
+      <pre class="markdown">&lt;p align="center"&gt;
+  &lt;img src="docs/images/hard-rules-grid.svg" alt="The ten hard rules of GeneralStaff" width="960"&gt;
+&lt;/p&gt;</pre>
+    </section>
+
+  </main>
+
+  <footer>
+    Fonts are referenced by family only and fall back to the platform serif / mono stacks when
+    rendered inside GitHub markdown. On a typical GitHub viewer: Iowan Old Style (macOS) or
+    Palatino / Georgia (other), and the user's monospace. Typographic proportion and small-caps
+    are preserved by the SVG structure.
+  </footer>
+</body>
+</html>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" width="1200" height="500" role="img" aria-label="The ten hard rules of GeneralStaff, as a card grid.">
+  <rect width="1200" height="500" fill="#fdfbf7"></rect>
+  <text x="60" y="50" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="13" letter-spacing="2.8" fill="#6b5d4f">FIGURE 3 · THE TEN HARD RULES</text>
+  <line x1="60" y1="60" x2="370" y2="60" stroke="#6b5d4f" stroke-width="0.75"></line>
+  
+  <rect x="60" y="94" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="76" y="120" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="244" y="120" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 01</text>
+  <line x1="76" y1="132" x2="244" y2="132" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="76" y="158" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">No creative work by</text>
+  <text x="76" y="177" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">default. Engineering and</text>
+  <text x="76" y="196" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">correctness work only;</text>
+  <text x="76" y="215" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">creative agents are</text>
+  <text x="76" y="234" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">opt-in plugins.</text>
+  <rect x="280" y="94" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="296" y="120" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="464" y="120" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 02</text>
+  <line x1="296" y1="132" x2="464" y2="132" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="296" y="158" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">File-based state is the</text>
+  <text x="296" y="177" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">single source of truth.</text>
+  <text x="296" y="196" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">No databases, no SaaS</text>
+  <text x="296" y="215" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">orchestration.</text>
+  <rect x="500" y="94" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="516" y="120" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="684" y="120" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 03</text>
+  <line x1="516" y1="132" x2="684" y2="132" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="516" y="158" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Sequential cycles for</text>
+  <text x="516" y="177" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">MVP. Parallel worktrees</text>
+  <text x="516" y="196" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">come later.</text>
+  <rect x="720" y="94" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="736" y="120" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="904" y="120" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 04</text>
+  <line x1="736" y1="132" x2="904" y2="132" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="736" y="158" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Auto-merge off by</text>
+  <text x="736" y="177" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">default. Opt in per</text>
+  <text x="736" y="196" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">project after five clean</text>
+  <text x="736" y="215" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">verification passes.</text>
+  <rect x="940" y="94" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="956" y="120" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="1124" y="120" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 05</text>
+  <line x1="956" y1="132" x2="1124" y2="132" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="956" y="158" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Mandatory hands-off</text>
+  <text x="956" y="177" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">lists. An empty list</text>
+  <text x="956" y="196" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">means no registration.</text>
+  <rect x="60" y="278" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="76" y="304" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="244" y="304" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 06</text>
+  <line x1="76" y1="316" x2="244" y2="316" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="76" y="342" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">The verification gate is</text>
+  <text x="76" y="361" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">load-bearing. Tests pass,</text>
+  <text x="76" y="380" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">diff non-empty, reviewer</text>
+  <text x="76" y="399" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">confirms scope match.</text>
+  <rect x="280" y="278" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="296" y="304" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="464" y="304" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 07</text>
+  <line x1="296" y1="316" x2="464" y2="316" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="296" y="342" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Code ownership.</text>
+  <text x="296" y="361" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Bot pushes to bot/work</text>
+  <text x="296" y="380" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">on your own remote.</text>
+  <text x="296" y="399" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Export = git clone.</text>
+  <rect x="500" y="278" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="516" y="304" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="684" y="304" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 08</text>
+  <line x1="516" y1="316" x2="684" y2="316" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="516" y="342" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">BYOK for LLM providers.</text>
+  <text x="516" y="361" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">API-key default;</text>
+  <text x="516" y="380" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">subscriptions are opt-in,</text>
+  <text x="516" y="399" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">personal-use only.</text>
+  <rect x="720" y="278" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="736" y="304" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="904" y="304" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 09</text>
+  <line x1="736" y1="316" x2="904" y2="316" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="736" y="342" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Open audit log. Full</text>
+  <text x="736" y="361" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">prompts, responses, tool</text>
+  <text x="736" y="380" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">calls, diffs in</text>
+  <text x="736" y="399" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">PROGRESS.jsonl per cycle.</text>
+  <rect x="940" y="278" width="200" height="160" fill="#fdfbf7" stroke="#2a2520" stroke-width="0.9"></rect>
+  <text x="956" y="304" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="2.4" fill="#6b5d4f">HARD RULE</text>
+  <text x="1124" y="304" text-anchor="end" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="11" letter-spacing="1" fill="#7a3b1e">Nº 10</text>
+  <line x1="956" y1="316" x2="1124" y2="316" stroke="#d9cfc0" stroke-width="0.75"></line>
+  <text x="956" y="342" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">Local-first. No SaaS</text>
+  <text x="956" y="361" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">tier, no managed</text>
+  <text x="956" y="380" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">offering, no company</text>
+  <text x="956" y="399" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="14" fill="#2a2520">hosting.</text>
+  <text x="60" y="478" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="12" fill="#6b5d4f">Summary of the ten hard rules. Full text in the numbered list below.</text>
+</svg>

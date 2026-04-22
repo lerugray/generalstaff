@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800" role="img" aria-label="The Hammerstein typology: a 2x2 grid of Clever/Stupid against Industrious/Lazy.">
+  <defs>
+    <marker id="h-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#6b5d4f"></path>
+    </marker>
+  </defs>
+
+  
+  <rect width="800" height="800" fill="#fdfbf7"></rect>
+
+  
+  <text x="80" y="60" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="13" letter-spacing="2.8" fill="#6b5d4f">FIGURE 2 · THE HAMMERSTEIN TYPOLOGY</text>
+  <line x1="80" y1="72" x2="470" y2="72" stroke="#6b5d4f" stroke-width="0.75"></line>
+
+  
+  <rect x="140" y="140" width="280" height="280" fill="#efe3d5"></rect>
+
+  
+  <rect x="140" y="140" width="560" height="560" fill="none" stroke="#2a2520" stroke-width="1.4"></rect>
+  <line x1="420" y1="140" x2="420" y2="700" stroke="#2a2520" stroke-width="1.2"></line>
+  <line x1="140" y1="420" x2="700" y2="420" stroke="#2a2520" stroke-width="1.2"></line>
+
+  
+  <line x1="140" y1="700" x2="420" y2="700" stroke="#7a3b1e" stroke-width="3"></line>
+  <line x1="140" y1="420" x2="140" y2="700" stroke="#7a3b1e" stroke-width="3"></line>
+
+  
+  
+  <text x="280" y="740" text-anchor="middle" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="15" letter-spacing="2.8" fill="#2a2520">INDUSTRIOUS</text>
+  <text x="560" y="740" text-anchor="middle" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="15" letter-spacing="2.8" fill="#2a2520">LAZY</text>
+  <line x1="335" y1="734" x2="505" y2="734" stroke="#6b5d4f" stroke-width="0.8" marker-start="url(#h-arr)" marker-end="url(#h-arr)"></line>
+
+  
+  <text x="100" y="285" text-anchor="middle" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="15" letter-spacing="2.8" fill="#2a2520" transform="rotate(-90 100 285)">CLEVER</text>
+  <text x="100" y="565" text-anchor="middle" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="15" letter-spacing="2.8" fill="#2a2520" transform="rotate(-90 100 565)">STUPID</text>
+  <line x1="106" y1="335" x2="106" y2="505" stroke="#6b5d4f" stroke-width="0.8" marker-start="url(#h-arr)" marker-end="url(#h-arr)"></line>
+
+  
+  <text x="160" y="180" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="17" letter-spacing="2" fill="#2a2520">CLEVER + INDUSTRIOUS</text>
+  <text x="160" y="220" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">General Staff —</text>
+  <text x="160" y="244" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">execution with judgment.</text>
+  <text x="160" y="286" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="13" letter-spacing="3" fill="#7a3b1e">→ THIS TOOL LIVES HERE</text>
+
+  
+  <text x="440" y="180" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="17" letter-spacing="2" fill="#2a2520">CLEVER + LAZY</text>
+  <text x="440" y="220" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">Strategic command.</text>
+  <text x="440" y="244" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">You live here.</text>
+
+  
+  <text x="160" y="460" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="17" letter-spacing="2" fill="#7a3b1e">STUPID + INDUSTRIOUS</text>
+  <text x="160" y="500" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">Unbounded damage.</text>
+  <text x="160" y="524" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">Hammerstein said</text>
+  <text x="160" y="548" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">dismiss at once.</text>
+  <text x="160" y="588" font-family="&#39;IBM Plex Mono&#39;,&#39;JetBrains Mono&#39;,Menlo,Consolas,monospace" font-size="13" letter-spacing="3" fill="#7a3b1e">→ STRUCTURALLY PREVENTED</text>
+
+  
+  <text x="440" y="460" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-size="17" letter-spacing="2" fill="#2a2520">STUPID + LAZY</text>
+  <text x="440" y="500" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">Routine duties.</text>
+  <text x="440" y="524" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="17" fill="#2a2520">Harmless.</text>
+
+  
+  <text x="140" y="780" font-family="&#39;Iowan Old Style&#39;,&#39;Palatino Linotype&#39;,Palatino,Georgia,serif" font-style="italic" font-size="13" fill="#6b5d4f">after Kurt von Hammerstein-Equord, c. 1933.</text>
+</svg>

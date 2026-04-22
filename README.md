@@ -134,10 +134,11 @@ middleman.
 
 ## The approach
 
-```
- dispatcher --> engineer --> verification gate --> reviewer --> audit log
-    (picks)    (codes)     (tests must pass)    (scope match)   (open)
-```
+<p align="center">
+  <img src="docs/images/cycle-flow.svg"
+       alt="The cycle: dispatcher → engineer → verification gate → reviewer → audit log, looped back to dispatcher"
+       width="900">
+</p>
 
 - **Verification gate** (Hard Rule #6): a Boolean check in the
   dispatcher. Tests must pass, diff must be non-empty, reviewer must
@@ -414,6 +415,12 @@ The tool is neutral on **motivation**, not on **quadrant**.
 
 ## The Hammerstein framing
 
+<p align="center">
+  <img src="docs/images/hammerstein-quadrant.svg"
+       alt="The Hammerstein typology: Clever/Stupid × Industrious/Lazy. General Staff operates in the Clever+Industrious quadrant; Stupid+Industrious is structurally prevented."
+       width="560">
+</p>
+
 "GeneralStaff" is borrowed from Kurt von Hammerstein-Equord's officer
 typology. The clever-industrious "general staff" handle execution and
 dispatch on behalf of command -- they don't make strategy, they make
@@ -443,6 +450,12 @@ Full writeup of the framing and its empirical backing (5 experiments,
 lives in `docs/internal/`.
 
 ## Hard rules
+
+<p align="center">
+  <img src="docs/images/hard-rules-grid.svg"
+       alt="The ten hard rules of GeneralStaff, as a card grid. Full text in the numbered list below."
+       width="960">
+</p>
 
 All 10 Hard Rules are enforced either in code or by convention. They
 cannot be relaxed without an explicit `RULE-RELAXATION-<date>.md` log
