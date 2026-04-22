@@ -1,0 +1,94 @@
+[
+  {
+    "id": "wdb-001",
+    "title": "Print PDF pipeline: Pandoc-based conversion from docs/_chapters/ markdown into KDP-ready paperback PDF (6x9 trim, correct margins/bleed/gutter, running heads, page numbers, clean chapter breaks). Typography tuned to match the web aesthetic (Lora body + Playfair Display chapter headings, sized for print). Output lands at print/out/wargame-design-book.pdf.",
+    "status": "pending",
+    "priority": 1,
+    "expected_touches": [
+      "print/",
+      "print/build.sh",
+      "print/pandoc-template.tex",
+      "print/style-print.css"
+    ]
+  },
+  {
+    "id": "wdb-002",
+    "title": "Cover template: front + spine + back assembled as SVG (or Pandoc-driven), with spine-width calculator as a function of interior page count using KDP's paper-factor formula. Placeholders for title/subtitle/author/back-cover copy (filled by wdb-008). Reusable for future Ray KDP books.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "print/cover/",
+      "print/cover/cover-template.svg",
+      "print/cover/spine-width.py"
+    ]
+  },
+  {
+    "id": "wdb-003",
+    "title": "Front + back matter scaffolding: title page, copyright page with ISBN placeholder, auto-generated table of contents (derived from chapter front matter), about-the-author stub, also-by list, acknowledgements page. Copy content itself (author bio, back-cover hook) is wdb-008.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "print/front-matter/",
+      "print/back-matter/"
+    ]
+  },
+  {
+    "id": "wdb-004",
+    "title": "KDP proof-copy workflow doc: how to order a KDP paperback proof, what to check (trim, bleed, inside/outside margins, text legibility, image clarity at 300 DPI), iteration loop, known gotchas. Reusable across future Ray KDP projects.",
+    "status": "pending",
+    "priority": 4,
+    "expected_touches": [
+      "kdp/proof-workflow.md"
+    ]
+  },
+  {
+    "id": "wdb-005",
+    "title": "KDP launch checklist: listing fields (title, subtitle, series, edition, description, author bio), category selection template, keyword-research worksheet, review-request email templates, D-day sequence (pricing, promotion, first-24h checks). Reusable across future KDP projects.",
+    "status": "pending",
+    "priority": 5,
+    "expected_touches": [
+      "kdp/launch-checklist.md"
+    ]
+  },
+  {
+    "id": "wdb-006",
+    "title": "KDP royalty analysis: at $20 retail, KDP paperback 60% royalty minus printing cost (black-ink, 6x9 trim, page count). Break-even per copy, comparison table across $15/$18/$20/$25 retail price points, monthly income projection at N copies/month scenarios. Output drives wdb-010 pricing decision.",
+    "status": "pending",
+    "priority": 6,
+    "expected_touches": [
+      "kdp/royalty-analysis.md"
+    ]
+  },
+  {
+    "id": "wdb-007",
+    "title": "Amazon listing description: short (200-char hook) + long (4000-char body). Voice-calibrated against the book's own opening chapters (docs/_chapters/chapter_01.md, chapter_02.md). Stop-slop pass mandatory before landing — this is public-facing copy where AI-tells get read as AI-tells.",
+    "status": "pending",
+    "priority": 7,
+    "interactive_only": true,
+    "interactive_only_reason": "Public-facing Amazon listing copy, voice-sensitive. Ray writes with /stop-slop pass."
+  },
+  {
+    "id": "wdb-008",
+    "title": "Author bio + back-cover hook copy. Bio for the book jacket + Amazon listing; hook is the pitch someone reads in a store aisle. Both voice-sensitive. Should reference Conflict Simulations LLC without turning the bio into a CSL ad.",
+    "status": "pending",
+    "priority": 8,
+    "interactive_only": true,
+    "interactive_only_reason": "Author voice for the physical book jacket. Taste work."
+  },
+  {
+    "id": "wdb-009",
+    "title": "Amazon keyword + BISAC category selection: 7 keywords + 2 BISAC categories. Requires judgment about discovery positioning (hobby-games taxonomy vs. military-history taxonomy vs. cross-listing). Ray's call on where the book is best found.",
+    "status": "pending",
+    "priority": 9,
+    "interactive_only": true,
+    "interactive_only_reason": "Discovery/positioning strategy, not mechanical."
+  },
+  {
+    "id": "wdb-010",
+    "title": "Final KDP retail price decision after wdb-006 royalty analysis is in hand. Target is $20; actual list could move based on print cost, paperback-market comparables, and desired royalty per copy.",
+    "status": "pending",
+    "priority": 10,
+    "interactive_only": true,
+    "interactive_only_reason": "Business decision downstream of royalty analysis (wdb-006)."
+  }
+]
