@@ -88,10 +88,15 @@ __pycache__/
 
 # Claude Code per-machine state (allow-lists, scheduled-task locks, etc.)
 # Shared settings live in .claude/settings.json, which IS tracked.
+# Reusable skills live in .claude/skills/, which ARE tracked — shared
+# project conventions (aesthetic, rasterization, etc.) for future Claude
+# Code sessions, not per-machine. First landed 2026-04-22 alongside the
+# README visuals.
 # Everything else under .claude/ is per-machine / transient — including
 # settings.local.json, scheduled_tasks.lock, and any future harness files.
 .claude/*
 !.claude/settings.json
+!.claude/skills/
 
 # Obsidian per-machine vault state
 # Shared settings would be in .obsidian/app.json etc., which can be tracked
