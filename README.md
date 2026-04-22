@@ -46,6 +46,16 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 >   end the whole session. Reads Claude Code's own session blocks
 >   via `ccusage` so the gate reflects real spend, not an estimate.
 >   Design in `docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`.
+> - **Basecamp 4 integration (2026-04-21):** first-party OAuth2
+>   helper, thin TypeScript client, and CLI. Run
+>   `generalstaff integrations basecamp auth` once per machine
+>   to write tokens to your project's `.env`; the client
+>   auto-refreshes before expiry. Read-only CLI; write operations
+>   stay in your own code with explicit opt-in. Optional; the
+>   dispatcher itself does not depend on it. A GS-managed project
+>   can pull threads, todos, projects, and files into its own
+>   cycle prompts. Docs in
+>   [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
@@ -522,6 +532,13 @@ root.
   5-hour session blocks via the `ccusage` library, so the gate
   reflects real spend rather than a pre-cycle estimate. Design in
   [`docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`](docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md).
+- ✓ **Basecamp 4 integration** (closed 2026-04-21): first-party
+  OAuth2 setup helper, thin TypeScript client, and
+  `generalstaff integrations basecamp auth | whoami | projects`
+  CLI subcommands. Optional plumbing; the dispatcher itself does
+  not depend on Basecamp. A GS-managed project can pull Basecamp
+  state into its own cycle prompts. Docs in
+  [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
 - **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
   the dashboard, edit `tasks.json` from the UI, merge `bot/work`
   with a button. Read-only v1 is the current dashboard; actions
@@ -548,6 +565,9 @@ root.
   design-decision resolutions and the gs-188 observability surface
 - [`projects.yaml.example`](projects.yaml.example) -- config schema
   reference, including the `max_parallel_slots` opt-in
+- [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md) --
+  Basecamp 4 integration setup, auth flow, CLI reference, and
+  gotchas (pagination, User-Agent, token lifecycle)
 - [`docs/phase-5-references/`](docs/phase-5-references/) -- Phase 5
   UI reference views (fleet, queue, tail, detail, inbox) with a
   README documenting what each establishes and how the vocabulary
