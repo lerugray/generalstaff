@@ -1,1 +1,2 @@
 {"timestamp":"2026-04-23T18:58:06.162Z","event":"session_start","project_id":"wargame-design-book","data":{"budget_minutes":90,"dry_run":false,"registered_projects":["generalstaff","gamr","bookfinder-general","zero-page","veridian-contraption","personal-site","conflict-simulations","amfiog","mission-swarm","mission-bullet","wds1870","wargame-design-book"]}}
+{"timestamp":"2026-04-23T19:03:34.858Z","event":"session_end","project_id":"wargame-design-book","data":{"duration_minutes":6,"total_cycles":0,"total_verified":0,"total_failed":0,"stop_reason":"stop-file"}}
