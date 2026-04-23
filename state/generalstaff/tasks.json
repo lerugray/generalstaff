@@ -2142,7 +2142,7 @@
   {
     "id": "gs-300",
     "title": "Usage-budget feature â user-facing docs + README update. (a) New docs page at docs/conventions/usage-budget.md explaining config surface (max_usd/max_tokens/max_cycles + enforcement modes), how to pick hard vs advisory, how the Claude Code 5-hour rolling window works (not weekly), provider-abstraction roadmap (OpenRouter, Anthropic API, Ollama coming later). (b) README feature-list mention with one-line description. (c) CLAUDE.md update documenting the new dispatcher.session_budget config key + link to the docs page. (d) Cross-link from docs/integrations/ to usage-budget for Claude Code + OpenRouter users. Voice-bearing work; creative_work_allowed territory if GS ever flips that on. Interactive-only. Depends on gs-298 merged so the docs describe what actually shipped rather than planned shape.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "interactive_only": true
   },
