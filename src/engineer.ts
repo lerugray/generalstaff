@@ -170,7 +170,13 @@ export async function runEngineer(
     return { exitCode: 0, durationSeconds: 0, timedOut: false, logPath };
   }
 
-  const timeoutMs = (project.cycle_budget_minutes + 5) * 60 * 1000;
+  // gs-302-ish: shrunk buffer from +5 to +2 after 2026-04-23 observed a
+  // claude -p run 35m on a 30-min cycle_budget_minutes, exit=1 with zero
+  // commits (engineer.ts:173 fired the hard kill at the 35-min mark).
+  // +5 was "polite grace for wrap-up"; +2 trims the worst-case wasted
+  // Claude burn when claude -p gets stuck without committing. Revisit
+  // once the structural early-kill (no-claim-signal-by-N-min) lands.
+  const timeoutMs = (project.cycle_budget_minutes + 2) * 60 * 1000;
   const startTime = Date.now();
 
   return new Promise<EngineerResult>((resolve) => {
@@ -233,7 +239,7 @@ export async function runEngineer(
     const timer = setTimeout(() => {
       timedOut = true;
       logStream.write(
-        `\n\n=== TIMED OUT after ${project.cycle_budget_minutes + 5} min ===\n`,
+        `\n\n=== TIMED OUT after ${project.cycle_budget_minutes + 2} min ===\n`,
       );
       killChildTree(child);
     }, timeoutMs);

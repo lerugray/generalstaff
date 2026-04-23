@@ -2156,5 +2156,12 @@
       "tests/usage/",
       "tests/integration/"
     ]
+  },
+  {
+    "id": "gs-302",
+    "title": "Engineer-step early-kill when no task-claim signal by N minutes. Follow-up to the 2026-04-23 incident where claude -p ran 35m on a 30-min cycle_budget_minutes and exited with zero commits â the +5/+2 buffer shrink (this commit) trims worst-case waste but doesn't detect stuck runs early. Proper fix: engineer prompt emits a structured claim signal within the first N minutes ('claimed: gs-299'), session loop parses and threads it into ProgressEntry.data, dispatcher kills child if no claim arrives by a per-project default (e.g. 5 min). Depends on gs-291 (attempted_task_id in cycle_end event) which is already queued. interactive_only until gs-291 lands; src/prompts/ + src/engineer.ts + src/session.ts all touch hands_off territory. Expected diff: ~150-250 LOC.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true
   }
 ]
