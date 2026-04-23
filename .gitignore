@@ -62,6 +62,7 @@ state/mission-swarm/
 state/mission-bullet/
 state/wds1870/
 state/kreuzfeuer/
+state/adversary/
 
 # Bun / Node
 node_modules/
