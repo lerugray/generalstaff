@@ -206,6 +206,37 @@ explicitly, don't proactively write.
   for defaults and the open measurement questions, lives in
   **docs/internal/PHASE-4-COMPLETE-2026-04-18.md** and **DESIGN.md §v6**.
 
+- **Usage-budget cap is opt-in (gs-295..301 / 2026-04-21).** The
+  dispatcher can cap session consumption in USD, tokens, or
+  cycles via `dispatcher.session_budget` in `projects.yaml`.
+  When the provider reads back consumption at or above the cap,
+  the session stops with `stopReason: "usage-budget"`. Default
+  is no cap (existing wall-clock behaviour preserved).
+
+  ```yaml
+  dispatcher:
+    session_budget:
+      max_usd: 5.00           # pick exactly one unit:
+      # max_tokens: 500000     # max_usd | max_tokens | max_cycles
+      # max_cycles: 10
+      enforcement: hard-stop  # "hard-stop" (default) | "advisory"
+      provider_source: claude-code  # optional; auto-detects
+  ```
+
+  Per-project caps can set `on_exhausted: skip-project` so one
+  project hitting its cap drops from the picker without ending
+  the whole session. Fleet-wide caps always break session
+  (nothing to fall back to).
+
+  Shipped provider readers (v1): `claude-code` (5-hour window,
+  dollars / tokens / cycles via `ccusage/data-loader`). Stubs
+  on the roadmap: `openrouter`, `anthropic-api`, `ollama`.
+  Fail-open with one WARN per session when the reader can't
+  return data; the cap is a ceiling, not a gate.
+
+  Full docs at **docs/conventions/usage-budget.md**; design spec
+  at **docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md**.
+
 ### Reviewer provider configuration
 
 The verification-gate reviewer (`src/reviewer.ts`) is

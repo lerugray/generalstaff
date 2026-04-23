@@ -581,6 +581,10 @@ root.
 - [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md) --
   Basecamp 4 integration setup, auth flow, CLI reference, and
   gotchas (pagination, User-Agent, token lifecycle)
+- [`docs/conventions/usage-budget.md`](docs/conventions/usage-budget.md) --
+  `dispatcher.session_budget` config surface (USD / tokens / cycles),
+  hard-stop vs advisory enforcement, provider reader landscape, and
+  how the Claude Code 5-hour rolling window interacts with the cap
 - [`docs/phase-5-references/`](docs/phase-5-references/) -- Phase 5
   UI reference views (fleet, queue, tail, detail, inbox) with a
   README documenting what each establishes and how the vocabulary

@@ -203,3 +203,8 @@ same pattern for Python / shell / other languages.
 
 - Basecamp's own API docs: [github.com/basecamp/bc3-api](https://github.com/basecamp/bc3-api)
 - Authentication section specifically: [bc3-api §authentication](https://github.com/basecamp/bc3-api/blob/master/sections/authentication.md)
+- [`docs/conventions/usage-budget.md`](../conventions/usage-budget.md):
+  capping how much of your Claude Code / OpenRouter / Anthropic API
+  quota a GS session is allowed to spend. Uses the same `.env`
+  pattern for provider keys (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`,
+  etc.) that this integration uses for Basecamp credentials.
