@@ -2,7 +2,7 @@
   {
     "id": "wdb-001",
     "title": "Print PDF pipeline: Pandoc-based conversion from docs/_chapters/ markdown into KDP-ready paperback PDF (6x9 trim, correct margins/bleed/gutter, running heads, page numbers, clean chapter breaks). Typography tuned to match the web aesthetic (Lora body + Playfair Display chapter headings, sized for print). Output lands at print/out/wargame-design-book.pdf.",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "expected_touches": [
       "print/",
