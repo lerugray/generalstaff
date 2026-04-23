@@ -18,6 +18,12 @@ digests/
 next_project.txt
 STOP
 
+# Work-PC one-off launcher (2026-04-23) — routes around missing OpenRouter
+# key by running --provider=claude + scoping to Claude-consuming projects.
+# Per-machine workaround; delete once this PC has an OpenRouter key or
+# ollama is confirmed working as a reviewer.
+scripts/run_session_claude_only.bat
+
 # Transient pid file — written at session start by scripts/run_session.bat,
 # cleaned at session end. Tracking it causes `D state/session.pid` residue
 # that blocks the next launch's clean-tree preflight (gs-236).
