@@ -9,7 +9,8 @@
       "print/build.sh",
       "print/pandoc-template.tex",
       "print/style-print.css"
-    ]
+    ],
+    "interactive_only": true
   },
   {
     "id": "wdb-002",
