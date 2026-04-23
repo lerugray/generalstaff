@@ -15,7 +15,7 @@
   {
     "id": "wdb-002",
     "title": "Cover template: front + spine + back assembled as SVG (or Pandoc-driven), with spine-width calculator as a function of interior page count using KDP's paper-factor formula. Placeholders for title/subtitle/author/back-cover copy (filled by wdb-008). Reusable for future Ray KDP books.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "expected_touches": [
       "print/cover/",

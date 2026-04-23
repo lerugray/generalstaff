@@ -1,8 +1,8 @@
 {
   "project_id": "wargame-design-book",
   "current_cycle_id": null,
-  "last_cycle_id": null,
-  "last_cycle_outcome": null,
-  "last_cycle_at": null,
-  "cycles_this_session": 0
+  "last_cycle_id": "20260423191910_oubj",
+  "last_cycle_outcome": "verified",
+  "last_cycle_at": "2026-04-23T19:23:26.513Z",
+  "cycles_this_session": 1
 }
