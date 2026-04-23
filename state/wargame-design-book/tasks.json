@@ -36,7 +36,7 @@
   {
     "id": "wdb-004",
     "title": "KDP proof-copy workflow doc: how to order a KDP paperback proof, what to check (trim, bleed, inside/outside margins, text legibility, image clarity at 300 DPI), iteration loop, known gotchas. Reusable across future Ray KDP projects.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "expected_touches": [
       "kdp/proof-workflow.md"
