@@ -61,6 +61,7 @@ state/amfiog/
 state/mission-swarm/
 state/mission-bullet/
 state/wds1870/
+state/kreuzfeuer/
 
 # Bun / Node
 node_modules/
