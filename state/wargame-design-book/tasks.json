@@ -26,7 +26,7 @@
   {
     "id": "wdb-003",
     "title": "Front + back matter scaffolding: title page, copyright page with ISBN placeholder, auto-generated table of contents (derived from chapter front matter), about-the-author stub, also-by list, acknowledgements page. Copy content itself (author bio, back-cover hook) is wdb-008.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "print/front-matter/",
