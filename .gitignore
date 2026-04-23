@@ -54,6 +54,7 @@ state/conflict-simulations/
 state/amfiog/
 state/mission-swarm/
 state/mission-bullet/
+state/wds1870/
 
 # Bun / Node
 node_modules/
