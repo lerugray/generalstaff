@@ -2131,7 +2131,7 @@
   {
     "id": "gs-299",
     "title": "Usage-budget feature â session-end reporting + session-report integration. (a) Augment session_complete event in src/session.ts with consumption_summary={total_usd, total_tokens, cycles_used, budget_remaining} sourced from a final ConsumptionReader.readCurrentWindow() call. (b) Update src/session_report.ts to surface budget-stop sessions distinctly (e.g. separate header or icon in the rendered section) and render the consumption summary per-session in the digest. (c) Tests in tests/session_report.test.ts covering budget-hit session rendering + normal session rendering (regression). Depends on gs-298 (needs stopReason='budget' plumbing to exist). Expected diff: ~100-150 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "expected_touches": [
       "src/session.ts",
