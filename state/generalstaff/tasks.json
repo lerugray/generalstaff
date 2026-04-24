@@ -2236,5 +2236,113 @@
     "status": "pending",
     "priority": 4,
     "interactive_only": true
+  },
+  {
+    "id": "gs-306",
+    "title": "mshook-001 — mission-swarm reviewer-stage preview hook. Add src/integrations/mission_swarm/{hook.ts, types.ts, subprocess.ts}. runMissionSwarmPreview(task, project) spawns `missionswarm run` + `missionswarm summarize` as subprocesses when project.missionswarm is configured; returns the summary string for reviewer context. Cache keyed on sha256(task.description + audience + n_agents + n_rounds) under ~/.generalstaff/cache/missionswarm/. Graceful skip on missing config or subprocess failure (no-op, logs). Wire into src/reviewer.ts behind the has-missionswarm-config check. Full spec + sketch code + test strategy in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-306.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches src/reviewer.ts (hands_off) + projects.yaml schema. Cache location + config shape are taste calls.",
+    "expected_touches": [
+      "src/integrations/mission_swarm/",
+      "src/reviewer.ts",
+      "src/config.ts",
+      "tests/integrations/mission_swarm/"
+    ]
+  },
+  {
+    "id": "gs-307",
+    "title": "mshook-002 — surface mission-swarm preview in `generalstaff todo`. Add [simulated] marker on tasks with a cached preview; --verbose dumps the first paragraph of the summary inline. Reads from ~/.generalstaff/cache/missionswarm/. Blocks on gs-306 landed. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-307. Expected diff: ~50-80 LOC.",
+    "status": "pending",
+    "priority": 4,
+    "expected_blocked_by": ["gs-306"],
+    "expected_touches": [
+      "src/cli.ts",
+      "src/integrations/mission_swarm/format.ts",
+      "tests/cli/todo_format.test.ts"
+    ]
+  },
+  {
+    "id": "gs-308",
+    "title": "mshook-003 — optional `--markov` pass for deep simulations. For projects with missionswarm.simulate_deep=true, invocation passes --markov to missionswarm; resulting markov.json cascade graph gets a compact summary in reviewer context. Blocks on mission-swarm shipping --markov output (ms-ma-00x in docs/markov-analysis-design.md). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-308. Expected diff: ~100-150 LOC.",
+    "status": "pending",
+    "priority": 5,
+    "interactive_only": true,
+    "interactive_only_reason": "Cascade-graph summary prompt is voice-bearing; first draft needs Ray's eye.",
+    "expected_blocked_by": ["gs-306"],
+    "expected_touches": [
+      "src/integrations/mission_swarm/hook.ts",
+      "src/integrations/mission_swarm/markov.ts",
+      "tests/integrations/mission_swarm/markov.test.ts"
+    ]
+  },
+  {
+    "id": "gs-309",
+    "title": "mshook-004 — cache invalidation on task-description edit. Mostly covered by gs-306's hash-based cache key; this task verifies the expected behavior in a test + documents it. Old cache stays on disk (GC'd separately later). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-309. Expected diff: ~30-50 LOC.",
+    "status": "pending",
+    "priority": 4,
+    "expected_blocked_by": ["gs-306"],
+    "expected_touches": [
+      "tests/integrations/mission_swarm/hook.test.ts"
+    ]
+  },
+  {
+    "id": "gs-310",
+    "title": "jr-001 — create github.com/lerugray/mission-bullet-oss (public fork). Extract current private mission-bullet codebase minus voice-specific tunings (entries/, reflections/, Ray-specific prompt tweaks in src/refine.ts / src/review.ts / src/claude-note.ts stay private). Add MIT license (recommended per design doc). Rewrite README to position as standalone journal tool; GS integration as optional, not headline. Set private repo as downstream fork. Blocks on parallel mission-bullet session finishing (fork point must be stable). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-310 and design in docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md §2.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "License choice + README are Ray's voice work. Fork-point depends on parallel session state."
+  },
+  {
+    "id": "gs-311",
+    "title": "jr-002 — add journal.mission_bullet_root config key to projects.yaml schema + validator. No-op at runtime until jr-003 lands. Fields: mission_bullet_root (required string, absolute path), scan_days (optional int, default 7), reviewer_context (optional bool, default false). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-311. Expected diff: ~40-60 LOC. Can land anytime — not blocked on jr-001 since the schema is just a shape.",
+    "status": "pending",
+    "priority": 4,
+    "expected_touches": [
+      "src/config.ts",
+      "tests/config.test.ts"
+    ]
+  },
+  {
+    "id": "gs-312",
+    "title": "jr-003 — scan-bullets-by-project-affinity library. src/integrations/journal/scan.ts: pure library that takes journal root + project config + scan window (default 7 days), returns JournalProposal[]. Keyword-match on project id + name + configured aliases; bullets with no match filtered out. Counts only `- [ ]` (tasks) and `- !` (alerts); ignores `- *` (observations) and plain `- ` (notes). Never writes to the journal. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-312. Expected diff: ~180-250 LOC.",
+    "status": "pending",
+    "priority": 4,
+    "expected_blocked_by": ["gs-310", "gs-311"],
+    "expected_touches": [
+      "src/integrations/journal/scan.ts",
+      "src/integrations/journal/types.ts",
+      "tests/integrations/journal/scan.test.ts"
+    ]
+  },
+  {
+    "id": "gs-313",
+    "title": "jr-004 — `generalstaff todo --from-journal` proposal surface. CLI lets Ray accept/dismiss/edit journal proposals. Accept adds to project tasks.json; dismiss records in local seen-file (never writes to journal); edit opens proposal in $EDITOR before accept. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-313. Expected diff: ~150-200 LOC.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true,
+    "interactive_only_reason": "CLI UX flow decisions + $EDITOR handling are taste work.",
+    "expected_blocked_by": ["gs-312"],
+    "expected_touches": [
+      "src/cli.ts",
+      "src/integrations/journal/proposals.ts",
+      "tests/integrations/journal/proposals.test.ts"
+    ]
+  },
+  {
+    "id": "gs-314",
+    "title": "jr-005 — reviewer-stage hook reads journal proposals as context when generating tasks. Per-project opt-in via journal.reviewer_context=true. Privacy floor: journal text goes into reviewer's context window only when reviewer_context=true AND provider is allow-listed for journal data (default local-compute only; cloud opt-in separate). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-314. Expected diff: ~120-180 LOC.",
+    "status": "pending",
+    "priority": 5,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches src/reviewer.ts (hands_off) + privacy allow-list design is a taste call.",
+    "expected_blocked_by": ["gs-312"],
+    "expected_touches": [
+      "src/reviewer.ts",
+      "src/integrations/journal/reviewer_context.ts",
+      "tests/integrations/journal/reviewer_context.test.ts"
+    ]
   }
 ]
