@@ -2239,8 +2239,8 @@
   },
   {
     "id": "gs-306",
-    "title": "mshook-001 — mission-swarm reviewer-stage preview hook. Add src/integrations/mission_swarm/{hook.ts, types.ts, subprocess.ts}. runMissionSwarmPreview(task, project) spawns `missionswarm run` + `missionswarm summarize` as subprocesses when project.missionswarm is configured; returns the summary string for reviewer context. Cache keyed on sha256(task.description + audience + n_agents + n_rounds) under ~/.generalstaff/cache/missionswarm/. Graceful skip on missing config or subprocess failure (no-op, logs). Wire into src/reviewer.ts behind the has-missionswarm-config check. Full spec + sketch code + test strategy in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-306.",
-    "status": "pending",
+    "title": "mshook-001 — mission-swarm reviewer-stage preview hook. Add src/integrations/mission_swarm/{hook.ts, types.ts, subprocess.ts}. runMissionSwarmPreview(task, project) spawns `missionswarm run` + `missionswarm summarize` as subprocesses when project.missionswarm is configured; returns the summary string for reviewer context. Cache keyed on sha256(task.description + audience + n_agents + n_rounds) under ~/.generalstaff/cache/missionswarm/. Graceful skip on missing config or subprocess failure (no-op, logs). Wire into src/reviewer.ts behind the has-missionswarm-config check. Full spec + sketch code + test strategy in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-306. SHIPPED 2026-04-24 commit 4879a00 — live E2E validated via scripts/smoke-missionswarm-hook.ts (48s first run, cacheHit=true on second run, gaming-community voice on register). Wiring landed in src/cycle.ts rather than src/reviewer.ts since that's where ReviewerPromptParams is assembled; src/types.ts not src/config.ts for the schema extension (no src/config.ts file exists).",
+    "status": "done",
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "Touches src/reviewer.ts (hands_off) + projects.yaml schema. Cache location + config shape are taste calls.",
@@ -2253,8 +2253,8 @@
   },
   {
     "id": "gs-307",
-    "title": "mshook-002 — surface mission-swarm preview in `generalstaff todo`. Add [simulated] marker on tasks with a cached preview; --verbose dumps the first paragraph of the summary inline. Reads from ~/.generalstaff/cache/missionswarm/. Blocks on gs-306 landed. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-307. Expected diff: ~50-80 LOC.",
-    "status": "pending",
+    "title": "mshook-002 — surface mission-swarm preview in `generalstaff todo`. Add [simulated] marker on tasks with a cached preview; --verbose dumps the first paragraph of the summary inline. Reads from ~/.generalstaff/cache/missionswarm/. Blocks on gs-306 landed. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-307. Expected diff: ~50-80 LOC. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. Helper at src/integrations/mission_swarm/format.ts (lookupCachedPreview + firstParagraphOf). cli.ts todo case gains --verbose flag + the [simulated] suffix.",
+    "status": "done",
     "priority": 4,
     "expected_blocked_by": ["gs-306"],
     "expected_touches": [
@@ -2297,8 +2297,8 @@
   },
   {
     "id": "gs-311",
-    "title": "jr-002 — add journal.mission_bullet_root config key to projects.yaml schema + validator. No-op at runtime until jr-003 lands. Fields: mission_bullet_root (required string, absolute path), scan_days (optional int, default 7), reviewer_context (optional bool, default false). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-311. Expected diff: ~40-60 LOC. Can land anytime — not blocked on jr-001 since the schema is just a shape.",
-    "status": "pending",
+    "title": "jr-002 — add journal.mission_bullet_root config key to projects.yaml schema + validator. No-op at runtime until jr-003 lands. Fields: mission_bullet_root (required string, absolute path), scan_days (optional int, default 7), reviewer_context (optional bool, default false). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-311. Expected diff: ~40-60 LOC. Can land anytime — not blocked on jr-001 since the schema is just a shape. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. JournalProjectConfig interface in src/types.ts; validator in src/projects.ts (not src/config.ts, which doesn't exist).",
+    "status": "done",
     "priority": 4,
     "expected_touches": [
       "src/config.ts",
