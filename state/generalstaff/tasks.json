@@ -2167,5 +2167,15 @@
     "status": "pending",
     "priority": 2,
     "interactive_only": true
+  },
+  {
+    "id": "gs-303",
+    "title": "Session-complete notification: tag accuracy + project breakdown. The current [FAIL] tag fires when any single cycle in a session fails, even at 11/12 verified (92% success ships as 'failed'). Header also says 'GeneralStaff session complete' even when work spanned N projects with GS as orchestrator only \u2014 cryptic for a glance-check notification. Fix: (a) Header tag becomes [OK] if >=75% verified, [PARTIAL] if 25-74%, [FAIL] if <25%. (b) First 3 lines after the header list per-project cycle counts ('Touched: zero-page-private (3), sandkasten (3), auftragstaktik (3), wargame-design-book (1), devforge (1)'). (c) Task bullets grouped by project rather than cycle-order. (d) Each task bullet prefixed with project name ('[zero-page-private] zpp-001: port in-app instruction manual'). Acceptance: 11 verified + 1 failed produces [OK] or [PARTIAL] not [FAIL]; 0 verified + 5 failed still [FAIL]; a reader can see which projects moved in 3 seconds. Rationale captured 2026-04-24 after Ray flagged the real A5-session ping as 'legitimately cryptic' \u2014 the session completed 11 good cycles but read as a failure at first glance. Expected diff: ~100-200 LOC in src/session_report.ts + new cases in tests/session_report.test.ts.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "src/session_report.ts",
+      "tests/session_report.test.ts"
+    ]
   }
 ]
