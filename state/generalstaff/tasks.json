@@ -2076,9 +2076,7 @@
     "id": "gs-292",
     "title": "Make MAX_CONSECUTIVE_EMPTY configurable via DispatcherConfig. Currently hardcoded to 3 at src/session.ts line 452. Expose as dispatcher.max_consecutive_empty in projects.yaml (default 3). Optional per-project override via projects.yaml[<id>].max_consecutive_empty for projects with high legitimate empty-diff rates. Wiring: add field to DispatcherConfig in src/types.ts, add optional field to ProjectConfig, thread through to session.ts sequential + parallel loops (both hardcode the constant today). Tests: verify config value is respected, default preserved when unset. Small scope, bot-pickable candidate.",
     "status": "pending",
-    "priority": 5,
-    "interactive_only": true,
-    "interactive_only_reason": "Temporarily flipped 2026-04-24 ~03:35 after Stream A3 saw 10/11 verification failures on these tasks. Needs human diagnosis (tests broken? engineer producing non-working code?). Flip back to bot-pickable once root cause identified."
+    "priority": 5
   },
   {
     "id": "gs-293",
@@ -2151,15 +2149,9 @@
   {
     "id": "gs-301",
     "title": "Usage-budget feature \u00e2 integration test matrix. Covers 11 scenarios from the test-matrix section of docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md: (1) no session_budget set \u00e2 existing behavior unchanged (regression guard); (2) max_usd budget hit mid-session, enforcement='hard' \u00e2 stops with stopReason='budget'; (3) max_usd budget hit, enforcement='advisory' \u00e2 warning logged, continues to natural end; (4) max_tokens budget variant; (5) max_cycles budget variant; (6) per-project cap enforces correctly within fleet cap (project stops first); (7) per-project > fleet-wide validation rejection; (8) exactly-one-unit validation rejection (two units both set); (9) consumption source unavailable \u00e2 fail-open with warning, session completes normally; (10) Claude Code JSONL file missing \u00e2 same fail-open path; (11) fresh 5-hour window vs mid-window consumption math. Tests live in tests/integration/usage_budget.test.ts with shared fixtures under tests/usage/fixtures/. Depends on gs-298 + gs-299 both merged. Expected diff: ~300-500 LOC.",
-    "status": "pending",
+    "status": "superseded",
     "priority": 3,
-    "expected_touches": [
-      "tests/session.test.ts",
-      "tests/usage/",
-      "tests/integration/"
-    ],
-    "interactive_only": true,
-    "interactive_only_reason": "Temporarily flipped 2026-04-24 ~03:35 after Stream A3 saw 10/11 verification failures on these tasks. Needs human diagnosis (tests broken? engineer producing non-working code?). Flip back to bot-pickable once root cause identified."
+    "supersedes_note": "Split 2026-04-24 into gs-301a through gs-301e after 7 bot attempts all failed verification on 400-700 LOC single-cycle test generation. Root cause: task scope too large for single cycle — engineer produces 500+ LOC of TypeScript in one shot, inevitably hits tsc errors or failing assertions. Implementation surface (gs-298 usage-budget gate + gs-299 session_report surfacing) is complete and testable; scenarios 1-11 have been redistributed across 5 atomic tasks at ~100-150 LOC each."
   },
   {
     "id": "gs-302",
@@ -2176,6 +2168,56 @@
     "expected_touches": [
       "src/session_report.ts",
       "tests/session_report.test.ts"
+    ]
+  },
+  {
+    "id": "gs-301a",
+    "title": "Usage-budget integration tests \u2014 regression + fail-open guards (scenarios 1, 9, 10 from gs-301's matrix). (1) No session_budget set \u2192 existing dispatcher behavior unchanged (regression guard proving the feature is purely additive). (9) ConsumptionReader unavailable / throws at cycle boundary \u2192 fail-open with warning logged, session completes normally without budget enforcement. (10) Claude Code JSONL file missing at reader-construction time \u2192 same fail-open path as (9). Tests live in tests/integration/usage_budget.test.ts with shared fixtures under tests/usage/fixtures/. Expected diff: ~120-180 LOC total (one test per scenario + minimal fixture setup). Split from gs-301 on 2026-04-24 after 7 bot attempts at the 11-scenario monolith all failed verification. Each scenario should be a single it() block with clear setup/action/assert structure.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/integration/usage_budget.test.ts",
+      "tests/usage/fixtures/"
+    ]
+  },
+  {
+    "id": "gs-301b",
+    "title": "Usage-budget integration tests \u2014 max_usd enforcement modes (scenarios 2, 3 from gs-301's matrix). (2) max_usd budget hit mid-session, enforcement='hard' \u2192 session stops with stopReason='usage-budget', cycle_end event emits the budget-exceeded reason, session_report surfaces the $-marked row. (3) max_usd budget hit, enforcement='advisory' \u2192 warning logged to PROGRESS.jsonl, session continues to natural end (max_cycles or timer), budget shown as exceeded in final report but did not cause stop. Extends tests/integration/usage_budget.test.ts using fixtures from gs-301a. Expected diff: ~100-150 LOC (two scenarios, hard and advisory differ by enforcement config + expected stopReason). Split from gs-301 on 2026-04-24. Depends on gs-301a having landed shared fixtures (or duplicate minimal fixture inline if gs-301a isn't merged yet).",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/integration/usage_budget.test.ts",
+      "tests/usage/fixtures/"
+    ]
+  },
+  {
+    "id": "gs-301c",
+    "title": "Usage-budget integration tests \u2014 max_tokens + max_cycles units (scenarios 4, 5 from gs-301's matrix). (4) max_tokens budget variant: config sets max_tokens instead of max_usd; consumption reader returns token totals; same hard-stop semantics as gs-301b's scenario 2 but on token axis. (5) max_cycles budget variant: config sets max_cycles; cycle counter is compared against cap; session stops at the Nth completed cycle with stopReason='usage-budget'. Both scenarios share the hard-enforcement test structure from gs-301b; this task proves the enforcement is unit-agnostic. Expected diff: ~100-150 LOC. Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/integration/usage_budget.test.ts",
+      "tests/usage/fixtures/"
+    ]
+  },
+  {
+    "id": "gs-301d",
+    "title": "Usage-budget integration tests \u2014 per-project vs fleet semantics (scenarios 6, 7 from gs-301's matrix). (6) Per-project cap enforces correctly within a fleet cap: fleet max_usd=10, project-A cap=3, project-B cap=4; project-A hits its cap first and drops from picker (on_exhausted='skip-project'); session continues on project-B until fleet or project-B cap. Asserts skip-project semantics at the picker level, not stop-session. (7) Validation rejection: projects.yaml sets per-project cap higher than fleet cap \u2192 config load fails at validation with a clear error message. Negative test \u2014 asserts the validation error type and message content. Expected diff: ~120-180 LOC. Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/integration/usage_budget.test.ts",
+      "tests/usage/fixtures/"
+    ]
+  },
+  {
+    "id": "gs-301e",
+    "title": "Usage-budget integration tests \u2014 validation + window math (scenarios 8, 11 from gs-301's matrix). (8) Exactly-one-unit validation: config sets both max_usd and max_tokens \u2192 load fails with error naming both fields as exclusive. Negative test. (11) Fresh 5-hour window vs mid-window consumption math: ConsumptionReader gets a timestamp boundary inside an active 5-hour Claude Code billing window; asserts the reader correctly attributes consumption to the window (fresh start counts from 0; mid-window counts from window-start, not session-start). The math here is load-bearing \u2014 incorrect window attribution would either under-enforce caps (missed budget hits) or over-enforce (false positives). Expected diff: ~150-200 LOC (window math needs fixture variety \u2014 at least 3 timestamp scenarios). Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
+    "status": "pending",
+    "priority": 3,
+    "expected_touches": [
+      "tests/integration/usage_budget.test.ts",
+      "tests/usage/fixtures/"
     ]
   }
 ]
