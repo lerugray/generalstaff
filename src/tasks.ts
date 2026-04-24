@@ -35,6 +35,7 @@ const VALID_TASK_STATUSES: readonly GreenfieldTask["status"][] = [
   "in_progress",
   "done",
   "skipped",
+  "superseded",
 ];
 
 // gs-218: structural validation for each tasks.json entry. Unknown

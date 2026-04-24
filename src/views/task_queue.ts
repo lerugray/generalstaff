@@ -15,7 +15,7 @@ export interface TaskQueueEntry {
   id: string;
   title: string;
   priority: number;
-  status: "pending" | "in_progress" | "done" | "skipped";
+  status: "pending" | "in_progress" | "done" | "skipped" | "superseded";
   expected_touches?: string[];
   interactive_only?: boolean;
   completed_at?: string;

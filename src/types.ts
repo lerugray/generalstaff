@@ -309,7 +309,7 @@ export interface SingleCycleOptions {
 export interface GreenfieldTask {
   id: string;
   title: string;
-  status: "pending" | "in_progress" | "done" | "skipped";
+  status: "pending" | "in_progress" | "done" | "skipped" | "superseded";
   priority: number;
   // gs-195: optional bot-pickability guards. When a task's engineer
   // scope will touch files under the project's hands_off patterns, the

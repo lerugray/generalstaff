@@ -127,7 +127,11 @@ export async function greenfieldCountRemainingDetailed(
       b.done += 1;
       continue;
     }
-    if (task.status === "skipped") {
+    if (task.status === "skipped" || task.status === "superseded") {
+      // gs-301-split convention (CLAUDE.local.md §"Diagnose bot-task
+      // failures"): "superseded" marks a task whose intent moved to
+      // split children via `supersedes_note`. Bucketed with skipped
+      // for the dispatcher's "nothing bot-pickable to do here" check.
       b.skipped += 1;
       continue;
     }
