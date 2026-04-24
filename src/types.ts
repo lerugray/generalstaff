@@ -292,6 +292,13 @@ export type ProgressEventType =
   // cycle short-circuits to verification_failed; the event preserves
   // the parse error + file list for post-hoc grep.
   | "malformed_json"
+  // gs-318: anti-state-wipe gate fired. The cycle's diff included
+  // deletions of one or more tracked state files (state/<id>/
+  // {tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json} or
+  // state/_fleet/PROGRESS.jsonl). Cycle short-circuits to
+  // verification_failed; data carries deleted_files (string[]) for
+  // post-hoc grep + audit. Catches the 2026-04-24 incident shape.
+  | "state_wipe_blocked"
   // gs-281: the pre-cycle `loadTasks` peek (cycle.ts step 1a) found
   // a `state/<id>/tasks.json` that exists but can't be parsed or
   // validated. The cycle proceeds with nextTask=undefined so the
@@ -433,6 +440,8 @@ const VALID_EVENTS: readonly string[] = [
   "session_start", "session_end", "session_complete",
   "session_end_auto_merge",
   "malformed_json",
+  // gs-318: anti-state-wipe gate event
+  "state_wipe_blocked",
   // gs-298: usage-budget gate event types
   "session_budget_exceeded", "session_budget_advisory",
   "session_budget_reader_unavailable", "session_budget_project_skipped",

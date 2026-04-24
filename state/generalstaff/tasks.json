@@ -2385,5 +2385,29 @@
       "src/integrations/journal/reviewer_context.ts",
       "tests/integrations/journal/reviewer_context.test.ts"
     ]
+  },
+  {
+    "id": "gs-318",
+    "title": "Anti-state-wipe pre-commit gate. Add `detectStateFileDeletions(diff)` helper to src/cycle.ts that returns deleted paths matching `state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json}` or `state/_fleet/PROGRESS.jsonl`. Wire as gate 6e (after the JSON syntax gate, before the reviewer call) — when the list is non-empty, set verdict to verification_failed, append `state_wipe_blocked` PROGRESS event with deleted_files, and short-circuit. Motivation: 2026-04-24 incident — home-PC chained dispatcher session committed cycle 5756a5f deleting 21 state files (-6743 lines net) across all 6 public-state projects + _fleet, and the reviewer marked it verified. Pure-parsing helper, no filesystem reads, returns paths for the failure-reason string.",
+    "status": "done",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches src/cycle.ts (hands_off territory) + reviewer-pipeline change needs Ray's eye on gate placement and false-positive risk.",
+    "expected_touches": [
+      "src/cycle.ts",
+      "tests/cycle.test.ts"
+    ]
+  },
+  {
+    "id": "gs-319",
+    "title": "Reviewer-prompt rule for state-file deletions (belt-and-suspenders behind gs-318). Add a fifth numbered question to the reviewer prompt's '## Your task' section: 'Does the diff DELETE any file matching state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json} or state/_fleet/PROGRESS.jsonl? If yes, verdict is verification_failed.' Frames the rule explicitly as the second line of defense — the static gate (gs-318) catches the case in pure parsing, but if the gate has a gap (new state-file pattern, regex miss), the reviewer is the backstop. Static text only — no new prompt parameter.",
+    "status": "done",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches src/prompts/reviewer.ts (hands_off) + voice/framing of the rule needs Ray's eye.",
+    "expected_touches": [
+      "src/prompts/reviewer.ts",
+      "tests/reviewer_prompt.test.ts"
+    ]
   }
 ]

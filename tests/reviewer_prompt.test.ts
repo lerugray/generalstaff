@@ -250,4 +250,37 @@ describe("reviewer prompt template", () => {
       expect(pfIdx).toBeGreaterThan(msIdx);
     });
   });
+
+  describe("anti-state-wipe rule (gs-319)", () => {
+    it("includes a numbered question 5 about state-file deletions", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+      // The four-question structure became five with gs-319.
+      expect(prompt).toMatch(/5\.\s+\*\*State-file deletions/i);
+    });
+
+    it("names the protected state-file paths explicitly", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+      expect(prompt).toContain("tasks.json");
+      expect(prompt).toContain("MISSION.md");
+      expect(prompt).toContain("PROGRESS.jsonl");
+      expect(prompt).toContain("STATE.json");
+      expect(prompt).toContain("state/_fleet/PROGRESS.jsonl");
+    });
+
+    it("instructs the verification_failed verdict when a state file is deleted", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+      // The rule must reach verification_failed, not verified_weak —
+      // a state wipe is corrupt cycle state, not an edge case.
+      const stateRuleSection = prompt.slice(
+        prompt.indexOf("State-file deletions"),
+      );
+      expect(stateRuleSection).toContain("verification_failed");
+    });
+
+    it("frames the rule as belt-and-suspenders behind the gs-318 gate", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+      expect(prompt).toContain("gs-318");
+      expect(prompt).toContain("second line");
+    });
+  });
 });

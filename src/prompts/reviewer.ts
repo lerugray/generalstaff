@@ -148,6 +148,17 @@ Examine the diff and answer these questions:
    that the diff doesn't reflect? Did it claim to fix a test
    that's still failing in the verification output?
 
+5. **State-file deletions (gs-319):** Does the diff DELETE any
+   file matching \`state/<id>/{tasks.json,MISSION.md,
+   PROGRESS.jsonl,STATE.json}\` or \`state/_fleet/PROGRESS.jsonl\`?
+   These files are intended to be append-only or stable; deletion
+   is never a normal cycle outcome and signals corrupt cycle
+   state (operating on a stale base, an over-aggressive clean-tree
+   preflight, etc.). If you see one, verdict is
+   \`verification_failed\` with a clear note. The cycle's static
+   gate (gs-318) should already have blocked this before reaching
+   you — you are the second line if the gate has a gap.
+
 ## Verdict format
 
 Respond with a JSON object only. No prose before or after the

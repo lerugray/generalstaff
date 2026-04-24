@@ -342,6 +342,48 @@ export async function detectMalformedJsonFiles(
   return malformed;
 }
 
+// gs-318: anti-state-wipe guard. State-tracking files (tasks.json,
+// MISSION.md, PROGRESS.jsonl, STATE.json under state/<id>/, plus
+// state/_fleet/PROGRESS.jsonl) are intended to be append-only or
+// stable. Deletion of these files indicates corrupt cycle state —
+// the cycle is committing a bulk file removal that almost certainly
+// came from operating on a stale base or a clean-tree preflight that
+// over-cleaned. Block the commit before the reviewer step.
+//
+// Motivation: 2026-04-24 incident. Home-PC's morning chained
+// dispatcher session ran a "verified" cycle that deleted 21 state
+// files (-6743 lines net) — every public-state project's tasks.json
+// + MISSION.md + PROGRESS.jsonl + STATE.json plus _fleet/
+// PROGRESS.jsonl. Reviewer marked it verified_weak; only the
+// divergence with work-PC's parallel push surfaced the wipe later.
+//
+// Pure parsing — no filesystem reads. Returns the deleted-state-file
+// paths for surfacing in the failure reason. Empty list = gate
+// passes.
+export function detectStateFileDeletions(diff: string): string[] {
+  if (!diff) return [];
+  const STATE_FILE = /^state\/[^/]+\/(tasks\.json|MISSION\.md|PROGRESS\.jsonl|STATE\.json)$/;
+  const FLEET_FILE = /^state\/_fleet\/PROGRESS\.jsonl$/;
+  const isStateFile = (path: string): boolean =>
+    STATE_FILE.test(path) || FLEET_FILE.test(path);
+
+  const deletions: string[] = [];
+  // Per-file chunks start with `diff --git `. Split on that boundary
+  // (with lookahead so the marker stays at the start of each chunk)
+  // and inspect each chunk for the deletion marker.
+  const chunks = diff.split(/^(?=diff --git )/m);
+  for (const chunk of chunks) {
+    const header = chunk.match(/^diff --git a\/(.+?) b\/.+$/m);
+    if (!header) continue;
+    const path = header[1];
+    if (!isStateFile(path)) continue;
+    if (/^deleted file mode /m.test(chunk)) {
+      deletions.push(path);
+    }
+  }
+  return deletions;
+}
+
 export function diffSummaryStats(diff: string): DiffStats {
   if (!diff) {
     return { files_changed: 0, insertions: 0, deletions: 0 };
@@ -843,6 +885,26 @@ export async function executeCycle(
       await appendProgress(project.id, "malformed_json", {
         files: malformedJson,
         changed_files: changedFiles,
+      }, cycleId);
+      break assemble;
+    }
+
+    // 6e. gs-318: anti-state-wipe gate. State-tracking files are
+    //     intended to be append-only or stable; bulk deletion is
+    //     never a normal cycle outcome. Catches the 2026-04-24
+    //     incident where a cycle wiped 21 state files in one commit
+    //     (see detectStateFileDeletions for full context).
+    const stateDeletions = detectStateFileDeletions(fullDiff);
+    if (stateDeletions.length > 0) {
+      const list = stateDeletions.join(", ");
+      result.final_outcome = "verification_failed";
+      result.reason = `state-wipe gate: ${stateDeletions.length} state file(s) deleted: ${list}`;
+      result.verification_outcome = "failed";
+      result.reviewer_verdict = "verification_failed";
+      result.diff_stats = diffStats;
+      console.log(`\nState-wipe gate failed: ${result.reason}`);
+      await appendProgress(project.id, "state_wipe_blocked", {
+        deleted_files: stateDeletions,
       }, cycleId);
       break assemble;
     }

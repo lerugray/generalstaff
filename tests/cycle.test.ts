@@ -14,6 +14,7 @@ import {
   applyReviewerSanityCheck,
   decideBotBranchHandling,
   detectMalformedJsonFiles,
+  detectStateFileDeletions,
   peekNextBotPickableTask,
 } from "../src/cycle";
 import { setRootDir } from "../src/state";
@@ -1062,6 +1063,147 @@ describe("detectMalformedJsonFiles (gs-280)", () => {
     expect(result).toHaveLength(1);
     expect(result[0].error.length).toBeLessThanOrEqual(500);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("detectStateFileDeletions (gs-318)", () => {
+  it("returns empty list for empty diff", () => {
+    expect(detectStateFileDeletions("")).toEqual([]);
+  });
+
+  it("returns empty list for diff with no deletions", () => {
+    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
+index abc123..def456 100644
+--- a/state/foo/tasks.json
++++ b/state/foo/tasks.json
+@@ -1,3 +1,4 @@
+ [
+   {"id": "foo-001"},
++  {"id": "foo-002"},
+   {"id": "foo-003"}
+ ]`;
+    expect(detectStateFileDeletions(diff)).toEqual([]);
+  });
+
+  it("returns empty list for non-state-file deletions", () => {
+    const diff = `diff --git a/scratch/junk.txt b/scratch/junk.txt
+deleted file mode 100644
+index abc123..0000000
+--- a/scratch/junk.txt
++++ /dev/null
+@@ -1,3 +0,0 @@
+-line1
+-line2
+-line3`;
+    expect(detectStateFileDeletions(diff)).toEqual([]);
+  });
+
+  it("flags a tasks.json deletion under state/<id>/", () => {
+    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
+deleted file mode 100644
+index abc123..0000000
+--- a/state/foo/tasks.json
++++ /dev/null
+@@ -1,3 +0,0 @@
+-[
+-  {"id": "foo-001"}
+-]`;
+    expect(detectStateFileDeletions(diff)).toEqual(["state/foo/tasks.json"]);
+  });
+
+  it("flags MISSION.md, PROGRESS.jsonl, and STATE.json deletions", () => {
+    const diff = [
+      `diff --git a/state/foo/MISSION.md b/state/foo/MISSION.md`,
+      `deleted file mode 100644`,
+      `--- a/state/foo/MISSION.md`,
+      `+++ /dev/null`,
+      `@@ -1 +0,0 @@`,
+      `-mission text`,
+      `diff --git a/state/foo/PROGRESS.jsonl b/state/foo/PROGRESS.jsonl`,
+      `deleted file mode 100644`,
+      `--- a/state/foo/PROGRESS.jsonl`,
+      `+++ /dev/null`,
+      `@@ -1 +0,0 @@`,
+      `-{"event":"x"}`,
+      `diff --git a/state/foo/STATE.json b/state/foo/STATE.json`,
+      `deleted file mode 100644`,
+      `--- a/state/foo/STATE.json`,
+      `+++ /dev/null`,
+      `@@ -1 +0,0 @@`,
+      `-{}`,
+    ].join("\n");
+    const result = detectStateFileDeletions(diff);
+    expect(result).toContain("state/foo/MISSION.md");
+    expect(result).toContain("state/foo/PROGRESS.jsonl");
+    expect(result).toContain("state/foo/STATE.json");
+    expect(result).toHaveLength(3);
+  });
+
+  it("flags state/_fleet/PROGRESS.jsonl deletion specifically", () => {
+    const diff = `diff --git a/state/_fleet/PROGRESS.jsonl b/state/_fleet/PROGRESS.jsonl
+deleted file mode 100644
+--- a/state/_fleet/PROGRESS.jsonl
++++ /dev/null`;
+    expect(detectStateFileDeletions(diff)).toEqual([
+      "state/_fleet/PROGRESS.jsonl",
+    ]);
+  });
+
+  it("flags multi-project bulk wipe (the 2026-04-24 incident shape)", () => {
+    // Six public-state projects each losing tasks.json + MISSION.md +
+    // PROGRESS.jsonl + STATE.json plus _fleet/PROGRESS.jsonl = 25
+    // deletions. Reproduces the wipe-cycle pattern.
+    const ids = ["bookfinder-general", "catalogdna", "generalstaff", "personal-site", "wargame-design-book"];
+    const files = ["tasks.json", "MISSION.md", "PROGRESS.jsonl", "STATE.json"];
+    const chunks: string[] = [];
+    for (const id of ids) {
+      for (const f of files) {
+        chunks.push(
+          `diff --git a/state/${id}/${f} b/state/${id}/${f}\n` +
+          `deleted file mode 100644\n` +
+          `--- a/state/${id}/${f}\n` +
+          `+++ /dev/null\n` +
+          `@@ -1 +0,0 @@\n` +
+          `-content`
+        );
+      }
+    }
+    chunks.push(
+      `diff --git a/state/_fleet/PROGRESS.jsonl b/state/_fleet/PROGRESS.jsonl\n` +
+      `deleted file mode 100644\n` +
+      `--- a/state/_fleet/PROGRESS.jsonl\n` +
+      `+++ /dev/null\n` +
+      `@@ -1 +0,0 @@\n` +
+      `-{}`
+    );
+    const result = detectStateFileDeletions(chunks.join("\n"));
+    expect(result).toHaveLength(21);
+    expect(result).toContain("state/_fleet/PROGRESS.jsonl");
+    expect(result).toContain("state/generalstaff/tasks.json");
+  });
+
+  it("does not flag deletions of non-tracked state files (e.g. cycles/)", () => {
+    // state/<id>/cycles/<timestamp>.json is gitignored audit data —
+    // not a state file the gate cares about.
+    const diff = `diff --git a/state/foo/cycles/202604241200.json b/state/foo/cycles/202604241200.json
+deleted file mode 100644
+--- a/state/foo/cycles/202604241200.json
++++ /dev/null`;
+    expect(detectStateFileDeletions(diff)).toEqual([]);
+  });
+
+  it("does not flag a state-file modification (only deletions)", () => {
+    // The gate only blocks deletions; modifications (including
+    // task status flips, PROGRESS.jsonl appends) are normal cycle
+    // outputs and must pass through.
+    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
+index abc123..def456 100644
+--- a/state/foo/tasks.json
++++ b/state/foo/tasks.json
+@@ -1 +1 @@
+-{"status":"pending"}
++{"status":"done"}`;
+    expect(detectStateFileDeletions(diff)).toEqual([]);
   });
 });
 
