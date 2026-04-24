@@ -2332,6 +2332,47 @@
     ]
   },
   {
+    "id": "gs-315",
+    "title": "Reviewer-prompt enrichment for `public_facing: true` projects. Add optional `public_facing?: boolean` field to ProjectConfig. When true AND the cycle's diff touches customer-reachable surfaces (frontend/, auth, signup, checkout, API routes — heuristic TBD), the reviewer's prompt gets an extra section: 'This project ships to users. Before returning verified, confirm the verification step exercises at least one end-to-end user journey (not just unit tests). If it only exercises unit tests, downgrade to verified_weak and flag in notes that the customer-facing surface is untested.' Motivation: the rg-017 incident (2026-04-24) — window.supabase shadow bug broke site-wide login from launch; zero unit tests caught it because no test loaded index.html in a browser. Reviewer-prompt enrichment surfaces these gaps without blocking cycles — turns 'shipped, broken' into 'shipped with verified_weak + explicit note'. Expected diff: ~30-50 LOC across src/types.ts, src/projects.ts validator, src/prompts/reviewer.ts. Cheap, no new execution model.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches src/prompts/reviewer.ts (hands_off) + voice of the new prompt section needs Ray's eye.",
+    "expected_touches": [
+      "src/types.ts",
+      "src/projects.ts",
+      "src/prompts/reviewer.ts",
+      "tests/reviewer_prompt.test.ts",
+      "tests/projects.test.ts"
+    ]
+  },
+  {
+    "id": "gs-316",
+    "title": "customer_facing_smoke verification step + retrogaze reference implementation. Option A from the 2026-04-24 design discussion (post-rg-017 lesson). Add `customer_facing_smoke?: string` field to ProjectConfig — shell command run AFTER verification_command on any cycle on a `public_facing: true` project that touches customer-reachable surfaces. Failure → verdict is verification_failed regardless of what the reviewer says. First reference implementation: retrogaze's smoke is a Playwright probe that loads retrogazeai.com/app (or a local docker-compose bring-up), asserts window.supabase is preserved, attempts a real login against a test account, asserts 200. Reuse the probe-live.mjs already written. Graduation path: optional first (opt-in per project); required only after the harness is proven stable. gs-315 needs to land first so reviewer-prompt flags public_facing projects before the gate is live. Expected diff: ~100-150 LOC across src/types.ts, src/projects.ts validator, src/verification.ts, tests/. Plus the retrogaze-side Playwright harness integration (separate repo).",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches verification pipeline (hands_off) + cross-repo harness bring-up needs Ray's judgment on per-project smoke scope.",
+    "expected_blocked_by": ["gs-315"],
+    "expected_touches": [
+      "src/types.ts",
+      "src/projects.ts",
+      "src/verification.ts",
+      "tests/verification.test.ts"
+    ]
+  },
+  {
+    "id": "gs-317",
+    "title": "Design note capturing the rg-017 incident + customer-facing smoke-gate design implications. Write docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md covering: (a) the rg-017 incident narrative (window.supabase shadow bug, silent from launch, caught only when Moontini stuck with it, root cause traceable to missing end-to-end browser test); (b) GS's current gaps — verification_command runs bot's own tests, reviewer checks scope match, neither exercises the customer-facing surface; (c) the two proposed primitives (gs-315 reviewer-prompt enrichment + gs-316 customer_facing_smoke verification step); (d) tradeoffs (gate flakiness vs missed bugs, per-project vs global, opt-in vs required); (e) catalogdna launch prerequisites (needs a smoke harness before going public — at minimum: signup + first-value end-to-end). Draft form first; Ray's voice pass before any public-facing version.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Design document; voice-bearing; needs Ray's framing of the lesson for the broader GS narrative.",
+    "expected_touches": [
+      "docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md"
+    ]
+  },
+  {
     "id": "gs-314",
     "title": "jr-005 — reviewer-stage hook reads journal proposals as context when generating tasks. Per-project opt-in via journal.reviewer_context=true. Privacy floor: journal text goes into reviewer's context window only when reviewer_context=true AND provider is allow-listed for journal data (default local-compute only; cloud opt-in separate). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-314. Expected diff: ~120-180 LOC.",
     "status": "pending",
