@@ -54,7 +54,7 @@
   {
     "id": "wdb-006",
     "title": "KDP royalty analysis: at $20 retail, KDP paperback 60% royalty minus printing cost (black-ink, 6x9 trim, page count). Break-even per copy, comparison table across $15/$18/$20/$25 retail price points, monthly income projection at N copies/month scenarios. Output drives wdb-010 pricing decision.",
-    "status": "pending",
+    "status": "done",
     "priority": 6,
     "expected_touches": [
       "kdp/royalty-analysis.md"
