@@ -26,6 +26,19 @@ $logFile = Join-Path $gsRoot "logs\scheduled_$ts.log"
 Write-Output "scheduled-run-session: $(Get-Date -Format 'HH:mm') budget=$Budget, log=$logFile"
 Set-Location $gsRoot
 
+# Pull latest code before launching so scheduled sessions pick up
+# code fixes pushed from other machines without manual intervention.
+# Fail-soft: if the pull errors (network down, merge conflict, detached
+# HEAD), log and continue — stale code is preferred to a skipped
+# session. Only the public repo; private-state sync still happens via
+# sync-state.sh as normal.
+try {
+    $pullOut = & git pull --ff-only 2>&1 | Out-String
+    Write-Output "scheduled-run-session: git pull — $($pullOut.Trim())"
+} catch {
+    Write-Output "scheduled-run-session: git pull failed ($($_.Exception.Message)), continuing with on-disk code"
+}
+
 # Run the .bat synchronously; schtasks Task will exit when the session does.
 # Output teed so the scheduled log captures everything.
 & cmd.exe /c "scripts\run_session.bat $Budget" *> $logFile
