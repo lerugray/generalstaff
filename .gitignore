@@ -64,6 +64,8 @@ state/wds1870/
 state/kreuzfeuer/
 state/adversary/
 state/zero-page-private/
+state/sandkasten/
+state/auftragstaktik/
 
 # Bun / Node
 node_modules/
