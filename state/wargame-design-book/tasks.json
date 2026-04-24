@@ -95,7 +95,7 @@
   {
     "id": "wdb-011",
     "title": "Font polish: swap Georgia -> Lora body + Playfair Display chapter heads per wdb-001 original spec. Variable-TTF files (ofl/lora + ofl/playfairdisplay) already downloaded and user-font-registered 2026-04-23 but triggered  at PDF-write stage. Two-path fix: (a) download static-TTF versions (variable fonts + dvipdfmx is the incompatibility) or (b) swap xelatex -> lualatex (different PDF pipeline, handles variable fonts natively). Update metadata.yaml + header-includes titleformat defs once the engine works.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": false,
     "expected_touches": [
