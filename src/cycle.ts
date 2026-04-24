@@ -21,6 +21,7 @@ import { runEngineer } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runVerification } from "./verification";
 import { runReviewer, type ReviewerResult } from "./reviewer";
+import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, matchesHandsOffSymlinkAware } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import type {
@@ -909,6 +910,34 @@ export async function executeCycle(
 
       // Reviewer runs in worktree if available (so it can read the bot's files)
       const reviewerCwd = existsSync(wt) ? wt : undefined;
+
+      // gs-306: optional mission-swarm preview. Graceful-skips when
+      // the project has no missionswarm config, MISSIONSWARM_ROOT is
+      // unset, or the subprocess fails. Never throws into the cycle.
+      let missionswarmContext: string | undefined;
+      if (nextTask && project.missionswarm) {
+        try {
+          const preview = await runMissionSwarmPreview(nextTask, project);
+          if (preview.summary) {
+            missionswarmContext = preview.summary;
+            console.log(
+              `Mission-swarm preview ${preview.cacheHit ? "cache-hit" : "fresh"} ` +
+                `for ${nextTask.id} (${project.missionswarm.default_audience}).`,
+            );
+          } else if (preview.skipReason) {
+            console.log(
+              `Mission-swarm preview skipped for ${nextTask.id}: ${preview.skipReason}`,
+            );
+          }
+        } catch (err) {
+          console.log(
+            `Mission-swarm preview errored (graceful-skip): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+
       console.log("Running reviewer agent...");
       const reviewerResult = await runReviewer(
         project,
@@ -923,6 +952,7 @@ export async function executeCycle(
           verificationExitCode: verResult.exitCode,
           verificationOutputTruncated: verificationOutput,
           handsOffList: project.hands_off,
+          missionswarmContext,
         },
         config,
         dryRun,

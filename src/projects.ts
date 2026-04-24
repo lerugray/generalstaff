@@ -467,6 +467,53 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
   // validateBudgetHierarchy after both scopes are parsed.
   const sessionBudget = validateSessionBudget(id, raw.session_budget);
 
+  // gs-306: mission-swarm reviewer-preview integration config.
+  let missionswarm: { default_audience: string; n_agents?: number; n_rounds?: number } | undefined;
+  if (raw.missionswarm !== undefined && raw.missionswarm !== null) {
+    if (typeof raw.missionswarm !== "object" || Array.isArray(raw.missionswarm)) {
+      throw new ProjectValidationError(
+        id,
+        "missionswarm",
+        `must be an object, got ${Array.isArray(raw.missionswarm) ? "array" : typeof raw.missionswarm}`,
+      );
+    }
+    const ms = raw.missionswarm as Record<string, unknown>;
+    if (typeof ms.default_audience !== "string" || ms.default_audience.trim() === "") {
+      throw new ProjectValidationError(
+        id,
+        "missionswarm.default_audience",
+        "must be a non-empty string",
+      );
+    }
+    let nAgents: number | undefined;
+    if (ms.n_agents !== undefined && ms.n_agents !== null) {
+      if (typeof ms.n_agents !== "number" || !Number.isInteger(ms.n_agents) || ms.n_agents < 1) {
+        throw new ProjectValidationError(
+          id,
+          "missionswarm.n_agents",
+          `must be a positive integer if specified, got ${JSON.stringify(ms.n_agents)}`,
+        );
+      }
+      nAgents = ms.n_agents;
+    }
+    let nRounds: number | undefined;
+    if (ms.n_rounds !== undefined && ms.n_rounds !== null) {
+      if (typeof ms.n_rounds !== "number" || !Number.isInteger(ms.n_rounds) || ms.n_rounds < 1) {
+        throw new ProjectValidationError(
+          id,
+          "missionswarm.n_rounds",
+          `must be a positive integer if specified, got ${JSON.stringify(ms.n_rounds)}`,
+        );
+      }
+      nRounds = ms.n_rounds;
+    }
+    missionswarm = {
+      default_audience: ms.default_audience,
+      n_agents: nAgents,
+      n_rounds: nRounds,
+    };
+  }
+
   return {
     id,
     path,
@@ -487,6 +534,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     creative_work_drafts_dir: creativeWorkDraftsDir,
     voice_reference_paths: voiceReferencePaths,
     session_budget: sessionBudget,
+    missionswarm,
   };
 }
 

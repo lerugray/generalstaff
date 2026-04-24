@@ -11,7 +11,14 @@ export interface ReviewerPromptParams {
   verificationExitCode: number | null;
   verificationOutputTruncated: string;
   handsOffList: string[];
+  // gs-306: optional mission-swarm reviewer-preview context. When a
+  // task's project has a `missionswarm:` config block and the hook
+  // produced a summary, it's included here. Informational only — does
+  // NOT change the scope-match verdict rules below.
+  missionswarmContext?: string;
 }
+
+const MAX_MISSIONSWARM_CONTEXT = 12_000;
 
 const MAX_DIFF_LENGTH = 50_000;
 const MAX_VERIFICATION_OUTPUT = 10_000;
@@ -32,6 +39,16 @@ export function buildReviewerPrompt(params: ReviewerPromptParams): string {
   const handsOffFormatted = params.handsOffList
     .map((p) => `- \`${p}\``)
     .join("\n");
+
+  const missionswarmSection = params.missionswarmContext
+    ? `\n\n## Mission-swarm audience preview\n\nA simulated audience reaction to this task's description is included ` +
+      `below as soft context — use it to spot scope that audiences flagged, not to alter the verdict rules. ` +
+      `If the diff contradicts the audience's key concerns, note it in \`notes\`.\n\n` +
+      (params.missionswarmContext.length > MAX_MISSIONSWARM_CONTEXT
+        ? params.missionswarmContext.slice(0, MAX_MISSIONSWARM_CONTEXT) +
+          `\n\n[... truncated at ${MAX_MISSIONSWARM_CONTEXT} chars]`
+        : params.missionswarmContext)
+    : "";
 
   return `You are the Reviewer agent for GeneralStaff, reviewing one cycle
 of work on the ${params.projectId} project.
@@ -81,7 +98,7 @@ ${verOutput || "(No output captured)"}
 These files (or glob patterns) must NOT appear in the diff. A
 single match means the cycle failed.
 
-${handsOffFormatted}
+${handsOffFormatted}${missionswarmSection}
 
 ## Your task
 

@@ -139,6 +139,21 @@ export interface ProjectConfig {
   // dispatcher.session_budget when both are set with the same unit
   // (validated at config load).
   session_budget?: SessionBudget;
+  // gs-306: optional mission-swarm reviewer-preview integration.
+  // When set, the reviewer runs a cached simulation of the picked
+  // task against the named audience before verdict and includes the
+  // summary in the reviewer's context. See
+  // docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md §1. Graceful-
+  // skips on any failure — never blocks the cycle. Invocation goes
+  // through $MISSIONSWARM_ROOT/src/index.ts; if that env is unset
+  // the integration silently no-ops.
+  missionswarm?: MissionSwarmProjectConfig;
+}
+
+export interface MissionSwarmProjectConfig {
+  default_audience: string;
+  n_agents?: number;
+  n_rounds?: number;
 }
 
 export interface DispatcherConfig {
