@@ -1354,3 +1354,191 @@ projects:${BASE_PROJECT}
   });
 });
 
+describe("missionswarm + journal block validation (gs-306 / gs-311)", () => {
+  const BASE = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("accepts a minimal missionswarm block", async () => {
+    const path = writeYaml(
+      "ms-min.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      default_audience: gaming-community
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].missionswarm?.default_audience).toBe("gaming-community");
+    expect(yaml.projects[0].missionswarm?.n_agents).toBeUndefined();
+    expect(yaml.projects[0].missionswarm?.n_rounds).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts a full missionswarm block with overrides", async () => {
+    const path = writeYaml(
+      "ms-full.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      default_audience: tech-dev
+      n_agents: 8
+      n_rounds: 3
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].missionswarm?.default_audience).toBe("tech-dev");
+    expect(yaml.projects[0].missionswarm?.n_agents).toBe(8);
+    expect(yaml.projects[0].missionswarm?.n_rounds).toBe(3);
+    cleanup();
+  });
+
+  it("rejects missionswarm without default_audience", async () => {
+    const path = writeYaml(
+      "ms-no-audience.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      n_agents: 4
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/default_audience/);
+    cleanup();
+  });
+
+  it("rejects non-integer n_agents", async () => {
+    const path = writeYaml(
+      "ms-bad-agents.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      default_audience: gaming-community
+      n_agents: 2.5
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/n_agents/);
+    cleanup();
+  });
+
+  it("rejects zero or negative n_rounds", async () => {
+    const path = writeYaml(
+      "ms-bad-rounds.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      default_audience: gaming-community
+      n_rounds: 0
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/n_rounds/);
+    cleanup();
+  });
+
+  it("accepts a minimal journal block", async () => {
+    const path = writeYaml(
+      "journal-min.yaml",
+      `
+projects:${BASE}
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].journal?.mission_bullet_root).toBe(
+      "/home/ray/mission-bullet",
+    );
+    expect(yaml.projects[0].journal?.scan_days).toBeUndefined();
+    expect(yaml.projects[0].journal?.reviewer_context).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts journal with scan_days + reviewer_context", async () => {
+    const path = writeYaml(
+      "journal-full.yaml",
+      `
+projects:${BASE}
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+      scan_days: 14
+      reviewer_context: true
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].journal?.mission_bullet_root).toBe(
+      "/home/ray/mission-bullet",
+    );
+    expect(yaml.projects[0].journal?.scan_days).toBe(14);
+    expect(yaml.projects[0].journal?.reviewer_context).toBe(true);
+    cleanup();
+  });
+
+  it("rejects journal without mission_bullet_root", async () => {
+    const path = writeYaml(
+      "journal-no-root.yaml",
+      `
+projects:${BASE}
+    journal:
+      scan_days: 7
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(
+      /mission_bullet_root/,
+    );
+    cleanup();
+  });
+
+  it("rejects journal scan_days <= 0", async () => {
+    const path = writeYaml(
+      "journal-bad-days.yaml",
+      `
+projects:${BASE}
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+      scan_days: 0
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/scan_days/);
+    cleanup();
+  });
+
+  it("rejects journal reviewer_context with non-boolean value", async () => {
+    const path = writeYaml(
+      "journal-bad-reviewer.yaml",
+      `
+projects:${BASE}
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+      reviewer_context: "yes"
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/reviewer_context/);
+    cleanup();
+  });
+
+  it("accepts both blocks together", async () => {
+    const path = writeYaml(
+      "both-blocks.yaml",
+      `
+projects:${BASE}
+    missionswarm:
+      default_audience: gaming-community
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+      reviewer_context: false
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].missionswarm?.default_audience).toBe("gaming-community");
+    expect(yaml.projects[0].journal?.mission_bullet_root).toBe(
+      "/home/ray/mission-bullet",
+    );
+    cleanup();
+  });
+});
+

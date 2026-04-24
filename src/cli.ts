@@ -84,7 +84,8 @@ import {
   ProviderConfigError,
 } from "./providers/registry";
 import type { ProviderHealth, ProviderRole } from "./providers/types";
-import type { EngineerProvider, GreenfieldTask } from "./types";
+import type { EngineerProvider, GreenfieldTask, ProjectConfig } from "./types";
+import { lookupCachedPreview } from "./integrations/mission_swarm/format";
 import { appendFleetMessage } from "./fleet_messages";
 
 const VERSION = "0.1.0";
@@ -1301,7 +1302,7 @@ switch (command) {
   case "todo": {
     if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
       console.log(
-        "Usage: generalstaff todo [--project=<id>] [--limit=<n>]\n" +
+        "Usage: generalstaff todo [--project=<id>] [--limit=<n>] [--verbose]\n" +
           "\n" +
           "List pending tasks the bot won't pick — work that needs the operator.\n" +
           "A task lands here when it's flagged `interactive_only`, when its\n" +
@@ -1311,8 +1312,12 @@ switch (command) {
           "Options:\n" +
           "  --project=<id>  Filter to one project (default: all registered)\n" +
           "  --limit=<n>     Max rows to print (default: 10)\n" +
+          "  --verbose       Include the first paragraph of any cached mission-\n" +
+          "                  swarm preview inline under the row.\n" +
           "\n" +
           "Output: `<project>/<task-id>  p<priority>  [<reason>]  <title>`\n" +
+          "A `[simulated]` suffix appears when the project has a missionswarm\n" +
+          "config and a preview is cached for this task (see gs-306/gs-307).\n" +
           "Sorted by priority asc, then project, then task id.\n",
       );
       process.exit(0);
@@ -1322,6 +1327,7 @@ switch (command) {
       options: {
         project: { type: "string" },
         limit: { type: "string" },
+        verbose: { type: "boolean", default: false },
       },
       strict: false,
     });
@@ -1351,6 +1357,7 @@ switch (command) {
     }
     interface TodoRow {
       projectId: string;
+      project: ProjectConfig;
       task: GreenfieldTask;
       reason: "interactive_only" | "hands_off" | "creative";
     }
@@ -1371,7 +1378,12 @@ switch (command) {
       };
       const items = interactiveTasks(tasks, proj.hands_off ?? [], ctx);
       for (const it of items) {
-        rows.push({ projectId: proj.id, task: it.task, reason: it.reason });
+        rows.push({
+          projectId: proj.id,
+          project: proj,
+          task: it.task,
+          reason: it.reason,
+        });
       }
     }
     rows.sort((a, b) => {
@@ -1394,11 +1406,23 @@ switch (command) {
       hands_off: "hands-off",
       creative: "creative",
     };
+    const verbose = values.verbose === true;
     const slice = rows.slice(0, limit);
     for (const r of slice) {
+      // gs-307: check for a cached mission-swarm preview and surface
+      // it as a row suffix + optional inline excerpt.
+      const preview = lookupCachedPreview(r.task, r.project);
+      const previewSuffix = preview.exists ? "  [simulated]" : "";
       console.log(
-        `${r.projectId}/${r.task.id}  p${r.task.priority}  [${REASON_LABEL[r.reason].padEnd(11)}]  ${r.task.title}`,
+        `${r.projectId}/${r.task.id}  p${r.task.priority}  [${REASON_LABEL[r.reason].padEnd(11)}]  ${r.task.title}${previewSuffix}`,
       );
+      if (verbose && preview.exists && preview.firstParagraph) {
+        const indented = preview.firstParagraph
+          .split(/\r?\n/)
+          .map((ln) => `    ${ln}`)
+          .join("\n");
+        console.log(indented);
+      }
     }
     if (rows.length > limit) {
       console.log(`\n... ${rows.length - limit} more (use --limit=<n>)`);

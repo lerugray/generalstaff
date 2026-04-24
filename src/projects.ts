@@ -514,6 +514,54 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     };
   }
 
+  // gs-311: optional journal-source config. Inert until jr-003 lands;
+  // schema-only today so projects.yaml can start carrying the path.
+  let journal: { mission_bullet_root: string; scan_days?: number; reviewer_context?: boolean } | undefined;
+  if (raw.journal !== undefined && raw.journal !== null) {
+    if (typeof raw.journal !== "object" || Array.isArray(raw.journal)) {
+      throw new ProjectValidationError(
+        id,
+        "journal",
+        `must be an object, got ${Array.isArray(raw.journal) ? "array" : typeof raw.journal}`,
+      );
+    }
+    const j = raw.journal as Record<string, unknown>;
+    if (typeof j.mission_bullet_root !== "string" || j.mission_bullet_root.trim() === "") {
+      throw new ProjectValidationError(
+        id,
+        "journal.mission_bullet_root",
+        "must be a non-empty string",
+      );
+    }
+    let scanDays: number | undefined;
+    if (j.scan_days !== undefined && j.scan_days !== null) {
+      if (typeof j.scan_days !== "number" || !Number.isInteger(j.scan_days) || j.scan_days < 1) {
+        throw new ProjectValidationError(
+          id,
+          "journal.scan_days",
+          `must be a positive integer if specified, got ${JSON.stringify(j.scan_days)}`,
+        );
+      }
+      scanDays = j.scan_days;
+    }
+    let reviewerContext: boolean | undefined;
+    if (j.reviewer_context !== undefined && j.reviewer_context !== null) {
+      if (typeof j.reviewer_context !== "boolean") {
+        throw new ProjectValidationError(
+          id,
+          "journal.reviewer_context",
+          `must be a boolean if specified, got ${typeof j.reviewer_context}`,
+        );
+      }
+      reviewerContext = j.reviewer_context;
+    }
+    journal = {
+      mission_bullet_root: j.mission_bullet_root,
+      scan_days: scanDays,
+      reviewer_context: reviewerContext,
+    };
+  }
+
   return {
     id,
     path,
@@ -535,6 +583,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     voice_reference_paths: voiceReferencePaths,
     session_budget: sessionBudget,
     missionswarm,
+    journal,
   };
 }
 

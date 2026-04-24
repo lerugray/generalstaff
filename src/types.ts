@@ -148,12 +148,27 @@ export interface ProjectConfig {
   // through $MISSIONSWARM_ROOT/src/index.ts; if that env is unset
   // the integration silently no-ops.
   missionswarm?: MissionSwarmProjectConfig;
+  // gs-311: optional journal-source integration. When set, GS knows
+  // where to find the user's mission-bullet-oss journal tree; inert
+  // until jr-003 (scan library) lands. See
+  // docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md §2.
+  // `reviewer_context: true` is opt-in — journal text only reaches the
+  // reviewer's context window when that flag is true AND the reviewer
+  // is using a provider Ray has explicitly allow-listed for journal
+  // data (enforcement lives in jr-005).
+  journal?: JournalProjectConfig;
 }
 
 export interface MissionSwarmProjectConfig {
   default_audience: string;
   n_agents?: number;
   n_rounds?: number;
+}
+
+export interface JournalProjectConfig {
+  mission_bullet_root: string;   // absolute path to the journal tree
+  scan_days?: number;             // default 7 (consumer-applied)
+  reviewer_context?: boolean;     // default false
 }
 
 export interface DispatcherConfig {
