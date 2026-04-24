@@ -63,6 +63,7 @@ state/mission-bullet/
 state/wds1870/
 state/kreuzfeuer/
 state/adversary/
+state/zero-page-private/
 
 # Bun / Node
 node_modules/
