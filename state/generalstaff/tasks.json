@@ -2219,5 +2219,22 @@
       "tests/integration/usage_budget.test.ts",
       "tests/usage/fixtures/"
     ]
+  },
+  {
+    "id": "gs-304",
+    "title": "Parallel-picker proper fix: greenfieldHasMoreWork state-path fallback. Context: 2026-04-24-parallel-picker-fix.md documented that parallel mode's pickNextProjects calls greenfieldHasMoreWork (src/work_detection.ts:234) which reads from ${projectPath}/state/<id>/tasks.json. Works for legacy projects (gamr, raybrain \u2014 state lives in their own repo) but fails for newly-registered projects (sandkasten, auftragstaktik, zero-page-private, WDB, devforge, catalogdna, retrogaze, adversary, kreuzfeuer) where state lives in <GS-root>/state/<id>/. Per-machine junction workaround is load-bearing for parallel mode; proper fix: fall back to <GS-root>/state/<id>/tasks.json when per-project path doesn't exist. Use process.cwd() or a getRootDir() helper if one exists (grep src/ for the pattern). Apply the same fallback to greenfieldCountRemaining (sibling function if present) to keep counts consistent. Sequential mode must remain unchanged (it intentionally doesn't call hasMoreWork at pick-time per gs-232). Tests: add a case in tests/work_detection.test.ts covering a project whose tasks.json lives in GS-root but not in projectPath \u2014 assert hasMoreWork returns true. Keep existing test covering the projectPath-lives-there case. Expected diff: ~40-80 LOC. Unblocks max_parallel_slots: 2 on all machines without the junction workaround.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": [
+      "src/work_detection.ts",
+      "tests/work_detection.test.ts"
+    ]
+  },
+  {
+    "id": "gs-305",
+    "title": "Standardize project scaffold: extend `register` CLI to drop canonical GS-integration files into the target project's tree. Context: overnight 2026-04-23 through 2026-04-24 the fleet hit a pattern where each newly-registered project needed a cleanup pass \u2014 .gitignore entries for state/ junction + scratch/release/settings artifacts (to satisfy GS dispatcher's clean-tree preflight), plus engineer_command.sh + verify_command template scripts. Sandkasten / Auftragstaktik / WDB / ZP-private / Devforge all needed the same pattern applied by hand. Standardize: `register` CLI grows a --scaffold flag (or runs by default with --no-scaffold opt-out) that drops: (a) append `state/` and `bot_status.md` to .gitignore if not present; (b) append a standard 'GS dispatcher clean-tree preflight' block to .gitignore covering scratch/release/settings artifacts Ray flagged earlier today; (c) copy scripts/templates/engineer_command.sh into the project root if not present (idempotent); (d) copy scripts/templates/verify_command.sh similarly; (e) optionally run setup-state-junctions.ps1 on Windows or equivalent on POSIX. Non-scaffold branch (--no-scaffold) preserves current behavior for projects that self-manage. Tests: fresh fixture project dir \u2192 register with --scaffold \u2192 assert all four artifacts present with canonical content \u2192 register again \u2192 assert idempotent (no duplicate gitignore lines). Expected diff: ~200-300 LOC including the two template scripts. Interactive-only: touches scripts/ and projects.yaml flows plus new template files under scripts/templates/; requires human voice for the template scripts' inline comments.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true
   }
 ]
