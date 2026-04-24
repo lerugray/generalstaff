@@ -2334,7 +2334,7 @@
   {
     "id": "gs-315",
     "title": "Reviewer-prompt enrichment for `public_facing: true` projects. Add optional `public_facing?: boolean` field to ProjectConfig. When true AND the cycle's diff touches customer-reachable surfaces (frontend/, auth, signup, checkout, API routes — heuristic TBD), the reviewer's prompt gets an extra section: 'This project ships to users. Before returning verified, confirm the verification step exercises at least one end-to-end user journey (not just unit tests). If it only exercises unit tests, downgrade to verified_weak and flag in notes that the customer-facing surface is untested.' Motivation: the rg-017 incident (2026-04-24) — window.supabase shadow bug broke site-wide login from launch; zero unit tests caught it because no test loaded index.html in a browser. Reviewer-prompt enrichment surfaces these gaps without blocking cycles — turns 'shipped, broken' into 'shipped with verified_weak + explicit note'. Expected diff: ~30-50 LOC across src/types.ts, src/projects.ts validator, src/prompts/reviewer.ts. Cheap, no new execution model.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Touches src/prompts/reviewer.ts (hands_off) + voice of the new prompt section needs Ray's eye.",

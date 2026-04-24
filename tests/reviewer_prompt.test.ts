@@ -202,4 +202,52 @@ describe("reviewer prompt template", () => {
       expect(prompt).toContain('NOT a natural-language summary');
     });
   });
+
+  describe("public_facing soft cue (gs-315)", () => {
+    it("omits the customer-facing section when publicFacing is unset", () => {
+      const prompt = buildReviewerPrompt(makeParams());
+      expect(prompt).not.toContain("Customer-facing surface");
+      expect(prompt).not.toContain("end-to-end user journey");
+    });
+
+    it("omits the customer-facing section when publicFacing is false", () => {
+      const prompt = buildReviewerPrompt(makeParams({ publicFacing: false }));
+      expect(prompt).not.toContain("Customer-facing surface");
+    });
+
+    it("includes the customer-facing section when publicFacing is true", () => {
+      const prompt = buildReviewerPrompt(makeParams({ publicFacing: true }));
+      expect(prompt).toContain("## Customer-facing surface");
+      expect(prompt).toContain("end-to-end user journey");
+      expect(prompt).toContain("verified_weak");
+    });
+
+    it("instructs the verified_weak downgrade with explicit notes phrasing", () => {
+      const prompt = buildReviewerPrompt(makeParams({ publicFacing: true }));
+      expect(prompt).toContain("downgrade your verdict to `verified_weak`");
+      expect(prompt).toContain("customer-facing surface untested");
+    });
+
+    it("explicitly frames the section as informational, not a hard rule", () => {
+      const prompt = buildReviewerPrompt(makeParams({ publicFacing: true }));
+      // Informational framing protects the existing verdict rules
+      // (scope match, hands-off, evidence) from being overridden.
+      expect(prompt).toMatch(/informational guidance, not a hard rule/i);
+    });
+
+    it("places the customer-facing section after hands-off and missionswarm", () => {
+      const prompt = buildReviewerPrompt(
+        makeParams({
+          publicFacing: true,
+          missionswarmContext: "audience-summary-marker",
+        })
+      );
+      const handsOffIdx = prompt.indexOf("## Hands-off list");
+      const msIdx = prompt.indexOf("audience-summary-marker");
+      const pfIdx = prompt.indexOf("## Customer-facing surface");
+      expect(handsOffIdx).toBeGreaterThan(-1);
+      expect(msIdx).toBeGreaterThan(handsOffIdx);
+      expect(pfIdx).toBeGreaterThan(msIdx);
+    });
+  });
 });

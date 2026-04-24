@@ -157,6 +157,19 @@ export interface ProjectConfig {
   // is using a provider Ray has explicitly allow-listed for journal
   // data (enforcement lives in jr-005).
   journal?: JournalProjectConfig;
+  // gs-315: customer-facing project flag. When true, the reviewer
+  // prompt receives an extra section asking it to confirm that the
+  // verification step exercises at least one end-to-end user journey
+  // (not just unit tests). If only unit tests are exercised, the
+  // reviewer is asked to downgrade to verified_weak with an explicit
+  // note that the customer-facing surface is untested. Motivated by
+  // the rg-017 incident (2026-04-24): window.supabase shadow bug
+  // broke retrogazeai.com login from launch; zero unit tests caught
+  // it because none loaded the page in a browser. Reviewer-prompt
+  // enrichment is informational — does NOT block cycles, just
+  // surfaces the gap. The harder verification gate is gs-316's
+  // customer_facing_smoke (planned next).
+  public_facing?: boolean;
 }
 
 export interface MissionSwarmProjectConfig {

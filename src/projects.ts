@@ -514,6 +514,21 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     };
   }
 
+  // gs-315: customer-facing flag. Boolean only — the heuristic for
+  // "does this diff touch customer-reachable surfaces" lives in the
+  // reviewer model itself. Schema validation only.
+  let publicFacing: boolean | undefined;
+  if (raw.public_facing !== undefined && raw.public_facing !== null) {
+    if (typeof raw.public_facing !== "boolean") {
+      throw new ProjectValidationError(
+        id,
+        "public_facing",
+        `must be a boolean if specified, got ${typeof raw.public_facing}`,
+      );
+    }
+    publicFacing = raw.public_facing;
+  }
+
   // gs-311: optional journal-source config. Inert until jr-003 lands;
   // schema-only today so projects.yaml can start carrying the path.
   let journal: { mission_bullet_root: string; scan_days?: number; reviewer_context?: boolean } | undefined;
@@ -584,6 +599,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     session_budget: sessionBudget,
     missionswarm,
     journal,
+    public_facing: publicFacing,
   };
 }
 

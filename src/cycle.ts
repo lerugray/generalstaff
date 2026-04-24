@@ -953,6 +953,7 @@ export async function executeCycle(
           verificationOutputTruncated: verificationOutput,
           handsOffList: project.hands_off,
           missionswarmContext,
+          publicFacing: project.public_facing,
         },
         config,
         dryRun,

@@ -16,6 +16,14 @@ export interface ReviewerPromptParams {
   // produced a summary, it's included here. Informational only — does
   // NOT change the scope-match verdict rules below.
   missionswarmContext?: string;
+  // gs-315: project-level customer-facing flag. When true, the prompt
+  // appends a soft cue asking the reviewer to confirm the verification
+  // step exercises at least one end-to-end user journey, and to
+  // downgrade to verified_weak with an explicit note when only unit
+  // tests are exercised. Informational only — does NOT change the
+  // verdict-rules block below; the verdict still comes from the
+  // existing scope/hands_off/evidence rules.
+  publicFacing?: boolean;
 }
 
 const MAX_MISSIONSWARM_CONTEXT = 12_000;
@@ -48,6 +56,22 @@ export function buildReviewerPrompt(params: ReviewerPromptParams): string {
         ? params.missionswarmContext.slice(0, MAX_MISSIONSWARM_CONTEXT) +
           `\n\n[... truncated at ${MAX_MISSIONSWARM_CONTEXT} chars]`
         : params.missionswarmContext)
+    : "";
+
+  // gs-315: customer-facing soft cue. Appended after the hands-off
+  // list and any mission-swarm section so it sits next to the diff/
+  // verification context the reviewer is judging.
+  const publicFacingSection = params.publicFacing
+    ? `\n\n## Customer-facing surface\n\nThis project ships to real users. Before returning \`verified\`, ` +
+      `confirm that the verification step exercises at least one end-to-end user journey — ` +
+      `loading the customer-reachable surface (page, API endpoint, signup/login flow, checkout, etc.) ` +
+      `and asserting against its real behavior, not just unit tests of the modules it composes.\n\n` +
+      `If the diff above touches a customer-reachable surface AND the verification output only ` +
+      `shows unit-test results (no browser probe, no integration test against the deployed/local ` +
+      `service, no end-to-end run), downgrade your verdict to \`verified_weak\` and include in ` +
+      `\`notes\`: "customer-facing surface untested — only unit tests exercised."\n\n` +
+      `This is informational guidance, not a hard rule. Use judgment: a backend-only refactor on a ` +
+      `customer-facing project doesn't need a browser test. A login-flow change does.`
     : "";
 
   return `You are the Reviewer agent for GeneralStaff, reviewing one cycle
@@ -98,7 +122,7 @@ ${verOutput || "(No output captured)"}
 These files (or glob patterns) must NOT appear in the diff. A
 single match means the cycle failed.
 
-${handsOffFormatted}${missionswarmSection}
+${handsOffFormatted}${missionswarmSection}${publicFacingSection}
 
 ## Your task
 

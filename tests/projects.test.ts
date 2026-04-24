@@ -1542,3 +1542,65 @@ projects:${BASE}
   });
 });
 
+describe("public_facing flag (gs-315)", () => {
+  const BASE = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("defaults to undefined when public_facing is not set", async () => {
+    const path = writeYaml(
+      "pf-unset.yaml",
+      `
+projects:${BASE}
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].public_facing).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts public_facing: true", async () => {
+    const path = writeYaml(
+      "pf-true.yaml",
+      `
+projects:${BASE}
+    public_facing: true
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].public_facing).toBe(true);
+    cleanup();
+  });
+
+  it("accepts public_facing: false", async () => {
+    const path = writeYaml(
+      "pf-false.yaml",
+      `
+projects:${BASE}
+    public_facing: false
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].public_facing).toBe(false);
+    cleanup();
+  });
+
+  it("rejects non-boolean public_facing", async () => {
+    const path = writeYaml(
+      "pf-bad.yaml",
+      `
+projects:${BASE}
+    public_facing: "yes"
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/public_facing/);
+    cleanup();
+  });
+});
+
