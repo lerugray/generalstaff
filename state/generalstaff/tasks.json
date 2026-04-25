@@ -2399,6 +2399,22 @@
     ]
   },
   {
+    "id": "gs-320",
+    "title": "Two-way messaging integration (Telegram first) — Phase A read-only commands. Build a Python listener process that bridges Telegram inbound to GS CLI / orchestration. Phase A scope: /status (calls orch-status.sh), /list (calls orch-list.sh), /tail <spawn-id> (relays outbox/result.md), /log <project> <N-events> (tail PROGRESS.jsonl). User allowlist on Ray's Telegram numeric ID only. Substrate: errbot Python chatops framework (gives plugin lifecycle + auth + command parsing for free). Out of scope for Phase A: write commands (/spawn, /kill, /queue) — those land in Phase B once the listener+auth plumbing is solid. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 1 for full design.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Major product-direction decision + needs Ray's auth setup (Telegram bot token, user ID allowlist). Once listener architecture is locked + Phase A is interactive, Phase B + C subtasks can be bot-pickable."
+  },
+  {
+    "id": "gs-321",
+    "title": "README tightening for public launch — replace prose-heavy sections with diagrams + real anecdotes from orchestration v0/v1/v2 dogfoods (retrogaze Ricky bug investigation, mission-bullet monthly review parity, OpenRouter smoke). Above-the-fold ~150 words: what it does, the verification-gate differentiator, 1 hero visual. Move deep Hammerstein content to docs/philosophy.md link. 'Works alongside' one-liner with logos for Claude Code / OpenRouter / Cursor / Aider. Visual continuity with docs/launch-posts/polsia-alternative.md. WAIT for: rayb-020 ingest stable + Ricky retrogaze bug fixes shipped (real success stories carry the launch story). Voice work — Ray-only authoring; bot-pickable subtasks could draft section-level proposals first via -Provider openrouter (Kimi K2.6) for ~$1-3 cost. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 2 for full design.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Public-facing copy is voice/taste work per the public-facing-copy stop-slop convention in CLAUDE.local.md. Section-level analysis + draft prose can be bot-pickable subtasks once the README structure is locked."
+  },
+  {
     "id": "gs-319",
     "title": "Reviewer-prompt rule for state-file deletions (belt-and-suspenders behind gs-318). Add a fifth numbered question to the reviewer prompt's '## Your task' section: 'Does the diff DELETE any file matching state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json} or state/_fleet/PROGRESS.jsonl? If yes, verdict is verification_failed.' Frames the rule explicitly as the second line of defense — the static gate (gs-318) catches the case in pure parsing, but if the gate has a gap (new state-file pattern, regex miss), the reviewer is the backstop. Static text only — no new prompt parameter.",
     "status": "done",
