@@ -47,7 +47,7 @@
   {
     "id": "wdb-005",
     "title": "KDP launch checklist: listing fields (title, subtitle, series, edition, description, author bio), category selection template, keyword-research worksheet, review-request email templates, D-day sequence (pricing, promotion, first-24h checks). Reusable across future KDP projects.",
-    "status": "pending",
+    "status": "done",
     "priority": 5,
     "expected_touches": [
       "kdp/launch-checklist.md"
