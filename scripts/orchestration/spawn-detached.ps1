@@ -229,16 +229,23 @@ if ($RoleName -eq "bot-launcher") {
         [void]$claudeArgs.Add($PermissionMode)
     }
 
-    # Build spawn-local settings.json with the heartbeat hook. Stop hook fires
-    # at end of every LLM turn, calls spawn-heartbeat.sh which updates
-    # status.json's last_heartbeat + transitions starting->active. The
-    # SPAWN_STATUS_FILE env tells the hook which file to update.
+    # Build spawn-local settings.json with two hooks:
+    #  - Stop: heartbeat (updates status.json each turn — v1)
+    #  - UserPromptSubmit: inbox-inject (polls inbox/ each turn, injects
+    #    unread messages from primary as additionalContext — v4 inter-
+    #    session communication beyond initial prompt)
+    # Env vars SPAWN_STATUS_FILE + SPAWN_MAILBOX_DIR tell the hooks which
+    # spawn they're acting for; without them the hooks no-op silently.
     $heartbeatScript = Join-Path $PSScriptRoot "spawn-heartbeat.sh"
     $heartbeatBashPath = ($heartbeatScript -replace '\\','/')
+    $inboxInjectScript = Join-Path $PSScriptRoot "inbox-inject.sh"
+    $inboxInjectBashPath = ($inboxInjectScript -replace '\\','/')
     $statusBashPath = ((Join-Path $spawnDir "status.json") -replace '\\','/')
+    $mailboxBashPath = ($spawnDir -replace '\\','/')
     $spawnSettings = @{
         env = @{
             SPAWN_STATUS_FILE = $statusBashPath
+            SPAWN_MAILBOX_DIR = $mailboxBashPath
         }
         hooks = @{
             Stop = @(
@@ -247,6 +254,16 @@ if ($RoleName -eq "bot-launcher") {
                         @{
                             type = "command"
                             command = "bash `"$heartbeatBashPath`""
+                        }
+                    )
+                }
+            )
+            UserPromptSubmit = @(
+                @{
+                    hooks = @(
+                        @{
+                            type = "command"
+                            command = "bash `"$inboxInjectBashPath`""
                         }
                     )
                 }

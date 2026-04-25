@@ -37,9 +37,11 @@ scripts/orchestration/
 ├── spawn-detached.ps1                  # Tier 3 spawn (detached cmd, survives primary)
 ├── spawn-tier2.sh                      # Tier 2 spawn (background claude -p)
 ├── spawn-heartbeat.sh                  # Stop-hook script: auto-updates status.json
+├── inbox-inject.sh                     # UserPromptSubmit hook: injects inbox messages as additionalContext (v4)
 ├── orch-status.sh                      # snapshot: spawns + launches + fleet + lifecycle + git-discovery
 ├── orch-list.sh                        # parseable: <id>\t<role>\t<state>\t<age>
 ├── orch-send.sh                        # append message to spawn's inbox
+├── orch-tail.sh                        # tail spawn's CC session transcript JSONL (v4)
 ├── orch-kill.sh                        # graceful inbox shutdown OR --force-process via cmd_pid
 ├── needs-ray-watch.sh                  # for the Monitor harness primitive
 └── roles/
@@ -194,6 +196,98 @@ Use `-Interactive` only when the spawn genuinely needs multi-turn back-and-
 forth (e.g. wizard interview gathering user input). For one-shot deliverables
 ("draft a proposal", "investigate X", "propose fixes"), the default one-shot
 mode is what you want — cheaper, cleaner, no orphan windows.
+
+## Inter-session communication (v4, 2026-04-25)
+
+The original orchestration only supported one direction at one time:
+the primary could send the *initial* prompt; after that, the only
+return path was outbox/result.md or git commits. To talk back to a
+running spawn mid-task you'd have to kill it and re-launch with new
+context. v4 closes this gap.
+
+Two new primitives:
+
+### `inbox-inject.sh` — UserPromptSubmit hook
+
+Wired into every spawn's `settings.json` (the `UserPromptSubmit` hook
+in addition to the existing `Stop` hook). Each time the spawn submits
+a turn (in `--print` mode that's once at startup; in `-Interactive`
+mode it's every typed message), the hook:
+
+1. Reads `<spawn-dir>/inbox/` for unread messages.
+2. Returns them as `additionalContext` per CC hook protocol — Claude
+   Code injects the content into the spawn's next turn.
+3. Moves processed files to `<spawn-dir>/inbox/processed/`.
+
+The primary writes to the spawn's inbox via `orch-send.sh`. Effect:
+**you can drop a message into a running spawn at any time, and it
+arrives on the spawn's next turn** without the spawn having to
+remember to check.
+
+Mode caveats:
+
+- `--print` (one-shot, default for non-bot-launcher) → hook fires once
+  on initial prompt submission. Useful for "pre-loading" context that
+  the spawn discovers when it starts. NOT useful for mid-task injection.
+- `-Interactive` (multi-turn) → hook fires on EVERY typed message.
+  This is the real Tier 4 use case. The primary drops messages, the
+  user (or anyone) types in the cmd window, and the spawn's next turn
+  sees both their typed input AND the primary's injected messages.
+
+For the "primary wants to inject without waiting for the user" case:
+the user has to type *something* (even a no-op like `check inbox`) to
+trigger the next turn. CC has no timer-driven hook event.
+
+### `orch-tail.sh` — transcript observer
+
+Lets the primary see what a spawn is doing in near-real-time without
+depending on the spawn writing to `outbox/` or making commits. Reads
+the spawn's CC session JSONL transcript directly from
+`~/.claude/projects/<sanitized-cwd>/<session-id>.jsonl`.
+
+```bash
+# print last 50 events, formatted
+bash scripts/orchestration/orch-tail.sh <spawn-id>
+
+# print last N events
+bash scripts/orchestration/orch-tail.sh <spawn-id> --lines 200
+
+# follow mode (use with Monitor for live primary-session notifications)
+bash scripts/orchestration/orch-tail.sh <spawn-id> --follow
+```
+
+Format: `<timestamp> <kind> <summary>` per line. Kinds: `USER`,
+`ASSISTANT`, `TOOL` (with the tool name + first arg), `SUMMARY`.
+
+Locates the right transcript by:
+
+1. Reading `cwd` from the spawn's `status.json`
+2. Sanitizing it the way CC does (`\` → `-`, `:` → `-`, `/` → `-`)
+3. Looking in `~/.claude/projects/<sanitized>/` for the most-recent
+   `.jsonl` whose mtime is ≥ the spawn's `spawned_at`
+
+Falls back to "most recent regardless of mtime" if the spawn just
+started and CC hasn't written anything yet.
+
+### Typical Tier 4 retrogaze-style flow
+
+1. Primary spawns interactive deep-dive in retrogaze:
+   ```
+   spawn-detached.ps1 -RoleName deep-dive `
+     -ProjectPath "C:\path\to\retrogaze" -Interactive `
+     -Task "Tackle Ricky's bugs + set up MCP"
+   ```
+2. The cmd window opens in retrogaze. User (Ray) sees it and can type
+   directly: "start with the toolbar bug."
+3. Primary monitors via `Monitor` running `orch-tail.sh <id> --follow`.
+4. Primary notices new context (e.g. another bug report from Ricky):
+   ```
+   echo "Ricky also flagged: extras viewer crashes on empty playlist." \
+     | bash orch-send.sh <spawn-id> -
+   ```
+5. User types next message in cmd window → hook fires → spawn sees
+   user's typed message AND primary's injected note in the same turn.
+6. Spawn responds, work continues.
 
 ## Heartbeat hook
 
