@@ -72,7 +72,7 @@ LOG_FILE="${SPAWN_DIR}/log/claude-p.log"
   # Run claude -p, capture output
   if claude -p "$(cat "$PROMPT_FILE")" > "$RESULT_FILE" 2> "$LOG_FILE"; then
     EXIT_CODE=0
-    STATE="completed"
+    STATE="complete"
   else
     EXIT_CODE=$?
     STATE="failed"

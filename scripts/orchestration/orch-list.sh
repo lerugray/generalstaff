@@ -26,7 +26,7 @@ for d in "$SPAWN_DIR"/*/; do
 import json, sys, datetime
 sf, now_epoch, sid = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 try:
-    d = json.load(open(sf))
+    d = json.load(open(sf, encoding="utf-8-sig"))
     role = d.get("role", "?")
     state = d.get("state", "?")
     spawned = d.get("spawned_at", "")

@@ -39,7 +39,8 @@ param(
     [string]$Model = "",              # override model (sonnet | opus | haiku); empty = default
     [string]$AppendSystemPromptFile = "", # path to an additional .md file appended to system prompt
     [string]$InitialPrompt = "",      # initial user message - required for non-bot-launcher roles, since interactive claude waits for one
-    [string]$PermissionMode = "auto"  # default to auto so spawned sessions don't hang on permission prompts; override to "default" for prompt-on-each-tool, "acceptEdits" for edits-only auto, "bypassPermissions" for full bypass
+    [string]$PermissionMode = "auto", # default to auto so spawned sessions don't hang on permission prompts; override to "default" for prompt-on-each-tool, "acceptEdits" for edits-only auto, "bypassPermissions" for full bypass
+    [switch]$NotifyOnExit             # Phase 6: when set, the exit-marker step also writes notify-ray.flag so primary's next watch tick triggers PushNotification
 )
 
 $ErrorActionPreference = "Stop"
@@ -143,7 +144,7 @@ $status = @{
     task = $Task
     last_heartbeat = $null
 } | ConvertTo-Json -Depth 4
-Set-Content -Path (Join-Path $spawnDir "status.json") -Value $status -Encoding utf8
+[System.IO.File]::WriteAllText((Join-Path $spawnDir "status.json"), $status, [System.Text.UTF8Encoding]::new($false))
 
 # --- Build a per-spawn .bat file with the actual launch commands ------------
 # Writing to a .bat file (rather than embedding && chains in PS strings) keeps
@@ -183,12 +184,12 @@ if ($RoleName -eq "bot-launcher") {
         log_dir = "$gsRoot\logs"
         wrapper = "scripts/run_session.bat"
     } | ConvertTo-Json -Depth 4
-    Set-Content -Path (Join-Path $spawnDir "status.json") -Value $status -Encoding utf8
+    [System.IO.File]::WriteAllText((Join-Path $spawnDir "status.json"), $status, [System.Text.UTF8Encoding]::new($false))
 
     # Also mirror to launches/ for the legacy bot-launcher view
     $launchesDir = Join-Path $orchRoot "launches"
     New-Item -ItemType Directory -Force -Path $launchesDir | Out-Null
-    Set-Content -Path (Join-Path $launchesDir "$SpawnId.json") -Value $status -Encoding utf8
+    [System.IO.File]::WriteAllText((Join-Path $launchesDir "$SpawnId.json"), $status, [System.Text.UTF8Encoding]::new($false))
 } else {
     # Generic claude session spawn
     $claudeArgs = New-Object System.Collections.ArrayList
@@ -206,6 +207,36 @@ if ($RoleName -eq "bot-launcher") {
         [void]$claudeArgs.Add("--permission-mode")
         [void]$claudeArgs.Add($PermissionMode)
     }
+
+    # Build spawn-local settings.json with the heartbeat hook. Stop hook fires
+    # at end of every LLM turn, calls spawn-heartbeat.sh which updates
+    # status.json's last_heartbeat + transitions starting->active. The
+    # SPAWN_STATUS_FILE env tells the hook which file to update.
+    $heartbeatScript = Join-Path $PSScriptRoot "spawn-heartbeat.sh"
+    $heartbeatBashPath = ($heartbeatScript -replace '\\','/')
+    $statusBashPath = ((Join-Path $spawnDir "status.json") -replace '\\','/')
+    $spawnSettings = @{
+        env = @{
+            SPAWN_STATUS_FILE = $statusBashPath
+        }
+        hooks = @{
+            Stop = @(
+                @{
+                    hooks = @(
+                        @{
+                            type = "command"
+                            command = "bash `"$heartbeatBashPath`""
+                        }
+                    )
+                }
+            )
+        }
+    } | ConvertTo-Json -Depth 8
+    $spawnSettingsPath = Join-Path $spawnDir "settings.json"
+    Set-Content -Path $spawnSettingsPath -Value $spawnSettings -Encoding utf8
+
+    [void]$claudeArgs.Add("--settings")
+    [void]$claudeArgs.Add("`"$spawnSettingsPath`"")
 
     # Always append the role.md so the spawned session has its operational context
     [void]$claudeArgs.Add("--append-system-prompt-file")
@@ -244,6 +275,18 @@ if ($RoleName -eq "bot-launcher") {
     [void]$batLines.Add("claude $argsJoined $promptEscaped")
 }
 
+# Append exit-marker step to launch.bat — runs after claude (or run_session.bat)
+# returns, regardless of LLM behavior. Provides an independent process-completion
+# signal that orch-status can detect even if status.json was never updated.
+[void]$batLines.Add("echo {""exit_code"": %ERRORLEVEL%, ""exited_at"": ""%DATE% %TIME%""} > `"$spawnDir\outbox\exit-marker.json`"")
+
+# If -NotifyOnExit, also write a notify-ray.flag that primary's next watch tick
+# detects and surfaces via PushNotification. Distinct from needs-ray.md (which
+# escalates mid-task); this fires only on terminal exit.
+if ($NotifyOnExit) {
+    [void]$batLines.Add("echo Spawn $SpawnId exited at %DATE% %TIME% > `"$spawnDir\notify-ray.flag`"")
+}
+
 # Write the .bat file
 $batLines | Set-Content -Path $batPath -Encoding ascii
 
@@ -252,10 +295,23 @@ Write-Output "Spawning: $SpawnId (role=$RoleName, cwd=$cwd)"
 Write-Output "Mailbox: $spawnDir"
 Write-Output "Launcher: $batPath"
 
-Start-Process cmd -ArgumentList "/k", "`"$batPath`""
+# -PassThru returns the Process object so we can capture cmd's PID. The cmd
+# window is the parent of claude / bun. Tracking its PID lets orch-status check
+# liveness via Get-Process and orch-kill --force close the window cleanly.
+$cmdProc = Start-Process cmd -ArgumentList "/k", "`"$batPath`"" -PassThru
+$cmdPid = $cmdProc.Id
+
+# Update status.json with PID + final spawn metadata. Re-read because
+# the bot-launcher branch may have rewritten it earlier in this script.
+$statusObj = Get-Content -Raw $spawnDir\status.json | ConvertFrom-Json
+$statusObj | Add-Member -NotePropertyName 'cmd_pid' -NotePropertyValue $cmdPid -Force
+$statusObj | Add-Member -NotePropertyName 'launch_bat' -NotePropertyValue $batPath -Force
+$statusObj | Add-Member -NotePropertyName 'notify_on_exit' -NotePropertyValue ([bool]$NotifyOnExit) -Force
+$statusObj | ConvertTo-Json -Depth 6 | ForEach-Object { [System.IO.File]::WriteAllText("$spawnDir\status.json", $_, [System.Text.UTF8Encoding]::new($false)) }
 
 # --- Output spawn id for caller capture -------------------------------------
 Write-Output ""
 Write-Output "SPAWN_ID=$SpawnId"
+Write-Output "CMD_PID=$cmdPid"
 Write-Output "STATUS_FILE=$spawnDir\status.json"
 Write-Output "ROLE_FILE=$roleMdPath"

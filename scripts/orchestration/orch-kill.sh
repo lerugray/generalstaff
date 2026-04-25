@@ -55,7 +55,7 @@ if [[ -f "$STATUS_FILE" ]]; then
   python3 - "$STATUS_FILE" <<'PYEOF'
 import json, sys, datetime
 sf = sys.argv[1]
-d = json.load(open(sf))
+d = json.load(open(sf, encoding="utf-8-sig"))
 d["state"] = "shutdown_requested"
 d["shutdown_requested_at"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 with open(sf, "w") as f:
@@ -68,8 +68,31 @@ fi
 
 if [[ "$FORCE_PROCESS" == "--force-process" ]]; then
   echo ""
-  echo "WARNING: --force-process not implemented (would risk dirty state)."
-  echo "         To kill claude.exe manually: tasklist /fi 'imagename eq claude.exe'"
-  echo "         then taskkill /pid <pid>. For bot sessions, prefer:"
-  echo "         touch state/STOP (clean stop at next cycle boundary)."
+  CMD_PID=$(python3 -c "import json; print(json.load(open('${STATUS_FILE}', encoding='utf-8-sig')).get('cmd_pid', ''))" 2>/dev/null || echo "")
+  if [[ -z "$CMD_PID" || "$CMD_PID" == "None" ]]; then
+    echo "ERROR: status.json has no cmd_pid (spawn pre-dates v1 hardening?)"
+    echo "       Manual: tasklist /fi 'imagename eq cmd.exe' to find the cmd window,"
+    echo "       then taskkill /pid <pid>. For bot sessions, prefer:"
+    echo "       touch state/STOP (clean stop at next cycle boundary)."
+    exit 1
+  fi
+  echo "Force-closing cmd window PID=$CMD_PID for spawn ${SPAWN_ID}..."
+  if powershell -NoProfile -Command "Stop-Process -Id $CMD_PID -Force -ErrorAction Stop" 2>/dev/null; then
+    echo "  cmd PID $CMD_PID terminated."
+    python3 - "$STATUS_FILE" <<'PYEOF'
+import json, sys, datetime
+sf = sys.argv[1]
+d = json.load(open(sf, encoding="utf-8-sig"))
+d["state"] = "force_closed"
+d["force_closed_at"] = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+with open(sf, "w") as f:
+    json.dump(d, f, indent=2)
+PYEOF
+    echo "  status.json state -> force_closed"
+  else
+    echo "  WARNING: Stop-Process failed (process may already be gone)"
+  fi
+  echo ""
+  echo "Note: --force-process kills the cmd parent. For bot-launcher spawns,"
+  echo "the proper clean stop is: touch state/STOP (graceful at cycle boundary)."
 fi

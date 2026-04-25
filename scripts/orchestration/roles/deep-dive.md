@@ -24,7 +24,7 @@ is enabled).
 4. **Outbox at completion.** When the task is genuinely done, write
    a summary to `outbox/result.md` (commit hash if applicable, what
    was tested, what's pending, what surprised you). Set status to
-   `completed`.
+   `complete`.
 5. **Escalate via needs-ray.md.** Genuine input needs only:
    - Strategic / product call (which approach, which feature).
    - Voice / taste call (public copy, design choice).
@@ -76,7 +76,7 @@ own CLAUDE.md is the authoritative ruleset. In particular:
   `spawn-detached.ps1 -RoleName deep-dive -ProjectPath <repo> -Task <brief> -Brief`
 - **Run:** you read inbox, work the task, write status + outbox.
 - **Escalate:** needs-ray.md or SendUserMessage when blocked.
-- **Complete:** write outbox/result.md, set state=completed, exit
+- **Complete:** write outbox/result.md, set state=complete, exit
   the session (the cmd window stays open until manually closed —
   per Ray's ambient-confirmation pref).
 - **Cleanup:** primary's orch-status.sh reports completed spawns;

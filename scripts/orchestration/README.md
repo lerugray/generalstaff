@@ -34,18 +34,87 @@ session.
 scripts/orchestration/
 ├── README.md                           # this file
 ├── enable-agent-teams.ps1              # one-time per-machine: opt into Agent Teams
-├── spawn-detached.ps1                  # Tier 2 spawn (detached cmd, survives primary)
-├── spawn-tier2.sh                      # Tier 1 spawn (background claude -p)
-├── orch-status.sh                      # snapshot: spawns + launches + fleet + processes
+├── spawn-detached.ps1                  # Tier 3 spawn (detached cmd, survives primary)
+├── spawn-tier2.sh                      # Tier 2 spawn (background claude -p)
+├── spawn-heartbeat.sh                  # Stop-hook script: auto-updates status.json
+├── orch-status.sh                      # snapshot: spawns + launches + fleet + lifecycle + git-discovery
 ├── orch-list.sh                        # parseable: <id>\t<role>\t<state>\t<age>
 ├── orch-send.sh                        # append message to spawn's inbox
-├── orch-kill.sh                        # signal graceful shutdown to a spawn
+├── orch-kill.sh                        # graceful inbox shutdown OR --force-process via cmd_pid
 ├── needs-ray-watch.sh                  # for the Monitor harness primitive
 └── roles/
     ├── bot-launcher.md                 # wrapper-only role (runs run_session.bat)
     ├── deep-dive.md                    # focused project work session
     └── monitor.md                      # ambient observability watcher
 ```
+
+## State schema (v1, 2026-04-25)
+
+`status.json` canonical fields:
+
+| Field | Set by | Purpose |
+|-------|--------|---------|
+| `spawn_id` | spawn wrapper | unique per spawn |
+| `role` | spawn wrapper | role classifier |
+| `state` | spawn → hook → LLM | lifecycle (see below) |
+| `spawned_at` | spawn wrapper | ISO UTC |
+| `last_heartbeat` | heartbeat Stop hook | ISO UTC, advances per LLM turn |
+| `cmd_pid` | spawn wrapper | parent cmd window PID for liveness check |
+| `launch_bat` | spawn wrapper | path to the per-spawn launch.bat |
+| `notify_on_exit` | spawn wrapper (-NotifyOnExit) | bool, writes notify-ray.flag on exit |
+| `project_path` | spawn wrapper (-ProjectPath) | enables git-log discovery in orch-status |
+| `task` | spawn wrapper (-Task) | one-line description |
+| `expected_end` | spawn wrapper (bot-launcher) | ISO UTC, for budget tracking |
+
+Canonical state vocabulary:
+
+- `starting` — spawn just launched, hasn't taken first turn yet
+- `active` — heartbeat hook fired at least once, currently working
+- `complete` — terminal, work done cleanly (LLM-set OR heartbeat-detected)
+- `failed` — terminal, errored out
+- `force_closed` — terminal, operator killed via orch-kill --force-process
+- `shutdown_requested` — operator asked for graceful exit, spawn hasn't ack'd yet
+
+Legacy `completed` is recognized as a synonym for `complete` (transition compat).
+
+## Independent completion signals (v1 hardening)
+
+The orchestration NO LONGER trusts the LLM-written `status.json` alone. Three
+independent signals get aggregated by `orch-status.sh`:
+
+1. **status.json `state`** — what the LLM thinks. Subject to "LLM forgot to
+   update it" failure mode.
+2. **cmd_pid liveness** — `Get-Process -Id <cmd_pid>` returns alive/dead.
+   Independent of LLM behavior. Distinguishes:
+   - `running` (PID alive + non-terminal state)
+   - `terminated cleanly` (PID dead + terminal state)
+   - `CRASHED` (PID dead + non-terminal state — flagged in output)
+   - `zombie` (PID alive + terminal state — flagged in output)
+3. **outbox/exit-marker.json** — written by launch.bat AFTER claude exits.
+   Captures cmd exit code + timestamp. Independent of LLM behavior.
+4. **git-log discovery** — orch-status runs `git -C <project_path>
+   log --since=<spawned_at>` and surfaces commits made by the spawn. Catches
+   the silent-success case where the spawn shipped a commit but never wrote
+   `outbox/result.md` or updated `status.json`.
+
+Concretely: even if a spawn forgets every reporting convention in role.md,
+the orchestration layer still knows it shipped, when it shipped, and what
+commits it produced.
+
+## Heartbeat hook
+
+Each Tier 3 spawn gets a spawn-local `settings.json` (in its mailbox dir)
+with a Stop hook that runs `spawn-heartbeat.sh`. The hook updates
+`status.json`'s `last_heartbeat` field on every LLM turn and transitions
+`starting` → `active` on the first fire. `--settings <path>` is passed to
+the claude command in launch.bat.
+
+The hook reads the status.json path from `SPAWN_STATUS_FILE` env var (also
+set in spawn-local settings.json's `env` block). If unset (e.g. invoked
+outside a spawn), the hook silently no-ops.
+
+Lean-ctx and other user-global hooks continue to fire in spawned sessions
+because Claude Code merges --settings additively with user settings.
 
 ## State directory (per-machine)
 
