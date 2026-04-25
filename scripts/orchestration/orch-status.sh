@@ -150,7 +150,7 @@ PYEOF
     # Exit marker — independent process-completion signal
     EXIT_MARKER="${d}outbox/exit-marker.json"
     if [[ -f "$EXIT_MARKER" ]]; then
-      EM_LINE=$(python3 -c "import json; d=json.load(open('${EXIT_MARKER}', encoding='utf-8-sig')); print(f'exit_code={d.get(\"exit_code\",\"?\")}, exited_at={d.get(\"exited_at\",\"?\")}')" 2>/dev/null || echo "(unreadable)")
+      EM_LINE=$(python3 -c "import json, sys; d=json.load(open(sys.argv[1], encoding='utf-8-sig')); print(f'exit_code={d.get(\"exit_code\",\"?\")}, exited_at={d.get(\"exited_at\",\"?\")}')" "$EXIT_MARKER" 2>/dev/null || echo "(unreadable)")
       echo "    exit-marker: ${EM_LINE}"
     fi
 

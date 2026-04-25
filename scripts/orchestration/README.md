@@ -101,6 +101,64 @@ Concretely: even if a spawn forgets every reporting convention in role.md,
 the orchestration layer still knows it shipped, when it shipped, and what
 commits it produced.
 
+## Provider routing (v2, 2026-04-25)
+
+`spawn-detached.ps1` accepts `-Provider claude` (default) or
+`-Provider openrouter`. The OpenRouter path uses the Anthropic-
+compatible `ANTHROPIC_BASE_URL` env-var trick — no proxy server
+required, just three env vars set in the spawn-local launch.bat:
+
+```
+set ANTHROPIC_BASE_URL=https://openrouter.ai/api
+set ANTHROPIC_AUTH_TOKEN=<key from OpenRouter>
+set ANTHROPIC_API_KEY=     (must be empty)
+```
+
+Plus model overrides:
+
+```
+set ANTHROPIC_DEFAULT_OPUS_MODEL=<model>
+set ANTHROPIC_DEFAULT_SONNET_MODEL=<model>
+set ANTHROPIC_DEFAULT_HAIKU_MODEL=<model>
+set CLAUDE_CODE_SUBAGENT_MODEL=<model>
+```
+
+(All four set to the same model — Claude Code routes by tier
+internally, but for spawn use we pin one model.)
+
+Default model: `moonshotai/kimi-k2.6` (~$0.74/$4.65 per M tokens,
+SWE-Bench Pro 58.6%, leads OpenRouter's coding leaderboard
+2026-04-25). Override via `-OpenRouterModel <model>`.
+
+Useful alternatives:
+
+| Model | Per-M cost (in/out) | Notes |
+|-------|---------------------|-------|
+| `moonshotai/kimi-k2.6` | ~$0.74 / ~$4.65 | Default. 256k context. Strong agentic coding. |
+| `qwen/qwen3-coder-plus` | ~$0.65 / ~$3.25 | 1M context. Qwen flagship coder. |
+| `qwen/qwen3-coder-flash` | ~$0.20 / ~$0.98 | 1M context. Cheapest agentic-coding model. |
+| `google/gemini-3.1-pro-preview` | ~$1.25-3 / varies | Google's frontier. Strong reasoning. |
+| `qwen/qwen3.6-plus` | ~$0.33 / ~$1.95 | Newest Qwen flagship general-purpose. |
+
+API key loading: launch.bat reads `OPENROUTER_API_KEY` from the
+`-OpenRouterEnvFile` (default
+`C:\Users\rweis\OneDrive\Documents\MiroShark\.env`). Mirrors
+`scripts/run_session.bat`'s `:load_openrouter_key` pattern. Falls
+back to the legacy `OPENAI_API_KEY` field name (per CLAUDE.local.md
+the MiroShark .env predates the rename). Spawn exits with code 78
+if no key found.
+
+When to use OpenRouter (rule of thumb):
+
+- Research / investigation / drafting / structured-output → yes
+- Bulk code transformation with clear pattern → yes
+- Agentic multi-file refactor with complex tool use → no, stay
+  on Claude (Opus 4.7's edge on SWE-bench + tool-use is real)
+- Long autonomous coding session → no, stay on Claude
+
+See `~/.claude/projects/.../memory/feedback_provider_routing_for_spawns.md`
+for the routing decision matrix + rationale.
+
 ## Heartbeat hook
 
 Each Tier 3 spawn gets a spawn-local `settings.json` (in its mailbox dir)

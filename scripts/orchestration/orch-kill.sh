@@ -68,7 +68,10 @@ fi
 
 if [[ "$FORCE_PROCESS" == "--force-process" ]]; then
   echo ""
-  CMD_PID=$(python3 -c "import json; print(json.load(open('${STATUS_FILE}', encoding='utf-8-sig')).get('cmd_pid', ''))" 2>/dev/null || echo "")
+  # Pass path via argv so Git Bash MSYS auto-converts /c/... -> C:/... before
+  # Python sees it. Embedding the path in the -c string skips this conversion
+  # and Python on Windows fails to find the file.
+  CMD_PID=$(python3 -c "import json, sys; print(json.load(open(sys.argv[1], encoding='utf-8-sig')).get('cmd_pid', ''))" "$STATUS_FILE" 2>/dev/null || echo "")
   if [[ -z "$CMD_PID" || "$CMD_PID" == "None" ]]; then
     echo "ERROR: status.json has no cmd_pid (spawn pre-dates v1 hardening?)"
     echo "       Manual: tasklist /fi 'imagename eq cmd.exe' to find the cmd window,"

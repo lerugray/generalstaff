@@ -40,7 +40,11 @@ param(
     [string]$AppendSystemPromptFile = "", # path to an additional .md file appended to system prompt
     [string]$InitialPrompt = "",      # initial user message - required for non-bot-launcher roles, since interactive claude waits for one
     [string]$PermissionMode = "auto", # default to auto so spawned sessions don't hang on permission prompts; override to "default" for prompt-on-each-tool, "acceptEdits" for edits-only auto, "bypassPermissions" for full bypass
-    [switch]$NotifyOnExit             # Phase 6: when set, the exit-marker step also writes notify-ray.flag so primary's next watch tick triggers PushNotification
+    [switch]$NotifyOnExit,            # Phase 6: when set, the exit-marker step also writes notify-ray.flag so primary's next watch tick triggers PushNotification
+    [ValidateSet("claude","openrouter")]
+    [string]$Provider = "claude",     # v2: provider selector. claude=Anthropic API (default). openrouter=OpenRouter API via env-var compat (ANTHROPIC_BASE_URL trick).
+    [string]$OpenRouterModel = "moonshotai/kimi-k2.6",  # v2: when -Provider openrouter, this model overrides all CC tier defaults. Cheap defaults: kimi-k2.6 (~$0.74/$4.65 per M, leads SWE-Bench Pro), qwen/qwen3-coder-plus (~$0.65/$3.25 per M), google/gemini-3.1-pro-preview, qwen/qwen3-coder-flash (~$0.20/$0.98 per M).
+    [string]$OpenRouterEnvFile = "C:\Users\rweis\OneDrive\Documents\MiroShark\.env"  # v2: .env file holding OPENROUTER_API_KEY (or OPENAI_API_KEY — legacy field name in MiroShark .env per CLAUDE.local.md).
 )
 
 $ErrorActionPreference = "Stop"
@@ -260,6 +264,47 @@ if ($RoleName -eq "bot-launcher") {
         [void]$batLines.Add("set CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1")
     }
 
+    # v2: -Provider openrouter routes the spawned `claude` to OpenRouter's
+    # Anthropic-compatible API endpoint. This is the simplest "use a non-Anthropic
+    # model" path — no CCR proxy required, just three env vars.
+    # See: https://openrouter.ai/docs/guides/coding-agents/claude-code-integration
+    # CLAUDE_CODE_SUBAGENT_MODEL routes the Agent tool's subagents to the
+    # same model so subagent calls don't fall back to Anthropic.
+    if ($Provider -eq "openrouter") {
+        # Load OPENROUTER_API_KEY from .env file at run time. Mirrors
+        # scripts/run_session.bat's :load_openrouter_key subroutine. The MiroShark
+        # .env uses the legacy field name OPENAI_API_KEY per CLAUDE.local.md.
+        [void]$batLines.Add("REM === v2 OpenRouter provider ===")
+        [void]$batLines.Add("if not defined OPENROUTER_API_KEY (")
+        [void]$batLines.Add("  if exist `"$OpenRouterEnvFile`" (")
+        # Note: cmd's command-substitution backticks (around findstr) must be
+        # written as `` in PowerShell here, not just `, because PS interprets
+        # `f as form-feed escape. Each `` produces one literal backtick in the
+        # output line that cmd then parses correctly.
+        [void]$batLines.Add("    for /f `"usebackq tokens=1,* delims==`" %%a in (``findstr /b `"OPENROUTER_API_KEY=`" `"$OpenRouterEnvFile`"``) do set `"OPENROUTER_API_KEY=%%b`"")
+        [void]$batLines.Add("    if not defined OPENROUTER_API_KEY (")
+        [void]$batLines.Add("      for /f `"usebackq tokens=1,* delims==`" %%a in (``findstr /b `"OPENAI_API_KEY=`" `"$OpenRouterEnvFile`"``) do set `"OPENROUTER_API_KEY=%%b`"")
+        [void]$batLines.Add("    )")
+        [void]$batLines.Add("  )")
+        [void]$batLines.Add(")")
+        [void]$batLines.Add("if not defined OPENROUTER_API_KEY (")
+        [void]$batLines.Add("  echo ERROR: OPENROUTER_API_KEY not found in env or in $OpenRouterEnvFile")
+        [void]$batLines.Add("  echo Spawn cannot proceed without an API key.")
+        [void]$batLines.Add("  exit /b 78")
+        [void]$batLines.Add(")")
+        [void]$batLines.Add("set ANTHROPIC_BASE_URL=https://openrouter.ai/api")
+        [void]$batLines.Add("set ANTHROPIC_AUTH_TOKEN=%OPENROUTER_API_KEY%")
+        [void]$batLines.Add("set ANTHROPIC_API_KEY=")
+        [void]$batLines.Add("set ANTHROPIC_DEFAULT_OPUS_MODEL=$OpenRouterModel")
+        [void]$batLines.Add("set ANTHROPIC_DEFAULT_SONNET_MODEL=$OpenRouterModel")
+        [void]$batLines.Add("set ANTHROPIC_DEFAULT_HAIKU_MODEL=$OpenRouterModel")
+        [void]$batLines.Add("set CLAUDE_CODE_SUBAGENT_MODEL=$OpenRouterModel")
+        [void]$batLines.Add("REM === end OpenRouter provider ===")
+
+        # Also annotate status.json so orch-status shows which provider/model.
+        # Deferred to the post-Start-Process status write below.
+    }
+
     [void]$batLines.Add("cd /d `"$cwd`"")
     $argsJoined = $claudeArgs -join " "
 
@@ -307,6 +352,10 @@ $statusObj = Get-Content -Raw $spawnDir\status.json | ConvertFrom-Json
 $statusObj | Add-Member -NotePropertyName 'cmd_pid' -NotePropertyValue $cmdPid -Force
 $statusObj | Add-Member -NotePropertyName 'launch_bat' -NotePropertyValue $batPath -Force
 $statusObj | Add-Member -NotePropertyName 'notify_on_exit' -NotePropertyValue ([bool]$NotifyOnExit) -Force
+$statusObj | Add-Member -NotePropertyName 'provider' -NotePropertyValue $Provider -Force
+if ($Provider -eq "openrouter") {
+    $statusObj | Add-Member -NotePropertyName 'openrouter_model' -NotePropertyValue $OpenRouterModel -Force
+}
 $statusObj | ConvertTo-Json -Depth 6 | ForEach-Object { [System.IO.File]::WriteAllText("$spawnDir\status.json", $_, [System.Text.UTF8Encoding]::new($false)) }
 
 # --- Output spawn id for caller capture -------------------------------------
