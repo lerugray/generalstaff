@@ -46,5 +46,29 @@
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Product-tier direction + monetization design. Taste call on where the free/paid line draws; format decisions interact with current render architecture and cannot be automated away."
+  },
+  {
+    "id": "cdna-007",
+    "title": "GS cycle trigger #2 — fires `bash run_bot.sh ${cycle_budget_minutes}` to run catalogdna's autonomous bot. Same shape as cdna-004; queued separately so a second back-to-back cycle can land in the same GS session. catalogdna's bot reads bot_tasks.md (refreshed 2026-04-24 evening for run 24, post-rule-relaxation) and picks the highest-priority remaining item. With the rule-relaxation in RULE-RELAXATION-2026-04-24-catalogdna-pipeline.md, the bot is now authorized to ship code in the analysis pipeline (`src/catalogdna/analyze/`, `convert/`, `discover/`, `reference/`, plus top-level analysis scripts). Run 24's queue starts with timbral extensions Phase 1 (P0) + hub-penalty distance fix (P1) — both genuinely move the analyzer needle per the 2026-04-13 phase-0 findings.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": false,
+    "expected_touches": []
+  },
+  {
+    "id": "cdna-008",
+    "title": "GS cycle trigger #3 — third trigger so a third back-to-back catalogdna cycle can run. catalogdna's bot picks whatever's still highest-priority in bot_tasks.md after cdna-004 + cdna-007 fire. Likely flow: cdna-004 picks P0 (timbral Phase 1), cdna-007 picks P1 (hub penalty), cdna-008 picks either P2 (timbral Phase 2 album aggregation) if P0 succeeded, OR Phase A/B rotation work if P0/P1 hit blockers. The bot's own run-judgment chooses; this trigger just authorizes a third cycle.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": false,
+    "expected_touches": []
+  },
+  {
+    "id": "cdna-009",
+    "title": "GS cycle trigger #4 — fourth trigger for tomorrow's session. Same pattern. Together with cdna-004/007/008 this gives the dispatcher 4 catalogdna runs in the queue; with `max_parallel_slots: 3` and ~13 registered projects, the picker will round-robin and catalogdna will get its share of slots. If 4 turns out to be too many for one session (other projects starve), Ray can flip the lowest-priority unused trigger to status: skipped at queue-trim time.",
+    "status": "pending",
+    "priority": 5,
+    "interactive_only": false,
+    "expected_touches": []
   }
 ]
