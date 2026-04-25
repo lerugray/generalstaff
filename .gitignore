@@ -124,3 +124,7 @@ AGENTS.md
 LEAN-CTX.md
 .cursorrules
 .aider*
+
+# Orchestration staging area — transient task briefs / inbox prep,
+# not part of the orchestration layer itself.
+scripts/orchestration/spawns-staging/
