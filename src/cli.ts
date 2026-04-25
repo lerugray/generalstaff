@@ -3024,6 +3024,13 @@ switch (command) {
     );
     console.log("Appended:\n");
     console.log(regResult.appendedYaml);
+    console.log(
+      `\nNext: capture project intent for downstream agents.\n` +
+        `  In a Claude Code session, run:\n` +
+        `    /agents-md-wizard ${regValues.path}\n` +
+        `  This drafts AGENTS.md (https://agents.md) at the project root via\n` +
+        `  a short interview. Skip with no penalty if the project is obvious.`,
+    );
     break;
   }
 

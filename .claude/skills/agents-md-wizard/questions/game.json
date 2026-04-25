@@ -1,0 +1,12 @@
+[
+  {"id": "what_is_this", "prompt": "What is this, in your own words?", "required": true},
+  {"id": "what_is_not", "prompt": "What is this explicitly NOT?", "required": true},
+  {"id": "when_done", "prompt": "When is this 'done' for you?", "required": true},
+  {"id": "genre", "prompt": "What genre/form is this, and what are 2-3 reference games?", "required": true},
+  {"id": "core_loop", "prompt": "Describe the 30-second core loop.", "required": true},
+  {"id": "audience", "prompt": "Who is this for, and what do they already play?", "required": true},
+  {"id": "platform", "prompt": "What platform(s) and why?", "required": true},
+  {"id": "monetization", "prompt": "How is this funded/sold?", "required": false},
+  {"id": "scope_ceiling", "prompt": "What is the absolute-maximum scope you'd still ship?", "required": true},
+  {"id": "art_style", "prompt": "Describe the visual/audio register in 1-2 sentences.", "required": false}
+]

@@ -1,0 +1,9 @@
+[
+  {"id": "what_is_this", "prompt": "What is this, in your own words?", "required": true},
+  {"id": "what_is_not", "prompt": "What is this explicitly NOT?", "required": true},
+  {"id": "when_done", "prompt": "When is this 'done' for you?", "required": true},
+  {"id": "purpose", "prompt": "What does this infrastructure enable?", "required": true},
+  {"id": "users", "prompt": "Who consumes this (humans, services, both)?", "required": true},
+  {"id": "constraints", "prompt": "What constraints (budget, latency, compliance) are load-bearing?", "required": true},
+  {"id": "ownership", "prompt": "Who runs this long-term?", "required": false}
+]

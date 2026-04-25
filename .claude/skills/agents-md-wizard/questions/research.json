@@ -1,0 +1,8 @@
+[
+  {"id": "what_is_this", "prompt": "What is this, in your own words?", "required": true},
+  {"id": "what_is_not", "prompt": "What is this explicitly NOT?", "required": true},
+  {"id": "when_done", "prompt": "When is this 'done' for you?", "required": true},
+  {"id": "hypothesis", "prompt": "What is the core hypothesis or question?", "required": true},
+  {"id": "method", "prompt": "What method will you use to test it?", "required": true},
+  {"id": "output_form", "prompt": "What does 'done' look like (paper, dataset, tool, demo)?", "required": true}
+]

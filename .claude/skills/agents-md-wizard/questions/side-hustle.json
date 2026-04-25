@@ -1,0 +1,8 @@
+[
+  {"id": "what_is_this", "prompt": "What is this, in your own words?", "required": true},
+  {"id": "what_is_not", "prompt": "What is this explicitly NOT?", "required": true},
+  {"id": "when_done", "prompt": "When is this 'done' for you?", "required": true},
+  {"id": "problem", "prompt": "What does this do for someone?", "required": true},
+  {"id": "constraints", "prompt": "What would make you abandon this?", "required": true},
+  {"id": "success", "prompt": "What is 'good enough' to ship?", "required": false}
+]

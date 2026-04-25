@@ -2401,16 +2401,16 @@
   {
     "id": "gs-322",
     "title": "AGENTS.md wizard — project-intent extraction at register time. PRIORITY 1 (structural improvement on the task-completion meta itself, per Ray 2026-04-25). Build a Claude Code skill at .claude/skills/agents-md-wizard/ that runs a conversational discovery wizard producing AGENTS.md at the project root. AGENTS.md is the cross-platform standard (Google/OpenAI/Cursor/Aider/Zed/Copilot et al, late 2025) — using it gives free integration with every other AI tool Ray uses, and is project-neutral by design (won't impose business-mindset on satire/personal/side-hustle projects). Phase A scope: fork prd-taskmaster (MIT, ~/.claude/skills/prd-taskmaster/) as substrate, adapt for AGENTS.md output, type-branched question sets (business / game / research / infra = heavy 8-12 questions; side-hustle / personal-tool / nonsense = lightweight 2-3 questions; skip = no plan); 3 universal questions every type asks (what is this / what is this NOT / when is this done). Hook into `generalstaff register` with skip-by-default prompt. New CLI: `generalstaff plan <project>` for standalone runs. Wizard runs as Tier 3 spawn with -Provider openrouter (Kimi K2.6 for heavy branches, free-tier like google/gemma-3 for lightweight) — ~$1-3 cost per heavy plan, near-zero for lightweight. Phase B (reviewer integration with verified_misaligned soft-flag) + Phase C (iterative-update mode + scope-drift detection) + Phase D (portfolio view) follow once Phase A validates. Total estimate ~2-3 days for A+B+C; Phase A alone ~3-4 hours by forking prd-taskmaster. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 1 for full design + decisions Ray confirmed 2026-04-25 ~06:30 EDT.",
-    "status": "pending",
+    "status": "phase_a_done",
     "priority": 1,
     "interactive_only": true,
     "interactive_only_reason": "Major product-direction work + UX taste calls (question sets per project type). Phase A architecture should be drafted by interactive session or by Tier 3 spawn with -Provider openrouter; Phase B/C/D have bot-pickable subtasks once Phase A architecture is locked.",
     "expected_touches": [
       ".claude/skills/agents-md-wizard/",
       "src/cli.ts",
-      "src/wizard/",
-      "tests/wizard/"
-    ]
+      "tests/agents_md_wizard.test.ts"
+    ],
+    "phase_a_notes": "Shipped 2026-04-25 in-session by Ray + Claude Opus 4.7 after a Kimi K2.6 spawn attempt failed to produce work (5min runtime, exit 0, zero edits — confirmed Ray's routing rule that long agentic coding sessions stay on Claude). Architecture revision from the original Kimi proposal: in-session SKILL (not Tier 3 spawn) since Tier 3 spawns can't ask the user questions interactively in the user's terminal. Files: .claude/skills/agents-md-wizard/{SKILL.md, README.md, questions/*.json (8 types), templates/agents-md.md}; src/cli.ts post-register suggestion; tests/agents_md_wizard.test.ts (46 tests, 386 expects, all passing). No prd-taskmaster dependency — borrowed the Q&A→markdown pattern, built fresh. Phase B (reviewer integration) and Phase C (drift detection) remain pending."
   },
   {
     "id": "gs-320",

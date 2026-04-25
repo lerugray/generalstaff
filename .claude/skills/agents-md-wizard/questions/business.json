@@ -1,0 +1,14 @@
+[
+  {"id": "what_is_this", "prompt": "What is this, in your own words?", "required": true},
+  {"id": "what_is_not", "prompt": "What is this explicitly NOT?", "required": true},
+  {"id": "when_done", "prompt": "When is this 'done' for you?", "required": true},
+  {"id": "problem", "prompt": "What problem does this solve, and for whom?", "required": true},
+  {"id": "revenue_model", "prompt": "How does this make money (or not)?", "required": true},
+  {"id": "differentiator", "prompt": "What makes this different from existing solutions?", "required": true},
+  {"id": "success_metrics", "prompt": "What numbers tell you this is working?", "required": true},
+  {"id": "constraints", "prompt": "What constraints (time, budget, legal, skill) are load-bearing?", "required": true},
+  {"id": "team", "prompt": "Who is working on this, and what do they own?", "required": false},
+  {"id": "risks", "prompt": "What could kill this project?", "required": true},
+  {"id": "milestones", "prompt": "What are the 3-4 phases from now to launch?", "required": true},
+  {"id": "dependencies", "prompt": "What external things must go right for this to work?", "required": false}
+]
