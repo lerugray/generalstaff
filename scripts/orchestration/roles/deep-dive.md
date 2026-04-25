@@ -25,6 +25,14 @@ is enabled).
    a summary to `outbox/result.md` (commit hash if applicable, what
    was tested, what's pending, what surprised you). Set status to
    `complete`.
+
+   **Path resolution:** `outbox/` resolves against your CWD, which
+   the wrapper sets to the project repo when `-ProjectPath` is set.
+   The wrapper has a v3 safety net that moves `<cwd>/outbox/*` to
+   the actual spawn dir on exit, so relative paths work — but
+   prefer absolute paths or the `$SPAWN_DIR/outbox/` form in your
+   own writes when you have it, to avoid race conditions if another
+   process touches the project's `outbox/` while you run.
 5. **Escalate via needs-ray.md.** Genuine input needs only:
    - Strategic / product call (which approach, which feature).
    - Voice / taste call (public copy, design choice).
@@ -76,9 +84,12 @@ own CLAUDE.md is the authoritative ruleset. In particular:
   `spawn-detached.ps1 -RoleName deep-dive -ProjectPath <repo> -Task <brief> -Brief`
 - **Run:** you read inbox, work the task, write status + outbox.
 - **Escalate:** needs-ray.md or SendUserMessage when blocked.
-- **Complete:** write outbox/result.md, set state=complete, exit
-  the session (the cmd window stays open until manually closed —
-  per Ray's ambient-confirmation pref).
+- **Complete:** write outbox/result.md, set state=complete, end
+  your turn. In v3 one-shot mode (default for deep-dive), the
+  spawn was launched with `claude --print` and `cmd /c`, so the
+  process exits cleanly when your turn ends and the cmd window
+  auto-closes. With `-Interactive`, the window stays open per
+  Ray's ambient-confirmation pref.
 - **Cleanup:** primary's orch-status.sh reports completed spawns;
   operator (or a cleanup task) archives them to
   `~/.claude/orchestration/completed/<spawn-id>/`.

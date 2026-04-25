@@ -159,6 +159,42 @@ When to use OpenRouter (rule of thumb):
 See `~/.claude/projects/.../memory/feedback_provider_routing_for_spawns.md`
 for the routing decision matrix + rationale.
 
+## One-shot mode + lifecycle hardening (v3, 2026-04-25)
+
+Driven by the morning's Kimi-spawn misdiagnosis: the wizard finished cleanly
+(result.md on disk, recap printed) but the orchestration reported "stuck" for
+2h+ because:
+
+1. `claude` (without `--print`) sits at the interactive prompt after the
+   recap. The launch.bat's `claude ...` line never returns.
+2. With `cmd /k`, the cmd window stays open even when the .bat does finish,
+   so cmd_pid stays alive indefinitely.
+3. The brief said "outbox/result.md" relative — that resolved against the
+   project CWD, not the spawn dir. The actual artifact landed in the project
+   tree, polluting the working dir → next bot cycle aborted with "Working
+   tree not clean: ?? outbox/".
+
+v3 fixes (default for non-bot-launcher spawns):
+
+- `--print` mode (`claude -p ...`) → claude exits cleanly when its turn ends,
+  launch.bat continues past the LLM line, exit-marker.json gets written.
+  Override with `-Interactive` for genuine multi-turn spawns.
+- `cmd /c` (instead of `/k`) → window auto-closes when the .bat finishes.
+  bot-launcher and `-Interactive` spawns still get `/k` so Ray retains
+  ambient-confirmation visibility.
+- **Outbox safety net** → after the LLM exits, the .bat moves any
+  `$cwd/outbox/*` files to `$spawnDir/outbox/` and removes the stray dir.
+  Catches the relative-path-against-project-cwd case without burdening
+  brief authors with absolute paths.
+- `-MaxBudgetUsd` parameter (works only with `--print`) → hard cost cap.
+  Recommended `1.00` for one-shot deliverables, `5.00` for heavier work.
+  Default 0 = uncapped (matches v2 behavior).
+
+Use `-Interactive` only when the spawn genuinely needs multi-turn back-and-
+forth (e.g. wizard interview gathering user input). For one-shot deliverables
+("draft a proposal", "investigate X", "propose fixes"), the default one-shot
+mode is what you want — cheaper, cleaner, no orphan windows.
+
 ## Heartbeat hook
 
 Each Tier 3 spawn gets a spawn-local `settings.json` (in its mailbox dir)

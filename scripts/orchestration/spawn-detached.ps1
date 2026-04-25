@@ -44,7 +44,9 @@ param(
     [ValidateSet("claude","openrouter")]
     [string]$Provider = "claude",     # v2: provider selector. claude=Anthropic API (default). openrouter=OpenRouter API via env-var compat (ANTHROPIC_BASE_URL trick).
     [string]$OpenRouterModel = "moonshotai/kimi-k2.6",  # v2: when -Provider openrouter, this model overrides all CC tier defaults. Cheap defaults: kimi-k2.6 (~$0.74/$4.65 per M, leads SWE-Bench Pro), qwen/qwen3-coder-plus (~$0.65/$3.25 per M), google/gemini-3.1-pro-preview, qwen/qwen3-coder-flash (~$0.20/$0.98 per M).
-    [string]$OpenRouterEnvFile = "C:\Users\rweis\OneDrive\Documents\MiroShark\.env"  # v2: .env file holding OPENROUTER_API_KEY (or OPENAI_API_KEY — legacy field name in MiroShark .env per CLAUDE.local.md).
+    [string]$OpenRouterEnvFile = "C:\Users\rweis\OneDrive\Documents\MiroShark\.env",  # v2: .env file holding OPENROUTER_API_KEY (or OPENAI_API_KEY — legacy field name in MiroShark .env per CLAUDE.local.md).
+    [switch]$Interactive,             # v3: opt-OUT of one-shot mode. By default, non-bot-launcher spawns run with claude -p (print mode) so they auto-exit when the LLM finishes the turn — prevents orphaned cmd windows and missing exit-markers (root cause of the 2026-04-25 wizard "stuck" misdiagnosis). Set -Interactive only when the spawn genuinely needs multi-turn back-and-forth (e.g. wizard interviews). For one-shot deliverables (draft a doc, investigate X, propose Y), leave it off.
+    [decimal]$MaxBudgetUsd = 0        # v3: hard cost cap (only works with -p / --print mode). Defaults to 0 = no cap. Recommended: $1.00 for cheap one-shot deliverables, $5.00 for heavier work. Spawn aborts when exceeded.
 )
 
 $ErrorActionPreference = "Stop"
@@ -198,6 +200,21 @@ if ($RoleName -eq "bot-launcher") {
     # Generic claude session spawn
     $claudeArgs = New-Object System.Collections.ArrayList
 
+    # v3: default to -p (print mode) for non-bot-launcher spawns. Print mode runs
+    # the prompt non-interactively and exits cleanly when the LLM finishes its
+    # turn — which means launch.bat continues past the `claude ...` line and
+    # writes exit-marker.json. Without -p, claude sits at the interactive prompt
+    # after recap, the .bat hangs, and orch-status can't distinguish "stuck" from
+    # "done but cmd waiting." Override with -Interactive for multi-turn spawns.
+    $oneShot = -not $Interactive
+    if ($oneShot) {
+        [void]$claudeArgs.Add("--print")
+        if ($MaxBudgetUsd -gt 0) {
+            [void]$claudeArgs.Add("--max-budget-usd")
+            [void]$claudeArgs.Add($MaxBudgetUsd.ToString())
+        }
+    }
+
     if ($Brief) { [void]$claudeArgs.Add("--brief") }
     if (-not [string]::IsNullOrEmpty($Model)) {
         [void]$claudeArgs.Add("--model")
@@ -320,6 +337,21 @@ if ($RoleName -eq "bot-launcher") {
     [void]$batLines.Add("claude $argsJoined $promptEscaped")
 }
 
+# v3 safety net: if the spawn wrote outputs to its CWD's outbox/ instead of
+# the spawn-dir outbox/ (because the brief used a relative path resolved
+# against the project CWD, not the spawn dir), move them over and clean up
+# the stray dir. Prevents the 2026-04-25 wizard bug where result.md landed in
+# GS root's outbox/ → next bot cycle aborted with "Working tree not clean".
+# Skip when cwd == spawnDir (no ProjectPath set; outbox/ is already correct).
+$cwdBackslash = $cwd -replace '/','\'
+if ($cwdBackslash -ne $spawnDir) {
+    [void]$batLines.Add("REM === v3 outbox safety net ===")
+    [void]$batLines.Add("if exist `"$cwdBackslash\outbox\`" (")
+    [void]$batLines.Add("  move /Y `"$cwdBackslash\outbox\*`" `"$spawnDir\outbox\`" >nul 2>nul")
+    [void]$batLines.Add("  rd `"$cwdBackslash\outbox`" 2>nul")
+    [void]$batLines.Add(")")
+}
+
 # Append exit-marker step to launch.bat — runs after claude (or run_session.bat)
 # returns, regardless of LLM behavior. Provides an independent process-completion
 # signal that orch-status can detect even if status.json was never updated.
@@ -343,7 +375,14 @@ Write-Output "Launcher: $batPath"
 # -PassThru returns the Process object so we can capture cmd's PID. The cmd
 # window is the parent of claude / bun. Tracking its PID lets orch-status check
 # liveness via Get-Process and orch-kill --force close the window cleanly.
-$cmdProc = Start-Process cmd -ArgumentList "/k", "`"$batPath`"" -PassThru
+#
+# v3 cmd flag: /c (close after .bat) for one-shot deep-dive spawns so the
+# window auto-disposes when work is done; /k (keep open) for bot-launcher and
+# -Interactive spawns where the window needs to stay for monitoring/input.
+# Without this split, /k for everything orphaned cmd windows after claude
+# exited (the 2026-04-25 wizard had cmd_pid=15952 alive 2h+ post-completion).
+$cmdFlag = if ($RoleName -eq "bot-launcher" -or $Interactive) { "/k" } else { "/c" }
+$cmdProc = Start-Process cmd -ArgumentList $cmdFlag, "`"$batPath`"" -PassThru
 $cmdPid = $cmdProc.Id
 
 # Update status.json with PID + final spawn metadata. Re-read because
