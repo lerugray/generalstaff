@@ -28,7 +28,7 @@
   {
     "id": "wdb-003",
     "title": "Front + back matter scaffolding: title page, copyright page with ISBN placeholder, auto-generated table of contents (derived from chapter front matter), about-the-author stub, also-by list, acknowledgements page. Copy content itself (author bio, back-cover hook) is wdb-008.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "print/front-matter/",
@@ -64,7 +64,7 @@
   },
   {
     "id": "wdb-007",
-    "title": "Amazon listing description: short (200-char hook) + long (4000-char body). Voice-calibrated against the book's own opening chapters (docs/_chapters/chapter_01.md, chapter_02.md). Stop-slop pass mandatory before landing \u2014 this is public-facing copy where AI-tells get read as AI-tells.",
+    "title": "Amazon listing description: short (200-char hook) + long (4000-char body). Voice-calibrated against the book's own opening chapters (docs/_chapters/chapter_01.md, chapter_02.md). Stop-slop pass mandatory before landing — this is public-facing copy where AI-tells get read as AI-tells.",
     "status": "pending",
     "priority": 7,
     "interactive_only": true,
