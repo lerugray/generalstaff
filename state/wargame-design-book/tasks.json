@@ -17,6 +17,8 @@
     "title": "Cover template: front + spine + back assembled as SVG (or Pandoc-driven), with spine-width calculator as a function of interior page count using KDP's paper-factor formula. Placeholders for title/subtitle/author/back-cover copy (filled by wdb-008). Reusable for future Ray KDP books.",
     "status": "pending",
     "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Cover artwork + aesthetic register are Ray-taste decisions. Bot was picking this every WDB cycle and exit-2-failing because the engineer can't make the aesthetic call. Flipped 2026-04-24 evening so bot stops retrying it. Spine-width calculator (the bot-doable subset) can graduate to its own task once Ray picks the cover aesthetic.",
     "expected_touches": [
       "print/cover/",
       "print/cover/cover-template.svg",
