@@ -6,6 +6,21 @@ import { $ } from "bun";
 
 const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
 
+function comparablePath(pathValue: string): string {
+  const isWindowsPath = /^[A-Za-z]:[\\/]/.test(pathValue);
+  return process.platform === "win32" || isWindowsPath
+    ? pathValue.toLowerCase()
+    : pathValue;
+}
+
+function expectSamePath(received: string, expected: string) {
+  expect(comparablePath(received)).toBe(comparablePath(expected));
+}
+
+function expectSamePaths(received: string[], expected: string[]) {
+  expect(received.map(comparablePath)).toEqual(expected.map(comparablePath));
+}
+
 async function runCli(args: string[], cwd?: string): Promise<{
   stdout: string;
   stderr: string;
@@ -979,7 +994,14 @@ dispatcher:
       const result = await runCli(["version"], VERSION_TEST_DIR);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).not.toContain("(not found)");
-      expect(result.stdout).toContain(join(VERSION_TEST_DIR, "projects.yaml"));
+      const projectsYamlLine = result.stdout
+        .split("\n")
+        .find((line) => line.startsWith("projects.yaml:"));
+      expect(projectsYamlLine).toBeDefined();
+      expectSamePath(
+        projectsYamlLine!.replace("projects.yaml:", "").trim(),
+        join(VERSION_TEST_DIR, "projects.yaml"),
+      );
     });
 
     it("is listed in --help output", async () => {
@@ -1688,7 +1710,7 @@ routes:
         const result = await runCli(["digest", "--latest", "--path"], DIGEST_TEST_DIR);
         expect(result.exitCode).toBe(0);
         const out = result.stdout.trim();
-        expect(out).toBe(join(DIGEST_DIR, "digest_20260416_150000.md"));
+        expectSamePath(out, join(DIGEST_DIR, "digest_20260416_150000.md"));
         expect(out).not.toContain("NEW");
       });
 
@@ -1713,7 +1735,8 @@ routes:
           DIGEST_TEST_DIR,
         );
         expect(result.exitCode).toBe(0);
-        expect(result.stdout.trim()).toBe(
+        expectSamePath(
+          result.stdout.trim(),
           join(DIGEST_DIR, "digest_20260416_090000.md"),
         );
       });
@@ -1725,7 +1748,7 @@ routes:
         const result = await runCli(["digest", "--list", "--path"], DIGEST_TEST_DIR);
         expect(result.exitCode).toBe(0);
         const lines = result.stdout.trim().split("\n");
-        expect(lines).toEqual([
+        expectSamePaths(lines, [
           join(DIGEST_DIR, "digest_20260416_180000.md"),
           join(DIGEST_DIR, "digest_20260416_090000.md"),
           join(DIGEST_DIR, "digest_20260415_120000.md"),
@@ -1745,7 +1768,8 @@ routes:
           DIGEST_TEST_DIR,
         );
         expect(result.exitCode).toBe(0);
-        expect(JSON.parse(result.stdout)).toBe(
+        expectSamePath(
+          JSON.parse(result.stdout),
           join(DIGEST_DIR, "digest_20260416_100000.md"),
         );
       });
@@ -1758,7 +1782,7 @@ routes:
           DIGEST_TEST_DIR,
         );
         expect(result.exitCode).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual([
+        expectSamePaths(JSON.parse(result.stdout), [
           join(DIGEST_DIR, "digest_20260416_180000.md"),
           join(DIGEST_DIR, "digest_20260415_120000.md"),
         ]);
