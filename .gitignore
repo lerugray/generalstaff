@@ -66,6 +66,9 @@ state/adversary/
 state/zero-page-private/
 state/sandkasten/
 state/auftragstaktik/
+state/chipforge/
+state/doae/
+state/mission-chess/
 
 # Bun / Node
 node_modules/
