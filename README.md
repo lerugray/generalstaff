@@ -14,7 +14,8 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 
 > **Status:** v0.1.0 tagged 2026-04-19. **1,628 passing tests** across
 > 48 files. Tests doubling as a gate cross-check: a cycle only verifies
-> if the suite passes. Six managed projects cycling. Cross-platform
+> if the suite passes. **17 managed projects** in the fleet (mix of
+> Mode A bot-pickable and Mode B interactive-only). Cross-platform
 > (Windows, macOS, Linux).
 >
 > **Shipped:**
@@ -75,6 +76,7 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 - [Quickstart](#quickstart)
 - [Why this over the alternatives](#why-this-over-the-alternatives)
 - [Works alongside](#works-alongside)
+- [Sister projects](#sister-projects)
 - [Opt-in knobs](#opt-in-knobs)
 - [Who this is for](#who-this-is-for)
 - [The Hammerstein framing](#the-hammerstein-framing)
@@ -103,8 +105,12 @@ Between those two dates, dogfooding itself the whole time:
   own diffs. The verification gate caught and rolled back 8.6% of
   what the engineer proposed, including hands-off violations on
   `src/safety.ts`, `src/reviewer.ts`, and `src/prompts/`.
-- Six managed projects cycling (itself, `gamr`, `raybrain`,
-  `devforge`, `bookfinder-general`, `catalogdna`).
+- 17 managed projects in the fleet. Six Mode A (bot-cycling)
+  pilots from launch (`generalstaff`, `gamr`, `raybrain`,
+  `devforge`, `bookfinder-general`, `catalogdna`); eleven
+  Mode B / interactive-only registrations added 2026-04-21..26
+  (game-dev projects, the mission-* ecosystem, and creative work
+  where the bot tracks tasks but the human writes the diffs).
 - Two pre-launch security audits. The first fixed five
   HIGH/MEDIUM findings. The second caught a symlink bypass on the
   hands-off check plus a handful of low-severity hardening items.
@@ -356,6 +362,35 @@ cycle:
 The combination is defense in depth. Use any of them alone if that
 fits; none is a hard dependency of the others.
 
+## Sister projects
+
+Three other open-source tools share this repo's posture: your data
+on your disk, your keys for paid providers, no SaaS layer. They run
+independently, and they compose well when stacked into a personal
+AI workflow.
+
+- **[mission-brain](https://github.com/lerugray/mission-brain)**:
+  queryable second brain over your own writing. Citation-grounded
+  retrieval across markdown, Facebook export, bullet-journal
+  entries, music metadata, or any custom loader you write. Refuses
+  to emit unsourced claims. Voyage cloud embeddings or Ollama
+  local.
+- **[mission-bullet-oss](https://github.com/lerugray/mission-bullet-oss)**:
+  AI-assisted bullet journal that runs Ryder Carroll's method.
+  Daily capture, weekly review, monthly migration. The AI surfaces
+  themes and proposes migrations; it never modifies your raw
+  entries.
+- **[mission-swarm](https://github.com/lerugray/mission-swarm)**:
+  swarm-simulation engine that generates plausible audience
+  reactions to a document. The lean ~20% of MiroShark, scoped to
+  kriegspiel scenarios and pre-launch reaction smoke-tests. Streams
+  reactions round by round, driven by audience templates you
+  define.
+
+GS-managed projects can invoke any of these as subprocesses, or
+talk to mission-brain through its MCP server. Integrations stay
+opt-in per project. GeneralStaff itself does not assume any.
+
 ## Opt-in knobs
 
 Defaults stay conservative on purpose. Autonomous mistakes on other
@@ -552,6 +587,19 @@ root.
   not depend on Basecamp. A GS-managed project can pull Basecamp
   state into its own cycle prompts. Docs in
   [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
+- ✓ **AGENTS.md wizard, Phase A** (closed 2026-04-25): a Claude
+  Code skill at `.claude/skills/agents-md-wizard/` that runs a
+  conversational discovery wizard producing an AGENTS.md at the
+  project root. Type-branched question sets (heavy 8-12 questions
+  for business / game / research / infra projects; lightweight
+  2-3 for side-hustle / personal-tool / nonsense; skip for
+  no-plan-needed). Wired into `generalstaff register` with a
+  skip-by-default prompt; standalone via `generalstaff plan
+  <project>`. AGENTS.md is the cross-platform agent-config
+  standard adopted by Claude Code, Cursor, Aider, Codex, Zed, and
+  the rest, so the artifact gives free integration with whatever
+  other AI tool you use. Phase B (reviewer alignment check) and
+  Phase C (drift detection) follow.
 - **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
   the dashboard, edit `tasks.json` from the UI, merge `bot/work`
   with a button. Read-only v1 is the current dashboard; actions
