@@ -18,45 +18,20 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 > Mode A bot-pickable and Mode B interactive-only). Cross-platform
 > (Windows, macOS, Linux).
 >
-> **Shipped:**
+> **Shipped through launch (Phases 1-7):** sequential MVP,
+> multi-provider LLM routing, cross-project generality, parallel
+> worktrees opt-in, visual anchor (terminal dashboards), local web
+> dashboard at `generalstaff serve`, pluggable engineer (claude / 
+> aider; OpenRouter Qwen 3.6+ Plus cleared 80% on a 10-task
+> benchmark), creative-work opt-in, Mode B registrations.
 >
-> - **Phases 1–4:** sequential MVP, multi-provider LLM routing,
->   cross-project generality, opt-in parallel worktrees.
-> - **Phase 5:** visual anchor (terminal dashboards).
-> - **Phase 6:** local web dashboard at `generalstaff serve`.
->   Fleet overview, per-project drill-down, single-cycle detail,
->   live session tail via SSE, attention inbox.
-> - **Phase 7:** pluggable engineer. `engineer_provider: aider`
->   routes cycles through aider + OpenRouter (Qwen 3.6+ Plus)
->   instead of `claude -p`. 10-task benchmark cleared 80% verified
->   on qwen3.6-plus. Per-task routing
->   (`task.engineer_provider`) mixes engineers by task complexity.
->   Benchmark details in
->   `docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`.
-> - **Creative-work opt-in:** per-project flag with voice
->   references and human-in-the-loop draft review. Policy in
->   `docs/internal/RULE-RELAXATION-2026-04-20.md`.
-> - **Mode B registrations:** GS wraps projects that already have
->   their own bot infrastructure (catalogdna pattern). It acts as a
->   discipline layer around the existing loop, not a replacement.
->   See `docs/internal/USE-MODES-2026-04-20.md`.
-> - **Usage-budget gate (2026-04-21):** cap what a session spends
->   against your Claude / OpenRouter allotment. Fleet-wide + per-
->   project scopes, hard-stop and advisory modes, and a
->   `skip-project` option so one project hitting its cap doesn't
->   end the whole session. Reads Claude Code's own session blocks
->   via `ccusage` so the gate reflects real spend, not an estimate.
->   Design in `docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`.
-> - **Basecamp 4 integration (2026-04-21):** first-party OAuth2
->   helper, thin TypeScript client, and CLI. Run
->   `generalstaff integrations basecamp auth` once per machine
->   to write tokens to your project's `.env`; the client
->   auto-refreshes before expiry. Read-only CLI; write operations
->   stay in your own code with explicit opt-in. Optional; the
->   dispatcher itself does not depend on it. A GS-managed project
->   can pull threads, todos, projects, and files into its own
->   cycle prompts. Docs in
->   [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
+> **Post-launch additions:** usage-budget gate (cap sessions on
+> USD / tokens / cycles, reads `ccusage` for real spend), Basecamp 4
+> integration (first-party OAuth2 + read-only CLI; opt-in plumbing),
+> AGENTS.md wizard (cross-platform agent-config skill at register
+> time), multi-agent orchestration tooling (Tier 1/2/3 spawn
+> primitives + inbox-injection routing for parallel sessions). Full
+> closure narratives + design docs in [Roadmap](#roadmap).
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
@@ -600,6 +575,17 @@ root.
   the rest, so the artifact gives free integration with whatever
   other AI tool you use. Phase B (reviewer alignment check) and
   Phase C (drift detection) follow.
+- ✓ **Multi-agent orchestration tooling** (closed 2026-04-25):
+  scripts at [`scripts/orchestration/`](scripts/orchestration/)
+  for spawning, monitoring, and routing work across parallel
+  Claude Code sessions. Four tiers in increasing weight: in-process
+  `Agent` subagents, opt-in Agent Teams (inter-agent messaging),
+  Tier 2 background `claude -p` spawns for bounded one-shot
+  side-quests, Tier 3 detached visible cmd windows for work that
+  must outlive the primary session. Inbox-injection hook (v4)
+  routes messages between sessions via a shared outbox without
+  shared state. Used in dogfood for parallel feature sprints
+  across managed projects.
 - **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
   the dashboard, edit `tasks.json` from the UI, merge `bot/work`
   with a button. Read-only v1 is the current dashboard; actions
@@ -639,6 +625,12 @@ root.
   carries across views
 - [`CLAUDE.md`](CLAUDE.md) -- instructions for Claude Code sessions
   operating in this repo
+- [`AGENTS.md`](AGENTS.md) -- cross-platform agent-config artifact
+  produced by the AGENTS.md wizard (gs-322 dogfood); read by Claude
+  Code, Cursor, Aider, Codex, Zed, and other AGENTS.md-aware agents
+- [`scripts/orchestration/README.md`](scripts/orchestration/README.md)
+  -- four-tier orchestration tooling for parallel Claude Code
+  sessions, including the inbox-injection routing hook
 - [`docs/internal/research-notes.md`](docs/internal/research-notes.md) -- research on prior art
   (nightcrawler, parallel-cc, Polsia, Continuous-Claude-v3)
 
