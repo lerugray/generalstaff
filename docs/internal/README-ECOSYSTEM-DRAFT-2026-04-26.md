@@ -31,30 +31,32 @@ than external complements.
 ```markdown
 ## Sister projects
 
-GeneralStaff is one of four open-source tools sharing a design floor:
-your data on your disk, your keys for paid providers, no SaaS layer.
-Each tool is standalone — none depend on the others — but they
-compose well for a personal AI workflow built entirely on local
-files and BYOK provider calls.
+Three other open-source tools share this repo's posture: your data
+on your disk, your keys for paid providers, no SaaS layer. They run
+independently, and they compose well when stacked into a personal
+AI workflow.
 
-- **[mission-brain](https://github.com/lerugray/mission-brain)** —
+- **[mission-brain](https://github.com/lerugray/mission-brain)**:
   queryable second brain over your own writing. Citation-grounded
-  retrieval over your corpus (markdown, Facebook export, journal
-  entries, music metadata, whatever you have). Refuses to write
-  unsourced claims. Voyage embeddings (cloud) or Ollama (local).
-- **[mission-bullet](https://github.com/lerugray/mission-bullet)** —
-  AI-assisted bullet journal in the Ryder Carroll method. Daily
-  capture, weekly review, monthly migration. AI surfaces themes
-  and proposes migrations; never modifies your raw entries.
-- **[mission-swarm](https://github.com/lerugray/mission-swarm)** —
-  swarm simulation engine for plausible audience reactions.
-  Lean ~20% of MiroShark, scoped to kriegspiel and pre-launch
-  reaction smoke-tests. Round-by-round streaming, audience-template
-  driven.
+  retrieval across markdown, Facebook export, bullet-journal
+  entries, music metadata, or any custom loader you write. Refuses
+  to emit unsourced claims. Voyage cloud embeddings or Ollama
+  local.
+- **[mission-bullet](https://github.com/lerugray/mission-bullet)**:
+  AI-assisted bullet journal that runs Ryder Carroll's method.
+  Daily capture, weekly review, monthly migration. The AI surfaces
+  themes and proposes migrations; it never modifies your raw
+  entries.
+- **[mission-swarm](https://github.com/lerugray/mission-swarm)**:
+  swarm-simulation engine that generates plausible audience
+  reactions to a document. The lean ~20% of MiroShark, scoped to
+  kriegspiel scenarios and pre-launch reaction smoke-tests. Streams
+  reactions round by round, driven by audience templates you
+  define.
 
-GS-managed projects can invoke any of these as subprocesses or, for
-mission-brain, via its MCP server. The integrations are opt-in per
-project; default GS posture is no integration assumed.
+GS-managed projects can invoke any of these as subprocesses, or
+talk to mission-brain through its MCP server. Integrations stay
+opt-in per project. GeneralStaff itself does not assume any.
 ```
 
 ---
