@@ -64,32 +64,32 @@
   },
   {
     "id": "wdb-007",
-    "title": "Amazon listing description: short (200-char hook) + long (4000-char body). Voice-calibrated against the book's own opening chapters (docs/_chapters/chapter_01.md, chapter_02.md). Stop-slop pass mandatory before landing — this is public-facing copy where AI-tells get read as AI-tells.",
-    "status": "pending",
+    "title": "Amazon listing description: short (200-char hook) + long (4000-char body). Voice-calibrated against the book's own opening chapters (docs/_chapters/chapter_01.md, chapter_02.md). Stop-slop pass mandatory before landing — this is public-facing copy where AI-tells get read as AI-tells. SHIPPED 2026-04-26 evening as part of the cursor/wdb-voice-drafts merge to main; lives at print/copy/amazon-listing.md. Ray approved drafts via paste-review without changes.",
+    "status": "done",
     "priority": 7,
     "interactive_only": true,
     "interactive_only_reason": "Public-facing Amazon listing copy, voice-sensitive. Ray writes with /stop-slop pass."
   },
   {
     "id": "wdb-008",
-    "title": "Author bio + back-cover hook copy. Bio for the book jacket + Amazon listing; hook is the pitch someone reads in a store aisle. Both voice-sensitive. Should reference Conflict Simulations LLC without turning the bio into a CSL ad.",
-    "status": "pending",
+    "title": "Author bio + back-cover hook copy. Bio for the book jacket + Amazon listing; hook is the pitch someone reads in a store aisle. Both voice-sensitive. Should reference Conflict Simulations LLC without turning the bio into a CSL ad. SHIPPED 2026-04-26 evening as part of the cursor/wdb-voice-drafts merge: print/copy/author-bio.md (short 150w + long 300w) + print/copy/back-cover-hook.md (Candidate 2 selected, candidates 1 and 3 preserved as alternates). Ray approved via paste-review and delegated final candidate pick to Claude.",
+    "status": "done",
     "priority": 8,
     "interactive_only": true,
     "interactive_only_reason": "Author voice for the physical book jacket. Taste work."
   },
   {
     "id": "wdb-009",
-    "title": "Amazon keyword + BISAC category selection: 7 keywords + 2 BISAC categories. Requires judgment about discovery positioning (hobby-games taxonomy vs. military-history taxonomy vs. cross-listing). Ray's call on where the book is best found.",
-    "status": "pending",
+    "title": "Amazon keyword + BISAC category selection: 7 keywords + 2 BISAC categories. Requires judgment about discovery positioning (hobby-games taxonomy vs. military-history taxonomy vs. cross-listing). Ray's call on where the book is best found. SHIPPED 2026-04-26 evening as part of the cursor/wdb-voice-drafts merge: print/copy/keywords-worksheet.md. Top-7 recommendation: wargame design / board game design / tabletop game design / conflict simulation / designing wargames / hex and counter wargames / historical board games. Top-2 BISAC: GAMES & ACTIVITIES / Board Games (GAM001000) + DESIGN / Games (DES016000).",
+    "status": "done",
     "priority": 9,
     "interactive_only": true,
     "interactive_only_reason": "Discovery/positioning strategy, not mechanical."
   },
   {
     "id": "wdb-010",
-    "title": "Final KDP retail price decision after wdb-006 royalty analysis is in hand. Target is $20; actual list could move based on print cost, paperback-market comparables, and desired royalty per copy.",
-    "status": "pending",
+    "title": "Final KDP retail price decision after wdb-006 royalty analysis is in hand. Target is $20; actual list could move based on print cost, paperback-market comparables, and desired royalty per copy. SHIPPED 2026-04-26 evening as part of the cursor/wdb-voice-drafts merge: print/copy/pricing-recommendation.md. Recommendation: launch at $24.99 (60% Amazon-direct royalty produces ~$9.67/copy after $5.32 print cost; $19.99 only ~$6.67/copy). Hold off on Expanded Distribution; 40% royalty rate gives up too much on this niche.",
+    "status": "done",
     "priority": 10,
     "interactive_only": true,
     "interactive_only_reason": "Business decision downstream of royalty analysis (wdb-006)."
@@ -105,5 +105,26 @@
       "print/fonts/",
       "print/build.sh"
     ]
+  },
+  {
+    "id": "wdb-013",
+    "title": "Cover text size pass: re-render the cover (build-cover.py) with all text large enough to be readable by older readers (boomers). Ray flagged 2026-04-26 evening that the wdb-002 cover (commit 98ce07e on main) had at least one text element that was too small. Audit subtitle, byline, back-cover hook (now finalized via wdb-008), spine text, and any tagline text. Bump font sizes where they read tight, and re-render print/cover/cover.svg + the print-ready PDF derivative. Re-check the print pipeline's wdb-002 cover output integrates the Candidate-2 back-cover-hook from print/copy/back-cover-hook.md.",
+    "status": "pending",
+    "priority": 7,
+    "interactive_only": true,
+    "interactive_only_reason": "Visual + typographic taste decision: which text elements need to grow, by how much, without breaking the cover composition. Ray's eye on the rendered output before re-shipping the print PDF.",
+    "expected_touches": [
+      "print/cover/build-cover.py",
+      "print/cover/cover.svg",
+      "print/cover/cover.pdf"
+    ]
+  },
+  {
+    "id": "wdb-014",
+    "title": "Stop-slop sweep on book chapters — voice audit pass against the same kind of AI-tells Ray scrubbed from the public Jekyll site. First pass landed 2026-04-26 evening (chapter_17.md: 'a human operator' -> 'an operator'). Sweep the rest of docs/_chapters/*.md for similar tells: rule-of-three / tricolons in places they don't belong, em-dashes in chapter prose, 'human X' qualifiers where the X obviously implies a person, 'delve' / 'leverage' / 'robust' / 'comprehensive' / 'seamless' filler vocabulary, throat-clearing chapter openings. Compare against Ray's voice from chapter_01 / chapter_02. Apply per-tell fixes; commit each cluster as its own atomic commit so Ray can roll back if any fix overcorrected the voice.",
+    "status": "pending",
+    "priority": 7,
+    "interactive_only": true,
+    "interactive_only_reason": "Voice-bearing chapter content; needs Ray's eye on each flagged tell since some 'AI cadence' is actually his voice. Stop-slop tooling can flag, Ray approves, fixer applies."
   }
 ]
