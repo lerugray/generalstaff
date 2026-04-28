@@ -70,6 +70,8 @@ state/chipforge/
 state/doae/
 state/mission-chess/
 state/mission-housing/
+state/catalogdna/
+state/personal-site/
 
 # Bun / Node
 node_modules/
