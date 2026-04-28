@@ -109,22 +109,29 @@
   {
     "id": "wdb-013",
     "title": "Cover text size pass: re-render the cover (build-cover.py) with all text large enough to be readable by older readers (boomers). Ray flagged 2026-04-26 evening that the wdb-002 cover (commit 98ce07e on main) had at least one text element that was too small. Audit subtitle, byline, back-cover hook (now finalized via wdb-008), spine text, and any tagline text. Bump font sizes where they read tight, and re-render print/cover/cover.svg + the print-ready PDF derivative. Re-check the print pipeline's wdb-002 cover output integrates the Candidate-2 back-cover-hook from print/copy/back-cover-hook.md.",
-    "status": "pending",
+    "status": "done",
     "priority": 7,
     "interactive_only": true,
     "interactive_only_reason": "Visual + typographic taste decision: which text elements need to grow, by how much, without breaking the cover composition. Ray's eye on the rendered output before re-shipping the print PDF.",
+    "_done_note": "Shipped 2026-04-28 evening on main via wdb-013-cover-text-sizing-pass merge. Three commits: c3a2538 (Cursor CLI size bump for boomer readability), f629a21 (Cursor IDE Auto pulled title text back from spine/front boundaries per Ray's 04-27 annotation pass), b8f8c51 (Claude shifted spine author baseline 1.530 to 1.800 to clear top gold rule). Back-cover-hook integration is wdb-002, not closed by this task.",
     "expected_touches": [
       "print/cover/build-cover.py",
-      "print/cover/cover.svg",
-      "print/cover/cover.pdf"
+      "print/cover/kdp_cover.py",
+      "print/cover/cover-final.svg",
+      "print/cover/cover-template.svg",
+      "print/cover/cover-template-filled.svg",
+      "print/out/wargame-design-book-cover.pdf",
+      "print/out/wargame-design-book-cover.png",
+      "print/out/wargame-design-book-cover-upload.svg"
     ]
   },
   {
     "id": "wdb-014",
     "title": "Stop-slop sweep on book chapters — voice audit pass against the same kind of AI-tells Ray scrubbed from the public Jekyll site. First pass landed 2026-04-26 evening (chapter_17.md: 'a human operator' -> 'an operator'). Sweep the rest of docs/_chapters/*.md for similar tells: rule-of-three / tricolons in places they don't belong, em-dashes in chapter prose, 'human X' qualifiers where the X obviously implies a person, 'delve' / 'leverage' / 'robust' / 'comprehensive' / 'seamless' filler vocabulary, throat-clearing chapter openings. Compare against Ray's voice from chapter_01 / chapter_02. Apply per-tell fixes; commit each cluster as its own atomic commit so Ray can roll back if any fix overcorrected the voice.",
-    "status": "pending",
+    "status": "cancelled",
     "priority": 7,
     "interactive_only": true,
-    "interactive_only_reason": "Voice-bearing chapter content; needs Ray's eye on each flagged tell since some 'AI cadence' is actually his voice. Stop-slop tooling can flag, Ray approves, fixer applies."
+    "interactive_only_reason": "Voice-bearing chapter content; needs Ray's eye on each flagged tell since some 'AI cadence' is actually his voice. Stop-slop tooling can flag, Ray approves, fixer applies.",
+    "cancelled_note": "Cancelled 2026-04-27 morning per Ray: every chapter was stop-slopped at write time during initial drafting, so a separate sweep pass is unnecessary. The chapter_17 fix (commit 98ce07e on cursor/wdb-voice-drafts) was a single instance Ray spotted in passing, not the leading edge of a broader sweep."
   }
 ]
