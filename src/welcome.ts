@@ -77,11 +77,11 @@ const GREETING = `
 Welcome, Commander.
 
 You're at the head of the General Staff. Your job is to
-direct, not to type — the Staff handles the detail of
-running Claude Code agents on your projects, with a
-verification gate that catches mistakes before they ship.
+direct, not to type. The Staff handles the detail of
+running Claude Code agents on your projects, and a
+verification gate catches mistakes before they ship.
 
-This briefing walks you through everything once:
+This briefing covers three steps:
   1. Connecting to a model provider
   2. Briefing your first staff officer (registering a project)
   3. Receiving your first dispatch (a verified cycle + audit log)
@@ -107,8 +107,8 @@ three kinds today:
                API key.
 
 For your first cycle, openrouter's free tier is the easiest
-path — it costs nothing and the free Qwen / Gemma models
-are good enough for the small starter task you'll run today.
+path: it costs nothing, and the free Qwen and Gemma models
+handle small starter tasks fine.
 `;
 
 const PROJECT_INTRO = `
@@ -155,23 +155,30 @@ or build command.
 // I/O defaults
 // ---------------------------------------------------------------
 
-async function defaultPrompt(
-  question: string,
-  defaultAnswer?: string,
-): Promise<string> {
+// Build a defaultPrompt bound to a single shared readline interface.
+// The wizard asks 7-9 prompts sequentially; opening + closing a fresh
+// readline per prompt works for interactive stdin but hangs the second
+// prompt onward when stdin is piped (e.g. from an answers file). One
+// readline for the whole wizard session keeps both modes working.
+function makeDefaultPrompt(): {
+  promptFn: PromptFn;
+  close: () => void;
+} {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const suffix = defaultAnswer !== undefined ? ` [${defaultAnswer}]` : "";
-  return new Promise((resolveP) => {
-    rl.question(`${question}${suffix} `, (answer) => {
-      rl.close();
-      const trimmed = answer.trim();
-      resolveP(
-        trimmed.length === 0 && defaultAnswer !== undefined
-          ? defaultAnswer
-          : trimmed,
-      );
+  const promptFn: PromptFn = (question, defaultAnswer) => {
+    const suffix = defaultAnswer !== undefined ? ` [${defaultAnswer}]` : "";
+    return new Promise((resolveP) => {
+      rl.question(`${question}${suffix} `, (answer) => {
+        const trimmed = answer.trim();
+        resolveP(
+          trimmed.length === 0 && defaultAnswer !== undefined
+            ? defaultAnswer
+            : trimmed,
+        );
+      });
     });
-  });
+  };
+  return { promptFn, close: () => rl.close() };
 }
 
 function defaultWrite(text: string): void {
@@ -765,83 +772,98 @@ Welcome to the General Staff, Commander.
 export async function runWelcome(
   opts: WelcomeOptions = {},
 ): Promise<WelcomeResult> {
-  const prompt = opts.promptFn ?? defaultPrompt;
+  // Build the default prompt+close pair once for the whole wizard
+  // session so a piped stdin (from an answers file) survives across
+  // every prompt. Tests that inject promptFn don't need close.
+  let cleanupPrompt: (() => void) | undefined;
+  let prompt: PromptFn;
+  if (opts.promptFn) {
+    prompt = opts.promptFn;
+  } else {
+    const built = makeDefaultPrompt();
+    prompt = built.promptFn;
+    cleanupPrompt = built.close;
+  }
   const write = opts.writeFn ?? defaultWrite;
   const rootDir = opts.rootDirOverride ?? getRootDir();
 
   const result: WelcomeResult = { ok: false, completedSteps: [] };
 
-  // Greeting
-  write(BANNER);
-  write(GREETING);
-  const begin = await prompt("Ready to begin?", "y");
-  if (!isYes(begin)) {
-    write("Briefing aborted. Run `gs welcome` again when ready.");
-    result.reason = "user-aborted-greeting";
-    return result;
-  }
-  result.completedSteps.push("greeting");
+  try {
+    // Greeting
+    write(BANNER);
+    write(GREETING);
+    const begin = await prompt("Ready to begin?", "y");
+    if (!isYes(begin)) {
+      write("Briefing aborted. Run `gs welcome` again when ready.");
+      result.reason = "user-aborted-greeting";
+      return result;
+    }
+    result.completedSteps.push("greeting");
 
-  // Provider step
-  const providerResult = await stepProvider(prompt, write, rootDir);
-  if (!providerResult.ok) {
-    write(`\nProvider step failed: ${providerResult.reason}`);
-    result.reason = providerResult.reason;
-    return result;
-  }
-  result.providerKind = providerResult.kind;
-  result.providerEnvVar = providerResult.envVar;
-  result.completedSteps.push("provider");
+    // Provider step
+    const providerResult = await stepProvider(prompt, write, rootDir);
+    if (!providerResult.ok) {
+      write(`\nProvider step failed: ${providerResult.reason}`);
+      result.reason = providerResult.reason;
+      return result;
+    }
+    result.providerKind = providerResult.kind;
+    result.providerEnvVar = providerResult.envVar;
+    result.completedSteps.push("provider");
 
-  // Project step
-  const projectResult = await stepProject(prompt, write);
-  if (!projectResult.ok) {
-    write(`\nProject step failed: ${projectResult.reason}`);
-    result.reason = projectResult.reason;
-    return result;
-  }
-  result.projectId = projectResult.projectId;
-  result.projectPath = projectResult.projectPath;
-  result.completedSteps.push("project");
+    // Project step
+    const projectResult = await stepProject(prompt, write);
+    if (!projectResult.ok) {
+      write(`\nProject step failed: ${projectResult.reason}`);
+      result.reason = projectResult.reason;
+      return result;
+    }
+    result.projectId = projectResult.projectId;
+    result.projectPath = projectResult.projectPath;
+    result.completedSteps.push("project");
 
-  // Inject starter task
-  const starterResult = injectStarterTask(
-    projectResult.projectPath!,
-    projectResult.projectId!,
-  );
-  if (!starterResult.ok) {
-    write(`\nStarter task injection failed: ${starterResult.reason}`);
-    result.reason = starterResult.reason;
-    return result;
-  }
-  result.completedSteps.push("starter-task");
+    // Inject starter task
+    const starterResult = injectStarterTask(
+      projectResult.projectPath!,
+      projectResult.projectId!,
+    );
+    if (!starterResult.ok) {
+      write(`\nStarter task injection failed: ${starterResult.reason}`);
+      result.reason = starterResult.reason;
+      return result;
+    }
+    result.completedSteps.push("starter-task");
 
-  // Cycle step
-  const cycleResult = await stepCycle(prompt, write, {
-    projectId: projectResult.projectId!,
-    projectPath: projectResult.projectPath!,
-    skipCycle: opts.skipCycle,
-  });
-  if (!cycleResult.ok) {
-    write(`\nCycle step failed: ${cycleResult.reason}`);
-    result.reason = cycleResult.reason;
-    return result;
-  }
-  result.cycleRan = cycleResult.cycleRan;
-  result.completedSteps.push("cycle");
-
-  // Audit display (only if cycle actually ran)
-  if (cycleResult.cycleRan) {
-    await stepAuditDisplay(write, {
+    // Cycle step
+    const cycleResult = await stepCycle(prompt, write, {
       projectId: projectResult.projectId!,
-      rootDir,
+      projectPath: projectResult.projectPath!,
+      skipCycle: opts.skipCycle,
     });
-    result.completedSteps.push("audit");
-  }
+    if (!cycleResult.ok) {
+      write(`\nCycle step failed: ${cycleResult.reason}`);
+      result.reason = cycleResult.reason;
+      return result;
+    }
+    result.cycleRan = cycleResult.cycleRan;
+    result.completedSteps.push("cycle");
 
-  // What's next
-  write(WHATS_NEXT);
-  result.completedSteps.push("whats-next");
-  result.ok = true;
-  return result;
+    // Audit display (only if cycle actually ran)
+    if (cycleResult.cycleRan) {
+      await stepAuditDisplay(write, {
+        projectId: projectResult.projectId!,
+        rootDir,
+      });
+      result.completedSteps.push("audit");
+    }
+
+    // What's next
+    write(WHATS_NEXT);
+    result.completedSteps.push("whats-next");
+    result.ok = true;
+    return result;
+  } finally {
+    cleanupPrompt?.();
+  }
 }

@@ -95,8 +95,9 @@ function printUsage() {
   console.log(`generalstaff v${VERSION}
 
 Usage:
-  generalstaff welcome                                    First-run wizard (recommended for new users)
+  generalstaff welcome [--skip-cycle]                     First-run wizard (recommended for new users)
     Example: generalstaff welcome
+    Example: generalstaff welcome --skip-cycle           # preview the flow without running a real cycle
     # Walks you through provider setup -> register your first project -> run one verified
     # cycle -> read the audit log. Estimated 30 minutes. Light staff-officer voice; substance
     # is plain. If you've already configured GS, the wizard offers to skip steps that have
@@ -2941,7 +2942,16 @@ switch (command) {
     // + one cycle + audit display into a guided flow for non-technical
     // users. Light staff-officer voice; substance is plain. See
     // src/welcome.ts for the step state machine.
-    const result = await runWelcome();
+    const { values: welcomeValues } = parseArgs({
+      args: args.slice(1),
+      options: {
+        "skip-cycle": { type: "boolean", default: false },
+      },
+      allowPositionals: true,
+    });
+    const result = await runWelcome({
+      skipCycle: welcomeValues["skip-cycle"] === true,
+    });
     if (!result.ok) {
       // Reason already printed by the orchestrator. Exit non-zero so
       // shell scripts see the abort.
