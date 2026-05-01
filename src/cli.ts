@@ -25,6 +25,7 @@ import {
 } from "./safety";
 import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, loadProgressEvents, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
 import { initProject } from "./init";
+import { runWelcome } from "./welcome";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
 import {
@@ -94,6 +95,13 @@ function printUsage() {
   console.log(`generalstaff v${VERSION}
 
 Usage:
+  generalstaff welcome                                    First-run wizard (recommended for new users)
+    Example: generalstaff welcome
+    # Walks you through provider setup -> register your first project -> run one verified
+    # cycle -> read the audit log. Estimated 30 minutes. Light staff-officer voice; substance
+    # is plain. If you've already configured GS, the wizard offers to skip steps that have
+    # been done. Compose-not-replace: it calls into bootstrap + register + cycle under the hood.
+
   generalstaff session [--budget=<minutes>] [--max-cycles=<n>] [--dry-run]
                        [--exclude-project=<id>[,<id>...]] [--project=<id>[,<id>...]]
                        [--verbose] [--chain=<n>] [--provider=<claude|openrouter|ollama>]
@@ -2924,6 +2932,20 @@ switch (command) {
       );
     } else {
       process.stdout.write(patchContent);
+    }
+    break;
+  }
+
+  case "welcome": {
+    // First-run wizard. Composes provider setup + bootstrap + register
+    // + one cycle + audit display into a guided flow for non-technical
+    // users. Light staff-officer voice; substance is plain. See
+    // src/welcome.ts for the step state machine.
+    const result = await runWelcome();
+    if (!result.ok) {
+      // Reason already printed by the orchestrator. Exit non-zero so
+      // shell scripts see the abort.
+      process.exit(1);
     }
     break;
   }

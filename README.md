@@ -234,12 +234,31 @@ bun link                                  # makes `generalstaff` a global comman
 generalstaff doctor                       # verify prerequisites
 ```
 
-Point it at a project you want the bot to work on:
+### First-run wizard (recommended for new users)
 
 ```bash
-generalstaff init /path/to/your-project --id=myproject
-# edit projects.yaml -- set engineer_command, verification_command,
-# cycle_budget_minutes, and hands_off patterns for the project
+generalstaff welcome
+```
+
+`gs welcome` is a guided ~30-minute briefing for first-time users.
+It walks you through provider setup (ollama / openrouter / claude),
+registering your first project, and running one verified cycle so
+you can see the dispatcher → engineer → verification → reviewer
+loop work end-to-end before you trust it with real tasks. The
+substance of every prompt is plain; the staff-officer voice is
+flavor only. You can quit at any prompt with Ctrl-C; nothing
+irreversible happens until each step's final confirmation.
+
+The wizard composes the existing `bootstrap` + `register` + `cycle`
+commands under the hood — once you've used it once, the manual
+flow below is straightforward.
+
+### Manual flow (experienced users / scripted setup)
+
+```bash
+generalstaff bootstrap /path/to/your-project "what this project is" --id=myproject
+# review the .generalstaff-proposal/ output, then move hands_off.yaml into place
+generalstaff register myproject --path=/path/to/your-project
 generalstaff config                       # pretty-print the parsed config
 generalstaff cycle --project=myproject --dry-run
 ```
