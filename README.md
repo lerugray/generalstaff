@@ -12,26 +12,36 @@ Verification gate you can't prompt around. Hands-off lists per project.
 Full audit log of every prompt, response, tool call, and diff in your
 own repo. Open-source alternative to closed SaaS bot platforms.
 
-> **Status:** v0.1.0 tagged 2026-04-19. **1,628 passing tests** across
-> 48 files. Tests doubling as a gate cross-check: a cycle only verifies
-> if the suite passes. **17 managed projects** in the fleet (mix of
-> Mode A bot-pickable and Mode B interactive-only). Cross-platform
-> (Windows, macOS, Linux).
+> **Status:** v0.2.0 tagged 2026-05-02 (v0.1.0 was 2026-04-19;
+> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **~1,820 passing
+> tests** across 58 files. Tests doubling as a gate cross-check: a
+> cycle only verifies if the suite passes. **17 managed projects**
+> in the fleet (mix of Mode A bot-pickable and Mode B
+> interactive-only). Cross-platform (Windows, macOS, Linux);
+> macOS dogfood-validated 2026-05-01.
 >
-> **Shipped through launch (Phases 1-7):** sequential MVP,
+> **Subscription auth:** the `claude` provider supports Anthropic
+> Pro / Max sessions in addition to API keys, so users on a paid
+> Claude plan can run GeneralStaff without separate API spend. BYOK
+> remains the default per Hard Rule 8.
+>
+> **Shipped through launch (Phases 1-7, v0.1.0):** sequential MVP,
 > multi-provider LLM routing, cross-project generality, parallel
 > worktrees opt-in, visual anchor (terminal dashboards), local web
 > dashboard at `generalstaff serve`, pluggable engineer (claude / 
 > aider; OpenRouter Qwen 3.6+ Plus cleared 80% on a 10-task
 > benchmark), creative-work opt-in, Mode B registrations.
 >
-> **Post-launch additions:** usage-budget gate (cap sessions on
-> USD / tokens / cycles, reads `ccusage` for real spend), Basecamp 4
-> integration (first-party OAuth2 + read-only CLI; opt-in plumbing),
-> AGENTS.md wizard (cross-platform agent-config skill at register
-> time), multi-agent orchestration tooling (Tier 1/2/3 spawn
-> primitives + inbox-injection routing for parallel sessions). Full
-> closure narratives + design docs in [Roadmap](#roadmap).
+> **Shipped in v0.2.0 (2026-04-21..05-02):** usage-budget gate
+> (cap sessions on USD / tokens / cycles, reads `ccusage` for real
+> spend), Basecamp 4 integration (first-party OAuth2 + read-only
+> CLI; opt-in plumbing), AGENTS.md wizard (cross-platform
+> agent-config skill at register time), multi-agent orchestration
+> tooling (Tier 1/2/3 spawn primitives + inbox-injection routing
+> for parallel sessions), `gs welcome` first-run wizard,
+> Claude subscription auth (Pro / Max), Mac / Linux session
+> launcher, `gs` shim install. Full release notes in
+> [`CHANGELOG.md`](CHANGELOG.md).
 
 > **Built by itself.** GeneralStaff is registered as its own first
 > managed project. Every verified commit in this repo passed the
@@ -68,6 +78,13 @@ On 2026-04-15 this repo was scaffold + Phase 0 design docs with no
 executable code (see `docs/internal/PIVOT-2026-04-15.md` for the day it was
 rescoped from "personal nightly dispatcher" to "open-source
 alternative to Polsia"). On 2026-04-19 it tagged v0.1.0.
+
+The headline numbers below count engineer-cycle commits, not
+human-hours. The tool runs cycles in parallel and overnight; one
+human sat at one keyboard, but the dispatcher kept working when the
+human stopped. The point of citing them is reproducibility — every
+cycle is in `PROGRESS.jsonl` and you can verify the gate fired —
+not that a single human typed all of it.
 
 Between those two dates, dogfooding itself the whole time:
 
@@ -582,47 +599,53 @@ root.
   creative cycle (bookfinder-general's bf-005) drafted a
   usable-with-light-edit README section now live on public main.
   See [`docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`](docs/internal/PHASE-7-BENCHMARK-2026-04-20.md).
-- ✓ **Usage-budget gate** (closed 2026-04-21): session-level
-  consumption cap wired into the dispatcher loop. Fleet-wide and
-  per-project `session_budget` config with exactly-one-unit
-  validation (max_usd / max_tokens / max_cycles), hard-stop and
-  advisory enforcement modes, and a `skip-project` option on
-  per-project caps so one project exhausting its share drops off
-  the picker without ending the session. Reads Claude Code's own
-  5-hour session blocks via the `ccusage` library, so the gate
-  reflects real spend rather than a pre-cycle estimate. Design in
+- ✓ **Usage-budget gate** (shipped in v0.2.0, closed 2026-04-21):
+  session-level consumption cap wired into the dispatcher loop.
+  Fleet-wide and per-project `session_budget` config with
+  exactly-one-unit validation (max_usd / max_tokens / max_cycles),
+  hard-stop and advisory enforcement modes, and a `skip-project`
+  option on per-project caps so one project exhausting its share
+  drops off the picker without ending the session. Reads Claude
+  Code's own 5-hour session blocks via the `ccusage` library, so
+  the gate reflects real spend rather than a pre-cycle estimate.
+  Design in
   [`docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`](docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md).
-- ✓ **Basecamp 4 integration** (closed 2026-04-21): first-party
-  OAuth2 setup helper, thin TypeScript client, and
+- ✓ **Basecamp 4 integration** (shipped in v0.2.0, closed
+  2026-04-21): first-party OAuth2 setup helper, thin TypeScript
+  client, and
   `generalstaff integrations basecamp auth | whoami | projects`
   CLI subcommands. Optional plumbing; the dispatcher itself does
   not depend on Basecamp. A GS-managed project can pull Basecamp
   state into its own cycle prompts. Docs in
   [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
-- ✓ **AGENTS.md wizard, Phase A** (closed 2026-04-25): a Claude
-  Code skill at `.claude/skills/agents-md-wizard/` that runs a
-  conversational discovery wizard producing an AGENTS.md at the
-  project root. Type-branched question sets (heavy 8-12 questions
-  for business / game / research / infra projects; lightweight
-  2-3 for side-hustle / personal-tool / nonsense; skip for
-  no-plan-needed). Wired into `generalstaff register` with a
-  skip-by-default prompt; standalone via `generalstaff plan
-  <project>`. AGENTS.md is the cross-platform agent-config
-  standard adopted by Claude Code, Cursor, Aider, Codex, Zed, and
-  the rest, so the artifact gives free integration with whatever
-  other AI tool you use. Phase B (reviewer alignment check) and
-  Phase C (drift detection) follow.
-- ✓ **Multi-agent orchestration tooling** (closed 2026-04-25):
-  scripts at [`scripts/orchestration/`](scripts/orchestration/)
-  for spawning, monitoring, and routing work across parallel
-  Claude Code sessions. Four tiers in increasing weight: in-process
-  `Agent` subagents, opt-in Agent Teams (inter-agent messaging),
-  Tier 2 background `claude -p` spawns for bounded one-shot
-  side-quests, Tier 3 detached visible cmd windows for work that
-  must outlive the primary session. Inbox-injection hook (v4)
-  routes messages between sessions via a shared outbox without
-  shared state. Used in dogfood for parallel feature sprints
-  across managed projects.
+- ✓ **AGENTS.md wizard, Phase A** (shipped in v0.2.0, closed
+  2026-04-25): a Claude Code skill at
+  `.claude/skills/agents-md-wizard/` that runs a conversational
+  discovery wizard producing an AGENTS.md at the project root.
+  Type-branched question sets (heavy 8-12 questions for business
+  / game / research / infra projects; lightweight 2-3 for
+  side-hustle / personal-tool / nonsense; skip for no-plan-needed).
+  Wired into `generalstaff register` with a skip-by-default prompt;
+  standalone via `generalstaff plan <project>`. AGENTS.md is the
+  cross-platform agent-config standard adopted by Claude Code,
+  Cursor, Aider, Codex, Zed, and the rest, so the artifact gives
+  free integration with whatever other AI tool you use. Phase B
+  (reviewer alignment check) and Phase C (drift detection) follow.
+- ✓ **Multi-agent orchestration tooling** (shipped in v0.2.0,
+  closed 2026-04-25): scripts at
+  [`scripts/orchestration/`](scripts/orchestration/) for spawning,
+  monitoring, and routing work across parallel Claude Code
+  sessions. Four tiers in increasing weight: in-process `Agent`
+  subagents, opt-in Agent Teams (inter-agent messaging), Tier 2
+  background `claude -p` spawns for bounded one-shot side-quests,
+  Tier 3 detached visible cmd windows for work that must outlive
+  the primary session. Inbox-injection hook (v4) routes messages
+  between sessions via a shared outbox without shared state. Used
+  in dogfood for parallel feature sprints across managed projects.
+- ✓ **`gs welcome` first-run wizard, Claude subscription auth,
+  Mac/Linux session launcher, `gs` shim install** (shipped in
+  v0.2.0): see [`CHANGELOG.md`](CHANGELOG.md) for full per-feature
+  notes.
 - **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
   the dashboard, edit `tasks.json` from the UI, merge `bot/work`
   with a button. Read-only v1 is the current dashboard; actions
