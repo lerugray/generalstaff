@@ -69,22 +69,30 @@ an explicit `docs/internal/RULE-RELAXATION-<date>.md` log file documenting why.*
 
 ## Working with this folder
 
-- This is a **planning + scaffold folder** that is now also a
-  **Phase 0 design pass** for an open-source product. Most tools
-  (build systems, test suites, package managers) don't apply yet
-  because there's no executable code.
-- **Do NOT generate executable code without explicit Ray approval**
-  — design first, build second, only after the design is reviewed.
-- Each design decision goes into `DESIGN.md` (append-only — v1
-  is preserved at the top, v2+ goes below).
-- Each open question goes into the "Open questions" section of
-  `DESIGN.md` or `docs/internal/RULE-RELAXATION-2026-04-15.md` §4 until it's
+- This is a **shipped codebase** as of v0.1.0 (2026-04-19). Bun +
+  TypeScript, full test suite (1,850+ across 58 files as of
+  2026-05-01), public on GitHub. Code lands routinely via the
+  dispatcher itself (dogfood) and via interactive sessions for
+  taste-work, architecture, and design docs. The earlier
+  "planning + scaffold folder" framing was accurate pre-pivot
+  and through Phase 0 (mid-April 2026); it no longer applies.
+- **Architectural changes need design context first.** When the
+  task is a structural shift (new subsystem, schema change,
+  cross-cutting refactor), update `DESIGN.md` (append-only — v1
+  at the top, v2+ below) before or alongside the code so the
+  rationale is recoverable from the repo. Routine bug fixes,
+  small features, test additions, and dogfood cycles do not need
+  a design pass.
+- Each open architecture question goes into the "Open questions"
+  section of `DESIGN.md` or
+  `docs/internal/RULE-RELAXATION-2026-04-15.md` §4 until it's
   answered.
-- Research that informs the design goes into `docs/internal/research-notes.md`
-  (append with date headers — don't rewrite history).
-- The folder is also an **Obsidian vault** — see `docs/internal/INDEX.md` for
-  the map of content. The repo is public at
-  `github.com/lerugray/generalstaff` as of 2026-04-20.
+- Research that informs design goes into
+  `docs/internal/research-notes.md` (append with date headers —
+  don't rewrite history).
+- The folder is also an **Obsidian vault** — see
+  `docs/internal/INDEX.md` for the map of content. The repo is
+  public at `github.com/lerugray/generalstaff` as of 2026-04-20.
 
 ## Session context (persistence across machines)
 

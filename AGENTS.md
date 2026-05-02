@@ -51,8 +51,10 @@ Both humans and bots:
 ## 6. What constraints are load-bearing
 
 - **Hardware:** laptop-class dev environment. No cloud infrastructure
-  dependency. Runs on Windows-native (Git Bash + PowerShell); WSL2 is
-  a follow-on, not a target.
+  dependency. Cross-platform: Windows-native (Git Bash + PowerShell),
+  macOS (bootstrap validated 2026-05-01 on a fresh MacBook via
+  `install.sh` + `gs welcome`), Linux. WSL2 is supported on Windows
+  but not the primary target.
 - **Cost ceiling:** must fit within an Anthropic Max 20 subscription
   for a single operator's daily use. Features that require
   pay-as-you-go API spend, enterprise tiers, or external paid services
@@ -75,6 +77,11 @@ The maintainer, plus any external contributors who emerge.
   first, WSL2 secondary.
 - 2026-04-25: Not pay-as-you-go API spend dependent — Max 20
   subscription is the ceiling.
+- 2026-05-01: Cross-platform amended in. Fresh-Mac dogfood pass
+  validated install + bootstrap + wizard end-to-end; install.sh
+  shim, wizard subscription-auth, and model-picker fixes shipped
+  same evening. Supersedes the 2026-04-25 "Windows-first" framing
+  for the OS dimension; the Max-subscription ceiling stays.
 
 ---
 
