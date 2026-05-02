@@ -22,6 +22,18 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
+// Resolve the user's home directory in a way that respects runtime
+// changes to HOME / USERPROFILE. Bun's os.homedir() caches its value
+// at process startup on POSIX, so tests that set process.env.HOME =
+// fixture in beforeEach get back the real homedir from os.homedir()
+// instead of the fixture path. Reading the env vars directly keeps
+// the tests honest and matches standard Unix HOME-override semantics
+// (env wins over passwd lookup) for users who, for example, run with
+// a sandboxed HOME pointing at a profile dir.
+function getEffectiveHomedir(): string {
+  return process.env.HOME ?? process.env.USERPROFILE ?? homedir();
+}
+
 export interface SessionNotificationParams {
   success: boolean;
   budgetMinutes: number;
@@ -42,7 +54,7 @@ interface TelegramCredentials {
 }
 
 export function loadTelegramCredentials(
-  homeDir: string = homedir(),
+  homeDir: string = getEffectiveHomedir(),
 ): TelegramCredentials | null {
   try {
     const mcpPath = join(homeDir, ".claude", ".mcp.json");
