@@ -250,7 +250,7 @@ loop work end-to-end before you trust it with real tasks.
 The provider step detects whether `claude` is on your PATH and
 offers a **subscription** path with no API key required. Pro and
 Max subscribers don't need to manage a separate Anthropic API
-key — the wizard writes a config that spawns `claude -p` directly
+key. The wizard writes a config that spawns `claude -p` directly
 and inherits your CLI session. API-key auth is supported as the
 second option for users without a subscription. (For openrouter
 or ollama, the wizard prompts for the relevant credential or host
