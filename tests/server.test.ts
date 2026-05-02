@@ -778,6 +778,37 @@ describe("startServer — gs-269 layout + / route + static stylesheet", () => {
     // data via getFleetOverview and renders fleet aggregates + a per-project
     // table + CLI dispatch hints. This test locks in that structure so the
     // placeholder can't regress.
+    //
+    // Self-contained fixture: the surrounding describe block resets rootDir
+    // to process.cwd() in beforeEach for tests that exercise empty/error
+    // paths; this test specifically needs a populated projects.yaml so the
+    // fleet-overview success path renders the table headings the assertions
+    // below check for. Without the fixture, getFleetOverview throws on a
+    // clean machine and the renderer falls back to an error message that
+    // doesn't contain "cycles" or "<th>Project</th>".
+    const FIXTURE_DIR = join(tmpdir(), `gs-server-fleet-${process.pid}`);
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(join(FIXTURE_DIR, "proj-alpha", "state", "alpha"), { recursive: true });
+    const projectPath = join(FIXTURE_DIR, "proj-alpha").replace(/\\/g, "/");
+    const projectsYaml = [
+      "projects:",
+      `  - id: alpha`,
+      `    path: ${projectPath}`,
+      `    priority: 1`,
+      `    engineer_command: "echo"`,
+      `    verification_command: "echo"`,
+      `    cycle_budget_minutes: 30`,
+      `    branch: bot/work`,
+      `    auto_merge: false`,
+      `    hands_off:`,
+      `      - secret/`,
+      "dispatcher:",
+      "  max_parallel_slots: 1",
+    ].join("\n");
+    writeFileSync(join(FIXTURE_DIR, "projects.yaml"), projectsYaml, "utf8");
+    const savedRoot = getRootDir();
+    setRootDir(FIXTURE_DIR);
+
     const server = await startServer({ port: 0 });
     try {
       const res = await fetch(`${server.url}/`);
@@ -803,6 +834,8 @@ describe("startServer — gs-269 layout + / route + static stylesheet", () => {
       expect(body).toContain("generalstaff stop");
     } finally {
       server.stop();
+      setRootDir(savedRoot);
+      rmSync(FIXTURE_DIR, { recursive: true, force: true });
     }
   });
 
