@@ -237,16 +237,27 @@ generalstaff doctor                       # verify prerequisites
 ### First-run wizard (recommended for new users)
 
 ```bash
-generalstaff welcome
+gs welcome              # short form, after the one-line installer
+generalstaff welcome    # long form, after a manual install
 ```
 
-`gs welcome` is a guided ~30-minute briefing for first-time users.
-It walks you through provider setup (ollama / openrouter / claude),
+A guided ~30-minute briefing for first-time users. It walks you
+through provider setup (ollama, openrouter, or claude),
 registering your first project, and running one verified cycle so
 you can see the dispatcher → engineer → verification → reviewer
-loop work end-to-end before you trust it with real tasks. The
-substance of every prompt is plain; the staff-officer voice is
-flavor only. You can quit at any prompt with Ctrl-C; nothing
+loop work end-to-end before you trust it with real tasks.
+
+The provider step detects whether `claude` is on your PATH and
+offers a **subscription** path with no API key required. Pro and
+Max subscribers don't need to manage a separate Anthropic API
+key — the wizard writes a config that spawns `claude -p` directly
+and inherits your CLI session. API-key auth is supported as the
+second option for users without a subscription. (For openrouter
+or ollama, the wizard prompts for the relevant credential or host
+URL.)
+
+The substance of every prompt is plain; the staff-officer voice
+is flavor only. You can quit at any prompt with Ctrl-C; nothing
 irreversible happens until each step's final confirmation.
 
 The wizard composes the existing `bootstrap` + `register` + `cycle`
@@ -282,8 +293,15 @@ coverage, but has less real-cycle mileage on it:
 
 - **OS.** macOS and Linux paths exist throughout (shell scripts,
   path resolution, install.sh). The install script smoke-tests
-  clean on all three. Expect rougher edges on macOS/Linux than on
-  Windows until the community shakes them out.
+  clean on all three. A 2026-05-01 fresh-Mac dogfood pass
+  validated the bootstrap end-to-end (install.sh, `gs welcome`
+  through provider setup, full test suite green at 1,850 / 58
+  files); three friction items in install.sh + the wizard
+  (missing PATH shim, claude-only-API-key assumption,
+  free-form model input) shipped fixes the same evening.
+  Real-cycle mileage on macOS/Linux is still lighter than on
+  Windows; expect rougher edges in less-trodden paths until the
+  community shakes them out.
 - **Engineer.** `claude -p` is the default. `engineer_provider: aider`
   with OpenRouter (Qwen 3.6+ Plus) cleared 80% verified on a 10-task
   benchmark (`docs/internal/PHASE-7-BENCHMARK-2026-04-20.md`); it's
