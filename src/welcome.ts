@@ -19,6 +19,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { createInterface } from "readline";
+import { spawnSync } from "child_process";
 import { basename, dirname, isAbsolute, join, resolve } from "path";
 import { getRootDir } from "./state";
 import { runBootstrap, type BootstrapResult } from "./bootstrap";
@@ -102,13 +103,17 @@ three kinds today:
   openrouter   Cloud models including a free tier
                (Qwen / Gemma) and cheap paid tiers.
                You'll need an API key from openrouter.ai.
-  claude       Direct to Anthropic's API. Highest-quality;
-               most expensive per token. Needs an Anthropic
-               API key.
+  claude       Anthropic's Claude. If you have a Claude Code
+               subscription (Pro / Max) and \`claude\` is on
+               your PATH, no API key is needed — the cycle
+               uses your existing CLI session. API-key auth
+               is also supported.
 
 For your first cycle, openrouter's free tier is the easiest
 path: it costs nothing, and the free Qwen and Gemma models
-handle small starter tasks fine.
+handle small starter tasks fine. If you already pay for
+Claude Code, the claude provider is the fastest path to a
+high-quality first cycle without any extra setup.
 `;
 
 const PROJECT_INTRO = `
@@ -193,6 +198,28 @@ function isNo(answer: string): boolean {
   return /^n(o)?$/i.test(answer.trim());
 }
 
+// Detect whether the `claude` CLI is on PATH. Used by stepProvider to
+// offer subscription-based auth (no API key) when Claude Code is
+// already installed. `claude --version` is fast (sub-second) and side-
+// effect-free; status === 0 means the binary ran successfully.
+//
+// Note: a successful version check does NOT prove the user is logged
+// in — only that the binary exists. A subsequent cycle that finds the
+// session unauthed will fail with the runtime's existing reviewer-
+// error path. The wizard intentionally does not block on auth check
+// here (would require running an actual prompt, slow + flaky).
+function claudeCliAvailable(): boolean {
+  try {
+    const result = spawnSync("claude", ["--version"], {
+      timeout: 3000,
+      stdio: "ignore",
+    });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------
 // Step 1: Provider setup
 // ---------------------------------------------------------------
@@ -201,13 +228,24 @@ interface ProviderStepResult {
   ok: boolean;
   kind?: "ollama" | "openrouter" | "claude";
   envVar?: string;
+  // claude only: true when the subscription / CLI-session auth path
+  // was selected (no api_key_env written). False / undefined means
+  // either a non-claude provider or the API-key flow was used.
+  claudeUsesSubscription?: boolean;
   reason?: string;
+}
+
+export interface StepProviderOptions {
+  // Inject `claude` CLI availability for tests. Defaults to a real
+  // `claude --version` probe via spawnSync.
+  claudeAvailable?: () => boolean;
 }
 
 export async function stepProvider(
   prompt: PromptFn,
   write: WriteFn,
   rootDir: string,
+  opts?: StepProviderOptions,
 ): Promise<ProviderStepResult> {
   write(PROVIDER_INTRO);
 
@@ -247,6 +285,7 @@ export async function stepProvider(
   let envVar: string | undefined;
   let model: string;
   let host: string | undefined;
+  let claudeUsesSubscription = false;
 
   if (kind === "ollama") {
     write(
@@ -281,21 +320,66 @@ export async function stepProvider(
       "qwen/qwen3-next-80b-a3b-instruct:free",
     );
   } else {
-    write(
-      "\nGet an Anthropic API key at https://console.anthropic.com (sign in -> Settings -> API Keys).",
-    );
-    write(
-      "Set it in your shell: `export ANTHROPIC_API_KEY=sk-ant-...`.",
-    );
-    envVar = await prompt(
-      "Which environment variable holds the key?",
-      "ANTHROPIC_API_KEY",
-    );
-    if (!process.env[envVar]) {
+    // claude provider — two auth paths:
+    //   subscription: existing `claude` CLI session (Pro / Max). No
+    //                 API key needed. The cycle's reviewer + engineer
+    //                 spawn `claude -p` directly, which inherits the
+    //                 user's logged-in session. This is the path the
+    //                 vast majority of Claude Code users actually
+    //                 want — and the path the wizard previously
+    //                 omitted, locking subscribers out of step 1.
+    //   api_key:      separate Anthropic console key in env var.
+    //                 For users without a subscription, or who want
+    //                 per-token billing instead of flat-rate.
+    const isClaudeAvailable = opts?.claudeAvailable ?? claudeCliAvailable;
+    const cliAvailable = isClaudeAvailable();
+
+    if (cliAvailable) {
       write(
-        `\nWarning: \$${envVar} is not set in this shell. The wizard will still write the config, but the cycle will fail until the env var is exported.`,
+        "\nGood news, Commander — `claude` is on your PATH. Two ways to authenticate:",
       );
+      write(
+        "  1. Subscription   Use your existing Claude Code session (Pro / Max). No API key.",
+      );
+      write(
+        "  2. API key        Direct Anthropic API access. Per-token billing, separate from any subscription.",
+      );
+      const authChoice = await prompt(
+        "Which? (1 = subscription / 2 = API key)",
+        "1",
+      );
+      claudeUsesSubscription =
+        authChoice.trim() === "1" || /^sub/i.test(authChoice.trim());
+    } else {
+      write(
+        "\nHeads-up: `claude` CLI not detected on PATH. If you have a Claude Pro or Max subscription, installing Claude Code (https://claude.com/code) gives you a no-API-key path. Continuing with the API-key flow.",
+      );
+      claudeUsesSubscription = false;
     }
+
+    if (claudeUsesSubscription) {
+      write(
+        "\nUsing your authed Claude Code session. The cycle will spawn `claude -p` directly — auth is inherited from the existing CLI session, no API key required.",
+      );
+      // envVar stays undefined so api_key_env is omitted from the config.
+    } else {
+      write(
+        "\nGet an Anthropic API key at https://console.anthropic.com (sign in -> Settings -> API Keys).",
+      );
+      write(
+        "Set it in your shell: `export ANTHROPIC_API_KEY=sk-ant-...`.",
+      );
+      envVar = await prompt(
+        "Which environment variable holds the key?",
+        "ANTHROPIC_API_KEY",
+      );
+      if (!process.env[envVar]) {
+        write(
+          `\nWarning: \$${envVar} is not set in this shell. The wizard will still write the config, but the cycle will fail until the env var is exported.`,
+        );
+      }
+    }
+
     model = await prompt("Which model?", "claude-sonnet-4-5");
   }
 
@@ -324,7 +408,7 @@ export async function stepProvider(
   writeFileSync(configPath, lines.join("\n"), "utf8");
   write(`\nWrote ${configPath}.`);
 
-  return { ok: true, kind, envVar };
+  return { ok: true, kind, envVar, claudeUsesSubscription };
 }
 
 // ---------------------------------------------------------------

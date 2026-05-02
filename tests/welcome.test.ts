@@ -156,6 +156,81 @@ describe("stepProvider", () => {
     expect(io.questions.length).toBe(1);
     expect(io.questions[0]).toContain("skip");
   });
+
+  // claude provider — three flows: subscription (CLI on PATH, picks 1),
+  // API key chosen explicitly (CLI on PATH, picks 2), and CLI not on
+  // PATH (forced into API-key flow). Subscription is the default that
+  // unblocks Pro / Max users who don't carry a separate API key.
+
+  it("writes claude config without api_key_env when subscription path is chosen", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-subscription");
+    mkdirSync(rootDir, { recursive: true });
+    const io = scriptedIO([
+      "claude", // provider kind
+      "1", // subscription auth
+      "claude-sonnet-4-5", // model (default)
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("claude");
+    expect(result.envVar).toBeUndefined();
+    expect(result.claudeUsesSubscription).toBe(true);
+
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("kind: claude");
+    expect(content).toContain("model: claude-sonnet-4-5");
+    // Critical: no api_key_env line. Subscription auth means no env var.
+    expect(content).not.toContain("api_key_env");
+  });
+
+  it("writes claude config with api_key_env when API-key path is chosen", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-apikey");
+    mkdirSync(rootDir, { recursive: true });
+    const io = scriptedIO([
+      "claude", // provider kind
+      "2", // API key auth
+      "ANTHROPIC_API_KEY", // env var (default)
+      "claude-sonnet-4-5", // model (default)
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("claude");
+    expect(result.envVar).toBe("ANTHROPIC_API_KEY");
+    expect(result.claudeUsesSubscription).toBe(false);
+
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("kind: claude");
+    expect(content).toContain("api_key_env: ANTHROPIC_API_KEY");
+  });
+
+  it("falls through to API-key flow when claude CLI is not on PATH", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-no-cli");
+    mkdirSync(rootDir, { recursive: true });
+    // No "1 / 2" prompt is asked because the CLI-absent branch skips
+    // the auth-choice question entirely.
+    const io = scriptedIO([
+      "claude",
+      "ANTHROPIC_API_KEY",
+      "claude-sonnet-4-5",
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => false,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("claude");
+    expect(result.envVar).toBe("ANTHROPIC_API_KEY");
+    expect(result.claudeUsesSubscription).toBe(false);
+
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("api_key_env: ANTHROPIC_API_KEY");
+  });
 });
 
 // ---------------------------------------------------------------
