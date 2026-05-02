@@ -1466,3 +1466,153 @@ authenticate, but the upstream warning saves log-reading.
   does on ambiguous tasks?** The reviewer catches both at the
   gate regardless of engineer, but drift patterns may inform
   the prompt shape.
+
+## §v8 — Post-v7 architectural index (rolling, started 2026-05-01)
+
+DESIGN.md v1-v7 captures the open architectural decisions with
+rationale through engineer pluggability (2026-04-20). The
+architectural moves shipped between v7 and the present each
+have their own dated design / closure doc rather than a fresh
+DESIGN.md section, because they were each scoped narrow enough
+that the per-phase doc carried the full story without needing
+the DESIGN.md ceremony. This v8 section is the index — it points
+future readers at where each post-v7 architectural decision
+actually lives so the rationale is recoverable from the repo
+without rediscovering the per-phase doc by accident.
+
+Future architectural moves that warrant a full DESIGN.md
+section (cross-cutting concerns, load-bearing new constraints,
+reversal of an earlier decision) should still get their own
+v8.x or v9 entry here. Routine UX polish, deployment fixes,
+and convention tweaks land in the relevant per-phase doc plus
+this index, not a full new section.
+
+### Web dashboard (Phase 6, closed 2026-04-20)
+
+Local HTTP server (`Bun.serve`, port 3737) plus
+`generalstaff serve` CLI subcommand plus shared layout +
+stylesheet (foundation trio gs-267 / gs-268 / gs-269) plus
+four route handlers (`/project/:id`, `/cycle/:cycleId`,
+`/tail/:sessionId` SSE stream, `/inbox`). Localhost-bound;
+no auth beyond 127.0.0.1.
+
+Design rationale + sketch:
+[`docs/internal/PHASE-6-SKETCH-2026-04-19.md`](docs/internal/PHASE-6-SKETCH-2026-04-19.md).
+Hard Rule 2's "local UI is permitted as a viewer/controller"
+relaxation (v2 §) is what unblocked this; the dashboard is a
+viewer/controller, never a hosted SaaS.
+
+### Usage-budget gate (closed 2026-04-21)
+
+Session-level consumption cap with units (USD / tokens /
+cycles), `hard-stop` or `advisory` enforcement, optional
+per-project `on_exhausted: skip-project`, and
+`ccusage`-backed provider readers that surface real
+post-cycle consumption rather than pre-cycle estimates.
+
+Design rationale:
+[`docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`](docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md).
+Convention surface:
+[`docs/conventions/usage-budget.md`](docs/conventions/usage-budget.md).
+Hard Rule 8 (BYOK) plus the "user pays the API surface"
+framing implied a hard cost ceiling per session was needed
+once Phase 4 parallel mode could multiply spend by N; the
+gate is the structural answer.
+
+### Basecamp 4 integration (closed 2026-04-21)
+
+First-party OAuth2 setup helper, thin TypeScript client, and
+`generalstaff integrations basecamp <subcommand>` CLI surface.
+Optional plumbing — the dispatcher itself does not depend on
+Basecamp; a managed project's `engineer_command` can pull
+Basecamp state into its own cycle prompts.
+
+Design rationale + setup:
+[`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
+Pattern established here is "integrations live behind their own
+CLI subcommand with their own credential plumbing; the
+dispatcher never sees the provider's auth surface." Future
+integrations should mirror this shape.
+
+### AGENTS.md wizard skill (closed 2026-04-25)
+
+Claude Code skill at `.claude/skills/agents-md-wizard/` that
+runs a conversational discovery wizard producing an AGENTS.md
+at project root. Type-branched question sets per project
+category (heavy 8-12 questions for business / game / research /
+infra; lightweight 2-3 for side-hustle / personal-tool /
+nonsense; skip for no-plan-needed). Wired into
+`generalstaff register` with skip-by-default; standalone via
+`generalstaff plan <project>`.
+
+Implementation lives at `.claude/skills/agents-md-wizard/SKILL.md`
+plus the gs-322 / gs-323 commits. The skills-first integration
+pattern means external tools don't bake into GS core; they live
+alongside via portable SKILL.md artifacts.
+
+### Multi-agent orchestration tooling (closed 2026-04-25)
+
+Scripts at [`scripts/orchestration/`](scripts/orchestration/)
+for spawning, monitoring, and routing work across parallel
+Claude Code sessions. Four-tier spawn hierarchy: in-process
+`Agent` subagents, opt-in Agent Teams (inter-agent messaging),
+Tier 2 background `claude -p` spawns for bounded one-shot
+side-quests, Tier 3 detached visible cmd windows for work
+that must outlive the primary session. Inbox-injection hook
+(v4) routes messages between sessions via a shared outbox
+without shared state.
+
+Tier table + design rationale:
+[`scripts/orchestration/README.md`](scripts/orchestration/README.md).
+Used in dogfood for parallel feature sprints across managed
+projects; orthogonal to Phase 4's per-session parallel
+worktrees (this is parallel sessions, not parallel cycles
+inside one session).
+
+### `gs welcome` first-run wizard (closed 2026-05-01)
+
+Composes existing primitives (provider config writer plus
+`runBootstrap` plus `runRegister` plus spawn `gs cycle` plus
+audit reader) into one guided flow for non-technical
+onboardees. Three steps: provider setup, project register +
+auto-move `hands_off.yaml`, first verified cycle + audit
+display. Light staff-officer voice; substance is plain.
+
+Implementation: `src/welcome.ts` plus `tests/welcome.test.ts`.
+Provider step detects `claude` on PATH and offers a
+no-API-key subscription path for Pro / Max users. Model
+prompt is a numbered-list picker per provider kind with a
+recommended default and a Custom escape hatch.
+
+Mac-dogfood pass on 2026-05-01 surfaced three friction items
+(install.sh missing PATH shim, claude provider locking out
+subscription auth, free-form model input) and shipped fixes
+for all three within the same evening (commits `b8a62d9`,
+`9593c12`, `a0b0d35`). Friction log captured in private
+maintainer memory; resolution log is in the public commit
+messages.
+
+This is the Kunal-aligned "lower the day-one barrier for
+non-technical CLI users" arc made concrete: the wizard is
+the first non-CLI surface a new user touches, and its
+friction shape is the load-bearing signal for what to build
+next on the onboarding path.
+
+### Cross-platform validation (2026-05-01)
+
+Mac as a tested platform was settled on 2026-05-01 evening.
+Earlier framing (Windows-first, WSL2 secondary, macOS / Linux
+"rougher edges") reflected the absence of dogfood mileage on
+non-Windows; the AGENTS.md non-goals list captured that as a
+reactive-pruning entry on 2026-04-25. The 2026-05-01 fresh-Mac
+dogfood pass closed the gap on the install + bootstrap +
+wizard path. The "real-cycle mileage on macOS / Linux is still
+lighter than Windows" framing is preserved (true) but the
+"not a target" framing is gone (no longer true).
+
+AGENTS.md reactive-pruning log appended a 2026-05-01 entry
+that supersedes the OS dimension of the 2026-04-25 entry.
+README "Tested configurations" section now describes the Mac
+validation. CLAUDE.md "Working with this folder" section
+dropped the "no executable code yet" framing (also stale; was
+accurate pre-pivot through Phase 0).
