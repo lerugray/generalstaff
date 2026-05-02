@@ -96,6 +96,15 @@ pull on the other. The repo is public at
 - [[research-notes]] — verbatim findings on nightcrawler,
   parallel-cc, Polsia, Continuous-Claude-v3 (append-only, dated)
 
+## Editorial voice
+
+- [[VOICE]] — calibration for public writing (README, landing
+  copy, release notes). Anti-Polsia positioning, Hammerstein /
+  Kriegspiel intellectual frame, dogfooding-as-credibility
+  framing, mainstream-economics anchors. Captured 2026-04-17;
+  migrated from the private companion repo 2026-05-01 with the
+  maintainer-personal section trimmed.
+
 ## Conventions for working in this folder
 
 - [[CLAUDE]] — instructions for future Claude sessions in this
