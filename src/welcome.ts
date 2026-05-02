@@ -198,6 +198,119 @@ function isNo(answer: string): boolean {
   return /^n(o)?$/i.test(answer.trim());
 }
 
+// ---------------------------------------------------------------
+// Model picker — list-of-choices replacement for the previous
+// free-form `prompt("Which model?", default)`. Non-technical users
+// have no way to know that "Opus 4.7" is canonically
+// `claude-opus-4-7` (no space, hyphenated); typing the human-
+// readable name silently writes a broken model id that only
+// surfaces at cycle time. Lists let users pick by number with a
+// recommended default highlighted. The "Custom" option is the
+// escape hatch for power users who already know the ID they want.
+
+interface ModelChoice {
+  id: string;
+  description: string;
+  recommended?: boolean;
+}
+
+const CLAUDE_MODELS: ModelChoice[] = [
+  {
+    id: "claude-opus-4-7",
+    description:
+      "Highest capability. Recommended default — best signal-per-cycle, especially on flat-rate Max plans where you're not metering tokens.",
+    recommended: true,
+  },
+  {
+    id: "claude-sonnet-4-6",
+    description:
+      "Fast + capable. Right call when you want shorter cycle times or are running many cycles.",
+  },
+  {
+    id: "claude-haiku-4-5",
+    description:
+      "Cheapest + fastest. Best for narrow / mechanical tasks where Opus is overkill.",
+  },
+];
+
+const OPENROUTER_MODELS: ModelChoice[] = [
+  {
+    id: "qwen/qwen3-next-80b-a3b-instruct:free",
+    description: "Free. Code-leaning, strong for structured / JSON tasks.",
+    recommended: true,
+  },
+  {
+    id: "google/gemma-4-31b-it:free",
+    description: "Free. Prose-leaning. Good fallback when Qwen is busy.",
+  },
+  {
+    id: "qwen/qwen3-coder-30b-a3b-instruct",
+    description:
+      "Paid (~$0.07/M in). Cheap + reliable when free tier is rate-limited.",
+  },
+  {
+    id: "anthropic/claude-sonnet-4-6",
+    description: "Paid (~$3/M in). Top quality on OpenRouter.",
+  },
+];
+
+const OLLAMA_MODELS: ModelChoice[] = [
+  {
+    id: "llama3.1",
+    description: "8B params, general purpose. Common default.",
+    recommended: true,
+  },
+  {
+    id: "qwen2.5-coder:7b",
+    description: "Code-leaning. Better than llama for code tasks.",
+  },
+];
+
+async function pickModel(
+  prompt: PromptFn,
+  write: WriteFn,
+  choices: ModelChoice[],
+): Promise<string> {
+  write("\nAvailable models (★ = recommended):");
+  choices.forEach((c, i) => {
+    const marker = c.recommended ? " ★" : "  ";
+    write(`  ${i + 1}.${marker} ${c.id}`);
+    write(`        ${c.description}`);
+  });
+  write(
+    `  ${choices.length + 1}.    Custom — type a model ID I haven't listed.`,
+  );
+
+  const recIdx = choices.findIndex((c) => c.recommended);
+  const fallbackIdx = recIdx >= 0 ? recIdx : 0;
+  const defaultStr = String(fallbackIdx + 1);
+
+  const answer = await prompt(
+    "Pick a number (or type a custom model ID directly)",
+    defaultStr,
+  );
+  const trimmed = answer.trim();
+  const n = parseInt(trimmed, 10);
+  // Treat as numeric only when the trimmed input is *exactly* a
+  // number — "1abc" parses as 1 but is not a valid choice.
+  if (!Number.isNaN(n) && String(n) === trimmed) {
+    if (n >= 1 && n <= choices.length) {
+      return choices[n - 1]!.id;
+    }
+    if (n === choices.length + 1) {
+      const custom = await prompt("Type the model ID");
+      return custom.trim();
+    }
+    write(
+      `\nNumber out of range. Using recommended: ${choices[fallbackIdx]!.id}`,
+    );
+    return choices[fallbackIdx]!.id;
+  }
+  // Non-numeric: treat as a direct model ID (escape hatch for users
+  // who pasted in a known-good ID).
+  return trimmed;
+}
+
 // Detect whether the `claude` CLI is on PATH. Used by stepProvider to
 // offer subscription-based auth (no API key) when Claude Code is
 // already installed. `claude --version` is fast (sub-second) and side-
@@ -295,7 +408,7 @@ export async function stepProvider(
       "If you haven't installed Ollama yet, get it from https://ollama.com and run `ollama pull llama3.1` first.",
     );
     host = await prompt("Ollama host URL?", "http://localhost:11434");
-    model = await prompt("Which model?", "llama3.1");
+    model = await pickModel(prompt, write, OLLAMA_MODELS);
   } else if (kind === "openrouter") {
     write(
       "\nGet a free API key at https://openrouter.ai (sign in, click your profile -> Keys -> Create Key).",
@@ -312,13 +425,7 @@ export async function stepProvider(
         `\nWarning: \$${envVar} is not set in this shell. The wizard will still write the config, but the cycle will fail until the env var is exported. Set it and re-run \`gs welcome\` if needed.`,
       );
     }
-    write(
-      "\nOpenRouter has free tiers for Qwen and Gemma. The free Qwen3 Next 80B model is a good default for code tasks.",
-    );
-    model = await prompt(
-      "Which model?",
-      "qwen/qwen3-next-80b-a3b-instruct:free",
-    );
+    model = await pickModel(prompt, write, OPENROUTER_MODELS);
   } else {
     // claude provider — two auth paths:
     //   subscription: existing `claude` CLI session (Pro / Max). No
@@ -380,7 +487,7 @@ export async function stepProvider(
       }
     }
 
-    model = await prompt("Which model?", "claude-sonnet-4-5");
+    model = await pickModel(prompt, write, CLAUDE_MODELS);
   }
 
   // Write provider_config.yaml. Format matches what

@@ -231,6 +231,71 @@ describe("stepProvider", () => {
     const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
     expect(content).toContain("api_key_env: ANTHROPIC_API_KEY");
   });
+
+  // pickModel coverage — exercises the numbered-list picker that
+  // replaced the previous free-form prompt("Which model?", default).
+  // Non-numeric input still works as the "I know the ID I want"
+  // escape hatch; numeric input maps to the choices list; one
+  // past-the-list triggers the Custom prompt.
+
+  it("writes the selected claude model when user picks a number from the list", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-numbered");
+    mkdirSync(rootDir, { recursive: true });
+    // CLAUDE_MODELS order: 1 = opus-4-7 (recommended), 2 = sonnet-4-6,
+    // 3 = haiku-4-5, 4 = Custom. Pick "2" -> sonnet-4-6.
+    const io = scriptedIO([
+      "claude", // provider kind
+      "1", // subscription auth
+      "2", // model choice -> sonnet
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("claude");
+
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("model: claude-sonnet-4-6");
+  });
+
+  it("uses the recommended claude model when user accepts the default at the picker", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-default-model");
+    mkdirSync(rootDir, { recursive: true });
+    // Empty string at the picker -> default -> recommended idx + 1.
+    // Recommended in CLAUDE_MODELS is opus-4-7 (idx 0), so "1".
+    const io = scriptedIO([
+      "claude", // provider kind
+      "1", // subscription auth
+      "", // accept default at model picker -> opus-4-7
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => true,
+    });
+    expect(result.ok).toBe(true);
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("model: claude-opus-4-7");
+  });
+
+  it("accepts a custom model id when user picks the Custom option", async () => {
+    const rootDir = join(FIXTURE_ROOT, "claude-custom-model");
+    mkdirSync(rootDir, { recursive: true });
+    // 4 of 4 = Custom (CLAUDE_MODELS has 3 entries + Custom slot).
+    const io = scriptedIO([
+      "claude",
+      "1", // subscription
+      "4", // Custom
+      "claude-experimental-2026-may", // typed ID
+    ]);
+
+    const result = await stepProvider(io.promptFn, io.writeFn, rootDir, {
+      claudeAvailable: () => true,
+    });
+    expect(result.ok).toBe(true);
+    const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
+    expect(content).toContain("model: claude-experimental-2026-may");
+  });
 });
 
 // ---------------------------------------------------------------
