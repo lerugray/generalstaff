@@ -3,6 +3,11 @@ projects.yaml
 # Tracked fixture registry — synthetic paths, safe to commit (gs-241).
 !tests/fixtures/view_integration/projects.yaml
 
+# Real provider_config.yaml is per-machine — written by `gs welcome`,
+# may carry user-chosen API key env var names + model preferences.
+# Root-only match so test fixtures under tests/fixtures/ stay tracked.
+/provider_config.yaml
+
 # Logs from dispatcher runs
 logs/
 *.log
