@@ -78,6 +78,8 @@ state/mission-housing/
 state/catalogdna/
 state/personal-site/
 state/mission-employment/
+state/twar-pc/
+state/greater-than-alexander/
 
 # Bun / Node
 node_modules/
