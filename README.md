@@ -13,12 +13,13 @@ Full audit log of every prompt, response, tool call, and diff in your
 own repo. Open-source alternative to closed SaaS bot platforms.
 
 > **Status:** v0.2.0 tagged 2026-05-02 (v0.1.0 was 2026-04-19;
-> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **~1,820 passing
+> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,854 passing
 > tests** across 58 files. Tests doubling as a gate cross-check: a
-> cycle only verifies if the suite passes. **17 managed projects**
+> cycle only verifies if the suite passes. **30+ managed projects**
 > in the fleet (mix of Mode A bot-pickable and Mode B
-> interactive-only). Cross-platform (Windows, macOS, Linux);
-> macOS dogfood-validated 2026-05-01.
+> interactive-only across the dogfood, game-dev, and mission-*
+> ecosystems). Cross-platform (Windows, macOS, Linux); macOS
+> dogfood-validated 2026-05-01.
 >
 > **Subscription auth:** the `claude` provider supports Anthropic
 > Pro / Max sessions in addition to API keys, so users on a paid
@@ -89,21 +90,25 @@ not that a single human typed all of it.
 
 Between those two dates, dogfooding itself the whole time:
 
-- **1,407 commits**, of which **200** are shipped task commits
+- **1,615+ commits**, of which **250+** are shipped task commits
   (one per `gs-XXX` feature or fix landing on master)
-- **1,628 passing tests** across 48 test files (of which 4 cover
+- **1,854 passing tests** across 58 test files (of which 4 cover
   the symlink-aware hands-off gate added in the pre-HN audit below)
-- **20,500+ lines of TypeScript** in `src/`
-- **211 verified + 20 rejected + 2 weak** reviewer verdicts on its
-  own diffs. The verification gate caught and rolled back 8.6% of
-  what the engineer proposed, including hands-off violations on
+- **24,500+ lines of TypeScript** in `src/`
+- **223 verified + 27 rejected** reviewer verdicts on its own diffs.
+  The verification gate caught and rolled back ~10.8% of what the
+  engineer proposed, including hands-off violations on
   `src/safety.ts`, `src/reviewer.ts`, and `src/prompts/`.
-- 17 managed projects in the fleet. Six Mode A (bot-cycling)
-  pilots from launch (`generalstaff`, `gamr`, `raybrain`,
-  `devforge`, `bookfinder-general`, `catalogdna`); eleven
-  Mode B / interactive-only registrations added 2026-04-21..26
-  (game-dev projects, the mission-* ecosystem, and creative work
-  where the bot tracks tasks but the human writes the diffs).
+- 30+ managed projects in the fleet. Mode A (bot-cycling) pilots:
+  the dogfood (`generalstaff`), matchmaking-app sandbox (`gamr`),
+  second-brain retrieval tool (`raybrain`), Tauri IDE (`devforge`),
+  and cross-platform book-search tool (`bookfinder-general`). The
+  rest run Mode B as interactive-only registrations: game-dev
+  projects, the mission-* ecosystem (mission-bullet,
+  mission-employment, mission-housing, mission-PMA), creative work
+  where the bot tracks tasks and the human writes diffs, and
+  standalone art / research projects (FnordOS, twar-pc,
+  greater-than-alexander, veridian-contraption).
 - Two pre-launch security audits. The first fixed five
   HIGH/MEDIUM findings. The second caught a symlink bypass on the
   hands-off check plus a handful of low-severity hardening items.
@@ -151,7 +156,7 @@ Three architectural pieces make that work:
 - The audit log records every prompt, response, tool call, and
   diff per cycle. You can read it after.
 
-The same architecture runs 17 projects in flight. Co-pilot UIs
+The same architecture runs 30+ projects in flight. Co-pilot UIs
 can't because synchronous chat doesn't parallelize.
 
 ## The approach
@@ -327,7 +332,7 @@ The bot only pushes to `bot/work` on your own remote. Export equals
 
 ### Tested configurations
 
-The full dogfood trail (211 verified cycles, 1,628 passing tests)
+The full dogfood trail (223 verified cycles, 1,854 passing tests)
 ran on **Windows 11 + Claude Code** as the primary engineer. Every
 other combination is wired end-to-end and has working test
 coverage, but has less real-cycle mileage on it:
@@ -675,18 +680,34 @@ root.
   Mac/Linux session launcher, `gs` shim install** (shipped in
   v0.2.0): see [`CHANGELOG.md`](CHANGELOG.md) for full per-feature
   notes.
-- **Phase 6.5+ (proposed):** UI actions — dispatch sessions from
-  the dashboard, edit `tasks.json` from the UI, merge `bot/work`
-  with a button. Read-only v1 is the current dashboard; actions
-  are the next iteration.
-- **Command-room UI aesthetic (proposed):** Kriegspiel-inspired
+### Proposed (not yet scheduled)
+
+- **Phased autonomous progression.** Projects declare a phased
+  roadmap upfront (`state/<project>/ROADMAP.yaml`). Each phase
+  has tasks, completion criteria, and what comes next. The
+  dispatcher detects phase completion, surfaces it to the
+  commander for approval, and seeds the next phase's tasks. The
+  commander touches the system at phase boundaries, not per task.
+  Stronger autonomy for fleet operators running 30+ projects;
+  full design in
+  [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-19.md).
+- **UI actions on top of the read-only dashboard.** Dispatch
+  sessions from the dashboard, edit `tasks.json` from the UI,
+  merge `bot/work` with a button. Read-only v1 is the current
+  dashboard at `generalstaff serve`; write-mode is the next
+  iteration.
+- **Non-programmer-friendly UI/UX path.** The CLI stays the
+  recommended primary surface for users comfortable with a
+  terminal. A guided flow for users who'd rather not live in
+  `bash`: register projects, queue tasks, and watch cycles run
+  from a desktop app or web UI. Scoped for users who can describe
+  a project in plain English but don't want to write `tasks.json`
+  by hand. The visual register inherits from the Phase 5
+  references; the Phase 6.5+ work defines the interaction model.
+- **Command-room UI aesthetic.** Kriegspiel-inspired
   high-density map/status layout, borrowed from 19th-century
   Prussian wargaming. See
   [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
-- **Public launch:** gated on README polish, `SUPPORTERS.md`, and
-  `LICENSE`. Repo is public at `github.com/lerugray/generalstaff`
-  as of 2026-04-20. CLI + dashboard both feature-complete for MVP
-  value; launch timing is separate from phase completion.
 
 ## Documentation
 
