@@ -1,0 +1,17 @@
+[
+  {
+    "id": "dfw-001",
+    "title": "Apply BRIEF_V031_UPDATE.md to the website. Bump 'What's Live' header to v0.3.1; add Mac support headline + cost transparency feature card + LENS mode + native notifications mention; update mode list to 17 modes (Forge, GDD, Pitch, Discuss, Implement, Debug, Research, QA, Freeform, Marketing, Instruct, Test, Security, UI/UX, Mod, Package, Lens); update platform stacks to 20 stacks (call out Swift/iOS, Kotlin/Android, Ruby/RPG Maker, asm6502/NES, Ikemen GO additions); drop 'macOS/Linux when demand exists' and replace with 'Windows 10/11 or macOS 14+ (Apple Silicon)'; verify pricing matches $9 early access; sync itch.html with the main devforge repo's docs/ITCH_LISTING.md (already updated 2026-05-03 in commit 9a2021b on lerugray/devforge); update ROADMAP_PUBLIC.md if v0.4.0 horizon has firmed up. Move BRIEF_V031_UPDATE.md to brief archive/ when done.",
+    "status": "pending",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Voice-bearing marketing copy. Ray writes the prose pass; the brief documents what changed but the wording belongs to him.",
+    "expected_touches": [
+      "index.html",
+      "itch.html",
+      "ROADMAP_PUBLIC.md",
+      "BRIEF_V031_UPDATE.md",
+      "brief archive/"
+    ]
+  }
+]
