@@ -55,6 +55,7 @@ own repo. Open-source alternative to closed SaaS bot platforms.
 
 - [Built in 4 days](#built-in-4-days)
 - [The problem](#the-problem)
+- [A different category](#a-different-category)
 - [The approach](#the-approach)
 - [What it actually catches](#what-it-actually-catches)
 - [What it looks like](#what-it-looks-like)
@@ -129,6 +130,29 @@ credit whether the project ships or not, so the slop isn't a bug in
 their pricing; it's the equilibrium. GeneralStaff refuses to
 participate: local-first, BYOK, open audit log, no platform
 middleman.
+
+## A different category
+
+Most AI coding tools are co-pilots: a human and an AI taking turns
+in a chat window.
+
+GeneralStaff is dispatched labor. You write work orders into
+`tasks.json` and read SITREPs when each cycle finishes. Between
+those, the dispatcher routes cycles to N parallel agents and runs
+each through a Boolean gate before producing a commit.
+
+Three architectural pieces make that work:
+
+- The verification gate runs three checks per cycle: tests pass,
+  diff non-empty, reviewer confirms scope match. Cycles that fail
+  any check roll back.
+- Hands-off lists name the files the bot can't touch. The reviewer
+  flags any diff touching those paths, and the cycle rolls back.
+- The audit log records every prompt, response, tool call, and
+  diff per cycle. You can read it after.
+
+The same architecture runs 17 projects in flight. Co-pilot UIs
+can't because synchronous chat doesn't parallelize.
 
 ## The approach
 
@@ -394,31 +418,36 @@ fits; none is a hard dependency of the others.
 ## Sister projects
 
 Three other open-source tools share this repo's posture: your data
-on your disk, your keys for paid providers, no SaaS layer. They run
-independently, and they compose well when stacked into a personal
-AI workflow.
+on your disk, your keys for paid providers, no SaaS layer. Past
+one project, you need three things to keep dispatched labor
+useful: voice (output that sounds like you), intent (cycles aimed
+at what matters this week), and reaction-testing (catching how a
+doc lands before it ships). The three sister apps each fill one
+role.
 
-- **[mission-brain](https://github.com/lerugray/mission-brain)**:
-  queryable second brain over your own writing. Citation-grounded
-  retrieval across markdown, Facebook export, bullet-journal
-  entries, music metadata, or any custom loader you write. Refuses
-  to emit unsourced claims. Voyage cloud embeddings or Ollama
-  local.
-- **[mission-bullet-oss](https://github.com/lerugray/mission-bullet-oss)**:
-  AI-assisted bullet journal that runs Ryder Carroll's method.
-  Daily capture, weekly review, monthly migration. The AI surfaces
-  themes and proposes migrations; it never modifies your raw
-  entries.
-- **[mission-swarm](https://github.com/lerugray/mission-swarm)**:
-  swarm-simulation engine that generates plausible audience
-  reactions to a document. The lean ~20% of MiroShark, scoped to
-  kriegspiel scenarios and pre-launch reaction smoke-tests. Streams
-  reactions round by round, driven by audience templates you
-  define.
+- **[mission-brain](https://github.com/lerugray/mission-brain)**
+  gives cycles your voice. Citation-grounded retrieval over your
+  writing. Loads markdown notes, Facebook archive, journals, song
+  lyrics, or any custom format you write a loader for. Won't emit
+  unsourced claims. Voyage cloud or Ollama local. Stack with GS
+  so drafts ground in your corpus.
+- **[mission-bullet-oss](https://github.com/lerugray/mission-bullet-oss)**
+  is your intent layer. AI-assisted bullet journal running Ryder
+  Carroll's method: daily capture, weekly review, monthly
+  migration. Surfaces themes and proposes migrations without
+  touching your raw entries. Stack with GS so cycles work toward
+  this week's priorities as you record them.
+- **[mission-swarm](https://github.com/lerugray/mission-swarm)**
+  is your reaction surface. Swarm-simulation engine that generates
+  audience reactions to a document. You define the audience
+  templates; it streams reactions round by round. Stack with GS to
+  smoke-test feature specs, launch posts, or design docs against a
+  synthetic kriegspiel audience before you ship them.
 
-GS-managed projects can invoke any of these as subprocesses, or
-talk to mission-brain through its MCP server. Integrations stay
-opt-in per project. GeneralStaff itself does not assume any.
+Cycles in any GS-managed project can invoke these as subprocesses,
+or talk to mission-brain through its MCP server. Each project
+chooses its own integrations. GeneralStaff assumes none by
+default.
 
 ## Opt-in knobs
 
