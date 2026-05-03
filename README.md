@@ -13,8 +13,8 @@ Full audit log of every prompt, response, tool call, and diff in your
 own repo. Open-source alternative to closed SaaS bot platforms.
 
 > **Status:** v0.2.0 tagged 2026-05-02 (v0.1.0 was 2026-04-19;
-> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,910 passing
-> tests** across 61 files. Tests doubling as a gate cross-check: a
+> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,928 passing
+> tests** across 63 files. Tests doubling as a gate cross-check: a
 > cycle only verifies if the suite passes. **30+ managed projects**
 > in the fleet (mix of Mode A bot-pickable and Mode B
 > interactive-only across the dogfood, game-dev, and mission-*
@@ -92,7 +92,7 @@ Between those two dates, dogfooding itself the whole time:
 
 - **1,615+ commits**, of which **250+** are shipped task commits
   (one per `gs-XXX` feature or fix landing on master)
-- **1,910 passing tests** across 61 test files (of which 4 cover
+- **1,928 passing tests** across 63 test files (of which 4 cover
   the symlink-aware hands-off gate added in the pre-HN audit below)
 - **24,500+ lines of TypeScript** in `src/`
 - **223 verified + 27 rejected** reviewer verdicts on its own diffs.
@@ -682,26 +682,32 @@ root.
   notes.
 ### Recently shipped (post-v0.2.0)
 
-- ✓ **Phased autonomous progression — Phase A** (shipped
+- ✓ **Phased autonomous progression — Phases A + B** (shipped
   2026-05-03). Projects declare a phased campaign in
   `state/<project>/ROADMAP.yaml`: per-phase goals, completion
   criteria, and literal tasks seeded when the phase advances.
-  The commander runs `generalstaff phase status` / `phase
-  advance` to gate transitions. v1 evaluates `all_tasks_done` and
-  `custom_check` criteria; remaining criteria types are reserved
-  for Phase B. Schema reference in
-  [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
+  The dispatcher detects ready phases at session start (writes a
+  PHASE_READY.json sentinel + emits a `phase_ready_for_advance`
+  event); the commander runs `generalstaff phase advance` to
+  actually transition. `generalstaff view phase-ready` lists all
+  projects awaiting advance. Auto-advance is OFF by design (the
+  "commander gate" approach from the design doc). v1 evaluates
+  `all_tasks_done` and `custom_check` criteria. Schema reference
+  in [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
   original design at
   [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-19.md).
 
 ### Proposed (not yet scheduled)
 
-- **Phased autonomous progression — Phase B.** The Phase A
-  schema + manual-advance command shipped 2026-05-03. Phase B
-  wires phase-progression detection into the dispatcher loop
-  (auto-evaluate at session start), surfaces phase-complete
-  events in the dashboard Attention panel, and adds an advance
-  button to the UI.
+- **Phased progression — dashboard UI surfacing.** The
+  `gs view phase-ready` JSON view module is exposed; the web
+  dashboard (`gs serve`) needs to wire it into an Attention
+  panel + add an advance button.
+- **Phased progression — task templates + opt-in auto-advance.**
+  Task templates (LLM-refined task drafts at phase-start time),
+  opt-in `advance: automatic` for phases the commander pre-
+  authorizes, and `phase rollback` for the moment after the
+  first wrong-advance happens.
 - **UI actions on top of the read-only dashboard.** Dispatch
   sessions from the dashboard, edit `tasks.json` from the UI,
   merge `bot/work` with a button. Read-only v1 is the current

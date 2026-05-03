@@ -291,7 +291,7 @@ Usage:
   generalstaff view <name> [options]                      Structured fleet views (Phase 6)
     Example: generalstaff view fleet-overview            # one row per project + aggregates
     Example: generalstaff view fleet-overview --json     # same, as JSON
-    # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox
+    # Valid views: fleet-overview, task-queue, session-tail, dispatch-detail, inbox, phase-ready
 
   generalstaff serve [--port=<n>] [--host=<ip>] [--open] [--dry-run]
                                                           Start the local web dashboard (Phase 6)
@@ -3129,6 +3129,7 @@ switch (command) {
       "session-tail",
       "dispatch-detail",
       "inbox",
+      "phase-ready",
     ] as const;
     const viewName = args[1];
     const viewArgs = args.slice(2);
@@ -3142,7 +3143,8 @@ switch (command) {
           "  task-queue <project-id>     Task buckets (In-flight/Ready/Blocked/Shipped) (gs-227)\n" +
           "  session-tail [--limit=N]    Newest sessions with per-cycle breakdown (gs-228)\n" +
           "  dispatch-detail <cycle-id>  Full cycle report: phases, diff, checks (gs-229)\n" +
-          "  inbox [--since=<iso>]       Fleet message inbox (gs-230)\n",
+          "  inbox [--since=<iso>]       Fleet message inbox (gs-230)\n" +
+          "  phase-ready                 Projects ready to advance to next phase (Phase B)\n",
       );
       process.exit(0);
     }
@@ -3165,6 +3167,7 @@ switch (command) {
       "session-tail": "view session-tail [--limit=N] [--json]",
       "dispatch-detail": "view dispatch-detail <cycle-id> [--json]",
       "inbox": "view inbox [--since=<iso>] [--json]",
+      "phase-ready": "view phase-ready [--json]",
     };
     const handleViewParseError = (err: unknown): never => {
       const anyErr = err as { code?: string; message?: string };
@@ -3423,6 +3426,44 @@ switch (command) {
             console.log(`  ${c.name.padEnd(16)} ${status}${detail}`);
           }
         }
+      }
+      break;
+    }
+
+    if (viewName === "phase-ready") {
+      const { values: prValues } = parseArgs({
+        args: viewArgs,
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: false,
+      });
+      const { getPhaseReady } = await import("./views/phase_ready");
+      const data = await getPhaseReady();
+      if (prValues.json) {
+        console.log(JSON.stringify(data, null, 2));
+      } else if (data.ready.length === 0) {
+        console.log(
+          `No projects ready to advance. Scanned ${data.total_projects_scanned} project${data.total_projects_scanned === 1 ? "" : "s"}; ${data.total_with_roadmap} have a ROADMAP.yaml.`,
+        );
+      } else {
+        const headers = ["project", "from -> to", "criteria", "detected"];
+        const cells = data.ready.map((r) => [
+          r.project_id,
+          `${r.from_phase} -> ${r.to_phase}`,
+          `${r.passed_criteria}/${r.total_criteria}`,
+          formatRelativeTime(r.detected_at),
+        ]);
+        const widths = headers.map((h, i) =>
+          Math.max(h.length, ...cells.map((row) => row[i].length), 0),
+        );
+        const fmtRow = (row: string[]) =>
+          row.map((v, i) => v.padEnd(widths[i])).join("  ");
+        console.log(fmtRow(headers));
+        for (const row of cells) console.log(fmtRow(row));
+        console.log(
+          `\n${data.ready.length} ready / ${data.total_with_roadmap} with roadmap / ${data.total_projects_scanned} total. Advance with \`generalstaff phase advance --project=<id>\`.`,
+        );
       }
       break;
     }
@@ -4108,6 +4149,12 @@ switch (command) {
         seeded_task_ids: seededTaskIds,
         timestamp: new Date().toISOString(),
       });
+
+      // Phase B: clear the PHASE_READY.json sentinel if one exists.
+      // The new current_phase has fresh criteria; the next session-
+      // start detection will re-evaluate and re-write if appropriate.
+      const detectorLib = await import("./phase_detector");
+      await detectorLib.clearPhaseReadySentinel(projectId);
 
       console.log(`Advanced ${projectId}: ${currentPhase.id} -> ${nextPhase.id}`);
       if (seededTaskIds.length > 0) {

@@ -334,7 +334,15 @@ export type ProgressEventType =
   // Phase A: emitted when `gs phase advance` seeds the next phase's
   // tasks into tasks.json. Data carries
   // {from_phase, to_phase, seeded_task_ids: string[]}.
-  | "phase_advanced";
+  | "phase_advanced"
+  // Phase B: emitted at session start when the dispatcher's
+  // phase-progression check finds a project's current phase has
+  // all criteria passing AND a non-terminal next_phase. The
+  // commander still must run `gs phase advance` to actually
+  // transition. Data carries {from_phase, to_phase,
+  // criteria_results}. Sentinel file at state/<project>/PHASE_READY.json
+  // records the same info on disk for view modules.
+  | "phase_ready_for_advance";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -498,6 +506,18 @@ export interface PhaseState {
   completed_phases: PhaseStateEntry[];
 }
 
+// Sentinel file written by the Phase B dispatcher detector at
+// state/<project>/PHASE_READY.json when a project's current phase
+// has all criteria passing AND a non-terminal next_phase. Read by
+// the phase-ready view module + status.
+export interface PhaseReadySentinel {
+  project_id: string;
+  from_phase: string;
+  to_phase: string;
+  detected_at: string;  // ISO 8601
+  criteria_results: PhaseCriterionResult[];
+}
+
 // --- Type guards for parse boundaries ---
 
 const VALID_VERDICTS: readonly string[] = ["verified", "verified_weak", "verification_failed"];
@@ -519,6 +539,8 @@ const VALID_EVENTS: readonly string[] = [
   "session_budget_reader_unavailable", "session_budget_project_skipped",
   // Phase A (FUTURE-DIRECTIONS-2026-04-19)
   "phase_complete", "phase_advanced",
+  // Phase B (FUTURE-DIRECTIONS-2026-04-19 §2)
+  "phase_ready_for_advance",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

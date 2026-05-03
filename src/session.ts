@@ -411,6 +411,25 @@ export async function runSession(options: SessionOptions) {
     await saveProjectState(state, config);
   }
 
+  // Phase B (FUTURE-DIRECTIONS-2026-04-19 §2): per-project
+  // phase-progression check. For projects with a ROADMAP.yaml,
+  // evaluates the current phase's completion_criteria and writes
+  // a PHASE_READY.json sentinel + emits phase_ready_for_advance
+  // when the criteria all pass and the phase has a non-terminal
+  // next_phase. Auto-advance is OFF — commander still runs
+  // `gs phase advance` to actually transition. dryRun skips the
+  // detection so dry-run sessions stay side-effect-free.
+  if (!dryRun) {
+    try {
+      const { runFleetPhaseDetection } = await import("./phase_detector");
+      await runFleetPhaseDetection(projects);
+    } catch (err) {
+      console.warn(
+        `[phase] fleet detection failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const allResults: CycleResult[] = [];
   const cyclesPerProject = new Map<string, number>();
   const skippedProjects = new Set<string>(excludeSet);

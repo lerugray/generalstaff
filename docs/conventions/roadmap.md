@@ -6,10 +6,20 @@ criteria, and the tasks that should be queued when the phase
 begins. The dispatcher detects phase completion and the commander
 advances phases manually via `generalstaff phase advance`.
 
-This is the **Phase A v1** scope from
+This is the **Phase A + Phase B v1** scope from
 [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](../internal/FUTURE-DIRECTIONS-2026-04-19.md):
-schema + manual advance only. Dispatcher integration (auto-detect
-at session start) and dashboard surfacing land in Phase B.
+
+- **Phase A** (shipped 2026-05-03 morning): schema, validator,
+  criteria evaluator, per-project state tracker, manual `gs phase
+  advance` command.
+- **Phase B** (shipped 2026-05-03 evening): dispatcher hook at
+  session start that auto-detects ready phases, writes a
+  `PHASE_READY.json` sentinel, emits `phase_ready_for_advance` to
+  the audit log, and surfaces ready projects via `gs view
+  phase-ready`. Auto-advance is OFF by design — the commander
+  still runs `gs phase advance` to actually transition. Dashboard
+  UI rendering of the phase-ready view is deferred to a future
+  pass; the JSON view module is already exposed.
 
 ## Quick start
 
@@ -166,13 +176,28 @@ not edit it by hand. To rewind a phase advance, edit it (Phase A
 has no `phase rollback` command — that's a Phase B item).
 
 ### `state/<project>/PROGRESS.jsonl`
-The audit log gets two new event types:
+The audit log gets three new event types:
 
-- `phase_complete` — emitted when criteria pass. Data carries
-  `{phase_id, criteria_results, forced, timestamp}`.
-- `phase_advanced` — emitted when the advance has seeded the next
-  phase's tasks. Data carries `{from_phase, to_phase,
-  seeded_task_ids, timestamp}`.
+- `phase_ready_for_advance` (Phase B) — emitted at session start
+  when the dispatcher detects a phase whose criteria all pass and
+  has a non-terminal `next_phase`. Data carries `{from_phase,
+  to_phase, criteria_results}`. Idempotent: if the same readiness
+  was already detected for the same `{from_phase, to_phase}`, the
+  sentinel file is rewritten with a fresh timestamp but no
+  duplicate event is emitted.
+- `phase_complete` (Phase A) — emitted when `gs phase advance`
+  runs and criteria pass. Data carries `{phase_id,
+  criteria_results, forced, timestamp}`.
+- `phase_advanced` (Phase A) — emitted when the advance has
+  seeded the next phase's tasks. Data carries `{from_phase,
+  to_phase, seeded_task_ids, timestamp}`.
+
+### `state/<project>/PHASE_READY.json` (Phase B sentinel)
+Written by the session-start phase-progression detector when a
+project's current phase is ready to advance. Read by the
+`phase-ready` view module + (future) dashboard Attention panel.
+Cleared automatically by `gs phase advance` after a successful
+transition.
 
 ## CLI reference
 
@@ -181,17 +206,50 @@ generalstaff phase init     --project=<id> [--force]
 generalstaff phase status   --project=<id> [--json]
 generalstaff phase advance  --project=<id> [--force]
 generalstaff phase --help
+
+generalstaff view phase-ready [--json]
 ```
 
-- `init` — scaffolds a starter ROADMAP.yaml. Refuses to overwrite
-  without `--force`.
-- `status` — shows current phase, goal, next phase, completed
-  phases, and per-criterion pass/fail. `--json` for machine-
-  readable output.
-- `advance` — evaluates criteria; advances if all pass. `--force`
-  bypasses the criteria gate (records `forced: true` in the
-  audit log). Refuses to advance from a terminal phase (no
-  `next_phase`).
+- `phase init` — scaffolds a starter ROADMAP.yaml. Refuses to
+  overwrite without `--force`.
+- `phase status` — shows current phase, goal, next phase,
+  completed phases, and per-criterion pass/fail. `--json` for
+  machine-readable output.
+- `phase advance` — evaluates criteria; advances if all pass.
+  `--force` bypasses the criteria gate (records `forced: true`
+  in the audit log). Refuses to advance from a terminal phase
+  (no `next_phase`). Clears the `PHASE_READY.json` sentinel on
+  success.
+- `view phase-ready` — list of projects with a sentinel file
+  present (i.e., the session-start detector flagged them ready
+  to advance). Sorted oldest-detected first. `--json` for
+  machine-readable output. Phase B's primary read surface.
+
+## Session-start detection (Phase B)
+
+When `generalstaff session` (or any session loop) starts, the
+dispatcher iterates every registered project and runs the same
+criteria evaluator that `phase status` uses. For each project
+where the criteria all pass AND the current phase has a
+non-terminal `next_phase`:
+
+1. The detector writes a `PHASE_READY.json` sentinel file.
+2. It emits a `phase_ready_for_advance` event to PROGRESS.jsonl
+   (idempotent — same readiness for the same `{from, to}` pair
+   doesn't re-emit).
+3. The session log prints a one-liner: `[phase] <project>: ready
+   to advance <from> -> <to>`.
+
+The detection is `dryRun`-aware: dry-run sessions skip detection
+so they remain side-effect-free.
+
+The commander then runs `gs phase advance --project=<id>` (or
+inspects the queue with `gs view phase-ready`). Auto-advance is
+NOT enabled in v1 by design — the design doc §2 calls this the
+"commander gate" and frames it as an explicit trust-building
+step. Once Phase B has run cleanly for many phase transitions
+across many projects, an opt-in `advance: automatic` flag in
+ROADMAP.yaml is the natural relaxation (deferred).
 
 ## Hands-off interaction
 
