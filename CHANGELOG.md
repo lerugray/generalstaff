@@ -7,6 +7,34 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries are written in Ray's voice and prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## [Unreleased]
+
+### Added
+
+- **Phased autonomous progression — Phase A** (`gs phase` command,
+  `state/<project>/ROADMAP.yaml` schema, `PHASE_STATE.json` runtime
+  tracker). Projects can declare phased campaigns upfront with
+  per-phase goals, completion criteria, and literal task seeding.
+  v1 evaluates `all_tasks_done` and `custom_check` criteria;
+  `launch_gate` / `git_tag` / `lifecycle_transition` are accepted
+  by the schema but return "not implemented in v1." Three CLI
+  subcommands: `phase init` (scaffold a starter ROADMAP.yaml),
+  `phase status` (show current phase + per-criterion pass/fail),
+  `phase advance` (evaluate criteria, advance + seed if pass).
+  `--force` bypasses the criteria gate (records `forced=true` in
+  PROGRESS.jsonl). Two new event types in PROGRESS.jsonl:
+  `phase_complete` and `phase_advanced`. Full schema reference in
+  [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
+  original design at
+  [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-19.md).
+  *Why:* the dispatcher previously required a human to hand-queue
+  each wave of tasks. With phased roadmaps the commander writes
+  the campaign once, advances at phase boundaries, and the system
+  seeds the next wave automatically. **Phase B** (dispatcher-side
+  auto-detection at session start + dashboard Attention surfacing
+  + advance button in UI) is deferred to a future release per
+  FUTURE-DIRECTIONS-2026-04-19 §8.
+
 ## [0.2.0] — 2026-05-02
 
 The post-v0.1.0-launch run. Two weeks of dogfood on top of the initial

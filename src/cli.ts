@@ -370,6 +370,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "todo",
   "serve",
   "integrations",
+  "phase",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -3805,6 +3806,326 @@ switch (command) {
       console.log(`Appended message from ${from} at ${timestamp}`);
     }
     break;
+  }
+
+  case "phase": {
+    const sub = args[1];
+    if (
+      args.includes("--help") ||
+      args.includes("-h") ||
+      sub === "--help" ||
+      sub === "help" ||
+      sub === undefined
+    ) {
+      console.log(
+        "Usage: generalstaff phase <subcommand> --project=<id> [options]\n" +
+          "\n" +
+          "Phased autonomous progression. Each project declares a phased\n" +
+          "roadmap at state/<id>/ROADMAP.yaml; this command evaluates\n" +
+          "completion criteria + advances phases. Phase A (v1) supports\n" +
+          "all_tasks_done + custom_check criteria, manual advance only.\n" +
+          "\n" +
+          "Subcommands:\n" +
+          "  status   --project=<id>          Show current phase + criteria results\n" +
+          "  init     --project=<id> [--force]  Scaffold a starter ROADMAP.yaml\n" +
+          "  advance  --project=<id> [--force]  Run criteria; advance if all pass\n" +
+          "\n" +
+          "Notes:\n" +
+          "  - --force on advance bypasses the criteria gate (records the\n" +
+          "    advance with a 'forced=true' note in PHASE_STATE.json).\n" +
+          "  - --force on init overwrites an existing ROADMAP.yaml.\n" +
+          "  - Phase B (dispatcher integration + dashboard) is deferred per\n" +
+          "    docs/internal/FUTURE-DIRECTIONS-2026-04-19.md §8.\n" +
+          "\n" +
+          "See docs/conventions/roadmap.md for the full schema reference.\n",
+      );
+      process.exit(0);
+    }
+
+    const phaseLib = await import("./phase");
+    const phaseStateLib = await import("./phase_state");
+    const auditLib = await import("./audit");
+    const tasksLib = await import("./tasks");
+
+    if (sub === "init") {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          force: { type: "boolean" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const projectId = values.project;
+      if (existsSync(join(getRootDir(), "projects.yaml"))) {
+        const registered = await loadProjects();
+        if (!registered.find((p) => p.id === projectId)) {
+          const ids = registered.map((p) => p.id).join(", ") || "(none)";
+          console.error(
+            `Error: project '${projectId}' not found. Registered: ${ids}`,
+          );
+          process.exit(1);
+        }
+      }
+      const path = phaseLib.roadmapPath(projectId);
+      if (existsSync(path) && !values.force) {
+        console.error(
+          `Error: ${path} already exists. Use --force to overwrite.`,
+        );
+        process.exit(1);
+      }
+      const { mkdir, writeFile } = await import("fs/promises");
+      const { dirname } = await import("path");
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, phaseLib.defaultRoadmapYaml(projectId), "utf-8");
+      console.log(`Wrote ${path}`);
+      console.log(
+        `Edit it to describe ${projectId}'s phased campaign, then run\n` +
+          `\`generalstaff phase status --project=${projectId}\` to verify.`,
+      );
+      break;
+    }
+
+    if (sub === "status") {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          json: { type: "boolean" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const projectId = values.project;
+      const projects = existsSync(join(getRootDir(), "projects.yaml"))
+        ? await loadProjects()
+        : [];
+      const projectConfig = projects.find((p) => p.id === projectId);
+      if (existsSync(join(getRootDir(), "projects.yaml")) && !projectConfig) {
+        const ids = projects.map((p) => p.id).join(", ") || "(none)";
+        console.error(
+          `Error: project '${projectId}' not found. Registered: ${ids}`,
+        );
+        process.exit(1);
+      }
+      let roadmap;
+      try {
+        roadmap = await phaseLib.loadRoadmap(projectId);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(1);
+      }
+      const state = await phaseStateLib.loadPhaseState(
+        projectId,
+        roadmap.current_phase,
+      );
+      const currentPhase = phaseLib.findPhase(roadmap, state.current_phase);
+      if (!currentPhase) {
+        console.error(
+          `Error: PHASE_STATE.json current_phase="${state.current_phase}" no longer matches any phase in ROADMAP.yaml. ` +
+            `Edit one or the other to reconcile.`,
+        );
+        process.exit(1);
+      }
+      let criteriaResults;
+      if (projectConfig) {
+        criteriaResults = await phaseLib.evaluateCriteria(
+          currentPhase,
+          projectConfig,
+        );
+      }
+
+      if (values.json) {
+        console.log(
+          JSON.stringify(
+            {
+              project_id: projectId,
+              current_phase: state.current_phase,
+              completed_phases: state.completed_phases.map((p) => p.phase_id),
+              all_phases: roadmap.phases.map((p) => p.id),
+              next_phase: currentPhase.next_phase ?? null,
+              criteria: criteriaResults ?? null,
+              all_passed: criteriaResults
+                ? phaseLib.allPassed(criteriaResults)
+                : null,
+            },
+            null,
+            2,
+          ),
+        );
+        break;
+      }
+
+      console.log(`Phase status for ${projectId}:`);
+      console.log(`  current_phase:   ${state.current_phase}`);
+      console.log(`  goal:            ${currentPhase.goal}`);
+      console.log(`  next_phase:      ${currentPhase.next_phase ?? "(terminal)"}`);
+      if (state.completed_phases.length > 0) {
+        const done = state.completed_phases.map((p) => p.phase_id).join(", ");
+        console.log(`  completed:       ${done}`);
+      }
+      console.log("");
+      console.log("Completion criteria:");
+      if (currentPhase.completion_criteria.length === 0) {
+        console.log("  (none declared)");
+      } else if (!criteriaResults) {
+        console.log("  (skipped — projects.yaml not present, can't run checks)");
+      } else {
+        for (const r of criteriaResults) {
+          const mark = r.passed ? "[x]" : "[ ]";
+          console.log(`  ${mark} ${r.kind}: ${r.detail}`);
+        }
+        console.log("");
+        const passed = phaseLib.allPassed(criteriaResults);
+        if (passed) {
+          console.log(
+            `All criteria passed. Run \`generalstaff phase advance --project=${projectId}\` to advance.`,
+          );
+        } else {
+          console.log("One or more criteria not met. Address the [ ] items above.");
+        }
+      }
+      break;
+    }
+
+    if (sub === "advance") {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          force: { type: "boolean" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      const projectId = values.project;
+      const projects = await loadProjects();
+      const projectConfig = projects.find((p) => p.id === projectId);
+      if (!projectConfig) {
+        const ids = projects.map((p) => p.id).join(", ") || "(none)";
+        console.error(
+          `Error: project '${projectId}' not found. Registered: ${ids}`,
+        );
+        process.exit(1);
+      }
+      let roadmap;
+      try {
+        roadmap = await phaseLib.loadRoadmap(projectId);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(1);
+      }
+      const state = await phaseStateLib.loadPhaseState(
+        projectId,
+        roadmap.current_phase,
+      );
+      const currentPhase = phaseLib.findPhase(roadmap, state.current_phase);
+      if (!currentPhase) {
+        console.error(
+          `Error: PHASE_STATE.json current_phase="${state.current_phase}" no longer matches any phase in ROADMAP.yaml.`,
+        );
+        process.exit(1);
+      }
+      if (!currentPhase.next_phase) {
+        console.error(
+          `Error: phase "${currentPhase.id}" is terminal (no next_phase). Nothing to advance to.`,
+        );
+        process.exit(1);
+      }
+      const nextPhase = phaseLib.findPhase(roadmap, currentPhase.next_phase);
+      if (!nextPhase) {
+        console.error(
+          `Error: next_phase="${currentPhase.next_phase}" not found in ROADMAP.yaml`,
+        );
+        process.exit(1);
+      }
+
+      const criteriaResults = await phaseLib.evaluateCriteria(
+        currentPhase,
+        projectConfig,
+      );
+      const passed = phaseLib.allPassed(criteriaResults);
+      if (!passed && !values.force) {
+        console.error(`Cannot advance: completion criteria for "${currentPhase.id}" not met.`);
+        for (const r of criteriaResults) {
+          if (!r.passed) {
+            console.error(`  [ ] ${r.kind}: ${r.detail}`);
+          }
+        }
+        console.error(
+          "\nFix the unmet criteria, or use --force to bypass (will record forced=true in audit log).",
+        );
+        process.exit(1);
+      }
+
+      // Record + advance.
+      const now = new Date().toISOString();
+      await auditLib.appendProgress(projectId, "phase_complete", {
+        phase_id: currentPhase.id,
+        criteria_results: criteriaResults,
+        forced: !passed && !!values.force,
+        timestamp: now,
+      });
+
+      // Seed next phase's literal tasks. Templates not supported in v1.
+      const seededTaskIds: string[] = [];
+      if (nextPhase.tasks && nextPhase.tasks.length > 0) {
+        for (const t of nextPhase.tasks) {
+          const task = await tasksLib.addTask(
+            projectId,
+            t.title,
+            t.priority ?? 2,
+            {
+              interactiveOnly: t.interactive_only,
+              interactiveOnlyReason: t.interactive_only_reason,
+              expectedTouches: t.expected_touches,
+            },
+          );
+          seededTaskIds.push(task.id);
+        }
+      }
+
+      await phaseStateLib.recordPhaseAdvance(
+        projectId,
+        currentPhase.id,
+        nextPhase.id,
+        criteriaResults,
+      );
+
+      await auditLib.appendProgress(projectId, "phase_advanced", {
+        from_phase: currentPhase.id,
+        to_phase: nextPhase.id,
+        seeded_task_ids: seededTaskIds,
+        timestamp: new Date().toISOString(),
+      });
+
+      console.log(`Advanced ${projectId}: ${currentPhase.id} -> ${nextPhase.id}`);
+      if (seededTaskIds.length > 0) {
+        console.log(
+          `Seeded ${seededTaskIds.length} task${seededTaskIds.length === 1 ? "" : "s"}: ${seededTaskIds.join(", ")}`,
+        );
+      } else {
+        console.log(`No tasks declared for "${nextPhase.id}"; tasks.json unchanged.`);
+      }
+      if (!passed && values.force) {
+        console.log("(advanced with --force; criteria were not met)");
+      }
+      break;
+    }
+
+    console.error(`Unknown phase subcommand: ${sub}`);
+    console.error("Run `generalstaff phase --help` for usage.");
+    process.exit(1);
   }
 
   default:

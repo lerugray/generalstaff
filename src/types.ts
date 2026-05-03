@@ -325,7 +325,16 @@ export type ProgressEventType =
   // Project is removed from picker eligibility for the rest of the
   // session; the session continues with other projects. Data carries
   // the same {unit, budget, consumed, source} as session_budget_exceeded.
-  | "session_budget_project_skipped";
+  | "session_budget_project_skipped"
+  // Phase A (FUTURE-DIRECTIONS-2026-04-19): emitted when the
+  // commander runs `gs phase advance` and the current phase's
+  // completion criteria all pass. Data carries
+  // {phase_id, criteria_results: [{kind, passed, detail}]}.
+  | "phase_complete"
+  // Phase A: emitted when `gs phase advance` seeds the next phase's
+  // tasks into tasks.json. Data carries
+  // {from_phase, to_phase, seeded_task_ids: string[]}.
+  | "phase_advanced";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -426,6 +435,69 @@ export interface BotRunningResult {
   reason?: string;
 }
 
+// --- Phased roadmap (FUTURE-DIRECTIONS-2026-04-19, Phase A) ---
+
+// Each completion-criterion is one of these shapes. v1 supports
+// `all_tasks_done` and `custom_check`; the other kinds are listed
+// here so the schema has a stable shape but the evaluator returns
+// "not yet supported" for them.
+export type RoadmapCriterion =
+  | { all_tasks_done: true }
+  | { custom_check: string }  // bash one-liner, exit 0 = pass
+  | { launch_gate: string }  // not evaluated in v1
+  | { git_tag: string }  // not evaluated in v1
+  | { lifecycle_transition: string };  // not evaluated in v1
+
+// Literal task entries seeded when a phase advances. Mirrors the
+// shape of GreenfieldTask but without the runtime fields the
+// dispatcher computes (id is auto-assigned, status starts as
+// "pending"). v1 does NOT support `tasks_template`.
+export interface RoadmapLiteralTask {
+  title: string;
+  priority?: number;
+  interactive_only?: boolean;
+  interactive_only_reason?: string;
+  expected_touches?: string[];
+}
+
+export interface RoadmapPhase {
+  id: string;
+  goal: string;
+  depends_on?: string;
+  tasks?: RoadmapLiteralTask[];
+  // tasks_template intentionally omitted from v1 per
+  // FUTURE-DIRECTIONS-2026-04-19 §8 explicit non-goals.
+  completion_criteria: RoadmapCriterion[];
+  next_phase?: string;
+}
+
+export interface Roadmap {
+  project_id: string;
+  current_phase: string;
+  phases: RoadmapPhase[];
+}
+
+// Per-project state file written to state/<project>/PHASE_STATE.json.
+// Tracks the runtime view that ROADMAP.yaml itself doesn't carry:
+// which phases the commander has marked complete, and when.
+export interface PhaseStateEntry {
+  phase_id: string;
+  completed_at: string;  // ISO 8601
+  criteria_results: PhaseCriterionResult[];
+}
+
+export interface PhaseCriterionResult {
+  kind: "all_tasks_done" | "custom_check" | "launch_gate" | "git_tag" | "lifecycle_transition";
+  passed: boolean;
+  detail: string;
+}
+
+export interface PhaseState {
+  project_id: string;
+  current_phase: string;
+  completed_phases: PhaseStateEntry[];
+}
+
 // --- Type guards for parse boundaries ---
 
 const VALID_VERDICTS: readonly string[] = ["verified", "verified_weak", "verification_failed"];
@@ -445,6 +517,8 @@ const VALID_EVENTS: readonly string[] = [
   // gs-298: usage-budget gate event types
   "session_budget_exceeded", "session_budget_advisory",
   "session_budget_reader_unavailable", "session_budget_project_skipped",
+  // Phase A (FUTURE-DIRECTIONS-2026-04-19)
+  "phase_complete", "phase_advanced",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {
