@@ -204,6 +204,8 @@ export interface JournalProjectConfig {
   mission_bullet_root: string;   // absolute path to the journal tree
   scan_days?: number;             // default 7 (consumer-applied)
   reviewer_context?: boolean;     // default false
+  /** Optional extra strings (jr-003) matched case-insensitively against bullet text + #tags. */
+  affinity_aliases?: string[];
 }
 
 export interface DispatcherConfig {

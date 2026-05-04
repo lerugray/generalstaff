@@ -590,7 +590,14 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
 
   // gs-311: optional journal-source config. Inert until jr-003 lands;
   // schema-only today so projects.yaml can start carrying the path.
-  let journal: { mission_bullet_root: string; scan_days?: number; reviewer_context?: boolean } | undefined;
+  let journal:
+    | {
+        mission_bullet_root: string;
+        scan_days?: number;
+        reviewer_context?: boolean;
+        affinity_aliases?: string[];
+      }
+    | undefined;
   if (raw.journal !== undefined && raw.journal !== null) {
     if (typeof raw.journal !== "object" || Array.isArray(raw.journal)) {
       throw new ProjectValidationError(
@@ -629,10 +636,34 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
       }
       reviewerContext = j.reviewer_context;
     }
+    let affinityAliases: string[] | undefined;
+    if (j.affinity_aliases !== undefined && j.affinity_aliases !== null) {
+      if (!Array.isArray(j.affinity_aliases)) {
+        throw new ProjectValidationError(
+          id,
+          "journal.affinity_aliases",
+          `must be an array of strings if specified, got ${typeof j.affinity_aliases}`,
+        );
+      }
+      const aliases: string[] = [];
+      for (let i = 0; i < j.affinity_aliases.length; i++) {
+        const el = j.affinity_aliases[i];
+        if (typeof el !== "string" || el.trim() === "") {
+          throw new ProjectValidationError(
+            id,
+            "journal.affinity_aliases",
+            `each element must be a non-empty string, got ${JSON.stringify(el)} at index ${i}`,
+          );
+        }
+        aliases.push(el);
+      }
+      affinityAliases = aliases;
+    }
     journal = {
       mission_bullet_root: j.mission_bullet_root,
       scan_days: scanDays,
       reviewer_context: reviewerContext,
+      affinity_aliases: affinityAliases,
     };
   }
 

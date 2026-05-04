@@ -1617,6 +1617,26 @@ projects:${BASE}
     cleanup();
   });
 
+  it("accepts journal affinity_aliases (gs-312)", async () => {
+    const path = writeYaml(
+      "journal-aliases.yaml",
+      `
+projects:${BASE}
+    journal:
+      mission_bullet_root: /home/ray/mission-bullet
+      affinity_aliases:
+        - GS
+        - meta-dispatcher
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].journal?.affinity_aliases).toEqual([
+      "GS",
+      "meta-dispatcher",
+    ]);
+    cleanup();
+  });
+
   it("rejects journal without mission_bullet_root", async () => {
     const path = writeYaml(
       "journal-no-root.yaml",

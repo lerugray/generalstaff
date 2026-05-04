@@ -2318,14 +2318,15 @@
   {
     "id": "gs-312",
     "title": "jr-003 — scan-bullets-by-project-affinity library. src/integrations/journal/scan.ts: pure library that takes journal root + project config + scan window (default 7 days), returns JournalProposal[]. Keyword-match on project id + name + configured aliases; bullets with no match filtered out. Counts only `- [ ]` (tasks) and `- !` (alerts); ignores `- *` (observations) and plain `- ` (notes). Never writes to the journal. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-312. Expected diff: ~180-250 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "expected_blocked_by": ["gs-310", "gs-311"],
     "expected_touches": [
       "src/integrations/journal/scan.ts",
       "src/integrations/journal/types.ts",
       "tests/integrations/journal/scan.test.ts"
-    ]
+    ],
+    "done_note": "src/integrations/journal/scan.ts + types.ts: scanJournalBulletsByProjectAffinity walks journalRoot for *.md, dated filenames (or mtime) vs scan window, only - [ ] / - ! bullets, affinity score from case-insensitive non-overlapping hits on id + basename(path) + journal.affinity_aliases over line text and #tags; reviewer_context ignored. JournalProjectConfig gains affinity_aliases with projects.ts validation. tests/integrations/journal/scan.test.ts covers window, determinism, exclusions, reviewer_context parity. Library not wired to cycles."
   },
   {
     "id": "gs-313",
