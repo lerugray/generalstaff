@@ -29,6 +29,7 @@ export function makeDispatcherConfig(
     log_dir: "logs",
     digest_dir: "digests",
     max_parallel_slots: 1,
+    max_consecutive_empty: 3,
     ...overrides,
   };
 }

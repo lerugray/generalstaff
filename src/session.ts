@@ -38,6 +38,7 @@ import type {
   CycleResult,
   ProjectConfig,
   ProjectsYaml,
+  DispatcherConfig,
 } from "./types";
 // gs-298: usage-budget gate
 import type { ConsumptionReader, ConsumptionSnapshot } from "./usage/types";
@@ -74,6 +75,28 @@ export const DEFAULT_SOFT_SKIP_WINDOW_SECONDS = 600;
 // pattern that deserves its own handling, not a blind retry-loop
 // symptom.
 export const DEFAULT_UNPRODUCTIVE_THRESHOLD = 3;
+
+// gs-292: empty-diff streak guard uses per-project override when set,
+// else dispatcher.max_consecutive_empty (default 3 at load).
+export function effectiveMaxConsecutiveEmpty(
+  project: ProjectConfig,
+  dispatcher: DispatcherConfig,
+): number {
+  return project.max_consecutive_empty ?? dispatcher.max_consecutive_empty;
+}
+
+/** Parallel mode: threshold for consecutive all-empty rounds (max across slots). */
+export function maxConsecutiveEmptyLimitForRound(
+  projectsInRound: ProjectConfig[],
+  dispatcher: DispatcherConfig,
+): number {
+  if (projectsInRound.length === 0) {
+    return dispatcher.max_consecutive_empty;
+  }
+  return Math.max(
+    ...projectsInRound.map((p) => effectiveMaxConsecutiveEmpty(p, dispatcher)),
+  );
+}
 
 export interface FailureStreak {
   count: number;
@@ -585,7 +608,6 @@ export async function runSession(options: SessionOptions) {
   let currentProject: ProjectConfig | null = null;
   let pickReason: string = "";
   let consecutiveEmptyCycles = 0;
-  const MAX_CONSECUTIVE_EMPTY = 3;
 
   // gs-298: "usage-budget" joins the existing set for the
   // consumption-cap gate. NOT renamed to disambiguate from the
@@ -660,7 +682,6 @@ export async function runSession(options: SessionOptions) {
   // §v6 option (a). Slot idle time accumulates across rounds so the
   // §v6 open question #3 can be answered from observed data.
   if (isParallelMode) {
-    const MAX_ALL_EMPTY_ROUNDS = 3;
     let consecutiveAllEmptyRounds = 0;
 
     parallelLoop: while (remainingMinutes() > 0) {
@@ -925,10 +946,14 @@ export async function runSession(options: SessionOptions) {
       }
 
       if (allEmptyThisRound) {
+        const allEmptyRoundLimit = maxConsecutiveEmptyLimitForRound(
+          eligible.map((e) => e.project),
+          config,
+        );
         consecutiveAllEmptyRounds++;
-        if (consecutiveAllEmptyRounds >= MAX_ALL_EMPTY_ROUNDS) {
+        if (consecutiveAllEmptyRounds >= allEmptyRoundLimit) {
           console.log(
-            `\n${MAX_ALL_EMPTY_ROUNDS} consecutive all-empty rounds — ending session.`,
+            `\n${allEmptyRoundLimit} consecutive all-empty rounds — ending session.`,
           );
           stopReason = "empty-cycles";
           break parallelLoop;
@@ -1102,13 +1127,14 @@ export async function runSession(options: SessionOptions) {
       }
     }
 
-    // Guard against runaway empty cycles
+    // Guard against runaway empty cycles (gs-292: limit from config).
     if (result.final_outcome === "verified_weak" &&
         result.reason?.includes("empty diff")) {
       consecutiveEmptyCycles++;
-      if (consecutiveEmptyCycles >= MAX_CONSECUTIVE_EMPTY) {
+      const emptyLimit = effectiveMaxConsecutiveEmpty(currentProject, config);
+      if (consecutiveEmptyCycles >= emptyLimit) {
         console.log(
-          `\n${MAX_CONSECUTIVE_EMPTY} consecutive empty cycles — ending session.`,
+          `\n${emptyLimit} consecutive empty cycles — ending session.`,
         );
         stopReason = "empty-cycles";
         break;

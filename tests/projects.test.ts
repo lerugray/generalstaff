@@ -64,6 +64,7 @@ dispatcher:
     expect(yaml.projects[0].work_detection).toBe("tasks_json"); // default
     expect(yaml.projects[0].concurrency_detection).toBe("none"); // default
     expect(yaml.dispatcher.max_cycles_per_project_per_session).toBe(3);
+    expect(yaml.dispatcher.max_consecutive_empty).toBe(3);
     cleanup();
   });
 
@@ -1046,6 +1047,144 @@ projects:
     );
     await expect(loadProjectsYaml(path)).rejects.toThrow(/creative_work_branch/);
     cleanup();
+  });
+});
+
+describe("max_consecutive_empty (gs-292)", () => {
+  const BASE_PROJECT = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("defaults dispatcher.max_consecutive_empty to 3 when key absent", async () => {
+    const path = writeYaml(
+      "gs292-dispatcher-default.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.dispatcher.max_consecutive_empty).toBe(3);
+    cleanup();
+  });
+
+  it("loads explicit dispatcher.max_consecutive_empty", async () => {
+    const path = writeYaml(
+      "gs292-dispatcher-9.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_consecutive_empty: 9
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.dispatcher.max_consecutive_empty).toBe(9);
+    cleanup();
+  });
+
+  it("loads per-project max_consecutive_empty", async () => {
+    const path = writeYaml(
+      "gs292-project-6.yaml",
+      `
+projects:${BASE_PROJECT}
+    max_consecutive_empty: 6
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].max_consecutive_empty).toBe(6);
+    cleanup();
+  });
+
+  it("rejects dispatcher.max_consecutive_empty < 1", async () => {
+    const path = writeYaml(
+      "gs292-dispatcher-bad.yaml",
+      `
+projects:${BASE_PROJECT}
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_consecutive_empty: 0
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/dispatcher/);
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/max_consecutive_empty/);
+    cleanup();
+  });
+
+  it("rejects project max_consecutive_empty that is not an integer", async () => {
+    const path = writeYaml(
+      "gs292-project-float.yaml",
+      `
+projects:${BASE_PROJECT}
+    max_consecutive_empty: 2.5
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/max_consecutive_empty/);
+    cleanup();
+  });
+
+  it("validateConfig flags project max_consecutive_empty < 1", () => {
+    const { errors } = validateConfig({
+      projects: [
+        {
+          id: "x",
+          path: "/tmp/x",
+          priority: 1,
+          engineer_command: "e",
+          verification_command: "v",
+          cycle_budget_minutes: 1,
+          hands_off: ["a"],
+          max_consecutive_empty: 0,
+        },
+      ],
+    });
+    expect(errors.some((e) => e.includes("max_consecutive_empty"))).toBe(true);
   });
 });
 

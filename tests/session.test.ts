@@ -19,6 +19,8 @@ import {
   estimateReviewerSpendUSD,
   flushSessionEndMerges,
   commitSessionEndState,
+  effectiveMaxConsecutiveEmpty,
+  maxConsecutiveEmptyLimitForRound,
 } from "../src/session";
 import { $ } from "bun";
 import { tmpdir } from "os";
@@ -28,6 +30,7 @@ import { join } from "path";
 import { mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import type { CycleResult } from "../src/types";
 import type { SessionPlanEstimate } from "../src/dispatcher";
+import { makeProjectConfig, makeDispatcherConfig } from "./helpers/fixtures";
 
 async function runHelperSubprocess(helperName: string, ...helperArgs: string[]): Promise<{
   exitCode: number;
@@ -1225,6 +1228,66 @@ describe("runSession safeguards", () => {
     expect(result.result_count).toBe(3);
   }, 30_000);
 
+  it("gs-292: respects dispatcher.max_consecutive_empty when set above default", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_gs292_max_consecutive_empty.ts",
+      "sequential-fleet-5",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(5);
+  }, 30_000);
+
+  it("gs-292: default 3 consecutive empties when using factory dispatcher defaults", async () => {
+    const { exitCode, stderr, result } = await runHelperSubprocess(
+      "verify_gs292_max_consecutive_empty.ts",
+      "sequential-default-3",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(3);
+  }, 30_000);
+
+  it("gs-292: per-project max_consecutive_empty overrides fleet default", async () => {
+    const { exitCode, stderr, result } = await runHelperSubprocess(
+      "verify_gs292_max_consecutive_empty.ts",
+      "sequential-project-7",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(7);
+  }, 30_000);
+
+  it("gs-292: parallel all-empty rounds honor dispatcher.max_consecutive_empty", async () => {
+    const { exitCode, stderr, result } = await runHelperSubprocess(
+      "verify_gs292_max_consecutive_empty.ts",
+      "parallel-all-empty-2",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(4);
+  }, 30_000);
+
+  it("gs-292: parallel round limit is max of per-project effective limits", async () => {
+    const { exitCode, stderr, result } = await runHelperSubprocess(
+      "verify_gs292_max_consecutive_empty.ts",
+      "parallel-round-limit-max",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.execute_cycle_calls).toBe(8);
+  }, 30_000);
+
   it("gs-290: excludes empty-diff verified_weak task for rest of session; fresh session clears", async () => {
     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
       "verify_gs290_session_empty_diff_exclusion.ts",
@@ -1650,6 +1713,27 @@ describe("runSessionChain", () => {
   });
 });
 
+describe("effectiveMaxConsecutiveEmpty / maxConsecutiveEmptyLimitForRound (gs-292)", () => {
+  it("uses dispatcher value when project override is unset", () => {
+    const disp = makeDispatcherConfig({ max_consecutive_empty: 5 });
+    const proj = makeProjectConfig({});
+    expect(effectiveMaxConsecutiveEmpty(proj, disp)).toBe(5);
+  });
+
+  it("prefers per-project max_consecutive_empty over fleet", () => {
+    const disp = makeDispatcherConfig({ max_consecutive_empty: 3 });
+    const proj = makeProjectConfig({ max_consecutive_empty: 12 });
+    expect(effectiveMaxConsecutiveEmpty(proj, disp)).toBe(12);
+  });
+
+  it("round limit is the maximum effective limit across projects", () => {
+    const disp = makeDispatcherConfig({ max_consecutive_empty: 2 });
+    const a = makeProjectConfig({ id: "a", max_consecutive_empty: 5 });
+    const b = makeProjectConfig({ id: "b" });
+    expect(maxConsecutiveEmptyLimitForRound([a, b], disp)).toBe(5);
+  });
+});
+
 describe("updateFailureStreak (gs-193 fast-fail backoff)", () => {
   it("exports defaults matching the task spec (N=3, M=600s)", () => {
     expect(DEFAULT_SOFT_SKIP_THRESHOLD).toBe(3);
@@ -1907,6 +1991,7 @@ describe("hotReloadProjects (gs-191)", () => {
       log_dir: "logs",
       digest_dir: "digests",
       max_parallel_slots: 1,
+      max_consecutive_empty: 3,
     };
     return { projects, dispatcher };
   }

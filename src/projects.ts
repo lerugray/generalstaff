@@ -59,6 +59,8 @@ const DISPATCHER_DEFAULTS: DispatcherConfig = {
   // gs-186: Phase 4 default is sequential (1 slot). Opt into parallel
   // cycles by setting dispatcher.max_parallel_slots: N in projects.yaml.
   max_parallel_slots: 1,
+  // gs-292: empty-diff / all-empty-round session stop guard.
+  max_consecutive_empty: 3,
 };
 
 export class ProjectValidationError extends Error {
@@ -260,6 +262,36 @@ function validateBudgetHierarchy(
       }
     }
   }
+}
+
+/** Integer >= 1. Used for dispatcher + optional project fields (gs-292). */
+function parseMin1PositiveInt(
+  scopeId: string,
+  field: string,
+  value: unknown,
+): number {
+  if (typeof value !== "number") {
+    throw new ProjectValidationError(
+      scopeId,
+      field,
+      `must be a number, got ${typeof value}`,
+    );
+  }
+  if (!Number.isInteger(value)) {
+    throw new ProjectValidationError(
+      scopeId,
+      field,
+      `must be an integer, got ${value}`,
+    );
+  }
+  if (value < 1) {
+    throw new ProjectValidationError(
+      scopeId,
+      field,
+      `must be >= 1, got ${value}`,
+    );
+  }
+  return value;
 }
 
 function requirePositiveInt(
@@ -546,6 +578,16 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     lifecycle = raw.lifecycle;
   }
 
+  // gs-292: optional empty-diff streak override (per-project).
+  let maxConsecutiveEmpty: number | undefined;
+  if (raw.max_consecutive_empty !== undefined && raw.max_consecutive_empty !== null) {
+    maxConsecutiveEmpty = parseMin1PositiveInt(
+      id,
+      "max_consecutive_empty",
+      raw.max_consecutive_empty,
+    );
+  }
+
   // gs-311: optional journal-source config. Inert until jr-003 lands;
   // schema-only today so projects.yaml can start carrying the path.
   let journal: { mission_bullet_root: string; scan_days?: number; reviewer_context?: boolean } | undefined;
@@ -618,6 +660,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     journal,
     public_facing: publicFacing,
     lifecycle,
+    max_consecutive_empty: maxConsecutiveEmpty,
   };
 }
 
@@ -1035,6 +1078,38 @@ export function validateConfig(
         );
       }
     }
+
+    const mceLine = locateFieldLine(source, i, "max_consecutive_empty") ?? projectLine;
+    if (pr.max_consecutive_empty !== undefined && pr.max_consecutive_empty !== null) {
+      if (typeof pr.max_consecutive_empty !== "number") {
+        errors.push(
+          formatLine(
+            mceLine,
+            `${prefix}: max_consecutive_empty — must be a number, got ${typeof pr.max_consecutive_empty}`,
+            "value was quoted or given as a non-number",
+            "remove quotes so YAML parses it as an integer",
+          ),
+        );
+      } else if (!Number.isInteger(pr.max_consecutive_empty)) {
+        errors.push(
+          formatLine(
+            mceLine,
+            `${prefix}: max_consecutive_empty — must be an integer, got ${pr.max_consecutive_empty}`,
+            "fractional values are not meaningful for a streak count",
+            "round to a whole number >= 1",
+          ),
+        );
+      } else if (pr.max_consecutive_empty < 1) {
+        errors.push(
+          formatLine(
+            mceLine,
+            `${prefix}: max_consecutive_empty — must be >= 1, got ${pr.max_consecutive_empty}`,
+            "zero or negative cannot end a streak that never increments",
+            "set a positive integer or omit the field for the fleet default",
+          ),
+        );
+      }
+    }
   }
 
   return { errors };
@@ -1129,8 +1204,17 @@ function validateDispatcher(
     log_dir: (raw.log_dir as string) ?? DISPATCHER_DEFAULTS.log_dir,
     digest_dir: (raw.digest_dir as string) ?? DISPATCHER_DEFAULTS.digest_dir,
     max_parallel_slots: normalizeParallelSlots(raw.max_parallel_slots),
+    max_consecutive_empty: dispatcherMaxConsecutiveEmpty(raw),
     session_budget: sessionBudget,
   };
+}
+
+function dispatcherMaxConsecutiveEmpty(raw: Record<string, unknown>): number {
+  const v = raw.max_consecutive_empty;
+  if (v === undefined || v === null) {
+    return DISPATCHER_DEFAULTS.max_consecutive_empty;
+  }
+  return parseMin1PositiveInt("dispatcher", "max_consecutive_empty", v);
 }
 
 // gs-186: accept numeric input, clamp to >=1. Invalid / missing values

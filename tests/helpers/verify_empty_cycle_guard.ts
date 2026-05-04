@@ -1,5 +1,6 @@
 // Isolated test helper: proves that runSession exits the cycle loop
-// after MAX_CONSECUTIVE_EMPTY (3) consecutive empty-diff cycles.
+// after dispatcher.max_consecutive_empty consecutive empty-diff cycles
+// (default 3 via makeDispatcherConfig / projects.yaml).
 //
 // Runs in a subprocess so mock.module calls don't leak.
 

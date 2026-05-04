@@ -2076,8 +2076,9 @@
   {
     "id": "gs-292",
     "title": "Make MAX_CONSECUTIVE_EMPTY configurable via DispatcherConfig. Currently hardcoded to 3 at src/session.ts line 452. Expose as dispatcher.max_consecutive_empty in projects.yaml (default 3). Optional per-project override via projects.yaml[<id>].max_consecutive_empty for projects with high legitimate empty-diff rates. Wiring: add field to DispatcherConfig in src/types.ts, add optional field to ProjectConfig, thread through to session.ts sequential + parallel loops (both hardcode the constant today). Tests: verify config value is respected, default preserved when unset. Small scope, bot-pickable candidate.",
-    "status": "pending",
-    "priority": 5
+    "status": "done",
+    "priority": 5,
+    "done_note": "DispatcherConfig.max_consecutive_empty + ProjectConfig optional override; DISPATCHER_DEFAULTS/validateDispatcher + validateProject (parseMin1PositiveInt) + validateConfig project checks. session.ts: effectiveMaxConsecutiveEmpty + maxConsecutiveEmptyLimitForRound; sequential empty streak + parallel all-empty rounds use config. tests/helpers/fixtures.ts + budget_gate dispatcher literal; tests/projects.test.ts describe max_consecutive_empty; tests/helpers/verify_gs292_max_consecutive_empty.ts + session.test subprocess + pure helper its. bun test + typecheck clean."
   },
   {
     "id": "gs-293",

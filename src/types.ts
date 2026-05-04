@@ -148,6 +148,11 @@ export interface ProjectConfig {
   // through $MISSIONSWARM_ROOT/src/index.ts; if that env is unset
   // the integration silently no-ops.
   missionswarm?: MissionSwarmProjectConfig;
+  // gs-292: optional per-project override for the empty-diff streak
+  // guard. When set, wins over dispatcher.max_consecutive_empty for
+  // cycles on this project (sequential) and contributes the per-round
+  // maximum in parallel mode.
+  max_consecutive_empty?: number;
   // gs-311: optional journal-source integration. When set, GS knows
   // where to find the user's mission-bullet-oss journal tree; inert
   // until jr-003 (scan library) lands. See
@@ -215,6 +220,10 @@ export interface DispatcherConfig {
   // doubling of reviewer API calls on upgrade (Hard Rule 8 / BYOK).
   // Opt in per-fleet by setting this > 1 in projects.yaml.
   max_parallel_slots: number;
+  // gs-292: consecutive verified_weak + empty-diff cycles (sequential)
+  // or all-empty parallel rounds before the session stops with
+  // stopReason empty-cycles. Default 3 when omitted from projects.yaml.
+  max_consecutive_empty: number;
   // gs-297: optional fleet-wide usage budget. Applies across all
   // projects in a session. Per-project overrides (on ProjectConfig)
   // carve out tighter caps for individual projects and must fit
