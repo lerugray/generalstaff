@@ -34,18 +34,58 @@ function getEffectiveHomedir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? homedir();
 }
 
+/** One verified task, with the project it touched. Caller produces
+ *  these from the session's verified-cycle bucket; formatSessionMessage
+ *  groups them by project_id so the user can scan what moved on which
+ *  project at a glance (gs-303). */
+export interface SessionTaskEntry {
+  project_id: string;
+  /** Already-formatted human-readable line (e.g. "gs-091: validate
+   *  task add input"). The project prefix is added at format time. */
+  subject: string;
+}
+
+/** Per-project cycle count for the "Touched:" breakdown line.
+ *  cycles = verified + failed + skipped for that project (gs-303). */
+export interface SessionProjectCount {
+  project_id: string;
+  cycles: number;
+}
+
 export interface SessionNotificationParams {
-  success: boolean;
   budgetMinutes: number;
   durationMinutes: number;
   verified: number;
   failed: number;
   skipped: number;
-  /** Human-readable lines for the "What got done" section, already
-   *  formatted (e.g. "gs-091: validate task add input"). */
-  tasksDone: string[];
+  /** Verified tasks with their project_id, for grouping + prefixing
+   *  in the "What got done" section. (gs-303) */
+  tasksDone: SessionTaskEntry[];
+  /** Per-project total-cycle counts for the "Touched:" line. Empty
+   *  array suppresses the line. (gs-303) */
+  projectCounts: SessionProjectCount[];
   /** Optional log file path for the user to find the full transcript. */
   logPath?: string;
+}
+
+// gs-303: header tag is threshold-based, not all-or-nothing. The old
+// "[FAIL] if any cycle failed" rule fired [FAIL] on 11/12 verified
+// (91.7%) — Ray flagged this as cryptic on 2026-04-24 because the
+// session looked like a wash at first glance when it was actually
+// a productive run with one bad cycle. Thresholds match the gs-303
+// spec: [OK] >=75%, [PARTIAL] 25-74%, [FAIL] <25%. Skipped cycles
+// don't move the ratio (the bot didn't try and fail; it abstained).
+function computeHeaderTag(
+  verified: number,
+  failed: number,
+): "[OK]" | "[PARTIAL]" | "[FAIL]" {
+  const attempts = verified + failed;
+  // Zero attempts (e.g. all skipped) reads as [OK] — nothing failed.
+  if (attempts === 0) return "[OK]";
+  const ratio = verified / attempts;
+  if (ratio >= 0.75) return "[OK]";
+  if (ratio >= 0.25) return "[PARTIAL]";
+  return "[FAIL]";
 }
 
 interface TelegramCredentials {
@@ -83,26 +123,68 @@ export function loadTelegramCredentials(
 }
 
 export function formatSessionMessage(p: SessionNotificationParams): string {
-  const header = p.success ? "[OK]" : "[FAIL]";
+  const header = computeHeaderTag(p.verified, p.failed);
   const total = p.verified + p.failed + p.skipped;
   const lines: string[] = [
     `${header} GeneralStaff session complete`,
     ``,
-    `Duration: ${p.durationMinutes.toFixed(1)} min (budget ${p.budgetMinutes})`,
-    `Cycles: ${total} total — ${p.verified} verified, ${p.failed} failed${p.skipped > 0 ? `, ${p.skipped} skipped` : ""}`,
-    ``,
   ];
+
+  // gs-303: per-project breakdown right after the header so a glance
+  // tells you which projects moved. Empty list (single-project session
+  // without per-project data, or zero cycles) suppresses the line.
+  if (p.projectCounts.length > 0) {
+    const breakdown = p.projectCounts
+      .map((pc) => `${pc.project_id} (${pc.cycles})`)
+      .join(", ");
+    lines.push(`Touched: ${breakdown}`);
+  }
+
+  lines.push(
+    `Duration: ${p.durationMinutes.toFixed(1)} min (budget ${p.budgetMinutes})`,
+  );
+  lines.push(
+    `Cycles: ${total} total — ${p.verified} verified, ${p.failed} failed${p.skipped > 0 ? `, ${p.skipped} skipped` : ""}`,
+  );
+  lines.push(``);
+
   if (p.tasksDone.length > 0) {
+    // gs-303: group by project_id (preserve first-seen project order),
+    // prefix each bullet with [project_id]. Reading order matches the
+    // "Touched:" breakdown order, so the eye can follow the same
+    // narrative top-to-bottom.
+    const grouped = groupTasksByProject(p.tasksDone);
     lines.push("What got done:");
-    p.tasksDone.forEach((task, i) => {
-      lines.push(`${i + 1}. ${task}`);
-    });
+    let n = 1;
+    for (const [projectId, subjects] of grouped) {
+      for (const subject of subjects) {
+        lines.push(`${n}. [${projectId}] ${subject}`);
+        n += 1;
+      }
+    }
     lines.push("");
   }
   if (p.logPath) {
     lines.push(`Log: ${p.logPath}`);
   }
   return lines.join("\n");
+}
+
+// First-seen-project ordering. Map preserves insertion order in JS, so
+// iterating the result gives projects in the order they first appear in
+// tasksDone — matching the order verified-cycles were appended in
+// session.ts (which is by-project for sequential mode, by-completion-time
+// for parallel mode).
+function groupTasksByProject(
+  entries: SessionTaskEntry[],
+): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const e of entries) {
+    const list = groups.get(e.project_id);
+    if (list) list.push(e.subject);
+    else groups.set(e.project_id, [e.subject]);
+  }
+  return groups;
 }
 
 /** Telegram sendMessage accepts up to 4096 UTF-8 chars. Truncate with

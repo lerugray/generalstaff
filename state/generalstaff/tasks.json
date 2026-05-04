@@ -2163,12 +2163,13 @@
   {
     "id": "gs-303",
     "title": "Session-complete notification: tag accuracy + project breakdown. The current [FAIL] tag fires when any single cycle in a session fails, even at 11/12 verified (92% success ships as 'failed'). Header also says 'GeneralStaff session complete' even when work spanned N projects with GS as orchestrator only \u2014 cryptic for a glance-check notification. Fix: (a) Header tag becomes [OK] if >=75% verified, [PARTIAL] if 25-74%, [FAIL] if <25%. (b) First 3 lines after the header list per-project cycle counts ('Touched: zero-page-private (3), sandkasten (3), auftragstaktik (3), wargame-design-book (1), devforge (1)'). (c) Task bullets grouped by project rather than cycle-order. (d) Each task bullet prefixed with project name ('[zero-page-private] zpp-001: port in-app instruction manual'). Acceptance: 11 verified + 1 failed produces [OK] or [PARTIAL] not [FAIL]; 0 verified + 5 failed still [FAIL]; a reader can see which projects moved in 3 seconds. Rationale captured 2026-04-24 after Ray flagged the real A5-session ping as 'legitimately cryptic' \u2014 the session completed 11 good cycles but read as a failure at first glance. Expected diff: ~100-200 LOC in src/session_report.ts + new cases in tests/session_report.test.ts.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "expected_touches": [
       "src/session_report.ts",
       "tests/session_report.test.ts"
-    ]
+    ],
+    "done_note": "Shipped in src/notify.ts (the actual home for the session-complete Telegram notification — task description pointed at src/session_report.ts which is the unrelated stop-reason-stats analyst report; flagged in commit message). (a) Header tag now threshold-based via computeHeaderTag(verified, failed): >=75% [OK], 25-74% [PARTIAL], <25% [FAIL]. Zero-attempts (all-skipped) reads as [OK] — nothing failed. Skipped cycles don't move the ratio. (b) New 'Touched: project-id (cycles), ...' line right after the header, suppressed when projectCounts is empty. (c)+(d) Tasks grouped by first-seen project_id with [project-id] prefix on each bullet — 'What got done' iterates groups in first-seen order so the reading order matches the Touched: line. SessionNotificationParams gains tasksDone: SessionTaskEntry[] (was string[]) + projectCounts: SessionProjectCount[] (new); the now-redundant success: boolean field is removed (header derives from counts). Call site in src/session.ts builds projectCounts from fleetBuckets via inline first-seen-order Map walk over verified→failed→skipped. Acceptance: 11 verified + 1 failed → [OK] (gs-303 spec); 0 verified + 5 failed → [FAIL] (gs-303 spec). Diff: ~110 LOC src/notify.ts (interface expansion + threshold helper + grouping helper + format rewrite) + ~30 LOC src/session.ts (call-site shape change) + ~140 LOC tests/notify.test.ts (8 threshold cases, 2 breakdown cases, 1 grouping case, 2 integration-style updates). 43/43 notify tests pass; 1956 total fleet tests pass, 0 fail; tsc clean."
   },
   {
     "id": "gs-301a",

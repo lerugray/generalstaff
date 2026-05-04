@@ -107,34 +107,105 @@ describe("loadTelegramCredentials", () => {
 });
 
 describe("formatSessionMessage", () => {
-  function makeParams(overrides: Partial<SessionNotificationParams> = {}): SessionNotificationParams {
+  function makeParams(
+    overrides: Partial<SessionNotificationParams> = {},
+  ): SessionNotificationParams {
     return {
-      success: true,
       budgetMinutes: 90,
       durationMinutes: 44.0,
       verified: 9,
       failed: 0,
       skipped: 0,
       tasksDone: [],
+      projectCounts: [],
       ...overrides,
     };
   }
 
-  it("emits [OK] header when success is true", () => {
-    const msg = formatSessionMessage(makeParams({ success: true }));
-    expect(msg).toContain("[OK]");
-    expect(msg).not.toContain("[FAIL]");
-  });
+  // gs-303: header tag is threshold-based on verified/(verified+failed).
+  describe("header tag (gs-303)", () => {
+    it("[OK] when ratio is 100% (no failures)", () => {
+      const msg = formatSessionMessage(
+        makeParams({ verified: 9, failed: 0 }),
+      );
+      expect(msg).toContain("[OK]");
+      expect(msg).not.toContain("[FAIL]");
+      expect(msg).not.toContain("[PARTIAL]");
+    });
 
-  it("emits [FAIL] header when success is false", () => {
-    const msg = formatSessionMessage(makeParams({ success: false, failed: 1 }));
-    expect(msg).toContain("[FAIL]");
-    expect(msg).not.toContain("[OK]");
+    it("[OK] when ratio is exactly 75%", () => {
+      const msg = formatSessionMessage(
+        makeParams({ verified: 3, failed: 1 }),
+      );
+      expect(msg).toContain("[OK]");
+    });
+
+    it("[OK] when ratio is 91.7% (gs-303 acceptance: 11 verified + 1 failed)", () => {
+      const msg = formatSessionMessage(
+        makeParams({ verified: 11, failed: 1 }),
+      );
+      expect(msg).toContain("[OK]");
+      expect(msg).not.toContain("[FAIL]");
+    });
+
+    it("[PARTIAL] when ratio is in [25%, 75%)", () => {
+      // 5 verified out of 10 = 50%
+      const msg = formatSessionMessage(
+        makeParams({ verified: 5, failed: 5 }),
+      );
+      expect(msg).toContain("[PARTIAL]");
+      expect(msg).not.toContain("[OK]");
+      expect(msg).not.toContain("[FAIL]");
+    });
+
+    it("[PARTIAL] when ratio is exactly 25%", () => {
+      const msg = formatSessionMessage(
+        makeParams({ verified: 1, failed: 3 }),
+      );
+      expect(msg).toContain("[PARTIAL]");
+    });
+
+    it("[FAIL] when ratio is below 25%", () => {
+      // 1 verified out of 5 = 20%
+      const msg = formatSessionMessage(
+        makeParams({ verified: 1, failed: 4 }),
+      );
+      expect(msg).toContain("[FAIL]");
+      expect(msg).not.toContain("[OK]");
+    });
+
+    it("[FAIL] on gs-303 acceptance: 0 verified + 5 failed", () => {
+      const msg = formatSessionMessage(
+        makeParams({ verified: 0, failed: 5 }),
+      );
+      expect(msg).toContain("[FAIL]");
+    });
+
+    it("[OK] when there were no attempts (all skipped)", () => {
+      // attempts == 0 reads as healthy — nothing failed.
+      const msg = formatSessionMessage(
+        makeParams({ verified: 0, failed: 0, skipped: 3 }),
+      );
+      expect(msg).toContain("[OK]");
+    });
+
+    it("skipped cycles do not move the ratio", () => {
+      // 9 verified, 1 failed, 100 skipped → still 90% → [OK]
+      const msg = formatSessionMessage(
+        makeParams({ verified: 9, failed: 1, skipped: 100 }),
+      );
+      expect(msg).toContain("[OK]");
+    });
   });
 
   it("includes duration, budget, and cycle counts", () => {
     const msg = formatSessionMessage(
-      makeParams({ budgetMinutes: 90, durationMinutes: 44.0, verified: 9, failed: 1 }),
+      makeParams({
+        budgetMinutes: 90,
+        durationMinutes: 44.0,
+        verified: 9,
+        failed: 1,
+      }),
     );
     expect(msg).toContain("Duration: 44.0 min (budget 90)");
     expect(msg).toContain("Cycles: 10 total");
@@ -152,23 +223,52 @@ describe("formatSessionMessage", () => {
     expect(msg).toContain("2 skipped");
   });
 
-  it("renders the 'What got done' list when tasksDone has entries", () => {
-    const msg = formatSessionMessage(
-      makeParams({
-        tasksDone: [
-          "gs-091: validate task add input",
-          "gs-085: add formatRelativeTime helper",
-        ],
-      }),
-    );
-    expect(msg).toContain("What got done:");
-    expect(msg).toContain("1. gs-091: validate task add input");
-    expect(msg).toContain("2. gs-085: add formatRelativeTime helper");
+  // gs-303: "Touched:" breakdown.
+  describe("project breakdown (gs-303)", () => {
+    it("emits 'Touched: ...' when projectCounts is populated", () => {
+      const msg = formatSessionMessage(
+        makeParams({
+          projectCounts: [
+            { project_id: "zero-page-private", cycles: 3 },
+            { project_id: "sandkasten", cycles: 3 },
+            { project_id: "wargame-design-book", cycles: 1 },
+          ],
+        }),
+      );
+      expect(msg).toContain(
+        "Touched: zero-page-private (3), sandkasten (3), wargame-design-book (1)",
+      );
+    });
+
+    it("omits the 'Touched:' line when projectCounts is empty", () => {
+      const msg = formatSessionMessage(makeParams({ projectCounts: [] }));
+      expect(msg).not.toContain("Touched:");
+    });
   });
 
-  it("omits the task list entirely when tasksDone is empty", () => {
-    const msg = formatSessionMessage(makeParams({ tasksDone: [] }));
-    expect(msg).not.toContain("What got done:");
+  // gs-303: tasks grouped by project + prefixed with [project_id].
+  describe("'What got done' grouping (gs-303)", () => {
+    it("renders tasks prefixed with their project_id and grouped by first-seen project order", () => {
+      const msg = formatSessionMessage(
+        makeParams({
+          tasksDone: [
+            { project_id: "zero-page-private", subject: "zpp-001: port manual" },
+            { project_id: "sandkasten", subject: "sk-013: do thing" },
+            { project_id: "zero-page-private", subject: "zpp-002: another" },
+          ],
+        }),
+      );
+      expect(msg).toContain("What got done:");
+      // first-seen order: zpp's two tasks group, then sk-013
+      expect(msg).toContain("1. [zero-page-private] zpp-001: port manual");
+      expect(msg).toContain("2. [zero-page-private] zpp-002: another");
+      expect(msg).toContain("3. [sandkasten] sk-013: do thing");
+    });
+
+    it("omits the task list when tasksDone is empty", () => {
+      const msg = formatSessionMessage(makeParams({ tasksDone: [] }));
+      expect(msg).not.toContain("What got done:");
+    });
   });
 
   it("includes the log path when provided", () => {
@@ -357,13 +457,15 @@ describe("loadTelegramCredentials default homedir path", () => {
 
     try {
       await notifySessionEnd({
-        success: true,
         budgetMinutes: 5,
         durationMinutes: 2,
         verified: 1,
         failed: 0,
         skipped: 0,
-        tasksDone: ["gs-115: add default homedir notify test"],
+        tasksDone: [
+          { project_id: "generalstaff", subject: "gs-115: add default homedir notify test" },
+        ],
+        projectCounts: [{ project_id: "generalstaff", cycles: 1 }],
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -386,13 +488,13 @@ describe("loadTelegramCredentials default homedir path", () => {
 
     try {
       await notifySessionEnd({
-        success: true,
         budgetMinutes: 1,
         durationMinutes: 1,
         verified: 0,
         failed: 0,
         skipped: 0,
         tasksDone: [],
+        projectCounts: [],
       });
     } finally {
       globalThis.fetch = originalFetch;
@@ -418,13 +520,13 @@ describe("notifySessionEnd composition", () => {
 
     await notifySessionEnd(
       {
-        success: true,
         budgetMinutes: 1,
         durationMinutes: 1,
         verified: 0,
         failed: 0,
         skipped: 0,
         tasksDone: [],
+        projectCounts: [],
       },
       { loader: () => null },
     );
@@ -441,13 +543,15 @@ describe("notifySessionEnd composition", () => {
 
     await notifySessionEnd(
       {
-        success: true,
         budgetMinutes: 90,
         durationMinutes: 44,
         verified: 9,
         failed: 1,
         skipped: 0,
-        tasksDone: ["gs-091: validate task add input"],
+        tasksDone: [
+          { project_id: "generalstaff", subject: "gs-091: validate task add input" },
+        ],
+        projectCounts: [{ project_id: "generalstaff", cycles: 10 }],
         logPath: "logs/session_x.log",
       },
       { loader: () => ({ token: "T", chatId: "99" }) },
@@ -456,8 +560,11 @@ describe("notifySessionEnd composition", () => {
     expect(capturedBody).not.toBeNull();
     const body = JSON.parse(capturedBody as unknown as string);
     expect(body.chat_id).toBe("99");
+    // 9/10 = 90% verified → [OK] under gs-303 thresholds.
     expect(body.text).toContain("[OK] GeneralStaff session complete");
     expect(body.text).toContain("gs-091: validate task add input");
+    expect(body.text).toContain("[generalstaff]");
+    expect(body.text).toContain("Touched: generalstaff (10)");
     expect(body.text).toContain("Log: logs/session_x.log");
   });
 });

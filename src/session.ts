@@ -1357,22 +1357,39 @@ export async function runSession(options: SessionOptions) {
   // and all internal failures are swallowed so this can never crash
   // the session.
   if (!dryRun) {
-    const tasksDone = fleetBuckets.verified.map(
-      (r) =>
+    // gs-303: pass per-project structure into the notification so the
+    // formatter can group tasks + render the "Touched:" breakdown.
+    const tasksDone = fleetBuckets.verified.map((r) => ({
+      project_id: r.project_id,
+      subject:
         fetchCommitSubject(
           r.cycle_start_sha,
           r.cycle_end_sha,
           projectPaths[r.project_id],
         ) || r.cycle_id,
+    }));
+    // First-seen-project ordering across all three buckets. Verified
+    // first so verified-leading projects appear first in the breakdown
+    // (consistent with the "What got done" task-list ordering, which
+    // is verified-only).
+    const projectCountMap = new Map<string, number>();
+    const bumpCount = (id: string) => {
+      projectCountMap.set(id, (projectCountMap.get(id) ?? 0) + 1);
+    };
+    for (const r of fleetBuckets.verified) bumpCount(r.project_id);
+    for (const r of fleetBuckets.failed) bumpCount(r.project_id);
+    for (const r of fleetBuckets.skipped) bumpCount(r.project_id);
+    const projectCounts = [...projectCountMap.entries()].map(
+      ([project_id, cycles]) => ({ project_id, cycles }),
     );
     await notifySessionEnd({
-      success: fleetBuckets.failed.length === 0,
       budgetMinutes,
       durationMinutes: elapsed,
       verified: fleetBuckets.verified.length,
       failed: fleetBuckets.failed.length,
       skipped: fleetBuckets.skipped.length,
       tasksDone,
+      projectCounts,
       logPath: process.env.GENERALSTAFF_SESSION_LOG,
     });
   }
