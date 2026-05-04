@@ -110,15 +110,46 @@ completion_criteria:
   - custom_check: "test -f public/dist/index.html"
 ```
 
+### `launch_gate: "<gate-id>"`
+
+Resolves by looking for a checkbox bullet in the project's
+`LAUNCH-PLAN.md` whose first non-whitespace token (after the
+checkbox) matches the gate id, optionally `**bold-wrapped**`.
+Allows the launch-plan markdown to stay human-readable while
+giving the dispatcher a machine-checkable signal.
+
+```markdown
+## Phase 2 — Billing
+
+- [x] stripe-test-mode-verified — webhooks pass on staging
+- [x] **billing-history-page** — view / cancel / change card
+- [ ] first-paid-subscription — pending Phase 5
+```
+
+Semantics:
+- `[x]` (any-case) → gate closed, criterion passes
+- `[ ]` → declared but open, criterion fails with detail "declared but open"
+- gate id not found in the file → fails with detail "not declared"
+- `LAUNCH-PLAN.md` missing → fails with detail saying so
+
+The gate id is anchored to the position immediately after the
+checkbox so a stray mention of the same string inside another
+gate's description doesn't produce a false positive.
+
+```yaml
+completion_criteria:
+  - launch_gate: "stripe-test-mode-verified"
+  - launch_gate: "billing-history-page"
+```
+
 ### v1: declared but not evaluated
 
 The schema accepts these criteria so a roadmap can declare them
 without breaking validation, but `phase advance` returns
 `passed: false` with detail "not implemented in v1" for each. The
 operator either drops them, replaces them with `custom_check`
-equivalents, or waits for Phase B.
+equivalents, or waits for the evaluator to land.
 
-- `launch_gate: "<gate-id>"` — for future LAUNCH-PLAN.md unification
 - `git_tag: "<tag>"` — for future tag-watching
 - `lifecycle_transition: "dev -> live"` — for future lifecycle flips
 

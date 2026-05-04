@@ -412,11 +412,9 @@ export async function evaluateCriteria(
     } else if ("custom_check" in c) {
       results.push(await evaluateCustomCheck(c.custom_check, projectConfig.path));
     } else if ("launch_gate" in c) {
-      results.push({
-        kind: "launch_gate",
-        passed: false,
-        detail: `launch_gate "${c.launch_gate}": evaluator not implemented in v1`,
-      });
+      results.push(
+        await evaluateLaunchGate(c.launch_gate, projectConfig.path),
+      );
     } else if ("git_tag" in c) {
       results.push({
         kind: "git_tag",
@@ -462,6 +460,78 @@ async function evaluateAllTasksDone(projectId: string): Promise<PhaseCriterionRe
       detail: `loadTasks failed: ${(err as Error).message}`,
     };
   }
+}
+
+// gs-303-followup / Phase B+ deferred item: LAUNCH-PLAN.md gate
+// unification. ROADMAP.yaml's `launch_gate: "<gate-id>"` criterion
+// resolves by looking for a checkbox bullet in the project's
+// LAUNCH-PLAN.md whose first non-whitespace token after the checkbox
+// matches the gate id (optionally **bold-wrapped**).
+//
+//   - [x] stripe-test-mode-verified — Stripe webhooks pass on staging
+//   - [x] **lighthouse-mobile-85** — score 87 on /home, 89 on /browse
+//   - [ ] first-paid-subscription — pending Phase 5
+//
+// Semantics:
+//   - `[x]` (any-case) → gate closed (passed=true)
+//   - `[ ]` → declared but open (passed=false, detail says "open")
+//   - not present → not declared (passed=false, detail says "not found")
+//   - LAUNCH-PLAN.md missing entirely → passed=false, detail explains
+//
+// Anchoring the gate id to the position immediately after the checkbox
+// keeps a phrase like "stripe-test-mode-verified" inside another
+// gate's description from producing a false positive.
+async function evaluateLaunchGate(
+  gateId: string,
+  projectPath: string,
+): Promise<PhaseCriterionResult> {
+  const launchPlanPath = join(projectPath, "LAUNCH-PLAN.md");
+  if (!existsSync(launchPlanPath)) {
+    return {
+      kind: "launch_gate",
+      passed: false,
+      detail: `launch_gate "${gateId}": LAUNCH-PLAN.md not found at ${launchPlanPath}`,
+    };
+  }
+  let content: string;
+  try {
+    content = await readFile(launchPlanPath, "utf8");
+  } catch (err) {
+    return {
+      kind: "launch_gate",
+      passed: false,
+      detail: `launch_gate "${gateId}": LAUNCH-PLAN.md unreadable: ${(err as Error).message}`,
+    };
+  }
+  const escaped = gateId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const idPattern = `(?:\\*\\*)?${escaped}(?:\\*\\*)?`;
+  const checkedRe = new RegExp(
+    `^\\s*-\\s+\\[(?:x|X)\\]\\s+${idPattern}(?:\\b|$)`,
+    "m",
+  );
+  const uncheckedRe = new RegExp(
+    `^\\s*-\\s+\\[\\s\\]\\s+${idPattern}(?:\\b|$)`,
+    "m",
+  );
+  if (checkedRe.test(content)) {
+    return {
+      kind: "launch_gate",
+      passed: true,
+      detail: `launch_gate "${gateId}": closed`,
+    };
+  }
+  if (uncheckedRe.test(content)) {
+    return {
+      kind: "launch_gate",
+      passed: false,
+      detail: `launch_gate "${gateId}": declared but open in LAUNCH-PLAN.md`,
+    };
+  }
+  return {
+    kind: "launch_gate",
+    passed: false,
+    detail: `launch_gate "${gateId}": not declared in LAUNCH-PLAN.md (expected a checkbox bullet starting with the gate id)`,
+  };
 }
 
 async function evaluateCustomCheck(

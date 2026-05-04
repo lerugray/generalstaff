@@ -451,19 +451,116 @@ describe("evaluateCriteria — custom_check", () => {
   });
 });
 
-describe("evaluateCriteria — unsupported v1 kinds", () => {
-  it("returns passed=false with 'not implemented in v1' for launch_gate", async () => {
+describe("evaluateCriteria — launch_gate", () => {
+  it("passes when LAUNCH-PLAN.md has the gate id checked", async () => {
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      `## Phase 2 — Billing\n\n- [x] stripe-test-mode-verified — webhooks pass on staging\n`,
+    );
     const phase: RoadmapPhase = {
-      id: "mvp",
+      id: "billing",
       goal: "x",
-      completion_criteria: [{ launch_gate: "v0.1.0" }],
+      completion_criteria: [{ launch_gate: "stripe-test-mode-verified" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.kind).toBe("launch_gate");
+    expect(results[0]!.passed).toBe(true);
+    expect(results[0]!.detail).toContain("closed");
+  });
+
+  it("accepts uppercase [X] as closed", async () => {
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      `- [X] some-gate — done\n`,
+    );
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "some-gate" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(true);
+  });
+
+  it("accepts a **bold-wrapped** gate id as closed", async () => {
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      `- [x] **billing-history-page** — view / cancel / change card\n`,
+    );
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "billing-history-page" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(true);
+  });
+
+  it("fails with detail 'declared but open' when checkbox is empty", async () => {
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      `- [ ] first-paid-subscription — pending Phase 5\n`,
+    );
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "first-paid-subscription" }],
     };
     const results = await evaluateCriteria(phase, makeProjectConfig());
     expect(results[0]!.passed).toBe(false);
-    expect(results[0]!.detail).toContain("not implemented in v1");
+    expect(results[0]!.detail).toContain("declared but open");
   });
 
-  it("returns passed=false for git_tag + lifecycle_transition too", async () => {
+  it("fails with detail 'not declared' when the gate id is absent", async () => {
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      `- [x] something-else — irrelevant\n`,
+    );
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "missing-gate" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("not declared");
+  });
+
+  it("fails when LAUNCH-PLAN.md does not exist at the project path", async () => {
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "any-gate" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("LAUNCH-PLAN.md not found");
+  });
+
+  it("does not match a gate id appearing inside another gate's description", async () => {
+    // The gate id "stripe" should NOT match the second bullet, where
+    // "stripe" appears in the description but isn't the bullet's leading
+    // identifier. Anchoring is what prevents that false positive.
+    writeFileSync(
+      join(TEST_DIR, "LAUNCH-PLAN.md"),
+      [
+        `- [x] payments-overview — overview page mentions stripe`,
+        `- [ ] stripe — actual stripe gate, still open`,
+      ].join("\n") + "\n",
+    );
+    const phase: RoadmapPhase = {
+      id: "p",
+      goal: "x",
+      completion_criteria: [{ launch_gate: "stripe" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("declared but open");
+  });
+});
+
+describe("evaluateCriteria — unsupported v1 kinds", () => {
+  it("returns passed=false for git_tag + lifecycle_transition", async () => {
     const phase: RoadmapPhase = {
       id: "mvp",
       goal: "x",
