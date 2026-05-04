@@ -6,7 +6,30 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { spawnSync } from "child_process";
 import { botPickableTasks, isTaskBotPickable } from "./tasks";
+import { getRootDir } from "./state";
 import type { ProjectConfig, GreenfieldTask } from "./types";
+
+// gs-304: resolve a project's tasks.json across two layouts.
+//   - Legacy: <projectPath>/state/<id>/tasks.json (project carries its
+//     own state, e.g. gamr/raybrain).
+//   - GS-managed: <GS-root>/state/<id>/tasks.json (state lives in the
+//     GeneralStaff repo, with optional per-machine symlinks from the
+//     project tree). When the per-project file isn't present, fall
+//     back to the GS-root copy so parallel-mode work detection works
+//     without the symlink workaround that scripts/setup-state-junctions
+//     creates.
+//
+// Returns the first existing path, or null if neither resolves.
+function resolveTasksPath(
+  projectPath: string,
+  projectId: string,
+): string | null {
+  const direct = join(projectPath, "state", projectId, "tasks.json");
+  if (existsSync(direct)) return direct;
+  const fromRoot = join(getRootDir(), "state", projectId, "tasks.json");
+  if (existsSync(fromRoot)) return fromRoot;
+  return null;
+}
 
 // gs-200: structured breakdown of remaining work. Distinguishes the
 // three "pending" buckets that the dispatcher/queuer care about —
@@ -102,8 +125,8 @@ export async function greenfieldCountRemainingDetailed(
   projectId: string,
   handsOff: string[] = [],
 ): Promise<WorkBreakdown> {
-  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
-  if (!existsSync(tasksPath)) return emptyBreakdown();
+  const tasksPath = resolveTasksPath(projectPath, projectId);
+  if (!tasksPath) return emptyBreakdown();
 
   let tasks: GreenfieldTask[];
   try {
@@ -188,8 +211,8 @@ export async function greenfieldCountRemaining(
   projectId: string,
   handsOff: string[] = [],
 ): Promise<number> {
-  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
-  if (!existsSync(tasksPath)) return 0;
+  const tasksPath = resolveTasksPath(projectPath, projectId);
+  if (!tasksPath) return 0;
 
   try {
     const raw = await readFile(tasksPath, "utf8");
@@ -240,8 +263,8 @@ export async function greenfieldHasMoreWork(
   projectId: string,
   handsOff: string[] = [],
 ): Promise<boolean> {
-  const tasksPath = join(projectPath, "state", projectId, "tasks.json");
-  if (!existsSync(tasksPath)) return false;
+  const tasksPath = resolveTasksPath(projectPath, projectId);
+  if (!tasksPath) return false;
 
   try {
     const raw = await readFile(tasksPath, "utf8");

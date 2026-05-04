@@ -336,6 +336,70 @@ describe("greenfieldCountRemaining", () => {
       ]),
     ).toBe(false);
   });
+
+  // gs-304: GS-root fallback when projectPath/state/<id>/tasks.json
+  // is missing. Removes the per-machine symlink workaround that
+  // scripts/setup-state-junctions installs for parallel-mode pickers.
+  it("falls back to <GS-root>/state/<id>/tasks.json when projectPath has no state file", async () => {
+    // Project repo has no state/ dir — simulates a freshly-registered
+    // project on a machine without the junction/symlink in place.
+    const projectPath = join(FIXTURES, "no-state-project");
+    mkdirSync(projectPath, { recursive: true });
+
+    // Canonical state lives at <GS-root>/state/<id>/tasks.json.
+    // setRootDir(FIXTURES) is set in beforeEach.
+    writeFixture(
+      "state/gs-304-fallback/tasks.json",
+      JSON.stringify([
+        { id: "1", title: "t1", status: "pending", priority: 1 },
+        { id: "2", title: "t2", status: "pending", priority: 1 },
+        { id: "3", title: "t3", status: "done", priority: 1 },
+      ]),
+    );
+
+    expect(
+      await greenfieldCountRemaining(projectPath, "gs-304-fallback"),
+    ).toBe(2);
+    expect(await greenfieldHasMoreWork(projectPath, "gs-304-fallback")).toBe(
+      true,
+    );
+    const detailed = await greenfieldCountRemainingDetailed(
+      projectPath,
+      "gs-304-fallback",
+    );
+    expect(detailed.pending_bot_pickable).toBe(2);
+    expect(detailed.done).toBe(1);
+    expect(detailed.total).toBe(3);
+  });
+
+  it("prefers projectPath over GS-root when both exist (gs-304 fallback is fallback only)", async () => {
+    // Both paths populated; projectPath wins. Same shape as the
+    // pre-existing 'reads from project.path, not getRootDir()' test
+    // but kept inside the gs-304 describe scope so the regression
+    // surface is obvious.
+    const projectPath = join(FIXTURES, "project-with-state");
+    mkdirSync(join(projectPath, "state", "gs-304-precedence"), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(projectPath, "state", "gs-304-precedence", "tasks.json"),
+      JSON.stringify([
+        { id: "a", title: "a", status: "pending", priority: 1 },
+        { id: "b", title: "b", status: "pending", priority: 1 },
+      ]),
+      "utf8",
+    );
+    // GS-root decoy with a different count.
+    writeFixture(
+      "state/gs-304-precedence/tasks.json",
+      JSON.stringify([
+        { id: "x", title: "x", status: "pending", priority: 1 },
+      ]),
+    );
+    expect(
+      await greenfieldCountRemaining(projectPath, "gs-304-precedence"),
+    ).toBe(2);
+  });
 });
 
 function git(cwd: string, args: string[]) {
