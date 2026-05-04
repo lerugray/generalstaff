@@ -1,6 +1,6 @@
-// GeneralStaff — usage-budget integration tests (gs-301a/b/c).
-// Matrix: gs-301a 1,9,10; gs-301b 2,3; gs-301c 4,5.
-// YAML: tests/usage/fixtures/gs301{a,b,c}-*.projects.yaml
+// GeneralStaff — usage-budget integration tests (gs-301a/b/c/d).
+// Matrix: gs-301a 1,9,10; gs-301b 2,3; gs-301c 4,5; gs-301d 6,7.
+// YAML: tests/usage/fixtures/gs301{a,b,c,d}-*.projects.yaml
 
 import { describe, expect, it } from "bun:test";
 import { join } from "path";
@@ -19,6 +19,11 @@ const SUBPROCESS_C = join(
   import.meta.dir,
   "helpers",
   "usage_budget_gs301c_subprocess.ts",
+);
+const SUBPROCESS_D = join(
+  import.meta.dir,
+  "helpers",
+  "usage_budget_gs301d_subprocess.ts",
 );
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -63,6 +68,12 @@ async function runScenario301c(
   id: string,
 ): Promise<{ exitCode: number; json: Record<string, unknown> }> {
   return runSubprocess(SUBPROCESS_C, id);
+}
+
+async function runScenario301d(
+  id: string,
+): Promise<{ exitCode: number; json: Record<string, unknown> }> {
+  return runSubprocess(SUBPROCESS_D, id);
 }
 
 describe("usage-budget integration (gs-301a)", () => {
@@ -132,5 +143,24 @@ describe("usage-budget integration (gs-301c)", () => {
     expect(json.stop_reason).toBe("usage-budget");
     expect(json.execute_cycle_calls).toBe(2);
     expect(json.exceeded_count).toBe(1);
+  });
+});
+
+// YAML: tests/usage/fixtures/gs301d-scenario{6,7}.projects.yaml
+describe("usage-budget integration (gs-301d)", () => {
+  it("scenario 6: per-project skip-project — proj-a budget binds first, session continues on proj-b", async () => {
+    const { exitCode, json } = await runScenario301d("6");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
+    expect(json.skipped_count).toBe(1);
+    expect(json.exceeded_fleet_count).toBe(0);
+    expect(json.execute_cycle_calls).toBe(2);
+    expect(json.stop_reason).toBe("max-cycles");
+  });
+
+  it("scenario 7: per-project max_usd > fleet max_usd — ProjectValidationError at load", async () => {
+    const { exitCode, json } = await runScenario301d("7");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
   });
 });

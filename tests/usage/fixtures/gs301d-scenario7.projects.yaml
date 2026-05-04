@@ -1,0 +1,30 @@
+# gs-301d scenario 7 — invalid: per-project max_usd > fleet max_usd (load-time rejection).
+
+projects:
+  - id: proj-over
+    path: /tmp/gs301d_scenario7_stub
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 30
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    auto_merge: false
+    hands_off:
+      - secret/
+    session_budget:
+      max_usd: 10
+
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 3
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_parallel_slots: 1
+  session_budget:
+    max_usd: 5

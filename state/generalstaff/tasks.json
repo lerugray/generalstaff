@@ -2207,7 +2207,8 @@
   {
     "id": "gs-301d",
     "title": "Usage-budget integration tests \u2014 per-project vs fleet semantics (scenarios 6, 7 from gs-301's matrix). (6) Per-project cap enforces correctly within a fleet cap: fleet max_usd=10, project-A cap=3, project-B cap=4; project-A hits its cap first and drops from picker (on_exhausted='skip-project'); session continues on project-B until fleet or project-B cap. Asserts skip-project semantics at the picker level, not stop-session. (7) Validation rejection: projects.yaml sets per-project cap higher than fleet cap \u2192 config load fails at validation with a clear error message. Negative test \u2014 asserts the validation error type and message content. Expected diff: ~120-180 LOC. Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Added tests/integration/helpers/usage_budget_gs301d_subprocess.ts + describe gs-301d in tests/integration/usage_budget.test.ts. Scenario 6: mocked two-project fleet (proj-a $3 skip-project, proj-b $4, fleet $10) + FixedUsdReader at $3.5; pickNextProject returns a then b when a skipped; one session_budget_project_skipped on proj-a, zero fleet session_budget_exceeded, two cycles on proj-b, max-cycles stop. Scenario 7: real loadProjectsYaml(tests/usage/fixtures/gs301d-scenario7.projects.yaml) throws ProjectValidationError(proj-over, session_budget.max_usd) with message citing fleet 5 + \u201cper-project budgets must fit within the fleet cap\u201d. Fixtures gs301d-scenario{6,7}.projects.yaml. 9 tests in file; bun test + typecheck clean.",
     "priority": 3,
     "expected_touches": [
       "tests/integration/usage_budget.test.ts",

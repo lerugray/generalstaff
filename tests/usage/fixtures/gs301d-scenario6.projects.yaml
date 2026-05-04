@@ -1,0 +1,50 @@
+# gs-301d scenario 6 — fleet cap + per-project caps; proj-a tighter, skip-project.
+# Synthetic reader in subprocess returns total_usd=3.5 so only proj-a hits first.
+
+projects:
+  - id: proj-a
+    path: .
+    priority: 2
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 1
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    auto_merge: false
+    hands_off:
+      - dummy-pattern
+    session_budget:
+      max_usd: 3
+      on_exhausted: skip-project
+
+  - id: proj-b
+    path: .
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 1
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    auto_merge: false
+    hands_off:
+      - dummy-pattern
+    session_budget:
+      max_usd: 4
+      on_exhausted: skip-project
+
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 100
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_parallel_slots: 1
+  session_budget:
+    max_usd: 10
+    enforcement: hard
+    provider_source: claude_code
