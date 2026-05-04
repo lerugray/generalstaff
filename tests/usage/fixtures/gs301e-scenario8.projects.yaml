@@ -1,0 +1,32 @@
+# gs-301e scenario 8 — invalid: fleet session_budget sets max_usd and max_tokens together.
+# loadProjectsYaml must reject with ProjectValidationError (exactly-one-unit rule).
+
+projects:
+  - id: gs301e-proj
+    path: .
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 1
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    auto_merge: false
+    hands_off:
+      - dummy-pattern
+
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 100
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_parallel_slots: 1
+  session_budget:
+    max_usd: 5
+    max_tokens: 1000
+    enforcement: hard
+    provider_source: claude_code

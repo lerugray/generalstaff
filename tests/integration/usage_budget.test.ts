@@ -1,6 +1,6 @@
-// GeneralStaff — usage-budget integration tests (gs-301a/b/c/d).
-// Matrix: gs-301a 1,9,10; gs-301b 2,3; gs-301c 4,5; gs-301d 6,7.
-// YAML: tests/usage/fixtures/gs301{a,b,c,d}-*.projects.yaml
+// GeneralStaff — usage-budget integration tests (gs-301a/b/c/d/e).
+// Matrix: gs-301a 1,9,10; gs-301b 2,3; gs-301c 4,5; gs-301d 6,7; gs-301e 8,11.
+// YAML: tests/usage/fixtures/gs301{a,b,c,d,e}-*.projects.yaml
 
 import { describe, expect, it } from "bun:test";
 import { join } from "path";
@@ -24,6 +24,11 @@ const SUBPROCESS_D = join(
   import.meta.dir,
   "helpers",
   "usage_budget_gs301d_subprocess.ts",
+);
+const SUBPROCESS_E = join(
+  import.meta.dir,
+  "helpers",
+  "usage_budget_gs301e_subprocess.ts",
 );
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -74,6 +79,12 @@ async function runScenario301d(
   id: string,
 ): Promise<{ exitCode: number; json: Record<string, unknown> }> {
   return runSubprocess(SUBPROCESS_D, id);
+}
+
+async function runScenario301e(
+  id: string,
+): Promise<{ exitCode: number; json: Record<string, unknown> }> {
+  return runSubprocess(SUBPROCESS_E, id);
 }
 
 describe("usage-budget integration (gs-301a)", () => {
@@ -162,5 +173,21 @@ describe("usage-budget integration (gs-301d)", () => {
     const { exitCode, json } = await runScenario301d("7");
     expect(exitCode).toBe(0);
     expect(json.pass).toBe(true);
+  });
+});
+
+// YAML: tests/usage/fixtures/gs301e-scenario{8,11}.projects.yaml
+describe("usage-budget integration (gs-301e)", () => {
+  it("scenario 8: max_usd + max_tokens together — ProjectValidationError names both units", async () => {
+    const { exitCode, json } = await runScenario301e("8");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
+  });
+
+  it("scenario 11: Claude Code 5h-window attribution — fresh / mid-window / post-rollover blocks + budget gate", async () => {
+    const { exitCode, json } = await runScenario301e("11");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
+    expect(json.cases_passed).toBe(3);
   });
 });

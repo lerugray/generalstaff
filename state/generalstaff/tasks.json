@@ -2218,7 +2218,8 @@
   {
     "id": "gs-301e",
     "title": "Usage-budget integration tests \u2014 validation + window math (scenarios 8, 11 from gs-301's matrix). (8) Exactly-one-unit validation: config sets both max_usd and max_tokens \u2192 load fails with error naming both fields as exclusive. Negative test. (11) Fresh 5-hour window vs mid-window consumption math: ConsumptionReader gets a timestamp boundary inside an active 5-hour Claude Code billing window; asserts the reader correctly attributes consumption to the window (fresh start counts from 0; mid-window counts from window-start, not session-start). The math here is load-bearing \u2014 incorrect window attribution would either under-enforce caps (missed budget hits) or over-enforce (false positives). Expected diff: ~150-200 LOC (window math needs fixture variety \u2014 at least 3 timestamp scenarios). Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Added tests/integration/helpers/usage_budget_gs301e_subprocess.ts + gs-301e describe in tests/integration/usage_budget.test.ts. Scenario 8: loadProjectsYaml(gs301e-scenario8) throws ProjectValidationError(dispatcher, session_budget) with message naming max_usd, max_tokens, and exactly-one rule. Scenario 11: loads gs301e-scenario11 (fleet max_usd 5); three ClaudeCodeReader+evaluateUsageBudget cases \u2014 (A) fresh block $0 \u2192 ok + window_start = block start, (B) mid-window $6 \u2192 hit consumed 6, (C) prior block $100 + new block $0.50 \u2192 ok (no false hit from summing). Fixtures: gs301e-scenario{8,11}.projects.yaml. bun test tests/integration/usage_budget.test.ts + typecheck clean.",
     "priority": 3,
     "expected_touches": [
       "tests/integration/usage_budget.test.ts",
