@@ -174,18 +174,65 @@ describe("runMissionSwarmPreview", () => {
     expect(result.summary).toBe("cached summary body");
   });
 
-  it("invalidates the cache when task.title changes", async () => {
+  // gs-309: description (task.title → invocation.taskDescription) is in the
+  // sha256 cache basis; editing it must miss the old cache file, re-spawn,
+  // and write a new key.md. The X cache file remains on disk until GC.
+  it("cache miss when task title changes X → Y (distinct sha256 keys, fresh preview)", async () => {
     const project = makeProject();
-    const invocation1 = {
-      taskId: BASE_TASK.id,
-      taskDescription: BASE_TASK.title,
+    const taskX: GreenfieldTask = { ...BASE_TASK, title: "X" };
+    const taskY: GreenfieldTask = { ...BASE_TASK, title: "Y" };
+    const audience = "gaming-community";
+    const nAgents = 4;
+    const nRounds = 2;
+    const invocationX = {
+      taskId: taskX.id,
+      taskDescription: "X",
       projectId: project.id,
-      audience: "gaming-community",
-      nAgents: 4,
-      nRounds: 2,
+      audience,
+      nAgents,
+      nRounds,
     };
-    const invocation2 = { ...invocation1, taskDescription: "Different scope" };
-    expect(hashInvocation(invocation1)).not.toBe(hashInvocation(invocation2));
+    const invocationY = { ...invocationX, taskDescription: "Y" };
+    const keyX = hashInvocation(invocationX);
+    const keyY = hashInvocation(invocationY);
+    expect(keyX).not.toBe(keyY);
+
+    let simCalls = 0;
+    let summarizeCalls = 0;
+
+    const runFresh = async (task: GreenfieldTask, summaryLine: string) =>
+      runMissionSwarmPreview(task, project, {
+        cacheDir,
+        missionswarmRoot: fakeMsRoot,
+        runSim: async () => {
+          simCalls++;
+          return { ok: true, stdout: "", stderr: "", exitCode: 0 };
+        },
+        runSummarize: async () => {
+          summarizeCalls++;
+          return { ok: true, stdout: summaryLine, stderr: "", exitCode: 0 };
+        },
+      });
+
+    const rX = await runFresh(taskX, "## Preview for X\n");
+    expect(rX.cacheHit).toBe(false);
+    expect(rX.skipped).toBe(false);
+    expect(rX.summary).toContain("Preview for X");
+    expect(simCalls).toBe(1);
+    expect(summarizeCalls).toBe(1);
+
+    const rY = await runFresh(taskY, "## Preview for Y\n");
+    expect(rY.cacheHit).toBe(false);
+    expect(rY.skipped).toBe(false);
+    expect(rY.summary).toContain("Preview for Y");
+    expect(rY.summary).not.toContain("Preview for X");
+    expect(simCalls).toBe(2);
+    expect(summarizeCalls).toBe(2);
+
+    expect(existsSync(join(cacheDir, `${keyX}.md`))).toBe(true);
+    expect(existsSync(join(cacheDir, `${keyY}.md`))).toBe(true);
+    expect(await readFile(join(cacheDir, `${keyX}.md`), "utf8")).toContain("Preview for X");
+    expect(await readFile(join(cacheDir, `${keyY}.md`), "utf8")).toContain("Preview for Y");
   });
 
   it("graceful-skips when `missionswarm run` subprocess fails", async () => {

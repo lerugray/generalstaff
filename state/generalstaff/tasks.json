@@ -2288,12 +2288,13 @@
   {
     "id": "gs-309",
     "title": "mshook-004 — cache invalidation on task-description edit. Mostly covered by gs-306's hash-based cache key; this task verifies the expected behavior in a test + documents it. Old cache stays on disk (GC'd separately later). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-309. Expected diff: ~30-50 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "expected_blocked_by": ["gs-306"],
     "expected_touches": [
       "tests/integrations/mission_swarm/hook.test.ts"
-    ]
+    ],
+    "done_note": "tests/integrations/mission_swarm/hook.test.ts: it() runs runMissionSwarmPreview twice (task.title X then Y), asserts distinct hashInvocation keys, both calls cacheHit=false with summarize invoked twice, second summary is Y-only; both ${key}.md files remain on disk. bun test tests/integrations/mission_swarm/hook.test.ts + bun run typecheck clean."
   },
   {
     "id": "gs-310",
