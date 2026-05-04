@@ -2174,7 +2174,8 @@
   {
     "id": "gs-301a",
     "title": "Usage-budget integration tests \u2014 regression + fail-open guards (scenarios 1, 9, 10 from gs-301's matrix). (1) No session_budget set \u2192 existing dispatcher behavior unchanged (regression guard proving the feature is purely additive). (9) ConsumptionReader unavailable / throws at cycle boundary \u2192 fail-open with warning logged, session completes normally without budget enforcement. (10) Claude Code JSONL file missing at reader-construction time \u2192 same fail-open path as (9). Tests live in tests/integration/usage_budget.test.ts with shared fixtures under tests/usage/fixtures/. Expected diff: ~120-180 LOC total (one test per scenario + minimal fixture setup). Split from gs-301 on 2026-04-24 after 7 bot attempts at the 11-scenario monolith all failed verification. Each scenario should be a single it() block with clear setup/action/assert structure.",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Shipped tests/integration/usage_budget.test.ts (3 it() blocks) + tests/integration/helpers/usage_budget_gs301a_subprocess.ts driving isolated Bun subprocesses with mocked cycle/dispatcher/audit. Scenario 1: no session_budget \u2192 zero session_budget_reader_unavailable events, session ends max-cycles. Scenario 9: fleet session_budget + provider_source openrouter \u2192 null reader, one fail-open WARN + one appendProgress session_budget_reader_unavailable with reader \"none\", still 2 cycles / max-cycles. Scenario 10: factory-injected ClaudeCodeReader whose loader throws (missing JSONL analogue) \u2192 same unavailable path with reader \"claude_code\". Committed YAML references under tests/usage/fixtures/gs301a-scenario{1,9,10}.projects.yaml. 3 tests in usage_budget.test.ts; bun test tests/integration/usage_budget.test.ts + typecheck clean.",
     "priority": 3,
     "expected_touches": [
       "tests/integration/usage_budget.test.ts",
