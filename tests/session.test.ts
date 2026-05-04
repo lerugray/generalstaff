@@ -1225,6 +1225,18 @@ describe("runSession safeguards", () => {
     expect(result.result_count).toBe(3);
   }, 30_000);
 
+  it("gs-290: excludes empty-diff verified_weak task for rest of session; fresh session clears", async () => {
+    const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
+      "verify_gs290_session_empty_diff_exclusion.ts",
+    );
+    if (exitCode !== 0) {
+      throw new Error(`Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`);
+    }
+    expect(result.pass).toBe(true);
+    expect(result.session1_exclude_args).toEqual([null, ["task-a"]]);
+    expect(result.session2_exclude_args).toEqual([null]);
+  }, 30_000);
+
   it("logs cycle completion with project, outcome, and remaining budget", async () => {
     const { exitCode, stdout, stderr, result } = await runHelperSubprocess(
       "verify_cycle_completion_log.ts",

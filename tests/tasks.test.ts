@@ -1412,6 +1412,16 @@ describe("nextBotPickableTask (gs-275)", () => {
       nextBotPickableTask(ts, [], { creativeWorkAllowed: true })?.id,
     ).toBe("a-001");
   });
+
+  it("gs-290: skips session-excluded task in favor of the next pickable", () => {
+    const ts = [
+      task({ id: "task-a", priority: 1 }),
+      task({ id: "task-b", priority: 1 }),
+    ];
+    expect(
+      nextBotPickableTask(ts, [], undefined, new Set(["task-a"]))?.id,
+    ).toBe("task-b");
+  });
 });
 
 describe("isTaskBotPickable — gs-278 creative check", () => {
@@ -1429,6 +1439,14 @@ describe("isTaskBotPickable — gs-278 creative check", () => {
     const t = task({ creative: true });
     const result = isTaskBotPickable(t, []);
     expect(result).toEqual({ ok: false, reason: "creative_work_not_allowed_for_project" });
+  });
+
+  it("gs-290: session_empty_diff_excluded when id is in session set", () => {
+    const t = task({ id: "stuck-1" });
+    expect(isTaskBotPickable(t, [], undefined, new Set(["stuck-1"]))).toEqual({
+      ok: false,
+      reason: "session_empty_diff_excluded",
+    });
   });
 
   it("returns ok:true when task is creative and project opts in", () => {

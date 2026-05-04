@@ -214,7 +214,9 @@ export type TaskPickabilityReason =
   // has not opted in via `creative_work_allowed: true`. Surfaces
   // distinctly so the dispatcher can log it instead of silently
   // eliding a queued creative task.
-  | { ok: false; reason: "creative_work_not_allowed_for_project" };
+  | { ok: false; reason: "creative_work_not_allowed_for_project" }
+  // gs-290: empty-diff verified_weak this session — try another task.
+  | { ok: false; reason: "session_empty_diff_excluded" };
 
 // gs-278: optional context the bot-pickability check uses for
 // project-scoped policies that aren't captured by hands_off alone.
@@ -247,6 +249,7 @@ export function isTaskBotPickable(
   task: GreenfieldTask,
   handsOff: string[],
   projectCtx?: BotPickabilityProjectContext,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): TaskPickabilityReason {
   // Mirror pendingTasks() semantic: bot-pickable starts from the same
   // "not-done-and-not-skipped" filter (so in_progress tasks remain
@@ -288,6 +291,9 @@ export function isTaskBotPickable(
   if (task.creative === true && projectCtx?.creativeWorkAllowed !== true) {
     return { ok: false, reason: "creative_work_not_allowed_for_project" };
   }
+  if (sessionExcludedTaskIds?.has(task.id)) {
+    return { ok: false, reason: "session_empty_diff_excluded" };
+  }
   return { ok: true };
 }
 
@@ -295,8 +301,11 @@ export function botPickableTasks(
   tasks: GreenfieldTask[],
   handsOff: string[],
   projectCtx?: BotPickabilityProjectContext,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): GreenfieldTask[] {
-  return tasks.filter((t) => isTaskBotPickable(t, handsOff, projectCtx).ok);
+  return tasks.filter((t) =>
+    isTaskBotPickable(t, handsOff, projectCtx, sessionExcludedTaskIds).ok,
+  );
 }
 
 // Reason a pending task is surfaced to the operator instead of the bot:
@@ -327,6 +336,7 @@ export function interactiveTasks(
     const p = isTaskBotPickable(task, handsOff, projectCtx);
     if (p.ok) continue;
     if (p.reason === "not_pending") continue;
+    if (p.reason === "session_empty_diff_excluded") continue;
     if (p.reason === "interactive_only") {
       rows.push({ task, reason: "interactive_only" });
     } else if (p.reason === "hands_off_intersect") {
@@ -364,8 +374,14 @@ export function nextBotPickableTask(
   tasks: GreenfieldTask[],
   handsOff: string[],
   projectCtx?: BotPickabilityProjectContext,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): GreenfieldTask | undefined {
-  const pickable = botPickableTasks(tasks, handsOff, projectCtx);
+  const pickable = botPickableTasks(
+    tasks,
+    handsOff,
+    projectCtx,
+    sessionExcludedTaskIds,
+  );
   if (pickable.length === 0) return undefined;
   const sorted = [...pickable].sort((a, b) => {
     if (a.priority !== b.priority) return a.priority - b.priority;

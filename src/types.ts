@@ -276,6 +276,8 @@ export interface CycleResult {
   final_outcome: CycleOutcome;
   reason: string;
   diff_stats?: DiffStats;
+  /** gs-291 / gs-290: task id the engineer claimed (or peeked); set on full cycle_end paths. */
+  attempted_task_id?: string;
 }
 
 // --- PROGRESS.jsonl entry types ---

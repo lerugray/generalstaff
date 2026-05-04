@@ -151,6 +151,19 @@ describe("greenfieldHasMoreWork", () => {
   it("returns false when tasks.json doesn't exist", async () => {
     expect(await greenfieldHasMoreWork(FIXTURES, "nonexistent")).toBe(false);
   });
+
+  it("gs-290: session-excluded task id is ignored for has-more-work", async () => {
+    writeFixture(
+      "state/g290/tasks.json",
+      JSON.stringify([
+        { id: "only-one", title: "Lonely", status: "pending", priority: 1 },
+      ]),
+    );
+    expect(await greenfieldHasMoreWork(FIXTURES, "g290", [])).toBe(true);
+    expect(
+      await greenfieldHasMoreWork(FIXTURES, "g290", [], new Set(["only-one"])),
+    ).toBe(false);
+  });
 });
 
 describe("catalogdnaCountRemaining", () => {

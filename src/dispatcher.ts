@@ -97,6 +97,9 @@ async function readOverrideFile(
  * @param skipProjectIds Projects to exclude from this pick (soft-skipped,
  *   cap-reached, or currently running).
  * @param maxCount Maximum number of picks to return. `0` returns `[]`.
+ * @param sessionExcludedTaskIdsByProject gs-290: per-project sets of task
+ *   ids excluded for the rest of this session after an empty-diff
+ *   `verified_weak` cycle (parallel empty-queue filter + chaining).
  * @returns Up to `maxCount` `{project, reason}` entries, each reasoning
  *   string tagged with `override:` (first slot only) or `picker:`
  *   (subsequent slots).
@@ -133,6 +136,7 @@ export async function pickNextProjects(
   fleet: FleetState,
   skipProjectIds: Set<string> = new Set(),
   maxCount: number = 1,
+  sessionExcludedTaskIdsByProject?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<Array<{ project: ProjectConfig; reason: string }>> {
   if (maxCount <= 0) return [];
 
@@ -152,7 +156,12 @@ export async function pickNextProjects(
   if (override) {
     const project = projects.find((p) => p.id === override);
     if (project && !claimed.has(project.id) && !isBotRunning(project).running) {
-      const hasWork = skipEmptyQueue ? await hasMoreWork(project) : true;
+      const hasWork = skipEmptyQueue
+        ? await hasMoreWork(
+            project,
+            sessionExcludedTaskIdsByProject?.get(project.id),
+          )
+        : true;
       if (hasWork) {
         results.push({
           project,
@@ -175,7 +184,15 @@ export async function pickNextProjects(
     for (const { project, reason } of scored) {
       if (results.length >= maxCount) break;
       if (isBotRunning(project).running) continue;
-      if (skipEmptyQueue && !(await hasMoreWork(project))) continue;
+      if (
+        skipEmptyQueue &&
+        !(await hasMoreWork(
+          project,
+          sessionExcludedTaskIdsByProject?.get(project.id),
+        ))
+      ) {
+        continue;
+      }
       results.push({ project, reason: `picker: ${reason}` });
       claimed.add(project.id);
     }
@@ -189,6 +206,7 @@ export async function pickNextProject(
   config: DispatcherConfig,
   fleet: FleetState,
   skipProjectIds: Set<string> = new Set(),
+  sessionExcludedTaskIdsByProject?: ReadonlyMap<string, ReadonlySet<string>>,
 ): Promise<{ project: ProjectConfig; reason: string } | null> {
   const picks = await pickNextProjects(
     projects,
@@ -196,6 +214,7 @@ export async function pickNextProject(
     fleet,
     skipProjectIds,
     1,
+    sessionExcludedTaskIdsByProject,
   );
   return picks[0] ?? null;
 }
@@ -315,6 +334,7 @@ export async function shouldChain(
   cyclesOnProject: number,
   maxCyclesPerProject: number,
   remainingMinutes: number,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): Promise<ChainingDecision> {
   if (lastCycle.final_outcome === "verification_failed") {
     return { chain: false, reason: "last cycle failed verification" };
@@ -333,7 +353,7 @@ export async function shouldChain(
     return { chain: false, reason: "insufficient session budget" };
   }
 
-  const moreWork = await hasMoreWork(project);
+  const moreWork = await hasMoreWork(project, sessionExcludedTaskIds);
   if (!moreWork) {
     return { chain: false, reason: "no remaining work for this project" };
   }

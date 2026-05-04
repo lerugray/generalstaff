@@ -5,7 +5,11 @@ import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { spawnSync } from "child_process";
-import { botPickableTasks, isTaskBotPickable } from "./tasks";
+import {
+  botPickableTasks,
+  isTaskBotPickable,
+  type BotPickabilityProjectContext,
+} from "./tasks";
 import { getRootDir } from "./state";
 import type { ProjectConfig, GreenfieldTask } from "./types";
 
@@ -61,7 +65,10 @@ function emptyBreakdown(): WorkBreakdown {
   };
 }
 
-export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
+export async function hasMoreWork(
+  project: ProjectConfig,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
+): Promise<boolean> {
   switch (project.work_detection) {
     case "catalogdna_bot_tasks":
       return catalogdnaHasMoreWork(project.path);
@@ -69,7 +76,16 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
       // gs-195: pass hands_off so tasks with conflicting
       // expected_touches (or interactive_only=true) are filtered out
       // before the dispatcher decides to chain.
-      return greenfieldHasMoreWork(project.path, project.id, project.hands_off);
+      // gs-290: optional session-local empty-diff exclusions.
+      return greenfieldHasMoreWork(
+        project.path,
+        project.id,
+        project.hands_off,
+        sessionExcludedTaskIds,
+        {
+          creativeWorkAllowed: project.creative_work_allowed,
+        },
+      );
     case "git_issues":
       return gitIssuesHasMoreWork(project.path);
     case "git_unmerged":
@@ -81,6 +97,7 @@ export async function hasMoreWork(project: ProjectConfig): Promise<boolean> {
 
 export async function countRemainingWork(
   project: ProjectConfig,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): Promise<number> {
   switch (project.work_detection) {
     case "catalogdna_bot_tasks":
@@ -90,6 +107,10 @@ export async function countRemainingWork(
         project.path,
         project.id,
         project.hands_off,
+        sessionExcludedTaskIds,
+        {
+          creativeWorkAllowed: project.creative_work_allowed,
+        },
       );
     case "git_issues":
       return gitIssuesCountRemaining(project.path);
@@ -210,6 +231,8 @@ export async function greenfieldCountRemaining(
   projectPath: string,
   projectId: string,
   handsOff: string[] = [],
+  sessionExcludedTaskIds?: ReadonlySet<string>,
+  projectCtx?: BotPickabilityProjectContext,
 ): Promise<number> {
   const tasksPath = resolveTasksPath(projectPath, projectId);
   if (!tasksPath) return 0;
@@ -221,7 +244,12 @@ export async function greenfieldCountRemaining(
     // marked interactive_only or whose expected_touches would collide
     // with hands_off don't contribute to "work the bot has left to
     // do" and so shouldn't gate chaining or session pickers.
-    return botPickableTasks(tasks, handsOff).length;
+    return botPickableTasks(
+      tasks,
+      handsOff,
+      projectCtx,
+      sessionExcludedTaskIds,
+    ).length;
   } catch {
     return 0;
   }
@@ -262,6 +290,8 @@ export async function greenfieldHasMoreWork(
   projectPath: string,
   projectId: string,
   handsOff: string[] = [],
+  sessionExcludedTaskIds?: ReadonlySet<string>,
+  projectCtx?: BotPickabilityProjectContext,
 ): Promise<boolean> {
   const tasksPath = resolveTasksPath(projectPath, projectId);
   if (!tasksPath) return false;
@@ -272,7 +302,15 @@ export async function greenfieldHasMoreWork(
     // gs-195: "more work" is bot-pickable work — skip interactive-
     // only tasks and tasks whose expected_touches collide with
     // hands_off.
-    return botPickableTasks(tasks, handsOff).length > 0;
+    // gs-290: session-local empty-diff exclusions (same-session only).
+    return (
+      botPickableTasks(
+        tasks,
+        handsOff,
+        projectCtx,
+        sessionExcludedTaskIds,
+      ).length > 0
+    );
   } catch {
     return false; // malformed: fail-safe
   }

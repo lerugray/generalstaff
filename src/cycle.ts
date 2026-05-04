@@ -519,12 +519,13 @@ async function findSessionNote(
 export async function peekNextBotPickableTask(
   project: ProjectConfig,
   cycleId: string,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): Promise<GreenfieldTask | undefined> {
   try {
     const tasks = await loadTasks(project.id);
     return nextBotPickableTask(tasks, project.hands_off, {
       creativeWorkAllowed: project.creative_work_allowed,
-    });
+    }, sessionExcludedTaskIds);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await appendProgress(project.id, "task_peek_failed", {
@@ -539,6 +540,7 @@ export async function executeCycle(
   config: DispatcherConfig,
   dryRun: boolean = false,
   reviewerProviderOverride?: string,
+  sessionExcludedTaskIds?: ReadonlySet<string>,
 ): Promise<CycleResult> {
   const cycleId = generateCycleId();
   const startedAt = new Date().toISOString();
@@ -630,7 +632,11 @@ export async function executeCycle(
     //     through silently (loadTasks returns [] when the file is
     //     missing); malformed tasks.json logs a task_peek_failed event
     //     (gs-281) so operators have a grep-able signal.
-    nextTask = await peekNextBotPickableTask(project, cycleId);
+    nextTask = await peekNextBotPickableTask(
+      project,
+      cycleId,
+      sessionExcludedTaskIds,
+    );
 
     // 1b. Creative-work detection. Requires BOTH task-level `creative: true`
     //     AND project-level `creative_work_allowed: true` — if only one is
@@ -1131,6 +1137,9 @@ export async function executeCycle(
     // nextTask id when present (additive field for gs-290 + analytics).
     const cycleEndAttemptedId =
       engineerResult?.attempted_task_id ?? nextTask?.id;
+    if (cycleEndAttemptedId) {
+      result.attempted_task_id = cycleEndAttemptedId;
+    }
     const cycleEndData: Record<string, unknown> = {
       outcome: result.final_outcome,
       reason: result.reason,

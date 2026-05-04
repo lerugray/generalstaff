@@ -248,6 +248,34 @@ export async function hotReloadProjects(
   return { projects: yaml.projects, added, removed };
 }
 
+// gs-290: pass into executeCycle / shouldChain; undefined when nothing excluded.
+function sessionExcludedTaskIdsForProject(
+  map: Map<string, Set<string>>,
+  projectId: string,
+): ReadonlySet<string> | undefined {
+  const s = map.get(projectId);
+  return s && s.size > 0 ? s : undefined;
+}
+
+function recordSessionEmptyDiffExclusion(
+  map: Map<string, Set<string>>,
+  r: CycleResult,
+): void {
+  if (
+    r.final_outcome !== "verified_weak" ||
+    !r.reason?.includes("empty diff") ||
+    !r.attempted_task_id
+  ) {
+    return;
+  }
+  let s = map.get(r.project_id);
+  if (!s) {
+    s = new Set();
+    map.set(r.project_id, s);
+  }
+  s.add(r.attempted_task_id);
+}
+
 export function checkCycleWatchdog(
   durationSeconds: number,
   cycleBudgetMinutes: number,
@@ -433,6 +461,9 @@ export async function runSession(options: SessionOptions) {
   const allResults: CycleResult[] = [];
   const cyclesPerProject = new Map<string, number>();
   const skippedProjects = new Set<string>(excludeSet);
+  // gs-290: task ids excluded for the rest of this session after
+  // verified_weak + empty diff (per project).
+  const sessionEmptyDiffExcludedByProject = new Map<string, Set<string>>();
   const failureStreaks = new Map<string, FailureStreak>();
   const unproductiveStreaks = new Map<string, UnproductiveStreak>();
 
@@ -671,6 +702,7 @@ export async function runSession(options: SessionOptions) {
         updatedFleet,
         skippedProjects,
         config.max_parallel_slots,
+        sessionEmptyDiffExcludedByProject,
       );
       if (picks.length === 0) {
         console.log("\nNo eligible project — ending session.");
@@ -740,7 +772,16 @@ export async function runSession(options: SessionOptions) {
       const roundStartMs = Date.now();
       const roundResults = await Promise.all(
         eligible.map((p) =>
-          executeCycle(p.project, config, dryRun, options.reviewerProviderOverride),
+          executeCycle(
+            p.project,
+            config,
+            dryRun,
+            options.reviewerProviderOverride,
+            sessionExcludedTaskIdsForProject(
+              sessionEmptyDiffExcludedByProject,
+              p.project.id,
+            ),
+          ),
         ),
       );
       const roundWallMs = Date.now() - roundStartMs;
@@ -776,6 +817,8 @@ export async function runSession(options: SessionOptions) {
           `  Cycle ${allResults.length}: ${project.id} — ${result.final_outcome} ` +
             `(took ${formatDuration(cycleDurationSec)})`,
         );
+
+        recordSessionEmptyDiffExclusion(sessionEmptyDiffExcludedByProject, result);
 
         const watchdogWarning = checkCycleWatchdog(
           cycleDurationSec,
@@ -939,6 +982,7 @@ export async function runSession(options: SessionOptions) {
         config,
         updatedFleet,
         skippedProjects,
+        sessionEmptyDiffExcludedByProject,
       );
       if (!pick) {
         console.log("\nNo eligible project — ending session.");
@@ -992,8 +1036,14 @@ export async function runSession(options: SessionOptions) {
       config,
       dryRun,
       options.reviewerProviderOverride,
+      sessionExcludedTaskIdsForProject(
+        sessionEmptyDiffExcludedByProject,
+        currentProject.id,
+      ),
     );
     allResults.push(result);
+
+    recordSessionEmptyDiffExclusion(sessionEmptyDiffExcludedByProject, result);
 
     // Track cycles per project
     const count = (cyclesPerProject.get(currentProject.id) ?? 0) + 1;
@@ -1153,6 +1203,10 @@ export async function runSession(options: SessionOptions) {
       count,
       config.max_cycles_per_project_per_session,
       remainingMinutes(),
+      sessionExcludedTaskIdsForProject(
+        sessionEmptyDiffExcludedByProject,
+        currentProject.id,
+      ),
     );
 
     if (chainDecision.chain) {

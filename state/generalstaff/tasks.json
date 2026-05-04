@@ -2061,9 +2061,9 @@
   {
     "id": "gs-290",
     "title": "Session-local empty-diff task exclusion. When a cycle ends with verified_weak + empty diff, the picker should exclude that specific task from subsequent picks in the same session, so the next cycle tries a DIFFERENT task instead of the same stuck one. Prevents MAX_CONSECUTIVE_EMPTY from stopping sessions that still have other bot-pickable work. Requires: (1) engineer-side change to emit attempted_task_id in cycle_end event (currently not logged \u00e2\u0080\u0094 see gs-291), (2) session-loop in src/session.ts tracks Set<string> of excluded-this-session task ids, (3) isTaskBotPickable accepts optional session-excluded set, (4) dispatcher picker passes it through. Data motivation: 2026-04-21 session-report found 20 of 80 sessions (25%) end on 3-consecutive-empties averaging 7.5 cycles; if the picker had excluded the stuck task after first empty, many would continue on other tasks. Interactive because touches src/prompts/ (hands_off) for engineer claim-signal.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
-    "interactive_only": true
+    "done_note": "sessionEmptyDiffExcludedByProject Map + recordSessionEmptyDiffExclusion after each cycle (verified_weak + empty diff + attempted_task_id from gs-291). isTaskBotPickable/botPickableTasks/nextBotPickableTask take optional sessionExcludedTaskIds; peekNextBotPickableTask + executeCycle thread per-project set. hasMoreWork/greenfieldHasMoreWork/greenfieldCountRemaining/countRemainingWork pass exclusions + creativeWorkAllowed; pickNextProjects/shouldChain/pickNextProject accept optional per-project map. CycleResult.attempted_task_id set on full cycle_end. Tests: tests/tasks.test.ts, tests/work_detection.test.ts, tests/helpers/verify_gs290_session_empty_diff_exclusion.ts + session.test it."
   },
   {
     "id": "gs-291",
