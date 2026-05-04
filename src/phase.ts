@@ -416,11 +416,7 @@ export async function evaluateCriteria(
         await evaluateLaunchGate(c.launch_gate, projectConfig.path),
       );
     } else if ("git_tag" in c) {
-      results.push({
-        kind: "git_tag",
-        passed: false,
-        detail: `git_tag "${c.git_tag}": evaluator not implemented in v1`,
-      });
+      results.push(await evaluateGitTag(c.git_tag, projectConfig.path));
     } else if ("lifecycle_transition" in c) {
       results.push({
         kind: "lifecycle_transition",
@@ -532,6 +528,68 @@ async function evaluateLaunchGate(
     passed: false,
     detail: `launch_gate "${gateId}": not declared in LAUNCH-PLAN.md (expected a checkbox bullet starting with the gate id)`,
   };
+}
+
+// git_tag evaluator: passes when a tag with the exact name exists in
+// the project's repo. Uses `git rev-parse --verify --quiet
+// refs/tags/<tag>` rather than `git tag -l <name>` so wildcards
+// (`v*`, `[v]0`) are NOT expanded — the criterion declares an
+// exact tag id, not a glob. The `refs/tags/` prefix also disambiguates
+// tags from branches when both share a name.
+//
+// GIT_CEILING_DIRECTORIES guards against the common surprise where
+// projectPath isn't a git repo but a parent directory is (e.g. a
+// fresh project nested inside a monorepo or inside the GS clone for
+// testing). Without the ceiling, git walks up the tree and reports
+// the parent's tags — producing a false positive. Mirrors the same
+// defense in src/work_detection.ts's git_issues / git_unmerged paths.
+async function evaluateGitTag(
+  tagName: string,
+  projectPath: string,
+): Promise<PhaseCriterionResult> {
+  try {
+    const proc = Bun.spawn(
+      ["git", "rev-parse", "--verify", "--quiet", `refs/tags/${tagName}`],
+      {
+        cwd: projectPath,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: {
+          ...process.env,
+          GIT_CEILING_DIRECTORIES: join(projectPath, ".."),
+        },
+      },
+    );
+    const exitCode = await proc.exited;
+    if (exitCode === 0) {
+      return {
+        kind: "git_tag",
+        passed: true,
+        detail: `git_tag "${tagName}": tag exists in ${projectPath}`,
+      };
+    }
+    // Non-zero exit covers both "tag missing" and "not a git repo" /
+    // "git crash". Capture stderr so the operator can tell which.
+    const stderrText = (await new Response(proc.stderr).text()).trim();
+    if (stderrText.length === 0) {
+      return {
+        kind: "git_tag",
+        passed: false,
+        detail: `git_tag "${tagName}": tag does not exist in ${projectPath}`,
+      };
+    }
+    return {
+      kind: "git_tag",
+      passed: false,
+      detail: `git_tag "${tagName}": git rev-parse exited ${exitCode}; stderr: ${stderrText}`,
+    };
+  } catch (err) {
+    return {
+      kind: "git_tag",
+      passed: false,
+      detail: `git_tag "${tagName}": git invocation failed: ${(err as Error).message}`,
+    };
+  }
 }
 
 async function evaluateCustomCheck(

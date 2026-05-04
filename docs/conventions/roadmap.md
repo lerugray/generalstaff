@@ -142,6 +142,26 @@ completion_criteria:
   - launch_gate: "billing-history-page"
 ```
 
+### `git_tag: "<tag>"`
+
+Resolves by running `git rev-parse --verify --quiet refs/tags/<tag>`
+in the project's repo path. Exit 0 = tag exists, criterion passes.
+Anything non-zero = tag missing (or the path isn't a git repo,
+in which case the failure detail surfaces git's stderr).
+
+Wildcards are NOT expanded — the criterion declares an exact tag
+id, not a glob. The `refs/tags/` prefix disambiguates tags from
+branches that share a name.
+
+```yaml
+completion_criteria:
+  - git_tag: "v0.1.0"
+  - git_tag: "release-2026-05"
+```
+
+Useful for "this phase is complete when the release was tagged"
+without needing a `custom_check` shell one-liner.
+
 ### v1: declared but not evaluated
 
 The schema accepts these criteria so a roadmap can declare them
@@ -150,7 +170,6 @@ without breaking validation, but `phase advance` returns
 operator either drops them, replaces them with `custom_check`
 equivalents, or waits for the evaluator to land.
 
-- `git_tag: "<tag>"` — for future tag-watching
 - `lifecycle_transition: "dev -> live"` — for future lifecycle flips
 
 ## Example: a minimal two-phase roadmap

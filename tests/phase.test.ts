@@ -559,19 +559,112 @@ describe("evaluateCriteria — launch_gate", () => {
   });
 });
 
+describe("evaluateCriteria — git_tag", () => {
+  function git(args: string[]): void {
+    const proc = Bun.spawnSync(["git", ...args], {
+      cwd: TEST_DIR,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (proc.exitCode !== 0) {
+      throw new Error(
+        `git ${args.join(" ")} failed (exit ${proc.exitCode}): ${proc.stderr.toString()}`,
+      );
+    }
+  }
+
+  function initRepoWithCommit(): void {
+    git(["init", "--initial-branch=master"]);
+    git(["config", "user.email", "test@test.com"]);
+    git(["config", "user.name", "Test"]);
+    writeFileSync(join(TEST_DIR, "README.md"), "initial\n");
+    git(["add", "README.md"]);
+    git(["commit", "-m", "initial"]);
+  }
+
+  it("passes when the tag exists in the project's repo", async () => {
+    initRepoWithCommit();
+    git(["tag", "v0.1.0"]);
+    const phase: RoadmapPhase = {
+      id: "release",
+      goal: "x",
+      completion_criteria: [{ git_tag: "v0.1.0" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.kind).toBe("git_tag");
+    expect(results[0]!.passed).toBe(true);
+    expect(results[0]!.detail).toContain("tag exists");
+  });
+
+  it("fails when the tag does not exist", async () => {
+    initRepoWithCommit();
+    // No tag created.
+    const phase: RoadmapPhase = {
+      id: "release",
+      goal: "x",
+      completion_criteria: [{ git_tag: "v0.1.0" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("does not exist");
+  });
+
+  it("does not glob-expand the tag name (wildcards are literal)", async () => {
+    initRepoWithCommit();
+    // Tag a real "v0.1.0" but try to match "v*". With glob expansion
+    // this would pass; with exact matching (rev-parse refs/tags/v*),
+    // git treats "v*" as a literal name component which doesn't exist.
+    git(["tag", "v0.1.0"]);
+    const phase: RoadmapPhase = {
+      id: "release",
+      goal: "x",
+      completion_criteria: [{ git_tag: "v*" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("does not exist");
+  });
+
+  it("does not match a branch name that shares the tag's id", async () => {
+    initRepoWithCommit();
+    // Branch named "v0.1.0" but no tag — refs/tags/ prefix means
+    // the branch ref doesn't satisfy the criterion.
+    git(["branch", "v0.1.0"]);
+    const phase: RoadmapPhase = {
+      id: "release",
+      goal: "x",
+      completion_criteria: [{ git_tag: "v0.1.0" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+  });
+
+  it("fails with stderr detail when the project path is not a git repo", async () => {
+    // TEST_DIR is fresh from beforeEach; no git init.
+    const phase: RoadmapPhase = {
+      id: "release",
+      goal: "x",
+      completion_criteria: [{ git_tag: "v0.1.0" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    // Either "stderr:" surfacing git's "not a git repository" message,
+    // or the empty-stderr fallback. Either way, no false-positive pass.
+    expect(results[0]!.kind).toBe("git_tag");
+  });
+});
+
 describe("evaluateCriteria — unsupported v1 kinds", () => {
-  it("returns passed=false for git_tag + lifecycle_transition", async () => {
+  it("returns passed=false for lifecycle_transition", async () => {
     const phase: RoadmapPhase = {
       id: "mvp",
       goal: "x",
-      completion_criteria: [
-        { git_tag: "v0.1.0" },
-        { lifecycle_transition: "dev -> live" },
-      ],
+      completion_criteria: [{ lifecycle_transition: "dev -> live" }],
     };
     const results = await evaluateCriteria(phase, makeProjectConfig());
-    expect(results).toHaveLength(2);
-    expect(results.every((r) => !r.passed)).toBe(true);
+    expect(results).toHaveLength(1);
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain("not implemented in v1");
   });
 });
 
