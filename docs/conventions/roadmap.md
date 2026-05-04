@@ -162,15 +162,34 @@ completion_criteria:
 Useful for "this phase is complete when the release was tagged"
 without needing a `custom_check` shell one-liner.
 
-### v1: declared but not evaluated
+### `lifecycle_transition: "<from> -> <to>"`
 
-The schema accepts these criteria so a roadmap can declare them
-without breaking validation, but `phase advance` returns
-`passed: false` with detail "not implemented in v1" for each. The
-operator either drops them, replaces them with `custom_check`
-equivalents, or waits for the evaluator to land.
+Resolves by comparing the project's `lifecycle` field on
+`projects.yaml` to the target stage. Passes when current equals
+the target.
 
-- `lifecycle_transition: "dev -> live"` — for future lifecycle flips
+```yaml
+# projects.yaml
+projects:
+  - id: gamr
+    # ...other fields...
+    lifecycle: dev   # or "live"; absent/unset reads as "dev"
+```
+
+```yaml
+# state/<project>/ROADMAP.yaml
+completion_criteria:
+  - lifecycle_transition: "dev -> live"
+```
+
+The "from" half is documentation — only the target gates pass/fail.
+The transition itself happens via plain `projects.yaml` edit +
+commit; no dedicated CLI yet. The live-mode dashboard slice that
+would actually consume the `live` flag is separate future work
+(see `docs/internal/UI-VISION-2026-04-19.md`).
+
+Supported stages: `"dev"`, `"live"`. A typo like `lifecycle: alive`
+fails loudly at config load rather than silently never matching.
 
 ## Example: a minimal two-phase roadmap
 

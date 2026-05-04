@@ -1604,3 +1604,67 @@ projects:${BASE}
   });
 });
 
+// Phase B+ followup: lifecycle field on ProjectConfig drives the
+// lifecycle_transition phase-completion criterion.
+describe("lifecycle field", () => {
+  const BASE = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("defaults to undefined when lifecycle is not set", async () => {
+    const path = writeYaml(
+      "lc-unset.yaml",
+      `
+projects:${BASE}
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].lifecycle).toBeUndefined();
+    cleanup();
+  });
+
+  it("accepts lifecycle: dev", async () => {
+    const path = writeYaml(
+      "lc-dev.yaml",
+      `
+projects:${BASE}
+    lifecycle: dev
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].lifecycle).toBe("dev");
+    cleanup();
+  });
+
+  it("accepts lifecycle: live", async () => {
+    const path = writeYaml(
+      "lc-live.yaml",
+      `
+projects:${BASE}
+    lifecycle: live
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].lifecycle).toBe("live");
+    cleanup();
+  });
+
+  it("rejects unrecognized lifecycle values (e.g. typo 'alive')", async () => {
+    const path = writeYaml(
+      "lc-typo.yaml",
+      `
+projects:${BASE}
+    lifecycle: alive
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/lifecycle/);
+    cleanup();
+  });
+});
+

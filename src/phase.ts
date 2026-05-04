@@ -418,11 +418,9 @@ export async function evaluateCriteria(
     } else if ("git_tag" in c) {
       results.push(await evaluateGitTag(c.git_tag, projectConfig.path));
     } else if ("lifecycle_transition" in c) {
-      results.push({
-        kind: "lifecycle_transition",
-        passed: false,
-        detail: `lifecycle_transition "${c.lifecycle_transition}": evaluator not implemented in v1`,
-      });
+      results.push(
+        evaluateLifecycleTransition(c.lifecycle_transition, projectConfig),
+      );
     }
   }
   return results;
@@ -590,6 +588,57 @@ async function evaluateGitTag(
       detail: `git_tag "${tagName}": git invocation failed: ${(err as Error).message}`,
     };
   }
+}
+
+// lifecycle_transition evaluator (Phase B+ followup): passes when the
+// project's `lifecycle` field on projects.yaml equals the target stage.
+// Format is `"<from> -> <to>"` (whitespace tolerant). Only the target
+// matters at evaluation time — the "from" half is documentation.
+//
+// The transition itself happens via plain projects.yaml edit + commit;
+// no dedicated CLI yet. This is intentionally minimal — the live-mode
+// dashboard slice that would actually consume the `live` flag is its
+// own bigger session per docs/internal/UI-VISION-2026-04-19.md. This
+// evaluator gives the criterion real semantics today so phased
+// projects can declare `lifecycle_transition: "dev -> live"` as the
+// gate on their launch phase without waiting on the dashboard work.
+function evaluateLifecycleTransition(
+  spec: string,
+  project: ProjectConfig,
+): PhaseCriterionResult {
+  const arrowMatch = spec.match(/^\s*(\S+)\s*->\s*(\S+)\s*$/);
+  if (!arrowMatch) {
+    return {
+      kind: "lifecycle_transition",
+      passed: false,
+      detail: `lifecycle_transition "${spec}": expected format "<from> -> <to>" (e.g. "dev -> live")`,
+    };
+  }
+  const from = arrowMatch[1]!;
+  const to = arrowMatch[2]!;
+  if (to !== "dev" && to !== "live") {
+    return {
+      kind: "lifecycle_transition",
+      passed: false,
+      detail: `lifecycle_transition "${spec}": target "${to}" not a recognized stage (supported: dev, live)`,
+    };
+  }
+  // Absent / unset reads as "dev" — the implicit default for any project
+  // that hasn't explicitly declared a lifecycle stage. Matches the
+  // ProjectLifecycle type's documented default.
+  const current = project.lifecycle ?? "dev";
+  if (current === to) {
+    return {
+      kind: "lifecycle_transition",
+      passed: true,
+      detail: `lifecycle_transition "${spec}": project lifecycle is "${current}"`,
+    };
+  }
+  return {
+    kind: "lifecycle_transition",
+    passed: false,
+    detail: `lifecycle_transition "${spec}": project lifecycle is "${current}" (target "${to}", from "${from}")`,
+  };
 }
 
 async function evaluateCustomCheck(

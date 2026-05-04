@@ -654,17 +654,69 @@ describe("evaluateCriteria — git_tag", () => {
   });
 });
 
-describe("evaluateCriteria — unsupported v1 kinds", () => {
-  it("returns passed=false for lifecycle_transition", async () => {
+describe("evaluateCriteria — lifecycle_transition", () => {
+  it("passes when project.lifecycle equals the target", async () => {
     const phase: RoadmapPhase = {
-      id: "mvp",
+      id: "launch",
       goal: "x",
       completion_criteria: [{ lifecycle_transition: "dev -> live" }],
     };
-    const results = await evaluateCriteria(phase, makeProjectConfig());
-    expect(results).toHaveLength(1);
+    const results = await evaluateCriteria(
+      phase,
+      makeProjectConfig({ lifecycle: "live" }),
+    );
+    expect(results[0]!.kind).toBe("lifecycle_transition");
+    expect(results[0]!.passed).toBe(true);
+    expect(results[0]!.detail).toContain('lifecycle is "live"');
+  });
+
+  it("fails when project.lifecycle is the source (not yet transitioned)", async () => {
+    const phase: RoadmapPhase = {
+      id: "launch",
+      goal: "x",
+      completion_criteria: [{ lifecycle_transition: "dev -> live" }],
+    };
+    const results = await evaluateCriteria(
+      phase,
+      makeProjectConfig({ lifecycle: "dev" }),
+    );
     expect(results[0]!.passed).toBe(false);
-    expect(results[0]!.detail).toContain("not implemented in v1");
+    expect(results[0]!.detail).toContain('lifecycle is "dev"');
+  });
+
+  it("treats absent project.lifecycle as 'dev'", async () => {
+    const phase: RoadmapPhase = {
+      id: "launch",
+      goal: "x",
+      completion_criteria: [{ lifecycle_transition: "dev -> live" }],
+    };
+    const cfg = makeProjectConfig();
+    delete (cfg as { lifecycle?: unknown }).lifecycle;
+    const results = await evaluateCriteria(phase, cfg);
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain('lifecycle is "dev"');
+  });
+
+  it("rejects malformed spec strings", async () => {
+    const phase: RoadmapPhase = {
+      id: "launch",
+      goal: "x",
+      completion_criteria: [{ lifecycle_transition: "live" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain('expected format "<from> -> <to>"');
+  });
+
+  it("rejects unrecognized target stages", async () => {
+    const phase: RoadmapPhase = {
+      id: "launch",
+      goal: "x",
+      completion_criteria: [{ lifecycle_transition: "dev -> beta" }],
+    };
+    const results = await evaluateCriteria(phase, makeProjectConfig());
+    expect(results[0]!.passed).toBe(false);
+    expect(results[0]!.detail).toContain('not a recognized stage');
   });
 });
 

@@ -170,7 +170,24 @@ export interface ProjectConfig {
   // surfaces the gap. The harder verification gate is gs-316's
   // customer_facing_smoke (planned next).
   public_facing?: boolean;
+  // Phase B+ followup: project lifecycle stage. Drives the
+  // `lifecycle_transition` phase-completion criterion + (in future) the
+  // dev-mode vs live-mode dashboard split documented in
+  // docs/internal/UI-VISION-2026-04-19.md. Read-only as far as GS is
+  // concerned — operators flip the value via projects.yaml edit + commit
+  // (no `gs lifecycle flip` CLI yet). Absent / "dev" reads as in-development;
+  // "live" means the project has shipped (live URL, real users, etc.).
+  // The `lifecycle_transition: "<from> -> <to>"` ROADMAP criterion passes
+  // when this field equals the target.
+  lifecycle?: ProjectLifecycle;
 }
+
+// gs-322 / Phase B+ followup. Two stages today; intentionally narrow.
+// Adding a third value (e.g. "sunset" for archived projects, or
+// "beta" between dev and live) is a deliberate extension point —
+// don't expand this enum casually. Each new stage needs a story for
+// what dashboard mode it maps to + how transitions are gated.
+export type ProjectLifecycle = "dev" | "live";
 
 export interface MissionSwarmProjectConfig {
   default_audience: string;

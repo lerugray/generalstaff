@@ -529,6 +529,23 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     publicFacing = raw.public_facing;
   }
 
+  // Phase B+ followup: lifecycle stage. Drives the `lifecycle_transition`
+  // phase-completion criterion + future dev/live dashboard split.
+  // Optional; absent reads as "dev". Strict enum so a typo like
+  // `lifecycle: "alive"` fails loudly at config load instead of
+  // silently never matching the criterion.
+  let lifecycle: "dev" | "live" | undefined;
+  if (raw.lifecycle !== undefined && raw.lifecycle !== null) {
+    if (raw.lifecycle !== "dev" && raw.lifecycle !== "live") {
+      throw new ProjectValidationError(
+        id,
+        "lifecycle",
+        `must be "dev" or "live" if specified, got ${JSON.stringify(raw.lifecycle)}`,
+      );
+    }
+    lifecycle = raw.lifecycle;
+  }
+
   // gs-311: optional journal-source config. Inert until jr-003 lands;
   // schema-only today so projects.yaml can start carrying the path.
   let journal: { mission_bullet_root: string; scan_days?: number; reviewer_context?: boolean } | undefined;
@@ -600,6 +617,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     missionswarm,
     journal,
     public_facing: publicFacing,
+    lifecycle,
   };
 }
 
