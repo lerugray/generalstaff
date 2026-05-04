@@ -2185,7 +2185,8 @@
   {
     "id": "gs-301b",
     "title": "Usage-budget integration tests \u2014 max_usd enforcement modes (scenarios 2, 3 from gs-301's matrix). (2) max_usd budget hit mid-session, enforcement='hard' \u2192 session stops with stopReason='usage-budget', cycle_end event emits the budget-exceeded reason, session_report surfaces the $-marked row. (3) max_usd budget hit, enforcement='advisory' \u2192 warning logged to PROGRESS.jsonl, session continues to natural end (max_cycles or timer), budget shown as exceeded in final report but did not cause stop. Extends tests/integration/usage_budget.test.ts using fixtures from gs-301a. Expected diff: ~100-150 LOC (two scenarios, hard and advisory differ by enforcement config + expected stopReason). Split from gs-301 on 2026-04-24. Depends on gs-301a having landed shared fixtures (or duplicate minimal fixture inline if gs-301a isn't merged yet).",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Added tests/integration/helpers/usage_budget_gs301b_subprocess.ts + describe gs-301b in tests/integration/usage_budget.test.ts (2 it() blocks). SteppingUsdReader (factory mock): first read $1 under cap then $10 over fleet max_usd=5. Scenario 2 hard: 1 cycle, stopReason usage-budget, one _fleet/session_budget_exceeded (unit max_usd, consumed>=5), session_complete.consumption_summary present (gs-299 path). Scenario 3 advisory: maxCycles=3 natural end, stopReason max-cycles, zero exceeded, >=2 session_budget_advisory + exactly one console advisory warn (warn-once). YAML: tests/usage/fixtures/gs301b-scenario{2,3}.projects.yaml. Note: shipped gate emits session_budget_exceeded before executeCycle (no cycle_end budget payload); mocked executeCycle does not emit cycle_end. 5 tests total in usage_budget.test.ts; bun test + typecheck clean.",
     "priority": 3,
     "expected_touches": [
       "tests/integration/usage_budget.test.ts",
