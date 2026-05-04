@@ -17,7 +17,7 @@ import {
   botWorktreePath,
 } from "./state";
 import { appendProgress } from "./audit";
-import { runEngineer } from "./engineer";
+import { runEngineer, type EngineerResult } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runVerification } from "./verification";
 import { runReviewer, type ReviewerResult } from "./reviewer";
@@ -579,6 +579,7 @@ export async function executeCycle(
   let branch = project.branch;
   let voiceReferencePaths: string[] = [];
   let nextTask: GreenfieldTask | undefined;
+  let engineerResult: EngineerResult | undefined;
 
   assemble: {
     // 1. Pre-flight skip paths
@@ -745,7 +746,7 @@ export async function executeCycle(
     // git_unmerged) passed through the peek as `undefined` and engineer
     // resolution falls back to project-level defaults.
     console.log(`Running engineer: ${project.engineer_command}`);
-    const engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask, {
+    engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask, {
       isCreative,
       effectiveBranch: branch,
       voiceReferencePaths,
@@ -1126,6 +1127,10 @@ export async function executeCycle(
     // line shape is unchanged for downstream consumers. gs-279 adds the
     // `creative` flag (and task_id) for creative cycles so auditors can
     // grep `cycle_end` events by creative/non-creative cleanly.
+    // gs-291: attempted_task_id — engineer stdout claim wins, else peeked
+    // nextTask id when present (additive field for gs-290 + analytics).
+    const cycleEndAttemptedId =
+      engineerResult?.attempted_task_id ?? nextTask?.id;
     const cycleEndData: Record<string, unknown> = {
       outcome: result.final_outcome,
       reason: result.reason,
@@ -1141,6 +1146,9 @@ export async function executeCycle(
           new Date(result.started_at).getTime()) /
           1000,
       ),
+      ...(cycleEndAttemptedId
+        ? { attempted_task_id: cycleEndAttemptedId }
+        : {}),
       ...(isCreative ? { creative: true, task_id: nextTask?.id } : {}),
     };
     await appendProgress(project.id, "cycle_end", cycleEndData, cycleId);

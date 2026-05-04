@@ -11,7 +11,11 @@
 // Hard Rule 8 (BYOK): OPENROUTER_API_KEY must be present in the process
 // env; aider reads it natively. No key is embedded here.
 
-import type { ProjectConfig, CycleCreativeContext } from "../types";
+import type { ProjectConfig, CycleCreativeContext, GreenfieldTask } from "../types";
+import {
+  GENERALSTAFF_TASK_CLAIM_PREFIX,
+  engineerTaskClaimPromptSection,
+} from "../prompts/engineer_claim";
 
 // OpenRouter's Qwen 3.6 Plus — newer general-purpose flagship (released
 // 2026-04-02, ~$0.325/$1.95 per M tokens). The gs-277 benchmark
@@ -126,7 +130,9 @@ ${handsOffList}
 ## Budget
 You have ${project.cycle_budget_minutes} minutes total. After
 committing the draft, stop — the dispatcher starts a fresh cycle
-for the next task.`;
+for the next task.
+
+${engineerTaskClaimPromptSection()}`;
   }
 
   return `You are an autonomous engineering bot working on the ${project.id} project.
@@ -169,7 +175,9 @@ If they don't pass, fix or abandon — never commit failing tests.
 
 ## Budget
 You have ${project.cycle_budget_minutes} minutes total. After committing
-one task, stop — the dispatcher starts a fresh cycle for the next task.`;
+one task, stop — the dispatcher starts a fresh cycle for the next task.
+
+${engineerTaskClaimPromptSection()}`;
 }
 
 // Build the bash command that runs one aider engineer cycle. Does worktree
@@ -183,10 +191,20 @@ one task, stop — the dispatcher starts a fresh cycle for the next task.`;
 export function buildAiderCommand(
   project: ProjectConfig,
   context?: CycleCreativeContext,
+  nextTask?: GreenfieldTask,
 ): string {
   const model = project.engineer_model ?? DEFAULT_AIDER_MODEL;
   const prompt = buildAiderPrompt(project, context);
   const effectiveBranch = context?.effectiveBranch ?? project.branch;
+
+  const claimLine =
+    nextTask?.id != null
+      ? `${GENERALSTAFF_TASK_CLAIM_PREFIX}${JSON.stringify({
+          attempted_task_id: nextTask.id,
+        })}`
+      : "";
+  const claimEchoBlock =
+    nextTask?.id != null ? `echo ${shellSingleQuote(claimLine)}\n` : "";
 
   // Shell-escape every value that crosses the bash boundary. set -euo
   // pipefail at the top surfaces errors early; the dispatcher's timeout
@@ -221,6 +239,10 @@ export function buildAiderCommand(
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
 
+# gs-291: deterministic claim when dispatcher pre-resolved nextTask (stdout
+# for parseTaskClaimFromEngineerStdout). Model may print another line later;
+# parser keeps the last matching line.
+${claimEchoBlock}
 BUDGET=${project.cycle_budget_minutes}
 PROJECT_ROOT="$PWD"
 WORKTREE_DIR="$PROJECT_ROOT/.bot-worktree"

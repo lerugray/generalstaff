@@ -506,6 +506,54 @@ describe("executeCycle", () => {
     expect(result.reason).toContain("STOP file triggered during engineer");
   }, 30_000);
 
+  it("cycle_end includes attempted_task_id from engineer result (gs-291 mock-claim)", async () => {
+    const helperPath = join(
+      import.meta.dir,
+      "helpers",
+      "verify_cycle_end_attempted_task_id.ts",
+    );
+    const proc = Bun.spawn(["bun", "run", helperPath, "mock-claim"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode !== 0) {
+      throw new Error(
+        `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
+      );
+    }
+    const lastLine = stdout.trim().split("\n").pop()!;
+    const result = JSON.parse(lastLine);
+    expect(result.pass).toBe(true);
+    expect(result.attempted_task_id).toBe("from-mock-claim");
+  }, 30_000);
+
+  it("cycle_end falls back to peeked task id when engineer omits claim (gs-291 fallback)", async () => {
+    const helperPath = join(
+      import.meta.dir,
+      "helpers",
+      "verify_cycle_end_attempted_task_id.ts",
+    );
+    const proc = Bun.spawn(["bun", "run", helperPath, "fallback"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    if (exitCode !== 0) {
+      throw new Error(
+        `Helper failed (exit ${exitCode}):\n${stderr}\n${stdout}`,
+      );
+    }
+    const lastLine = stdout.trim().split("\n").pop()!;
+    const result = JSON.parse(lastLine);
+    expect(result.pass).toBe(true);
+    expect(result.attempted_task_id).toBe("peeked-001");
+  }, 30_000);
+
   it("skips verification and reviewer on hands-off violation", async () => {
     const helperPath = join(import.meta.dir, "helpers", "verify_handsoff_violation_skips.ts");
     const proc = Bun.spawn(["bun", "run", helperPath], {

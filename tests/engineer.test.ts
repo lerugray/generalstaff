@@ -570,6 +570,19 @@ describe("buildAiderCommand — creative cycle branch override (gs-279)", () => 
     expect(command).toContain("BRANCH='bot/work'");
   });
 
+  it("emits a gs-291 task claim echo when nextTask is passed", async () => {
+    const { buildAiderCommand } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });
+    const command = buildAiderCommand(project, undefined, {
+      id: "gs-claim-test",
+      title: "t",
+      status: "pending",
+      priority: 1,
+    });
+    expect(command).toContain("GENERALSTAFF_TASK_CLAIM_JSON:");
+    expect(command).toContain("gs-claim-test");
+  });
+
   it("uses context.effectiveBranch in the generated bash when isCreative", async () => {
     const { buildAiderCommand } = await import("../src/engineer_providers/aider");
     const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });

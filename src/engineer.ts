@@ -23,6 +23,7 @@ import type {
   CycleCreativeContext,
 } from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
+import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
 
 export type { CycleCreativeContext };
 
@@ -31,6 +32,8 @@ export interface EngineerResult {
   durationSeconds: number;
   timedOut: boolean;
   logPath: string;
+  /** gs-291: parsed from engineer stdout claim line, else peeked task id when set. */
+  attempted_task_id?: string;
 }
 
 // Re-exports preserve the public surface for callers (and tests) that
@@ -117,7 +120,7 @@ export function resolveEngineerCommand(
       return {
         provider,
         source,
-        command: buildAiderCommand(effectiveProject, context),
+        command: buildAiderCommand(effectiveProject, context, nextTask),
       };
   }
 }
@@ -167,7 +170,13 @@ export async function runEngineer(
       timed_out: false,
       dry_run: true,
     }, cycleId);
-    return { exitCode: 0, durationSeconds: 0, timedOut: false, logPath };
+    return {
+      exitCode: 0,
+      durationSeconds: 0,
+      timedOut: false,
+      logPath,
+      ...(nextTask?.id ? { attempted_task_id: nextTask.id } : {}),
+    };
   }
 
   // gs-302-ish: shrunk buffer from +5 to +2 after 2026-04-23 observed a
@@ -217,17 +226,31 @@ export async function runEngineer(
     const rootEnv: Record<string, string> = {
       GENERALSTAFF_ROOT: getRootDir(),
     };
+    const peekedTaskEnv: Record<string, string> =
+      nextTask?.id != null
+        ? { GENERALSTAFF_PEEKED_TASK_ID: nextTask.id }
+        : {};
+
+    const stdoutCapBytes = 256 * 1024;
+    let stdoutBytes = 0;
+    let stdoutCapture = "";
 
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...rootEnv, ...creativeEnv },
+      env: { ...process.env, ...rootEnv, ...creativeEnv, ...peekedTaskEnv },
     });
     setActiveEngineerChild(child);
 
     child.stdout?.on("data", (chunk: Buffer) => {
       logStream.write(chunk);
       process.stdout.write(chunk); // stream to console too
+      if (stdoutBytes < stdoutCapBytes) {
+        const s = chunk.toString("utf8");
+        const room = stdoutCapBytes - stdoutBytes;
+        stdoutCapture += s.length <= room ? s : s.slice(0, room);
+        stdoutBytes += Math.min(s.length, room);
+      }
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -257,6 +280,9 @@ export async function runEngineer(
       );
       logStream.end();
 
+      const parsedClaim = parseTaskClaimFromEngineerStdout(stdoutCapture);
+      const attempted_task_id = parsedClaim ?? nextTask?.id;
+
       await appendProgress(project.id, "engineer_completed", {
         exit_code: code,
         duration_seconds: Math.round(durationSeconds),
@@ -268,6 +294,7 @@ export async function runEngineer(
         durationSeconds,
         timedOut,
         logPath,
+        ...(attempted_task_id ? { attempted_task_id } : {}),
       });
     });
 
@@ -305,6 +332,9 @@ export async function runEngineer(
         (isPermission ? " (permission denied — check script is executable)" : ""),
       );
 
+      const parsedClaim = parseTaskClaimFromEngineerStdout(stdoutCapture);
+      const attempted_task_id = parsedClaim ?? nextTask?.id;
+
       await appendProgress(project.id, "engineer_completed", {
         exit_code: null,
         duration_seconds: Math.round(durationSeconds),
@@ -318,6 +348,7 @@ export async function runEngineer(
         durationSeconds,
         timedOut: false,
         logPath,
+        ...(attempted_task_id ? { attempted_task_id } : {}),
       });
     });
   });

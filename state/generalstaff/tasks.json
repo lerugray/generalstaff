@@ -2068,7 +2068,8 @@
   {
     "id": "gs-291",
     "title": "Add attempted_task_id to cycle_end progress event. Currently cycle_end records outcome + reason + duration but NOT which task the engineer claimed. Without this, retrospective analysis cannot correlate empty-diff patterns with specific tasks (is the same task producing empty diffs repeatedly? which tasks routinely go to empty?). Implementation: engineer prompt change to emit a structured claim signal (JSON header on stdout or a side-channel file), session.ts/cycle.ts parse and thread it into ProgressEntry.data. Load-bearing for gs-290 (can't exclude what you didn't record). Interactive because src/prompts/ is hands_off.",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Added src/prompts/engineer_claim.ts (GENERALSTAFF_TASK_CLAIM_JSON: prefix + parseTaskClaimFromEngineerStdout + engineerTaskClaimPromptSection). runEngineer captures stdout (256KB cap), parses claim (last line wins), falls back to nextTask.id; sets GENERALSTAFF_PEEKED_TASK_ID for claude scripts. buildAiderCommand echoes deterministic claim line when nextTask set; buildAiderPrompt includes claim instructions (creative + default). cycle_end data adds optional attempted_task_id (engineerResult ?? nextTask). Tests: tests/engineer_claim.test.ts; tests/helpers/verify_cycle_end_attempted_task_id.ts + 2 its in tests/cycle.test.ts; buildAiderCommand nextTask test. bun test + typecheck clean.",
     "priority": 4,
     "interactive_only": true
   },
