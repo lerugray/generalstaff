@@ -1,6 +1,6 @@
-// GeneralStaff — usage-budget integration tests (gs-301a, gs-301b).
-// Matrix: gs-301a scenarios 1, 9, 10; gs-301b scenarios 2, 3.
-// YAML: tests/usage/fixtures/gs301a-*.projects.yaml, gs301b-*.projects.yaml
+// GeneralStaff — usage-budget integration tests (gs-301a/b/c).
+// Matrix: gs-301a 1,9,10; gs-301b 2,3; gs-301c 4,5.
+// YAML: tests/usage/fixtures/gs301{a,b,c}-*.projects.yaml
 
 import { describe, expect, it } from "bun:test";
 import { join } from "path";
@@ -14,6 +14,11 @@ const SUBPROCESS_B = join(
   import.meta.dir,
   "helpers",
   "usage_budget_gs301b_subprocess.ts",
+);
+const SUBPROCESS_C = join(
+  import.meta.dir,
+  "helpers",
+  "usage_budget_gs301c_subprocess.ts",
 );
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -52,6 +57,12 @@ async function runScenario301b(
   id: string,
 ): Promise<{ exitCode: number; json: Record<string, unknown> }> {
   return runSubprocess(SUBPROCESS_B, id);
+}
+
+async function runScenario301c(
+  id: string,
+): Promise<{ exitCode: number; json: Record<string, unknown> }> {
+  return runSubprocess(SUBPROCESS_C, id);
 }
 
 describe("usage-budget integration (gs-301a)", () => {
@@ -100,5 +111,26 @@ describe("usage-budget integration (gs-301b)", () => {
     expect(json.execute_cycle_calls).toBe(3);
     expect(json.exceeded_count).toBe(0);
     expect(json.advisory_count).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// YAML: tests/usage/fixtures/gs301c-scenario{4,5}.projects.yaml
+describe("usage-budget integration (gs-301c)", () => {
+  it("scenario 4: max_tokens hard-stop — same gate as max_usd on token axis", async () => {
+    const { exitCode, json } = await runScenario301c("4");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
+    expect(json.stop_reason).toBe("usage-budget");
+    expect(json.execute_cycle_calls).toBe(1);
+    expect(json.exceeded_count).toBe(1);
+  });
+
+  it("scenario 5: max_cycles hard-stop — two cycles complete then usage-budget before a third", async () => {
+    const { exitCode, json } = await runScenario301c("5");
+    expect(exitCode).toBe(0);
+    expect(json.pass).toBe(true);
+    expect(json.stop_reason).toBe("usage-budget");
+    expect(json.execute_cycle_calls).toBe(2);
+    expect(json.exceeded_count).toBe(1);
   });
 });

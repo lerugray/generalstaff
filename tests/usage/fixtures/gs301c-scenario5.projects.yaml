@@ -1,0 +1,31 @@
+# gs-301c scenario 5 — max_cycles hard-stop; reader cycles_used crosses cap
+# after two completed cycles (>= semantics), so the third pick hits the gate.
+
+projects:
+  - id: ubudget-proj
+    path: .
+    priority: 1
+    engineer_command: "echo engineer"
+    verification_command: "echo verify"
+    cycle_budget_minutes: 1
+    work_detection: tasks_json
+    concurrency_detection: none
+    branch: bot/work
+    auto_merge: false
+    hands_off:
+      - dummy-pattern
+
+dispatcher:
+  state_dir: ./state
+  fleet_state_file: ./fleet_state.json
+  stop_file: ./STOP
+  override_file: ./next_project.txt
+  picker: priority_x_staleness
+  max_cycles_per_project_per_session: 100
+  log_dir: ./logs
+  digest_dir: ./digests
+  max_parallel_slots: 1
+  session_budget:
+    max_cycles: 2
+    enforcement: hard
+    provider_source: claude_code

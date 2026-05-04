@@ -2196,7 +2196,8 @@
   {
     "id": "gs-301c",
     "title": "Usage-budget integration tests \u2014 max_tokens + max_cycles units (scenarios 4, 5 from gs-301's matrix). (4) max_tokens budget variant: config sets max_tokens instead of max_usd; consumption reader returns token totals; same hard-stop semantics as gs-301b's scenario 2 but on token axis. (5) max_cycles budget variant: config sets max_cycles; cycle counter is compared against cap; session stops at the Nth completed cycle with stopReason='usage-budget'. Both scenarios share the hard-enforcement test structure from gs-301b; this task proves the enforcement is unit-agnostic. Expected diff: ~100-150 LOC. Split from gs-301 on 2026-04-24. Depends on gs-301a fixtures landed.",
-    "status": "pending",
+    "status": "done",
+    "done_note": "Added tests/integration/helpers/usage_budget_gs301c_subprocess.ts + describe gs-301c in tests/integration/usage_budget.test.ts (2 it()). Scenario 4: fleet session_budget max_tokens=1000 hard; SteppingTokensReader first read 500 then 50k tokens \u2192 1 cycle, usage-budget, session_budget_exceeded unit max_tokens, session_complete.consumption_summary.total_tokens>=1000. Scenario 5: max_cycles=2 hard; SteppingCyclesReader returns cycles_used 0,1,2 across pre-cycle reads \u2192 2 completed cycles then gate before third, usage-budget, exceeded unit max_cycles budget/consumed=2. Fixtures: tests/usage/fixtures/gs301c-scenario{4,5}.projects.yaml. 7 tests in usage_budget.test.ts; bun test + typecheck clean.",
     "priority": 3,
     "expected_touches": [
       "tests/integration/usage_budget.test.ts",
