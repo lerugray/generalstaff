@@ -15,7 +15,7 @@ export interface LayoutOptions {
   // Highlights the active nav link with aria-current. Omit or pass
   // a value not in the set to render the nav without any active state
   // (e.g. a dedicated error page).
-  activeNav?: "fleet" | "inbox";
+  activeNav?: "fleet" | "inbox" | "phase";
 }
 
 // Resolve the dispatcher's package.json relative to this module.
@@ -57,6 +57,7 @@ export function layout(opts: LayoutOptions): string {
   const safeTitle = escapeHtml(opts.title);
   const activeFleet = opts.activeNav === "fleet" ? ' aria-current="page"' : "";
   const activeInbox = opts.activeNav === "inbox" ? ' aria-current="page"' : "";
+  const activePhase = opts.activeNav === "phase" ? ' aria-current="page"' : "";
   const now = new Date().toISOString();
   const version = getVersion();
 
@@ -73,6 +74,7 @@ export function layout(opts: LayoutOptions): string {
   <h1 class="site-title">GeneralStaff</h1>
   <nav class="site-nav" aria-label="Primary">
     <a href="/"${activeFleet}>Fleet</a>
+    <a href="/phase"${activePhase}>Phase</a>
     <a href="/inbox"${activeInbox}>Inbox</a>
   </nav>
 </header>

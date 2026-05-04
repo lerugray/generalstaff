@@ -170,6 +170,45 @@ body {
   color: var(--ink-ghost);
 }
 
+/* --- /phase flash + advance form ---
+ * Minimal styling for the commander advance UI. The flash messages
+ * live next to their row (or top-of-page if the row was the one that
+ * just advanced and is therefore gone); the form's button is the only
+ * actionable element in the row's last cell.
+ */
+.phase-flash {
+  margin: var(--space-2) 0 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--rule-soft);
+  font-size: 0.9rem;
+}
+.phase-flash-ok {
+  border-left-color: var(--ink);
+  color: var(--ink);
+}
+.phase-flash-error {
+  border-left-color: var(--rule);
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.phase-advance-form {
+  display: inline;
+  margin: 0;
+  padding: 0;
+}
+.phase-advance-form button {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  padding: var(--space-1) var(--space-3);
+  background: var(--paper-2);
+  border: 1px solid var(--rule-soft);
+  color: var(--ink);
+  cursor: pointer;
+}
+.phase-advance-form button:hover {
+  background: var(--paper-edge);
+}
+
 /* --- Small screens fallback ---
  * No mobile-first pretense — the dashboard is meant for desktop
  * monitoring per Phase 6 scope — but collapse nav + padding so

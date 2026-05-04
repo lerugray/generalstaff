@@ -80,6 +80,8 @@ state/personal-site/
 state/mission-employment/
 state/twar-pc/
 state/greater-than-alexander/
+state/FnordOS/
+state/mission-PMA/
 
 # Bun / Node
 node_modules/

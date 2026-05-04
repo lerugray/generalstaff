@@ -13,6 +13,12 @@ import { renderProjectPage } from "./server/routes/project";
 import { renderCyclePage } from "./server/routes/cycle";
 import { renderTailPage, openTailStream } from "./server/routes/tail";
 import { renderInboxPage } from "./server/routes/inbox";
+import {
+  renderPhasePage,
+  handlePhaseAdvance,
+  isAcceptableOrigin,
+  parseAdvanceFormBody,
+} from "./server/routes/phase";
 import { getFleetOverview } from "./views/fleet_overview";
 import type { FleetOverviewProjectRow } from "./views/fleet_overview";
 
@@ -242,6 +248,70 @@ export async function startServer(
         return new Response(html, {
           status,
           headers: htmlHeaders(),
+        });
+      }
+      if (req.method === "GET" && url.pathname === "/phase") {
+        // Phase B+ deferred item: phase-ready dashboard. Carries optional
+        // ?flash params from the POST /phase/advance redirect so the
+        // success/error message survives the round-trip without a server-
+        // side session store.
+        const flashProjectId = url.searchParams.get("flash_project");
+        const flashStatusRaw = url.searchParams.get("flash_status");
+        const flashMessage = url.searchParams.get("flash_message");
+        const flashStatus: "ok" | "error" | null =
+          flashStatusRaw === "ok" || flashStatusRaw === "error"
+            ? flashStatusRaw
+            : null;
+        const flash =
+          flashProjectId !== null && flashStatus !== null && flashMessage !== null
+            ? {
+                project_id: flashProjectId,
+                status: flashStatus,
+                message: flashMessage,
+              }
+            : null;
+        const { status, html } = await renderPhasePage({ flash });
+        return new Response(html, {
+          status,
+          headers: htmlHeaders(),
+        });
+      }
+      if (req.method === "POST" && url.pathname === "/phase/advance") {
+        // Origin-check guards same-origin only. Loopback binding plus
+        // this header check is the CSRF defense.
+        if (!isAcceptableOrigin(req)) {
+          return new Response("Forbidden", {
+            status: 403,
+            headers: SECURITY_HEADERS,
+          });
+        }
+        let body: string;
+        try {
+          body = await req.text();
+        } catch {
+          return new Response("Bad Request", {
+            status: 400,
+            headers: SECURITY_HEADERS,
+          });
+        }
+        const projectId = parseAdvanceFormBody(body);
+        const { flash } = await handlePhaseAdvance(projectId);
+        // Always 303-redirect back to /phase carrying the flash so the
+        // success path is bookmarkable + a refresh can't double-submit.
+        // Even the advance-attempted-but-failed case redirects: the
+        // user lands on /phase and sees the error inline next to the row
+        // (or top-of-page if the row is gone after a successful advance).
+        const params = new URLSearchParams({
+          flash_project: flash.project_id,
+          flash_status: flash.status,
+          flash_message: flash.message,
+        });
+        return new Response(null, {
+          status: 303,
+          headers: {
+            ...SECURITY_HEADERS,
+            Location: `/phase?${params.toString()}`,
+          },
         });
       }
       if (req.method === "GET" && url.pathname.startsWith("/project/")) {
