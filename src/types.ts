@@ -342,7 +342,17 @@ export type ProgressEventType =
   // transition. Data carries {from_phase, to_phase,
   // criteria_results}. Sentinel file at state/<project>/PHASE_READY.json
   // records the same info on disk for view modules.
-  | "phase_ready_for_advance";
+  | "phase_ready_for_advance"
+  // Phase B+ (2026-05-04): emitted at session start when a project
+  // declares `auto_advance: true` in ROADMAP.yaml AND the current
+  // phase's criteria all pass. The detector calls executePhaseAdvance
+  // directly (no PHASE_READY.json sentinel). Data carries
+  // {from_phase, to_phase, seeded_task_ids: string[]}.
+  | "phase_auto_advanced"
+  // Phase B+ (2026-05-04): emitted by `gs phase rollback` when the
+  // commander reverses one or more phase advances. Data carries
+  // {from_phase, to_phase, undone_phases: string[], forced: boolean}.
+  | "phase_rolled_back";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -459,7 +469,7 @@ export type RoadmapCriterion =
 // Literal task entries seeded when a phase advances. Mirrors the
 // shape of GreenfieldTask but without the runtime fields the
 // dispatcher computes (id is auto-assigned, status starts as
-// "pending"). v1 does NOT support `tasks_template`.
+// "pending").
 export interface RoadmapLiteralTask {
   title: string;
   priority?: number;
@@ -468,13 +478,23 @@ export interface RoadmapLiteralTask {
   expected_touches?: string[];
 }
 
+// Templated task entries — same shape as RoadmapLiteralTask, but
+// string fields can contain placeholders like {phase_id}, {prev_phase},
+// {project_id}, {date}, {datetime}. Resolved on phase advance via
+// expandTaskTemplates(). Lets a single roadmap declare boilerplate
+// tasks that adapt to the phase being entered (e.g. "Cut the
+// {phase_id} release tag", "Post {phase_id} announcement on {date}").
+//
+// Phase B+ (2026-05-04). Pre-Phase B+ schemas that didn't declare
+// tasks_template continue to load unchanged.
+export type RoadmapTemplateTask = RoadmapLiteralTask;
+
 export interface RoadmapPhase {
   id: string;
   goal: string;
   depends_on?: string;
   tasks?: RoadmapLiteralTask[];
-  // tasks_template intentionally omitted from v1 per
-  // FUTURE-DIRECTIONS-2026-04-19 §8 explicit non-goals.
+  tasks_template?: RoadmapTemplateTask[];
   completion_criteria: RoadmapCriterion[];
   next_phase?: string;
 }
@@ -483,6 +503,13 @@ export interface Roadmap {
   project_id: string;
   current_phase: string;
   phases: RoadmapPhase[];
+  // Opt-in auto-advance. When true, the session-start phase detector
+  // calls executePhaseAdvance() instead of writing PHASE_READY.json
+  // when the current phase's criteria all pass. Default false (the
+  // human-gate design from FUTURE-DIRECTIONS-2026-04-19 §2). The
+  // commander still has to set this explicitly per project — there
+  // is no fleet-wide auto_advance flag.
+  auto_advance?: boolean;
 }
 
 // Per-project state file written to state/<project>/PHASE_STATE.json.
@@ -541,6 +568,9 @@ const VALID_EVENTS: readonly string[] = [
   "phase_complete", "phase_advanced",
   // Phase B (FUTURE-DIRECTIONS-2026-04-19 §2)
   "phase_ready_for_advance",
+  // Phase B+ (2026-05-04): opt-in auto-advance + multi-phase rollback
+  "phase_auto_advanced",
+  "phase_rolled_back",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

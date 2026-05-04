@@ -3867,16 +3867,22 @@ switch (command) {
           "all_tasks_done + custom_check criteria, manual advance only.\n" +
           "\n" +
           "Subcommands:\n" +
-          "  status   --project=<id>          Show current phase + criteria results\n" +
-          "  init     --project=<id> [--force]  Scaffold a starter ROADMAP.yaml\n" +
-          "  advance  --project=<id> [--force]  Run criteria; advance if all pass\n" +
+          "  status    --project=<id>                       Show current phase + criteria results\n" +
+          "  init      --project=<id> [--force]             Scaffold a starter ROADMAP.yaml\n" +
+          "  advance   --project=<id> [--force]             Run criteria; advance if all pass\n" +
+          "  rollback  --project=<id> --to=<phase> [--force] Roll back to a prior phase\n" +
           "\n" +
           "Notes:\n" +
           "  - --force on advance bypasses the criteria gate (records the\n" +
           "    advance with a 'forced=true' note in PHASE_STATE.json).\n" +
           "  - --force on init overwrites an existing ROADMAP.yaml.\n" +
-          "  - Phase B (dispatcher integration + dashboard) is deferred per\n" +
-          "    docs/internal/FUTURE-DIRECTIONS-2026-04-19.md §8.\n" +
+          "  - --force on rollback allows targeting a phase NOT in\n" +
+          "    completed_phases (sets current_phase directly).\n" +
+          "  - Auto-advance opt-in: set `auto_advance: true` at the top\n" +
+          "    of ROADMAP.yaml to have the session-start detector run\n" +
+          "    advance automatically when criteria pass.\n" +
+          "  - Rollback does NOT remove tasks seeded by prior advances —\n" +
+          "    use `generalstaff task done/rm` to clean up those manually.\n" +
           "\n" +
           "See docs/conventions/roadmap.md for the full schema reference.\n",
       );
@@ -4109,46 +4115,13 @@ switch (command) {
         process.exit(1);
       }
 
-      // Record + advance.
-      const now = new Date().toISOString();
-      await auditLib.appendProgress(projectId, "phase_complete", {
-        phase_id: currentPhase.id,
-        criteria_results: criteriaResults,
-        forced: !passed && !!values.force,
-        timestamp: now,
-      });
-
-      // Seed next phase's literal tasks. Templates not supported in v1.
-      const seededTaskIds: string[] = [];
-      if (nextPhase.tasks && nextPhase.tasks.length > 0) {
-        for (const t of nextPhase.tasks) {
-          const task = await tasksLib.addTask(
-            projectId,
-            t.title,
-            t.priority ?? 2,
-            {
-              interactiveOnly: t.interactive_only,
-              interactiveOnlyReason: t.interactive_only_reason,
-              expectedTouches: t.expected_touches,
-            },
-          );
-          seededTaskIds.push(task.id);
-        }
-      }
-
-      await phaseStateLib.recordPhaseAdvance(
-        projectId,
-        currentPhase.id,
-        nextPhase.id,
+      const advance = await phaseLib.executePhaseAdvance(
+        projectConfig,
+        currentPhase,
+        nextPhase,
         criteriaResults,
+        { forced: !passed && !!values.force, triggerEvent: "phase_advanced" },
       );
-
-      await auditLib.appendProgress(projectId, "phase_advanced", {
-        from_phase: currentPhase.id,
-        to_phase: nextPhase.id,
-        seeded_task_ids: seededTaskIds,
-        timestamp: new Date().toISOString(),
-      });
 
       // Phase B: clear the PHASE_READY.json sentinel if one exists.
       // The new current_phase has fresh criteria; the next session-
@@ -4156,17 +4129,116 @@ switch (command) {
       const detectorLib = await import("./phase_detector");
       await detectorLib.clearPhaseReadySentinel(projectId);
 
-      console.log(`Advanced ${projectId}: ${currentPhase.id} -> ${nextPhase.id}`);
-      if (seededTaskIds.length > 0) {
+      console.log(`Advanced ${projectId}: ${advance.from_phase} -> ${advance.to_phase}`);
+      if (advance.seeded_task_ids.length > 0) {
         console.log(
-          `Seeded ${seededTaskIds.length} task${seededTaskIds.length === 1 ? "" : "s"}: ${seededTaskIds.join(", ")}`,
+          `Seeded ${advance.seeded_task_ids.length} task${advance.seeded_task_ids.length === 1 ? "" : "s"}: ${advance.seeded_task_ids.join(", ")}`,
         );
       } else {
         console.log(`No tasks declared for "${nextPhase.id}"; tasks.json unchanged.`);
       }
-      if (!passed && values.force) {
+      if (advance.forced) {
         console.log("(advanced with --force; criteria were not met)");
       }
+      break;
+    }
+
+    if (sub === "rollback") {
+      const { values } = parseArgs({
+        args: args.slice(2),
+        options: {
+          project: { type: "string" },
+          to: { type: "string" },
+          force: { type: "boolean" },
+        },
+        allowPositionals: false,
+      });
+      if (!values.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      if (!values.to) {
+        console.error("Error: --to=<phase_id> is required");
+        process.exit(1);
+      }
+      const projectId = values.project;
+      const targetPhase = values.to;
+      const projects = await loadProjects();
+      const projectConfig = projects.find((p) => p.id === projectId);
+      if (!projectConfig) {
+        const ids = projects.map((p) => p.id).join(", ") || "(none)";
+        console.error(
+          `Error: project '${projectId}' not found. Registered: ${ids}`,
+        );
+        process.exit(1);
+      }
+      let roadmap;
+      try {
+        roadmap = await phaseLib.loadRoadmap(projectId);
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(1);
+      }
+      // Validate target is a real phase in the roadmap
+      const target = phaseLib.findPhase(roadmap, targetPhase);
+      if (!target) {
+        console.error(
+          `Error: phase "${targetPhase}" not found in ROADMAP.yaml. ` +
+            `Declared phases: [${roadmap.phases.map((p) => p.id).join(", ")}].`,
+        );
+        process.exit(1);
+      }
+
+      let rollback;
+      try {
+        rollback = await phaseStateLib.recordPhaseRollback(
+          projectId,
+          roadmap.current_phase,
+          targetPhase,
+          { forced: !!values.force },
+        );
+      } catch (err) {
+        console.error(`Error: ${(err as Error).message}`);
+        process.exit(1);
+      }
+
+      if (rollback.from_phase === rollback.to_phase) {
+        console.log(
+          `${projectId} is already on phase "${rollback.to_phase}"; nothing to do.`,
+        );
+        break;
+      }
+
+      await auditLib.appendProgress(projectId, "phase_rolled_back", {
+        from_phase: rollback.from_phase,
+        to_phase: rollback.to_phase,
+        undone_phases: rollback.undone_phases,
+        forced: rollback.forced,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Phase B: clear sentinel — the rolled-back phase has fresh
+      // criteria; next session detection will re-evaluate.
+      const detectorLib = await import("./phase_detector");
+      await detectorLib.clearPhaseReadySentinel(projectId);
+
+      console.log(
+        `Rolled back ${projectId}: ${rollback.from_phase} -> ${rollback.to_phase}`,
+      );
+      if (rollback.undone_phases.length > 0) {
+        console.log(
+          `Undone phases: [${rollback.undone_phases.join(", ")}] ` +
+            `(removed from completed_phases)`,
+        );
+      } else if (rollback.forced) {
+        console.log(
+          "(forced rollback; target was not in completed_phases — set current_phase directly)",
+        );
+      }
+      console.log(
+        "Note: any tasks seeded by previous advances stay in tasks.json. " +
+          "Use `generalstaff task done`/`task rm` to clean up if needed.",
+      );
       break;
     }
 

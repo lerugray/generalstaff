@@ -245,11 +245,124 @@ so they remain side-effect-free.
 
 The commander then runs `gs phase advance --project=<id>` (or
 inspects the queue with `gs view phase-ready`). Auto-advance is
-NOT enabled in v1 by design — the design doc §2 calls this the
+**off by default** — the design doc §2 calls this the
 "commander gate" and frames it as an explicit trust-building
-step. Once Phase B has run cleanly for many phase transitions
-across many projects, an opt-in `advance: automatic` flag in
-ROADMAP.yaml is the natural relaxation (deferred).
+step.
+
+### Opt-in auto-advance (Phase B+, 2026-05-04)
+
+Set `auto_advance: true` at the top of `ROADMAP.yaml` (sibling of
+`current_phase`) to have the session-start detector run the
+equivalent of `gs phase advance` automatically when the current
+phase's criteria all pass. The advance still emits
+`phase_complete` + `phase_auto_advanced` to `PROGRESS.jsonl` (the
+event name is distinct from the manual-path `phase_advanced` so
+later audit can tell them apart) and seeds the next phase's
+literal tasks the same way.
+
+```yaml
+project_id: myapp
+current_phase: mvp
+auto_advance: true   # Opt in.
+
+phases:
+  - id: mvp
+    completion_criteria:
+      - all_tasks_done: true
+    next_phase: launch
+  ...
+```
+
+When `auto_advance: true`, the detector does NOT write
+`PHASE_READY.json` — the advance is unconditional once criteria
+pass. Forced advances still require the manual `gs phase advance
+--force` path (auto-advance never bypasses failing criteria).
+
+Recommended usage: turn on for projects where the phase boundaries
+are mechanical and well-tested (e.g. a `dev → live` lifecycle
+flip on a low-stakes side project). Keep off for any project with
+voice-bearing or stakeholder-facing transitions where you want a
+human eyeball before flipping.
+
+### Multi-phase rollback (Phase B+, 2026-05-04)
+
+When you advance a phase by mistake — wrong criteria pass, premature
+trigger, accidental `--force` — `gs phase rollback` walks back to a
+prior phase:
+
+```bash
+generalstaff phase rollback --project=myapp --to=mvp
+```
+
+The command pops phases off `completed_phases` until the target is
+re-opened as `current_phase`. It emits a `phase_rolled_back` event
+to `PROGRESS.jsonl` carrying `{from_phase, to_phase, undone_phases,
+forced}`.
+
+**What rollback does NOT do:** it leaves tasks seeded by previous
+advances in `tasks.json`. Phase advances materialize literal tasks
+into the queue; commanders may have edited or worked on those tasks
+already, so removing them automatically would conflict with state
+the commander cares about. Use `generalstaff task done` /
+`task rm` to clean up after a rollback if needed.
+
+**`--force` flag:** allows targeting a phase that's NOT in
+`completed_phases` (e.g. you want to set `current_phase` directly to
+a phase you've never been on, or that fell off history). Sets the
+field directly without touching `completed_phases`.
+
+```bash
+# Walk back through history (target must be in completed_phases):
+generalstaff phase rollback --project=myapp --to=mvp
+
+# Or set current_phase directly (target NOT in history):
+generalstaff phase rollback --project=myapp --to=mvp --force
+```
+
+### Tasks templates with placeholder expansion (Phase B+, 2026-05-04)
+
+In addition to literal `tasks:`, a phase can declare
+`tasks_template:` — same shape, but string fields support
+placeholder substitution at advance time:
+
+```yaml
+phases:
+  - id: launch
+    tasks:
+      - title: "Smoke-test the live deployment"
+        priority: 1
+    tasks_template:
+      - title: "Cut the {phase_id} release tag"
+        priority: 2
+      - title: "Post {phase_id} announcement on {date}"
+        priority: 3
+        interactive_only: true
+        interactive_only_reason: "Voice-bearing copy for {project_id}"
+        expected_touches: ["docs/{phase_id}/announcement.md"]
+```
+
+When the phase is advanced into, both `tasks:` (verbatim) and
+`tasks_template:` (with placeholders resolved) are seeded into
+`tasks.json`. Literal tasks come first, then templated.
+
+**Supported placeholders:**
+
+| Placeholder      | Resolves to                                              |
+|------------------|----------------------------------------------------------|
+| `{phase_id}`     | The phase being entered (e.g. `launch`)                  |
+| `{prev_phase}`   | The phase being advanced from (e.g. `mvp`)               |
+| `{project_id}`   | The project's registry id                                |
+| `{date}`         | UTC date in `YYYY-MM-DD` (advance-time)                  |
+| `{datetime}`     | UTC ISO 8601 `YYYY-MM-DDTHH:MM:SSZ` (advance-time)       |
+
+Unknown placeholders are rejected at `loadRoadmap` time so typos
+fail fast instead of materializing into your task queue. Adding
+a new placeholder requires updating `SUPPORTED_PLACEHOLDERS` in
+`src/phase.ts`, `buildExpansionContext`, and this table.
+
+Placeholders apply in `title`, `interactive_only_reason`, and each
+`expected_touches` entry. Non-string fields (`priority`,
+`interactive_only`) pass through unchanged.
 
 ## Hands-off interaction
 

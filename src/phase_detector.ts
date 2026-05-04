@@ -23,6 +23,7 @@ import {
   evaluateCriteria,
   allPassed,
   roadmapExists,
+  executePhaseAdvance,
 } from "./phase";
 import { loadPhaseState } from "./phase_state";
 import { appendProgress } from "./audit";
@@ -39,6 +40,13 @@ export type DetectionResult =
       kind: "ready";
       from_phase: string;
       to_phase: string;
+      criteria_results: PhaseCriterionResult[];
+    }
+  | {
+      kind: "auto_advanced";
+      from_phase: string;
+      to_phase: string;
+      seeded_task_ids: string[];
       criteria_results: PhaseCriterionResult[];
     }
   | {
@@ -121,6 +129,39 @@ export async function detectPhaseReady(
     return { kind: "terminal_complete", current_phase: state.current_phase };
   }
 
+  const nextPhase = findPhase(roadmap, currentPhase.next_phase);
+  if (!nextPhase) {
+    return {
+      kind: "error",
+      message: `next_phase="${currentPhase.next_phase}" not found in ROADMAP.yaml`,
+    };
+  }
+
+  // Opt-in auto-advance: when the roadmap declares `auto_advance: true`,
+  // run executePhaseAdvance directly instead of writing the sentinel.
+  // The commander has explicitly delegated authority to the detector.
+  if (roadmap.auto_advance === true) {
+    // Clear any stale sentinel from a previous session before advancing —
+    // executePhaseAdvance's own follow-up may write a fresh one if the
+    // NEW current phase is also ready (e.g. instant-pass criteria), but
+    // we don't want a sentinel pointing at a phase we just left.
+    await clearPhaseReadySentinel(project.id);
+    const advance = await executePhaseAdvance(
+      project,
+      currentPhase,
+      nextPhase,
+      criteriaResults,
+      { forced: false, triggerEvent: "phase_auto_advanced" },
+    );
+    return {
+      kind: "auto_advanced",
+      from_phase: advance.from_phase,
+      to_phase: advance.to_phase,
+      seeded_task_ids: advance.seeded_task_ids,
+      criteria_results: criteriaResults,
+    };
+  }
+
   // Sentinel path. Skip the event emission if this same readiness was
   // already detected (idempotence — repeated session runs shouldn't
   // spam PROGRESS.jsonl with duplicate phase_ready_for_advance events
@@ -188,6 +229,7 @@ export async function runFleetPhaseDetection(
 ): Promise<Map<string, DetectionResult>> {
   const results = new Map<string, DetectionResult>();
   let readyCount = 0;
+  let autoAdvancedCount = 0;
   for (const project of projects) {
     const result = await detectPhaseReady(project);
     results.set(project.id, result);
@@ -195,6 +237,13 @@ export async function runFleetPhaseDetection(
       readyCount++;
       log(
         `[phase] ${project.id}: ready to advance ${result.from_phase} -> ${result.to_phase}`,
+      );
+    } else if (result.kind === "auto_advanced") {
+      autoAdvancedCount++;
+      const seeded = result.seeded_task_ids.length;
+      log(
+        `[phase] ${project.id}: auto-advanced ${result.from_phase} -> ${result.to_phase}` +
+          (seeded > 0 ? ` (seeded ${seeded} task${seeded === 1 ? "" : "s"})` : ""),
       );
     } else if (result.kind === "terminal_complete") {
       log(
@@ -209,6 +258,11 @@ export async function runFleetPhaseDetection(
   if (readyCount > 0) {
     log(
       `[phase] ${readyCount} project${readyCount === 1 ? "" : "s"} ready to advance — run \`generalstaff phase status --project=<id>\` to inspect.`,
+    );
+  }
+  if (autoAdvancedCount > 0) {
+    log(
+      `[phase] ${autoAdvancedCount} project${autoAdvancedCount === 1 ? "" : "s"} auto-advanced this session.`,
     );
   }
   return results;

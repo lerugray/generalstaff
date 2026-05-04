@@ -14,11 +14,14 @@ import {
   type Roadmap,
   type RoadmapPhase,
   type RoadmapCriterion,
+  type RoadmapLiteralTask,
   type PhaseCriterionResult,
 } from "./types";
 import { getRootDir } from "./state";
-import { loadTasks } from "./tasks";
+import { loadTasks, addTask } from "./tasks";
 import type { ProjectConfig } from "./types";
+import { recordPhaseAdvance } from "./phase_state";
+import { appendProgress } from "./audit";
 
 export class RoadmapLoadError extends Error {
   constructor(message: string) {
@@ -114,10 +117,21 @@ export function validateRoadmap(raw: unknown, expectedProjectId: string): Roadma
       );
     }
   }
+  let autoAdvance: boolean | undefined;
+  if (o.auto_advance != null) {
+    if (typeof o.auto_advance !== "boolean") {
+      throw new RoadmapValidationError(
+        "ROADMAP.yaml `auto_advance` must be a boolean (true/false) when set",
+      );
+    }
+    autoAdvance = o.auto_advance;
+  }
+
   return {
     project_id: o.project_id,
     current_phase: o.current_phase,
     phases,
+    auto_advance: autoAdvance,
   };
 }
 
@@ -141,46 +155,25 @@ function validatePhase(raw: unknown, idx: number): RoadmapPhase {
     validateCriterion(c, idx, j),
   );
 
-  // tasks_template explicitly rejected in v1 per
-  // FUTURE-DIRECTIONS-2026-04-19 §8.
-  if (p.tasks_template != null) {
-    throw new RoadmapValidationError(
-      `phases[${idx}] uses tasks_template which is not supported in v1. ` +
-        `Use literal tasks: instead, or wait for the templates feature.`,
-    );
-  }
-
   let tasks: RoadmapPhase["tasks"];
   if (p.tasks != null) {
-    if (!Array.isArray(p.tasks)) {
-      throw new RoadmapValidationError(`phases[${idx}].tasks must be a list`);
+    tasks = parseTaskList(p.tasks, `phases[${idx}].tasks`);
+  }
+
+  let tasksTemplate: RoadmapPhase["tasks_template"];
+  if (p.tasks_template != null) {
+    tasksTemplate = parseTaskList(
+      p.tasks_template,
+      `phases[${idx}].tasks_template`,
+    );
+    // Validate placeholders early so a malformed template doesn't
+    // surface only at advance time.
+    for (let j = 0; j < tasksTemplate.length; j++) {
+      validateTaskTemplatePlaceholders(
+        tasksTemplate[j]!,
+        `phases[${idx}].tasks_template[${j}]`,
+      );
     }
-    tasks = p.tasks.map((t, j) => {
-      if (t == null || typeof t !== "object") {
-        throw new RoadmapValidationError(
-          `phases[${idx}].tasks[${j}] is not a mapping`,
-        );
-      }
-      const task = t as Record<string, unknown>;
-      if (typeof task.title !== "string" || task.title.length === 0) {
-        throw new RoadmapValidationError(
-          `phases[${idx}].tasks[${j}].title is required and must be a string`,
-        );
-      }
-      return {
-        title: task.title,
-        priority: typeof task.priority === "number" ? task.priority : undefined,
-        interactive_only:
-          typeof task.interactive_only === "boolean" ? task.interactive_only : undefined,
-        interactive_only_reason:
-          typeof task.interactive_only_reason === "string"
-            ? task.interactive_only_reason
-            : undefined,
-        expected_touches: Array.isArray(task.expected_touches)
-          ? (task.expected_touches.filter((x) => typeof x === "string") as string[])
-          : undefined,
-      };
-    });
   }
 
   return {
@@ -188,9 +181,155 @@ function validatePhase(raw: unknown, idx: number): RoadmapPhase {
     goal: p.goal,
     depends_on: typeof p.depends_on === "string" ? p.depends_on : undefined,
     tasks,
+    tasks_template: tasksTemplate,
     completion_criteria: criteria,
     next_phase: typeof p.next_phase === "string" ? p.next_phase : undefined,
   };
+}
+
+// Shared parser for both `tasks:` and `tasks_template:`. Both lists
+// have the same shape; tasks_template entries' string fields may
+// additionally contain {placeholder} tokens that get resolved at
+// advance time via expandTaskTemplates().
+function parseTaskList(raw: unknown, label: string): RoadmapLiteralTask[] {
+  if (!Array.isArray(raw)) {
+    throw new RoadmapValidationError(`${label} must be a list`);
+  }
+  return raw.map((t, j) => {
+    if (t == null || typeof t !== "object") {
+      throw new RoadmapValidationError(`${label}[${j}] is not a mapping`);
+    }
+    const task = t as Record<string, unknown>;
+    if (typeof task.title !== "string" || task.title.length === 0) {
+      throw new RoadmapValidationError(
+        `${label}[${j}].title is required and must be a string`,
+      );
+    }
+    return {
+      title: task.title,
+      priority: typeof task.priority === "number" ? task.priority : undefined,
+      interactive_only:
+        typeof task.interactive_only === "boolean" ? task.interactive_only : undefined,
+      interactive_only_reason:
+        typeof task.interactive_only_reason === "string"
+          ? task.interactive_only_reason
+          : undefined,
+      expected_touches: Array.isArray(task.expected_touches)
+        ? (task.expected_touches.filter((x) => typeof x === "string") as string[])
+        : undefined,
+    };
+  });
+}
+
+// Supported placeholder tokens in tasks_template strings. Adding a
+// new placeholder requires (a) adding it here, (b) populating it in
+// expandTaskTemplates' context, (c) updating docs/conventions/roadmap.md.
+const SUPPORTED_PLACEHOLDERS: readonly string[] = [
+  "phase_id",
+  "prev_phase",
+  "project_id",
+  "date",
+  "datetime",
+];
+
+const PLACEHOLDER_RE = /\{([a-z_]+)\}/g;
+
+// Walk every string-typed field on a template task, find {placeholder}
+// tokens, and reject any token that isn't in SUPPORTED_PLACEHOLDERS.
+// This catches typos at load time rather than silently passing them
+// through to the materialized task.
+function validateTaskTemplatePlaceholders(
+  task: RoadmapLiteralTask,
+  label: string,
+): void {
+  const fields: Array<[string, string | undefined]> = [
+    ["title", task.title],
+    ["interactive_only_reason", task.interactive_only_reason],
+  ];
+  for (const [fieldName, value] of fields) {
+    if (typeof value !== "string") continue;
+    for (const match of value.matchAll(PLACEHOLDER_RE)) {
+      const token = match[1]!;
+      if (!SUPPORTED_PLACEHOLDERS.includes(token)) {
+        throw new RoadmapValidationError(
+          `${label}.${fieldName} uses unknown placeholder "{${token}}". ` +
+            `Supported: ${SUPPORTED_PLACEHOLDERS.map((p) => `{${p}}`).join(", ")}.`,
+        );
+      }
+    }
+  }
+  if (Array.isArray(task.expected_touches)) {
+    for (let i = 0; i < task.expected_touches.length; i++) {
+      const value = task.expected_touches[i]!;
+      for (const match of value.matchAll(PLACEHOLDER_RE)) {
+        const token = match[1]!;
+        if (!SUPPORTED_PLACEHOLDERS.includes(token)) {
+          throw new RoadmapValidationError(
+            `${label}.expected_touches[${i}] uses unknown placeholder "{${token}}". ` +
+              `Supported: ${SUPPORTED_PLACEHOLDERS.map((p) => `{${p}}`).join(", ")}.`,
+          );
+        }
+      }
+    }
+  }
+}
+
+export interface TemplateExpansionContext {
+  phase_id: string;
+  prev_phase: string;
+  project_id: string;
+  // Date in ISO 8601 YYYY-MM-DD form (UTC).
+  date: string;
+  // Full ISO 8601 timestamp YYYY-MM-DDTHH:MM:SSZ (UTC).
+  datetime: string;
+}
+
+export function buildExpansionContext(
+  projectId: string,
+  prevPhase: string,
+  newPhase: string,
+  now: Date = new Date(),
+): TemplateExpansionContext {
+  const datetime = now.toISOString().replace(/\.\d{3}Z$/, "Z");
+  const date = datetime.slice(0, 10);
+  return {
+    phase_id: newPhase,
+    prev_phase: prevPhase,
+    project_id: projectId,
+    date,
+    datetime,
+  };
+}
+
+function applyPlaceholders(
+  value: string,
+  ctx: TemplateExpansionContext,
+): string {
+  return value.replace(PLACEHOLDER_RE, (full, token: string) => {
+    if (token in ctx) {
+      return (ctx as unknown as Record<string, string>)[token]!;
+    }
+    // validateTaskTemplatePlaceholders rejects unknown tokens at load
+    // time, so this branch is defensive-only. If we reach it, leave
+    // the literal token in place rather than silently dropping it.
+    return full;
+  });
+}
+
+export function expandTaskTemplates(
+  templates: RoadmapLiteralTask[],
+  ctx: TemplateExpansionContext,
+): RoadmapLiteralTask[] {
+  return templates.map((t) => ({
+    title: applyPlaceholders(t.title, ctx),
+    priority: t.priority,
+    interactive_only: t.interactive_only,
+    interactive_only_reason:
+      t.interactive_only_reason != null
+        ? applyPlaceholders(t.interactive_only_reason, ctx)
+        : undefined,
+    expected_touches: t.expected_touches?.map((p) => applyPlaceholders(p, ctx)),
+  }));
 }
 
 function validateCriterion(raw: unknown, phaseIdx: number, critIdx: number): RoadmapCriterion {
@@ -364,6 +503,96 @@ export function allPassed(results: PhaseCriterionResult[]): boolean {
   return results.length > 0 && results.every((r) => r.passed);
 }
 
+// Result of a successful phase advance. seeded_task_ids lists the
+// task IDs that the next phase's `tasks:` literals were materialized
+// into via tasks.json.
+export interface PhaseAdvanceResult {
+  from_phase: string;
+  to_phase: string;
+  seeded_task_ids: string[];
+  forced: boolean;
+}
+
+// Record a phase advance: emits phase_complete, seeds next-phase
+// literal tasks, flips PHASE_STATE.json, emits the trigger event
+// (phase_advanced for the manual `gs phase advance` path,
+// phase_auto_advanced for the opt-in auto-advance path). The caller
+// is responsible for clearing the PHASE_READY.json sentinel if one
+// was written (manual path does this in cli.ts; auto-advance path
+// in phase_detector.ts).
+//
+// Pre-conditions assumed by the caller:
+// - currentPhase + nextPhase are valid phases from the same Roadmap
+// - criteriaResults reflect a fresh evaluation against currentPhase
+// - if forced=true the caller has explicit operator intent; if false
+//   then allPassed(criteriaResults) must already be true
+export async function executePhaseAdvance(
+  project: ProjectConfig,
+  currentPhase: RoadmapPhase,
+  nextPhase: RoadmapPhase,
+  criteriaResults: PhaseCriterionResult[],
+  options: {
+    forced?: boolean;
+    triggerEvent?: "phase_advanced" | "phase_auto_advanced";
+  } = {},
+): Promise<PhaseAdvanceResult> {
+  const forced = options.forced ?? false;
+  const triggerEvent = options.triggerEvent ?? "phase_advanced";
+
+  await appendProgress(project.id, "phase_complete", {
+    phase_id: currentPhase.id,
+    criteria_results: criteriaResults,
+    forced,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Materialize seeded tasks: literal `tasks:` first, then expanded
+  // `tasks_template:` entries. Expansion uses {phase_id, prev_phase,
+  // project_id, date, datetime} from buildExpansionContext.
+  const seededTaskIds: string[] = [];
+  const allTasks: RoadmapLiteralTask[] = [];
+  if (nextPhase.tasks && nextPhase.tasks.length > 0) {
+    allTasks.push(...nextPhase.tasks);
+  }
+  if (nextPhase.tasks_template && nextPhase.tasks_template.length > 0) {
+    const ctx = buildExpansionContext(
+      project.id,
+      currentPhase.id,
+      nextPhase.id,
+    );
+    allTasks.push(...expandTaskTemplates(nextPhase.tasks_template, ctx));
+  }
+  for (const t of allTasks) {
+    const task = await addTask(project.id, t.title, t.priority ?? 2, {
+      interactiveOnly: t.interactive_only,
+      interactiveOnlyReason: t.interactive_only_reason,
+      expectedTouches: t.expected_touches,
+    });
+    seededTaskIds.push(task.id);
+  }
+
+  await recordPhaseAdvance(
+    project.id,
+    currentPhase.id,
+    nextPhase.id,
+    criteriaResults,
+  );
+
+  await appendProgress(project.id, triggerEvent, {
+    from_phase: currentPhase.id,
+    to_phase: nextPhase.id,
+    seeded_task_ids: seededTaskIds,
+    timestamp: new Date().toISOString(),
+  });
+
+  return {
+    from_phase: currentPhase.id,
+    to_phase: nextPhase.id,
+    seeded_task_ids: seededTaskIds,
+    forced,
+  };
+}
+
 // Default ROADMAP.yaml for `gs phase init`. Single phase, literal
 // tasks, all_tasks_done criterion. Operator edits to taste.
 export function defaultRoadmapYaml(projectId: string): string {
@@ -371,11 +600,15 @@ export function defaultRoadmapYaml(projectId: string): string {
 # Format reference: docs/conventions/roadmap.md
 #
 # v1 supports all_tasks_done + custom_check completion criteria.
-# Templates and auto-advance are deferred (FUTURE-DIRECTIONS-
-# 2026-04-19 §8). Edit this file to describe the campaign.
+# Templates are still deferred. Auto-advance ships in Phase B+
+# (2026-05-04) — set \`auto_advance: true\` to have the
+# session-start detector advance phases automatically when
+# criteria pass. Default off (commander still runs
+# \`gs phase advance\` manually).
 
 project_id: ${projectId}
 current_phase: mvp
+# auto_advance: true   # Uncomment to opt into auto-advance.
 
 phases:
   - id: mvp

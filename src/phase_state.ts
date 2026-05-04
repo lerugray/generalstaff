@@ -110,3 +110,93 @@ export async function recordPhaseAdvance(
   await savePhaseState(state);
   return state;
 }
+
+export interface PhaseRollbackResult {
+  from_phase: string;
+  to_phase: string;
+  // The phase IDs that were popped off completed_phases (= the phases
+  // we walked back THROUGH). Empty when forced=true and the target
+  // wasn't in completed_phases.
+  undone_phases: string[];
+  forced: boolean;
+}
+
+// Roll the project back to a target phase. Two cases:
+// (a) target IS in completed_phases — pop entries until target is at
+//     the top of the stack, then promote target to current_phase.
+//     undone_phases records the popped IDs.
+// (b) target is NOT in completed_phases — only allowed with forced=true
+//     (the caller has explicit operator intent). Sets current_phase
+//     directly without touching completed_phases. undone_phases empty.
+//
+// Note: rollback does NOT remove already-seeded tasks from tasks.json.
+// Tasks that were materialized from a phase's `tasks:` literals stay
+// in the queue; the commander decides whether to manually mark them
+// done/skipped. Removing them automatically would conflict with the
+// "tasks may have been edited / depended on" reality.
+export async function recordPhaseRollback(
+  projectId: string,
+  defaultCurrentPhase: string,
+  targetPhase: string,
+  options: { forced?: boolean } = {},
+): Promise<PhaseRollbackResult> {
+  const forced = options.forced ?? false;
+  const state = await loadPhaseState(projectId, defaultCurrentPhase);
+  const fromPhase = state.current_phase;
+
+  if (fromPhase === targetPhase) {
+    return {
+      from_phase: fromPhase,
+      to_phase: targetPhase,
+      undone_phases: [],
+      forced,
+    };
+  }
+
+  const targetIdx = state.completed_phases.findIndex(
+    (e) => e.phase_id === targetPhase,
+  );
+
+  if (targetIdx === -1) {
+    if (!forced) {
+      throw new Error(
+        `Cannot rollback ${projectId} to "${targetPhase}": phase not in completed_phases. ` +
+          `Use --force to set current_phase directly without walking back through history.`,
+      );
+    }
+    // Forced rollback to a phase we've never been on (or that we
+    // somehow lost from history). Set current_phase directly; do not
+    // touch completed_phases.
+    state.current_phase = targetPhase;
+    await savePhaseState(state);
+    return {
+      from_phase: fromPhase,
+      to_phase: targetPhase,
+      undone_phases: [],
+      forced,
+    };
+  }
+
+  // Walk back: undo all phases AFTER the target index. The target
+  // itself stays in completed_phases — we're rolling INTO target,
+  // meaning target is "current" again, but its prior completion
+  // record is preserved as historical fact.
+  const undonePhases = state.completed_phases
+    .slice(targetIdx + 1)
+    .map((e) => e.phase_id);
+  // Also undo the target's own entry, since rolling back to a phase
+  // means we're re-opening it as current — its prior completion record
+  // is no longer meaningful for "current state". The audit log keeps
+  // the trail (phase_complete + phase_rolled_back events).
+  undonePhases.push(state.completed_phases[targetIdx]!.phase_id);
+  state.completed_phases = state.completed_phases.slice(0, targetIdx);
+  state.current_phase = targetPhase;
+
+  await savePhaseState(state);
+  return {
+    from_phase: fromPhase,
+    to_phase: targetPhase,
+    undone_phases: undonePhases,
+    forced,
+  };
+}

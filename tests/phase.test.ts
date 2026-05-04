@@ -173,7 +173,29 @@ describe("validateRoadmap", () => {
     ).toThrow(/depends_on="ghost"/);
   });
 
-  it("rejects tasks_template (deferred to v1)", () => {
+  it("accepts tasks_template (Phase B+, 2026-05-04)", () => {
+    const r = validateRoadmap(
+      {
+        project_id: PROJECT_ID,
+        current_phase: "mvp",
+        phases: [
+          {
+            id: "mvp",
+            goal: "x",
+            completion_criteria: [],
+            tasks_template: [{ title: "Cut the {phase_id} release tag" }],
+          },
+        ],
+      },
+      PROJECT_ID,
+    );
+    expect(r.phases[0]!.tasks_template).toHaveLength(1);
+    expect(r.phases[0]!.tasks_template![0]!.title).toBe(
+      "Cut the {phase_id} release tag",
+    );
+  });
+
+  it("rejects unknown placeholder in tasks_template", () => {
     expect(() =>
       validateRoadmap(
         {
@@ -184,13 +206,13 @@ describe("validateRoadmap", () => {
               id: "mvp",
               goal: "x",
               completion_criteria: [],
-              tasks_template: [{ title: "t" }],
+              tasks_template: [{ title: "Bad {nope} placeholder" }],
             },
           ],
         },
         PROJECT_ID,
       ),
-    ).toThrow(/tasks_template.*not supported in v1/);
+    ).toThrow(/unknown placeholder "\{nope\}"/);
   });
 
   it("rejects criterion with multiple keys", () => {

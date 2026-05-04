@@ -11,6 +11,35 @@ in practice, entries are written in Ray's voice and prioritize
 
 ### Added
 
+- **Phased autonomous progression — Phase B+** (2026-05-04). Three
+  follow-ons to Phase B:
+  - **Opt-in auto-advance.** Set `auto_advance: true` at the top of
+    `ROADMAP.yaml` (sibling of `current_phase`) to have the
+    session-start detector run the equivalent of `gs phase advance`
+    automatically when criteria pass. Default off (preserves the
+    Phase B "commander gate" by default). Emits a distinct
+    `phase_auto_advanced` event so the audit log can tell auto vs.
+    manual advances apart.
+  - **Multi-phase rollback CLI.** New `gs phase rollback
+    --project=<id> --to=<phase> [--force]` walks back to a prior
+    phase, popping `completed_phases` entries until the target is
+    re-opened. `--force` allows targeting a phase that's not in
+    `completed_phases` (sets `current_phase` directly). Does NOT
+    remove already-seeded tasks — the commander cleans those up
+    via `gs task done`/`task rm` if needed. Emits `phase_rolled_back`.
+  - **Tasks templates with placeholder expansion.** New
+    `tasks_template:` field on phases, same shape as `tasks:` but
+    string fields support `{phase_id}`, `{prev_phase}`,
+    `{project_id}`, `{date}`, `{datetime}` placeholders that
+    resolve at advance time. Unknown placeholders fail at
+    `loadRoadmap` time (typos surface immediately). Literal
+    `tasks:` and templated tasks both seed into the queue on
+    advance. Lets a single roadmap declare boilerplate that adapts
+    per-phase.
+
+  Two new PROGRESS.jsonl event types: `phase_auto_advanced`,
+  `phase_rolled_back`. Full reference in
+  [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md).
 - **Phased autonomous progression — Phases A + B** (`gs phase`
   command, `gs view phase-ready` view, `state/<project>/ROADMAP.yaml`
   schema, `PHASE_STATE.json` runtime tracker, `PHASE_READY.json`
