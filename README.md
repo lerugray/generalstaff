@@ -13,8 +13,8 @@ Full audit log of every prompt, response, tool call, and diff in your
 own repo. Open-source alternative to closed SaaS bot platforms.
 
 > **Status:** v0.2.0 tagged 2026-05-02 (v0.1.0 was 2026-04-19;
-> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,973 passing
-> tests** across 66 files. Tests doubling as a gate cross-check: a
+> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,989 passing
+> tests** across 67 files. Tests doubling as a gate cross-check: a
 > cycle only verifies if the suite passes. **30+ managed projects**
 > in the fleet (mix of Mode A bot-pickable and Mode B
 > interactive-only across the dogfood, game-dev, and mission-*
@@ -696,9 +696,12 @@ root.
   auto-advance (`auto_advance: true` flag), multi-phase rollback
   (`gs phase rollback --to=<phase>`), `tasks_template:` with
   `{phase_id}` / `{prev_phase}` / `{project_id}` / `{date}` /
-  `{datetime}` placeholders, and the `launch_gate: "<gate-id>"`
-  criterion that reads checkbox state from
-  `LAUNCH-PLAN.md`. Schema reference in
+  `{datetime}` placeholders, and two previously-deferred completion
+  criteria: `launch_gate: "<gate-id>"` (reads checkbox state from
+  `LAUNCH-PLAN.md`) and `git_tag: "<tag>"` (passes when the named
+  tag exists in the project's repo). Of the original five
+  criterion kinds, only `lifecycle_transition` remains
+  not-yet-evaluated. Schema reference in
   [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
   original design at
   [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-19.md).
@@ -719,6 +722,18 @@ root.
   workaround for parallel-mode pickers; legacy gamr/raybrain-
   style projects (state in their own repo) keep working
   unchanged.
+- ✓ **Usage-budget integration test coverage closed**
+  (gs-301a..e, 2026-05-04). The full 11-scenario test matrix
+  from [`docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md`](docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md)
+  shipped across five atomic commits. Covers the three budget
+  axes (max_usd, max_tokens, max_cycles), both enforcement modes
+  (hard / advisory), per-project vs fleet-cap semantics, the
+  validation rejection path, and the 5-hour-window math.
+  Subprocess-isolation pattern keeps `mock.module` calls sandboxed
+  per scenario. Originally a single `gs-301` task that lost 7 bot
+  attempts at the 400-700 LOC monolith; splitting into five
+  ~120-180 LOC atomic tasks let each scenario land in a focused
+  cycle.
 
 ### Proposed (not yet scheduled)
 
