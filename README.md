@@ -13,8 +13,8 @@ Full audit log of every prompt, response, tool call, and diff in your
 own repo. Open-source alternative to closed SaaS bot platforms.
 
 > **Status:** v0.2.0 tagged 2026-05-02 (v0.1.0 was 2026-04-19;
-> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,928 passing
-> tests** across 63 files. Tests doubling as a gate cross-check: a
+> changelog at [`CHANGELOG.md`](CHANGELOG.md)). **1,973 passing
+> tests** across 66 files. Tests doubling as a gate cross-check: a
 > cycle only verifies if the suite passes. **30+ managed projects**
 > in the fleet (mix of Mode A bot-pickable and Mode B
 > interactive-only across the dogfood, game-dev, and mission-*
@@ -682,37 +682,51 @@ root.
   notes.
 ### Recently shipped (post-v0.2.0)
 
-- ✓ **Phased autonomous progression — Phases A + B** (shipped
-  2026-05-03). Projects declare a phased campaign in
-  `state/<project>/ROADMAP.yaml`: per-phase goals, completion
-  criteria, and literal tasks seeded when the phase advances.
-  The dispatcher detects ready phases at session start (writes a
-  PHASE_READY.json sentinel + emits a `phase_ready_for_advance`
-  event); the commander runs `generalstaff phase advance` to
-  actually transition. `generalstaff view phase-ready` lists all
-  projects awaiting advance. Auto-advance is OFF by design (the
-  "commander gate" approach from the design doc). v1 evaluates
-  `all_tasks_done` and `custom_check` criteria. Schema reference
-  in [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
+- ✓ **Phased autonomous progression — Phases A, B, and B+**
+  (shipped across 2026-05-03 / 2026-05-04). Projects declare a
+  phased campaign in `state/<project>/ROADMAP.yaml`: per-phase
+  goals, completion criteria, and literal tasks seeded when the
+  phase advances. The dispatcher detects ready phases at session
+  start (writes a PHASE_READY.json sentinel + emits a
+  `phase_ready_for_advance` event); the commander runs
+  `generalstaff phase advance` to transition. `gs view phase-ready`
+  lists awaiting projects from the CLI; the dashboard at
+  `/phase` (under `gs serve`) renders the same data with an
+  in-page Advance form button per row. Phase B+ added opt-in
+  auto-advance (`auto_advance: true` flag), multi-phase rollback
+  (`gs phase rollback --to=<phase>`), `tasks_template:` with
+  `{phase_id}` / `{prev_phase}` / `{project_id}` / `{date}` /
+  `{datetime}` placeholders, and the `launch_gate: "<gate-id>"`
+  criterion that reads checkbox state from
+  `LAUNCH-PLAN.md`. Schema reference in
+  [`docs/conventions/roadmap.md`](docs/conventions/roadmap.md);
   original design at
   [`docs/internal/FUTURE-DIRECTIONS-2026-04-19.md`](docs/internal/FUTURE-DIRECTIONS-2026-04-19.md).
+- ✓ **Session-complete notification — threshold tag + per-project
+  breakdown** (gs-303, 2026-05-04). End-of-session Telegram
+  message uses `[OK]` / `[PARTIAL]` / `[FAIL]` based on the
+  verified-vs-failed ratio (>=75% / 25-74% / <25%) instead of
+  fail-on-any-cycle. Header gains a `Touched: project (N), ...`
+  line; bullets in "What got done" group by project with
+  `[project-id]` prefix. Reads cleanly at a glance whether a
+  multi-project session moved real work.
+- ✓ **Parallel-picker work-detection — GS-root fallback**
+  (gs-304, 2026-05-04). `greenfieldHasMoreWork` /
+  `greenfieldCountRemaining` / `greenfieldCountRemainingDetailed`
+  now fall back from `<projectPath>/state/<id>/tasks.json` to
+  `<getRootDir()>/state/<id>/tasks.json` when the per-project
+  file is missing. Removes the load-bearing per-machine symlink
+  workaround for parallel-mode pickers; legacy gamr/raybrain-
+  style projects (state in their own repo) keep working
+  unchanged.
 
 ### Proposed (not yet scheduled)
 
-- **Phased progression — dashboard UI surfacing.** The
-  `gs view phase-ready` JSON view module is exposed; the web
-  dashboard (`gs serve`) needs to wire it into an Attention
-  panel + add an advance button.
-- **Phased progression — task templates + opt-in auto-advance.**
-  Task templates (LLM-refined task drafts at phase-start time),
-  opt-in `advance: automatic` for phases the commander pre-
-  authorizes, and `phase rollback` for the moment after the
-  first wrong-advance happens.
 - **UI actions on top of the read-only dashboard.** Dispatch
   sessions from the dashboard, edit `tasks.json` from the UI,
-  merge `bot/work` with a button. Read-only v1 is the current
-  dashboard at `generalstaff serve`; write-mode is the next
-  iteration.
+  merge `bot/work` with a button. The phase advance button
+  shipped 2026-05-04 is the first write-mode action; broader
+  write-mode is the next iteration.
 - **Non-programmer-friendly UI/UX path.** The CLI stays the
   recommended primary surface for users comfortable with a
   terminal. A guided flow for users who'd rather not live in
