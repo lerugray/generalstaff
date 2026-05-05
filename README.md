@@ -158,16 +158,6 @@ GeneralStaff is runtime enforcement at cycle boundaries. It stacks with instruct
 
 The combination is defense in depth. Use any alone if that fits.
 
-## Sister projects
-
-Three open-source tools share GeneralStaff's posture (your data on disk, your keys for paid providers, no SaaS layer):
-
-- **[mission-brain](https://github.com/lerugray/mission-brain)** — citation-grounded retrieval over your own writing. Cycles ground drafts in your corpus instead of generic LLM voice.
-- **[mission-bullet-oss](https://github.com/lerugray/mission-bullet-oss)** — AI-assisted bullet journal (Ryder Carroll method). Cycles work toward this week's priorities as you record them.
-- **[mission-swarm](https://github.com/lerugray/mission-swarm)** — swarm-simulation engine that generates audience reactions to a document. Smoke-test launch posts and design specs before shipping.
-
-Each project chooses its own integrations; GeneralStaff assumes none.
-
 ## Configuration
 
 Defaults stay conservative on purpose. Autonomous mistakes on other people's projects cost time to clean up. Flip per-project (or per-task) in `projects.yaml`; full schema in [`projects.yaml.example`](projects.yaml.example) and [`docs/conventions/`](docs/conventions/). Common opt-ins:
@@ -203,6 +193,16 @@ Recently shipped highlights below. Phase narratives + closure docs are linked fr
 - **Phases 1-5 (closed 2026-04-17/18).** Sequential MVP, multi-provider routing, dispatcher generality, parallel worktrees, visual anchor.
 
 Proposed but not scheduled: broader UI write-mode, non-programmer-friendly UI/UX path, command-room kriegspiel aesthetic. See [`docs/internal/UI-VISION-2026-04-15.md`](docs/internal/UI-VISION-2026-04-15.md).
+
+## Sister projects in the fleet
+
+Three other open-source projects are registered in this GeneralStaff fleet and share its posture (your data on disk, your keys for paid providers, no SaaS layer). They demonstrate the dispatcher running on real-world projects across different stacks beyond the dogfood:
+
+- **[mission-brain](https://github.com/lerugray/mission-brain)** (Python RAG) — citation-grounded retrieval over your own writing. Cycles ground drafts in your corpus instead of generic LLM voice.
+- **[mission-bullet-oss](https://github.com/lerugray/mission-bullet-oss)** (TypeScript) — AI-assisted bullet journal running Ryder Carroll's method. Cycles work toward this week's priorities as you record them.
+- **[mission-swarm](https://github.com/lerugray/mission-swarm)** (TypeScript / Bun) — swarm-simulation engine that generates audience reactions to a document. Smoke-test launch posts and design specs before shipping.
+
+Each project chooses its own integrations; GeneralStaff assumes none. Each one's own `state/<id>/PROGRESS.jsonl` is the audit log for its own cycles.
 
 ## Documentation
 
