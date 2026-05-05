@@ -65,6 +65,18 @@ GeneralStaff has been running its own codebase since 2026-04-15. Numbers from th
 
 `grep '"verdict":"verification_failed"' state/generalstaff/PROGRESS.jsonl` and verify the count yourself. The gate is what makes the velocity trustworthy instead of slop. Without it the commits would be faster and worse.
 
+## What the gate doesn't catch
+
+Real, observed, grep-able from the audit log.
+
+- **Engineer crashes the gate has nothing to gate.** When the engineer subprocess exits non-zero before producing a diff (deliberate stub `engineer_command` on Mode-B projects, Windows worktree-junction races on the venv link step, missing toolchain), the gate has nothing to verify. The dispatcher logs the failure but the picker may re-select the same project next cycle. Yesterday's 24-cycle session: 5 engineer-crashes across 3 projects, all pre-diff. Set `interactive_only: true` on Mode-B projects and declare `expected_touches`; not yet automatic.
+- **Empty-diff cycles look like work.** When a project's bot-pickable inventory is thin, the engineer runs cleanly and reports nothing-to-do; the cycle returns `verified_weak`. Reads as "all clear" in session metrics but means the picker selected a project that had no work. Yesterday: 16 of 24 cycles. Watch substantive landings vs. `verified_weak`, not the raw cycle count.
+- **Verification is scope-match, not correctness.** The reviewer confirms the diff matches declared `expected_touches` and respects hands_off. It does not run the diff against an oracle. The engineer's own tests are the correctness signal. If the engineer writes tests that pass for the wrong reason, the gate ratifies the cycle. The 1,989 passing tests are the dogfood floor, not a correctness guarantee.
+- **Push is best-effort.** The gate runs at commit time. Pushing `bot/work` to origin is opportunistic and silently fails on offline / auth-expired / detached states. Yesterday's wrap-up audit caught several repos where sub-sessions reported committed-locally-but-not-pushed work as "shipped." The final-sweep step is load-bearing, not ceremonial.
+- **Picker rotation can starve projects.** Round-robin within the ready set means rotation interval × ready-set-size × session budget can leave items unselected across a session. Yesterday two projects with verified bot-pickable work never came up across 24 cycles.
+
+File counterexamples on the issue tracker.
+
 ## What GeneralStaff is not
 
 - **Not a Claude wrapper.** Multi-provider from day one. Default engineer is `claude -p`; `aider + OpenRouter` ships as an alternative; Ollama works for unattended runs.
