@@ -2450,5 +2450,28 @@
       "src/prompts/reviewer.ts",
       "tests/reviewer_prompt.test.ts"
     ]
+  },
+  {
+    "id": "gs-323",
+    "title": "Dispatcher circuit-breaker gate: halt session on >=3 consecutive verified_weak (empty-diff) outcomes within a session, flag for manual inventory review. Background: 2026-05-04 evening session had 16/24 verified_weak cycles -- 67% of the budget burned on projects whose engineers found nothing to do. Hammerstein-the-AI's what-should-we-do-next query 2026-05-05 morning diagnosed this as inventory starvation (not picker failure) and recommended this circuit-breaker. Implementation shape: add a counter to DispatcherSession that increments on verified_weak verdicts and resets on any other outcome (verified, verification_failed, engineer_crashed). When counter hits a configurable threshold (default 3), end the session early with a clear log message + summary suggesting inventory audit. Threshold configurable via projects.yaml dispatcher.weak_streak_threshold (default 3, set to 0 to disable). Tests: unit test on the counter increment/reset semantics; integration test on a synthetic session that produces 3 weak-in-a-row + asserts halt. Bot-pickable; mechanical TS code change in src/dispatcher/.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": false,
+    "expected_touches": [
+      "src/dispatcher/",
+      "tests/"
+    ]
+  },
+  {
+    "id": "gs-324",
+    "title": "Pre-dispatch inventory audit as a CLI command + optional pre-flight check. Background: state/INVENTORY-AUDIT-2026-05-05.md captured the manual version of this audit; the script counted bot-pickable tasks per project and produced a tagged report. Reproducible. The 2026-05-05 audit found 9 effective bot-pickable tasks across 18 registered projects -- explaining yesterday's verified_weak rate. Implementation shape: a new CLI command `gs inventory-audit` that scans every registered project's tasks.json (handling both public-state and private-state via the existing state-junction discovery), counts pending + !interactive_only tasks, and prints a per-project line + distribution summary + recommendations. Optional flag --pre-dispatch on `gs session` runs the audit before launch and either warns or halts (configurable via projects.yaml dispatcher.audit_threshold) when bot-pickable inventory is below N. Bot-pickable; mechanical TS code change.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": false,
+    "expected_touches": [
+      "src/cli/",
+      "src/dispatcher/",
+      "tests/"
+    ]
   }
 ]
