@@ -55,9 +55,30 @@ function shellSingleQuote(s: string): string {
 export function buildAiderPrompt(
   project: ProjectConfig,
   context?: CycleCreativeContext,
+  nextTask?: GreenfieldTask,
 ): string {
   const effectiveBranch = context?.effectiveBranch ?? project.branch;
   const handsOffList = project.hands_off.map((h) => `  - ${h}`).join("\n");
+
+  // gs-291 path: when the dispatcher pre-resolved nextTask, embed the
+  // task content directly in the prompt rather than asking aider to
+  // "Read state/<project>/tasks.json and pick". The tasks.json file
+  // lives in $GENERALSTAFF_ROOT/state/, NOT in the project worktree —
+  // aider scans the project worktree only and would either fail to
+  // find it or ask the human to paste contents. Embedding the task
+  // content makes the prompt deterministic and self-contained.
+  const taskBlock = nextTask
+    ? `## Your task: ${nextTask.id}
+
+${nextTask.title}
+${nextTask.expected_touches && nextTask.expected_touches.length > 0
+        ? `\nExpected files to touch (per the task spec):\n${nextTask.expected_touches.map((p) => `  - ${p}`).join("\n")}\n`
+        : ""}
+Work on exactly this task — no scope creep.`
+    : `## Your task
+Read state/${project.id}/tasks.json and pick the highest-priority unfinished
+task (status: 'pending', lowest priority number first; among same-priority
+tasks, lowest id first). Work on exactly that task — no scope creep.`;
 
   if (context?.isCreative) {
     const voiceRefBlock =
@@ -92,11 +113,13 @@ references. Do not write in LLM default voice (no "unleash", no
 "revolutionize", no em-dash-heavy throat-clearing, no marketing
 engagement-bait verbs).
 
-## Your task
+${nextTask
+        ? `## Your task: ${nextTask.id}\n\n${nextTask.title}\n\nDraft only what this task's brief names — no scope creep.`
+        : `## Your task
 Read state/${project.id}/tasks.json and pick the highest-priority
 unfinished task with \`creative: true\` (status: 'pending', lowest
 priority number first; lowest id among ties). Work on exactly that
-task — draft only what the task's brief names.
+task — draft only what the task's brief names.`}
 
 ## What you can do
 - Create / modify files inside ${context.draftsDir}.
@@ -141,10 +164,7 @@ ${engineerTaskClaimPromptSection()}`;
 You are in a git worktree on the ${effectiveBranch} branch. The main working
 tree is on master and may be in use by a human. Work only in this directory.
 
-## Your task
-Read state/${project.id}/tasks.json and pick the highest-priority unfinished
-task (status: 'pending', lowest priority number first; among same-priority
-tasks, lowest id first). Work on exactly that task — no scope creep.
+${taskBlock}
 
 ## What you can do
 - Add, modify, or delete files at the paths the task explicitly names.
@@ -194,7 +214,7 @@ export function buildAiderCommand(
   nextTask?: GreenfieldTask,
 ): string {
   const model = project.engineer_model ?? DEFAULT_AIDER_MODEL;
-  const prompt = buildAiderPrompt(project, context);
+  const prompt = buildAiderPrompt(project, context, nextTask);
   const effectiveBranch = context?.effectiveBranch ?? project.branch;
 
   const claimLine =
