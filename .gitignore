@@ -82,6 +82,7 @@ state/twar-pc/
 state/greater-than-alexander/
 state/FnordOS/
 state/mission-PMA/
+state/hammerstein/
 
 # Bun / Node
 node_modules/
