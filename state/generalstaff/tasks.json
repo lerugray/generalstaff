@@ -2473,5 +2473,15 @@
       "src/dispatcher/",
       "tests/"
     ]
+  },
+  {
+    "id": "gs-325",
+    "title": "Add Hammerstein companion section to GS public README. New section between Works-alongside and Configuration: positions Hammerstein as strategic-reasoning companion (pre-queue plan audit / priority calls / opportunity-cost framing). Includes the corpus virtuous-cycle framed as MANUAL curation (operator's ~/.hammerstein/logs/ -> personal RAG corpus via curation, not auto-ingest). Both projects work standalone; loose coupling, no hard dep, graceful failure already in place via brief.ts. Filed 2026-05-06 morning after Hammerstein audit-this-plan pre-flight on the integration plan confirmed direction and surfaced version-compat drift as the real concern (driving paired ham-021 ship).",
+    "status": "done",
+    "completed_at": "2026-05-06",
+    "completion_notes": "Shipped 2026-05-06 morning as paired ship with ham-021 (Hammerstein README downstream-interface doc). README copy: pre-queue plan audit / priority calls / opportunity-cost framing as the three concrete fits; corpus loop framed as manual curation (not auto-ingest) per accuracy discipline; both-projects-work-standalone framing preserves the substitute-for-Claude thesis the audit flagged. Stop-slop pass clean (no robust/comprehensive/seamless/streamlined). Audit pre-flight via Hammerstein found the version-compat concern that drove ham-021's stable-interface doc.",
+    "priority": 3,
+    "interactive_only": false,
+    "expected_touches": ["README.md"]
   }
 ]

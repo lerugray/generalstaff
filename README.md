@@ -170,6 +170,20 @@ GeneralStaff is runtime enforcement at cycle boundaries. It stacks with instruct
 
 The combination is defense in depth. Use any alone if that fits.
 
+## Strategic-reasoning companion
+
+GeneralStaff handles execution gating; it does not generate strategy. For the pre-queue work — auditing a plan before it lands as a task, picking what to ship next, getting an adversarial second opinion before firing a long Claude session — [Hammerstein](https://github.com/lerugray/hammerstein) is the strategic-reasoning companion built alongside this project.
+
+Hammerstein is a CLI consult (Python, MIT). It runs through a provider fallback chain (OpenRouter → DeepSeek → Anthropic → Ollama) at sub-cent-per-call typical, and every response leads with a Plain English summary so operators can act without parsing framework jargon.
+
+Three places it fits a GS workflow:
+
+- `h audit "<plan>"` before adding a task to a hands-off-sensitive project catches scope creep and missed dependencies.
+- `h next "<options>"` produces a strategic ranking when GS queue depth alone isn't enough to decide what to work on.
+- `h worth "<proposal>"` for an opportunity-cost framing before committing Claude tokens to a multi-hour session.
+
+Both projects work standalone. Install Hammerstein only if its pre-queue surface fits how you work. Over time, your `~/.hammerstein/logs/` accumulates a record of your own strategic decisions — those can be curated into your personal Hammerstein corpus, making future consults align with your projects' actual patterns instead of the shipped reference corpus.
+
 ## Configuration
 
 Defaults stay conservative on purpose. Autonomous mistakes on other people's projects cost time to clean up. Flip per-project (or per-task) in `projects.yaml`; full schema in [`projects.yaml.example`](projects.yaml.example) and [`docs/conventions/`](docs/conventions/). Common opt-ins:
