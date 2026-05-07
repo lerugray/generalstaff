@@ -61,6 +61,8 @@ const DISPATCHER_DEFAULTS: DispatcherConfig = {
   max_parallel_slots: 1,
   // gs-292: empty-diff / all-empty-round session stop guard.
   max_consecutive_empty: 3,
+  // gs-323: fleet-wide weak-streak circuit breaker. 0 = disabled.
+  weak_streak_threshold: 3,
 };
 
 export class ProjectValidationError extends Error {
@@ -1237,6 +1239,7 @@ function validateDispatcher(
     max_parallel_slots: normalizeParallelSlots(raw.max_parallel_slots),
     max_consecutive_empty: dispatcherMaxConsecutiveEmpty(raw),
     session_budget: sessionBudget,
+    weak_streak_threshold: dispatcherWeakStreakThreshold(raw),
   };
 }
 
@@ -1246,6 +1249,24 @@ function dispatcherMaxConsecutiveEmpty(raw: Record<string, unknown>): number {
     return DISPATCHER_DEFAULTS.max_consecutive_empty;
   }
   return parseMin1PositiveInt("dispatcher", "max_consecutive_empty", v);
+}
+
+// gs-323: parse weak_streak_threshold. Accepts 0 (disabled) or any
+// positive integer. Uses direct validation instead of parseMin1PositiveInt
+// because 0 is valid (disables the circuit breaker).
+function dispatcherWeakStreakThreshold(raw: Record<string, unknown>): number {
+  const v = raw.weak_streak_threshold;
+  if (v === undefined || v === null) {
+    return DISPATCHER_DEFAULTS.weak_streak_threshold!;
+  }
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+    throw new ProjectValidationError(
+      "dispatcher",
+      "weak_streak_threshold",
+      `must be an integer >= 0 (0 = disabled), got ${typeof v === "number" ? v : typeof v}`,
+    );
+  }
+  return v;
 }
 
 // gs-186: accept numeric input, clamp to >=1. Invalid / missing values

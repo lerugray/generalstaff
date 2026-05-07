@@ -62,6 +62,11 @@ export const WATCHDOG_MULTIPLIER = 2;
 export const DEFAULT_SOFT_SKIP_THRESHOLD = 3;
 export const DEFAULT_SOFT_SKIP_WINDOW_SECONDS = 600;
 
+// gs-323: fleet-wide weak-streak circuit breaker. Halts the session on
+// N consecutive verified_weak (empty-diff) outcomes across any project.
+// Default threshold 3; set dispatcher.weak_streak_threshold: 0 to disable.
+export const DEFAULT_WEAK_STREAK_THRESHOLD = 3;
+
 // gs-220: unproductive-streak backoff (time-window-agnostic escape hatch
 // for gs-193). gs-193 soft-skips on N failures inside M seconds, which
 // catches fast-crash loops but misses slow-crash-with-zero-progress
@@ -218,6 +223,33 @@ export function updateUnproductiveStreak(
     streak: { count },
     shouldSoftSkip: count >= maxUnproductive,
   };
+}
+
+// gs-323: weak-streak state — fleet-wide counter for consecutive
+// verified_weak (empty-diff) outcomes. When the counter hits the
+// configured threshold, the session halts with an inventory-audit
+// suggestion. Resets on any non-weak outcome (verified, verification_failed).
+// cycle_skipped is a no-op (doesn't increment, doesn't reset).
+export interface WeakStreak {
+  count: number;
+}
+
+export interface WeakStreakUpdate {
+  streak: WeakStreak;
+  shouldHalt: boolean;
+}
+
+export function updateWeakStreak(
+  prev: WeakStreak,
+  isWeakCycle: boolean,
+  threshold: number,
+): WeakStreakUpdate {
+  if (!isWeakCycle) {
+    return { streak: { count: 0 }, shouldHalt: false };
+  }
+  const count = prev.count + 1;
+  const shouldHalt = threshold > 0 && count >= threshold;
+  return { streak: { count }, shouldHalt };
 }
 
 // gs-191: hot-reload the projects list between cycles so projects
@@ -608,12 +640,15 @@ export async function runSession(options: SessionOptions) {
   let currentProject: ProjectConfig | null = null;
   let pickReason: string = "";
   let consecutiveEmptyCycles = 0;
+  // gs-323: fleet-wide verified_weak streak counter.
+  let weakStreakCounter = 0;
+  const weakStreakThreshold = config.weak_streak_threshold ?? DEFAULT_WEAK_STREAK_THRESHOLD;
 
   // gs-298: "usage-budget" joins the existing set for the
   // consumption-cap gate. NOT renamed to disambiguate from the
   // default "budget" (wall-clock exhausted); rename would ripple
   // through every caller that pattern-matches stopReason.
-  let stopReason: "budget" | "usage-budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" = "budget";
+  let stopReason: "budget" | "usage-budget" | "max-cycles" | "stop-file" | "no-project" | "insufficient-budget" | "empty-cycles" | "weak-streak" = "budget";
 
   // gs-298: usage-budget state. budgetReader is null when no
   // session_budget is configured anywhere — the hot path short-
@@ -937,6 +972,25 @@ export async function runSession(options: SessionOptions) {
           continue;
         }
 
+        // gs-323: fleet-wide weak-streak check in parallel path.
+        if (weakStreakThreshold > 0) {
+          const isWeak = result.final_outcome === "verified_weak" &&
+            (result.reason?.includes("empty diff") ?? false);
+          const resetStreak = result.final_outcome !== "verified_weak";
+          const weakUpdate = updateWeakStreak(
+            { count: weakStreakCounter }, isWeak, weakStreakThreshold);
+          weakStreakCounter = resetStreak ? 0 : weakUpdate.streak.count;
+          if (weakUpdate.shouldHalt) {
+            console.log(
+              `\n[WEAK-STREAK] ${weakStreakThreshold} consecutive verified_weak cycles — ` +
+              `fleet inventory may be starved. Run 'gs inventory-audit' to check ` +
+              `bot-pickable tasks. Ending session.`,
+            );
+            stopReason = "weak-streak";
+            break parallelLoop;
+          }
+        }
+
         // Per-project cycle cap. Sequential mode handles this via
         // shouldChain; in parallel mode we check directly so a hot
         // project doesn't get re-picked endlessly.
@@ -1155,6 +1209,27 @@ export async function runSession(options: SessionOptions) {
       skippedProjects.add(currentProject.id);
       currentProject = null;
       continue;
+    }
+
+    // gs-323: fleet-wide weak-streak circuit breaker. Increment on
+    // verified_weak + empty-diff; reset on verified or verification_failed.
+    // Halt with inventory-audit suggestion when threshold is crossed.
+    if (weakStreakThreshold > 0) {
+      const isWeak = result.final_outcome === "verified_weak" &&
+        (result.reason?.includes("empty diff") ?? false);
+      const resetStreak = result.final_outcome !== "verified_weak";
+      const weakUpdate = updateWeakStreak(
+        { count: weakStreakCounter }, isWeak, weakStreakThreshold);
+      weakStreakCounter = resetStreak ? 0 : weakUpdate.streak.count;
+      if (weakUpdate.shouldHalt) {
+        console.log(
+          `\n[WEAK-STREAK] ${weakStreakThreshold} consecutive verified_weak cycles — ` +
+          `fleet inventory may be starved. Run 'gs inventory-audit' to check ` +
+          `bot-pickable tasks. Ending session.`,
+        );
+        stopReason = "weak-streak";
+        break;
+      }
     }
 
     // gs-193: fast-fail backoff. Accumulate consecutive verification_failed

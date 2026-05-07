@@ -250,6 +250,7 @@ export function formatSummary(
   summary: FleetSummary,
   tests: TestCounts | null,
   disk?: DiskUsage | null,
+  useColor?: boolean,
 ): string {
   const lines: string[] = [];
   lines.push("=== GeneralStaff Fleet Summary ===");
@@ -261,7 +262,10 @@ export function formatSummary(
   if (summary.cycles_total > 0) {
     lines.push(`  Verified:      ${summary.outcomes.verified}  (${pct(summary.outcomes.verified, summary.cycles_total)})`);
     if (summary.outcomes.verified_weak > 0) {
-      lines.push(`  Verified-weak: ${summary.outcomes.verified_weak}  (${pct(summary.outcomes.verified_weak, summary.cycles_total)})`);
+      const label = useColor
+        ? `\x1b[33mVerified-weak\x1b[0m`
+        : "Verified-weak";
+      lines.push(`  ${label}: ${summary.outcomes.verified_weak}  (${pct(summary.outcomes.verified_weak, summary.cycles_total)})`);
     }
     lines.push(`  Failed:        ${summary.outcomes.verification_failed}  (${pct(summary.outcomes.verification_failed, summary.cycles_total)})`);
     lines.push(`  Skipped:       ${summary.outcomes.cycle_skipped}  (${pct(summary.outcomes.cycle_skipped, summary.cycles_total)})`);

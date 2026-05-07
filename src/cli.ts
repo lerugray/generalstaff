@@ -23,11 +23,12 @@ import {
   writeSessionPid,
   removeSessionPid,
 } from "./safety";
-import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, loadProgressEvents, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
+import { tailProgressLog, loadCycleHistory, loadCycleHistoryJson, printHistoryTable, printHistoryCompact, summarizeCosts, compileGrepPattern, parseSinceFlag, setColorOverride, stripNoColorArgs, loadProgressEvents, shouldColorize, VALID_OUTCOME_FILTERS, type OutcomeFilter } from "./audit";
 import { initProject } from "./init";
 import { runWelcome } from "./welcome";
 import { runDoctor } from "./doctor";
 import { runClean } from "./clean";
+import { buildInventoryAudit, formatInventoryAudit } from "./inventory_audit";
 import {
   loadTasks,
   pendingTasks,
@@ -225,6 +226,11 @@ Usage:
     Example: generalstaff doctor --json --fix --yes     # emit post-fix state as JSON
     Example: generalstaff doctor --summary              # one-line health signal for scripts/CI
     Example: generalstaff doctor --summary --json       # {total, pass, warn, fail} count object
+
+  generalstaff inventory-audit [--json]                   Scan fleet for bot-pickable tasks (pre-flight)
+    Example: generalstaff inventory-audit               # human-readable table
+    Example: generalstaff inventory-audit --json        # JSON for scripts / CI
+
   generalstaff clean [--keep=N] [--log-days=N] [--dry-run] Remove stale worktrees + prune old cycles + rotate logs
     Example: generalstaff clean --keep=10
     Example: generalstaff clean --log-days=7             # delete logs older than 7 days
@@ -1671,7 +1677,7 @@ switch (command) {
     if (format === "json") {
       console.log(JSON.stringify({ summary, tests, disk }, null, 2));
     } else {
-      console.log(formatSummary(summary, tests, disk));
+      console.log(formatSummary(summary, tests, disk, shouldColorize()));
     }
     break;
   }
@@ -1707,6 +1713,51 @@ switch (command) {
       json: Boolean(doctorValues.json),
       summary: Boolean(doctorValues.summary),
     });
+    break;
+  }
+
+  case "inventory-audit": {
+    if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff inventory-audit [--json]\n" +
+          "\n" +
+          "Scan every registered project's tasks.json and report the fleet's\n" +
+          "bot-pickable inventory. Recommended as a pre-flight before running\n" +
+          "'gs session' — surface inventory starvation before cycles burn budget\n" +
+          "on verified_weak empty-diff outcomes.\n" +
+          "\n" +
+          "Options:\n" +
+          "  --json    Machine-readable output\n" +
+          "\n" +
+          "Examples:\n" +
+          "  generalstaff inventory-audit           # human-readable table\n" +
+          "  generalstaff inventory-audit --json    # JSON for scripts / CI\n",
+      );
+      process.exit(0);
+    }
+    const { values: auditValues } = parseArgs({
+      args: args.slice(1),
+      options: { json: { type: "boolean", default: false } },
+      allowPositionals: false,
+    });
+    try {
+      const audit = await buildInventoryAudit();
+      if (auditValues.json) {
+        console.log(JSON.stringify(audit, null, 2));
+      } else {
+        console.log(formatInventoryAudit(audit));
+      }
+      // Exit 1 when zero bot-pickable tasks — signals "don't dispatch"
+      // to scripts and CI pipelines.
+      if (audit.summary.fleet_bot_pickable === 0) {
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(
+        `Error: inventory audit failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      process.exit(1);
+    }
     break;
   }
 

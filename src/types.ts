@@ -226,6 +226,15 @@ export interface DispatcherConfig {
   // or all-empty parallel rounds before the session stops with
   // stopReason empty-cycles. Default 3 when omitted from projects.yaml.
   max_consecutive_empty: number;
+  // gs-323: consecutive verified_weak (empty-diff) outcomes across the
+  // fleet before the session halts with stopReason weak-streak +
+  // inventory-audit suggestion. Distinct from max_consecutive_empty in
+  // that this is fleet-scoped (any project can produce the weak cycle)
+  // and the halt message explicitly suggests running 'gs inventory-audit'.
+  // Default 3; set to 0 to disable. Count resets on any non-weak outcome
+  // (verified, verification_failed). cycle_skipped does NOT increment and
+  // does NOT reset — it's a pre-flight abort, not a progress signal.
+  weak_streak_threshold?: number;
   // gs-297: optional fleet-wide usage budget. Applies across all
   // projects in a session. Per-project overrides (on ProjectConfig)
   // carve out tighter caps for individual projects and must fit
