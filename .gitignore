@@ -84,6 +84,10 @@ state/FnordOS/
 state/mission-PMA/
 state/hammerstein/
 state/range-school/
+state/hammerstein-tui/
+state/asciigpt/
+state/clever-lazy/
+state/gs-scheduler/
 
 # Bun / Node
 node_modules/
