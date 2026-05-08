@@ -88,6 +88,7 @@ state/hammerstein-tui/
 state/asciigpt/
 state/clever-lazy/
 state/gs-scheduler/
+state/hammerstein-model/
 
 # Bun / Node
 node_modules/
