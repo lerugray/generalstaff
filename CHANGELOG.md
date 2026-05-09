@@ -9,6 +9,15 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-08
+
+v0.3.0 ships the phased autonomous progression arc that was on the
+v0.2.0 deferred list (Phases A → B → B+ all in this release), plus a
+weak-streak circuit breaker, an inventory-audit CLI, configurable
+empty-cycle limits, structured engineer task-claim plumbing, and the
+contributor docs the public-launch posture needed (QUICKSTART, SECURITY,
+a pre-PR checklist). 44 commits since v0.2.0, no breaking changes.
+
 ### Added
 
 - **Phased autonomous progression — Phase B+** (2026-05-04). Three
@@ -76,13 +85,143 @@ in practice, entries are written in Ray's voice and prioritize
   - `view phase-ready [--json]` — list of projects with a sentinel
     file present, sorted oldest-detected first.
 
-  **Deferred to a future release** per FUTURE-DIRECTIONS-2026-04-19
-  §8 explicit non-goals: dashboard UI rendering of the phase-ready
-  view (the JSON view module is exposed; the dashboard frontend
-  needs to wire it in), advance button in the UI (needs
-  dashboard write-mode plumbing), task templates with placeholder
-  expansion, opt-in auto-advance, multi-phase rollback, and
-  LAUNCH-PLAN.md gate unification.
+  Originally listed v0.3.0 deferrals (auto-advance, rollback,
+  templates, dashboard rendering, advance button, LAUNCH-PLAN.md
+  gate, evaluators) all landed in this release — see Phase B+ entry
+  above and the dashboard / phase-evaluators entries below.
+
+- **Phase evaluators: `launch_gate`, `git_tag`, `lifecycle_transition`**
+  (closed via gs-303 / gs-304 path). The Phases A+B v1 release accepted
+  these criterion types in the schema but returned "not implemented in
+  v1." All three are now wired:
+  - `launch_gate` reads checkbox state from `LAUNCH-PLAN.md` (per-task
+    completion gate).
+  - `git_tag` uses `git rev-parse` with `GIT_CEILING_DIRECTORIES` to
+    check whether a specific tag exists on the project's repo.
+  - `lifecycle_transition` reads the new `lifecycle:` field on
+    projects.yaml entries (e.g., `pre-launch` → `live` transitions
+    for projects that gate phase advancement on production status).
+  *Why:* phase evaluators were the structural extension point for
+  Phase B's "criteria pass → ready to advance" pattern; the v1 set
+  was only `all_tasks_done` + `custom_check`, which constrained
+  phase design to "did the queue empty" or "did this script exit 0."
+  The new evaluators let phases gate on real product milestones
+  (released, tagged, status-transitioned).
+- **Dashboard `/phase` route + commander advance button.** Web
+  dashboard now renders `gs view phase-ready` JSON visually and
+  exposes a click-to-advance button per project, replacing the
+  CLI-only Phase A+B surface. Wires the JSON view module that the
+  Phase B+ dispatch already produced into the existing dashboard
+  frontend.
+- **Weak-streak circuit breaker** (gs-323 / gs-324). Fleet-wide
+  counter for consecutive `verified_weak` (empty-diff) cycles across
+  any project. Default threshold 3 — at the third consecutive
+  weak cycle the session halts with stop reason `weak-streak` and
+  prints a recommendation to run `gs inventory-audit`. Configurable
+  via `dispatcher.weak_streak_threshold` (set 0 to disable).
+  *Why:* before this gate, a starved fleet (no pickable tasks
+  anywhere) would chew through a session's budget in 30-second
+  empty cycles. Now the circuit trips early with a diagnostic
+  hint instead of the user discovering a wasted session at the
+  digest.
+- **`gs inventory-audit` CLI.** New diagnostic command that scans
+  every registered project's `tasks.json`, separates pickable from
+  unpickable (interactive_only, hands_off-intersect, expected_touches
+  conflicts), and produces a report. Pairs with the weak-streak
+  circuit breaker — when the breaker trips, this is the first
+  thing to run. Exposed in dashboard via `verified_weak` yellow
+  status color so streak-trips are visible without inspecting logs.
+- **Configurable consecutive-empty limit** (gs-292). New
+  `dispatcher.max_consecutive_empty` config (default 3) and
+  per-project `max_consecutive_empty` override that lets the
+  empty-diff exclusion logic adapt to project shapes (a project
+  that legitimately produces "no work this cycle, the build is
+  pending" outcomes can raise its limit; a project where empty
+  diffs almost always indicate confusion can lower its limit).
+  Parallel mode honors the max of per-project effective limits in
+  each round.
+- **Session-local empty-diff task exclusion** (gs-290). Tasks that
+  produce empty diffs are temporarily excluded from picker
+  consideration for the rest of the session, preventing the picker
+  from cycling through the same stuck task repeatedly. Exclusion
+  resets at session end.
+- **Structured engineer task-claim** (gs-291). The engineer now
+  explicitly emits the `attempted_task_id` it picked up in the
+  cycle prompt, surfaced on `cycle_end` events. Closes a long-
+  standing observability gap where the audit log showed "engineer
+  worked on something, here's the diff" without the explicit task
+  ID; reviewer attribution + later digest accounting both improve.
+- **Greenfield work-detection fallback** (gs-304). When a project
+  has no `tasks.json` of its own, the picker falls back to the
+  GS-root `tasks.json` (i.e., the dispatcher project itself can
+  always cycle on its own backlog without per-project state). Fixes
+  the chicken-and-egg case for fresh project registrations.
+- **Per-project notification breakdown** (gs-303). Session-complete
+  notifications now include per-project cycle accounting (verified /
+  failed / skipped) and accurate session-tag attribution, replacing
+  the v0.2.0 fleet-totals-only summary.
+- **`scan-bullets-by-project-affinity` library** (gs-312, jr-003).
+  Extracted from the journal-reader skill into a reusable library
+  for matching free-text journal entries against project IDs by
+  affinity heuristics. Used by mission-bullet integration; available
+  for future GS-managed-project consumption.
+- **Usage-budget integration tests** (gs-301a-e, scenarios 1-11).
+  Comprehensive coverage of the v0.2.0 usage-budget gate across
+  per-project vs fleet semantics, `max_usd` modes, `max_tokens`,
+  `max_cycles`, validation, and rolling-window math. Closes the
+  test-coverage gap on the v0.2.0 budget surface that was holding
+  back confidence in unattended-run behavior.
+- **`QUICKSTART.md`** at repo root — five-minute path from clone to
+  first verified cycle, including verdict legend and merge workflow.
+  Addresses the "where do I start" gap surfaced in external review.
+- **`SECURITY.md`** at repo root — secret storage guidance, OS-level
+  protection recommendations, threat model for multi-user desktops
+  and CI adapters, vulnerability reporting path. Documents the
+  BYOK security posture explicitly.
+
+### Changed
+
+- **README hero block sharpened** for HN-readiness — adversarial-
+  engineering frame leads ("treats agentic AI as an adversarial
+  input to your codebase"), specific failure-mode list ("mark tasks
+  done when tests fail," "produce empty diffs and call them
+  complete"), and a real audit-log excerpt as the proof. ~37% prose
+  cut without losing claims (gs-321 stop-slop pass).
+- **README "What the gate doesn't catch" section** — honesty pass
+  that explicitly documents what the verification gate does not
+  enforce (semantic correctness, design quality, security review).
+  Pre-empts the obvious HN comment.
+- **Sister projects section** reframed as registered fleet members
+  rather than "things Ray also works on" — the reader sees the
+  dispatcher dogfooding itself across a real portfolio.
+- **README Hammerstein companion section** (gs-325) — surfaces the
+  Hammerstein strategic-reasoning framework + CLI as the optional
+  decision-support layer that pairs with the dispatcher (audit
+  before firing, scope before drafting).
+- **CONTRIBUTING.md** — removed pre-launch "private repo" framing,
+  added explicit pre-PR checklist (covers verification gate
+  preservation, RULE-RELAXATION-doc requirement, DESIGN.md append
+  discipline, doc updates for new CLI surfaces, security flag),
+  added explicit note on the maintainer's private companion-repo
+  pattern so external contributors aren't confused.
+
+### Fixed
+
+- **Aider engineer task selection** (799416a). Aider provider was
+  reading the unresolved `nextTask` placeholder from the prompt
+  template instead of the pre-resolved task content, leading to
+  cycles that picked up nothing or the wrong task. Fix embeds the
+  pre-resolved nextTask content in the prompt directly.
+- **mshook-004 cache invalidation regression test** (gs-309). Hook
+  cache was not invalidating on certain file-mtime patterns; test
+  coverage added to prevent regression.
+- **`gs-292` test suite reconciliation with `gs-323` weak-streak**
+  (release-prep fix). The gs-292 tests were written before the
+  gs-323 weak-streak circuit breaker landed, and their dispatcher
+  configs requested 5-7 consecutive cycles which the gs-323 default
+  threshold (3) was hard-stopping. Test fixtures now set
+  `weak_streak_threshold: 0` for the modes that need >3 cycles, so
+  the gs-292 limit is what halts. No product behavior change.
 
 ## [0.2.0] — 2026-05-02
 
