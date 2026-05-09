@@ -1,0 +1,24 @@
+# state/bookfinder-general/project-meta.yaml
+# v0 schema per generalstaff-private/docs/internal/PROJECT-CLASSIFICATION-2026-05-08.md
+
+classification:
+  primary: business-product
+  secondary:
+    - career-stakes
+
+viability:
+  financial_return: 1
+  time_to_revenue: 4
+  required_attention: weekly
+  reputation_signal: 1
+  lifestyle_value: 1
+  rationale: |
+    Book-finding/library-management Python tool. Part of Ray's PIH
+    (passive income hub) commercial portfolio. Currently free; no paid
+    tier locked, monetization deferred. Active dev with bot cycles +
+    creative-tagged drafts (voice-calibrated to Ray's PIH manuals).
+    Reputation tier=1: real but niche audience for self-hosted book
+    discovery. Lifestyle=1: Ray uses it himself for own library work.
+
+next_review_trigger: when paid-tier decision is made OR public release lands worthy of HN/r/selfhosted post
+last_reviewed: 2026-05-08

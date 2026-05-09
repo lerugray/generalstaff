@@ -1,0 +1,31 @@
+# state/generalstaff/project-meta.yaml
+# v0 schema per generalstaff-private/docs/internal/PROJECT-CLASSIFICATION-2026-05-08.md
+# HYBRID — uses primary-as-array form.
+
+classification:
+  primary:
+    - ai-dev
+    - business-product
+  secondary:
+    - career-stakes
+    - IP-bearing
+    - ecosystem-bearing
+    - proof-stack-bearing
+
+viability:
+  financial_return: 2
+  time_to_revenue: 0
+  required_attention: weekly
+  reputation_signal: 3
+  lifestyle_value: 3
+  rationale: |
+    Open-source autonomous engineering dispatcher. Ray's daily driver
+    across the entire portfolio (dogfood). Genuinely hybrid — it IS
+    Ray's dev infrastructure (ai-dev) AND a published commercial-
+    quality OSS product (business-product). Career-defining if community
+    adoption lands. Direct revenue via SUPPORTERS sponsorship; no SaaS
+    layer per Hard Rules. v0.3.0 just shipped (2026-05-08); announcement
+    deferred to post-Hammerstein-7B reception.
+
+next_review_trigger: when v0.3.0 announcement fires (post-Hammerstein-7B Tuesday) AND first external contributor PR lands OR 2026-06-15
+last_reviewed: 2026-05-08

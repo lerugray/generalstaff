@@ -1,0 +1,25 @@
+# state/wargame-design-book/project-meta.yaml
+# v0 schema per generalstaff-private/docs/internal/PROJECT-CLASSIFICATION-2026-05-08.md
+
+classification:
+  primary: book-kdp
+  secondary:
+    - career-stakes
+
+viability:
+  financial_return: 1
+  time_to_revenue: 1
+  required_attention: monthly
+  reputation_signal: 2
+  lifestyle_value: 1
+  rationale: |
+    A Contemporary Guide to Wargame Design — 23 chapters + 6 appendices
+    + acknowledgements, content-complete. Free Jekyll web version live
+    at lerugray.github.io/wargame-design-book. Remaining work is
+    commercial: KDP paperback build for Amazon at ~$20 retail. Mode B
+    (interactive-only). KDP-tier revenue (low volume), but reputation
+    ceiling=2 — "guy wrote a wargame design book" + free web version
+    drives discovery + the paperback is the monetization artifact.
+
+next_review_trigger: when KDP paperback ships to Amazon OR Q3 2026
+last_reviewed: 2026-05-08

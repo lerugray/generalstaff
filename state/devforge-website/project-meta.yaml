@@ -1,0 +1,25 @@
+# state/devforge-website/project-meta.yaml
+# v0 schema per generalstaff-private/docs/internal/PROJECT-CLASSIFICATION-2026-05-08.md
+
+classification:
+  primary: business-product
+  secondary:
+    - ecosystem-bearing
+
+viability:
+  financial_return: 0
+  time_to_revenue: 4
+  required_attention: monthly
+  reputation_signal: 0
+  lifestyle_value: 0
+  rationale: |
+    Public marketing site for Devforge desktop IDE. Plain HTML/CSS/JS,
+    no build pipeline. Two surfaces: index.html + itch.html (kept in
+    sync with main devforge repo's docs/ITCH_LISTING.md). Mode B,
+    voice-bearing copy. GS's role: track website-vs-app version drift
+    so a stale site doesn't quietly point users at a version that no
+    longer exists. Not directly revenue-generating; supports Devforge's
+    revenue arc (ecosystem-bearing).
+
+next_review_trigger: when Devforge ships a new app version requiring website sync
+last_reviewed: 2026-05-08
