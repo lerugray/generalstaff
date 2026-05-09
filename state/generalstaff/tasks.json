@@ -2483,5 +2483,14 @@
     "priority": 3,
     "interactive_only": false,
     "expected_touches": ["README.md"]
+  },
+  {
+    "id": "gs-326",
+    "title": "Add public-GS doc capturing the bite-sized one-by-one decision surfacing pattern. Generalized port of the cross-machine rule saved 2026-05-09 in generalstaff-private/CLAUDE.local.md (Ray verbatim: 'absolutely love the workflow you've done for this session which is new compared to what we ever did before on unblocking stuff'). Public-side doc strips the GS-orchestrator-specific shape down to 'any interactive Claude Code session unblocking a multi-project portfolio' — keeps the load-bearing pattern (survey-then-strawman / leans-with-LOCK-markers / one-by-one AskUserQuestion / execute-between-questions / repo-state-grounded / commit-as-you-go) without the GS-state-update mechanics. Lives at docs/CLAUDE-WORKFLOWS.md (or similar; could go in CLAUDE.md as a new section). Also benefits Kunal (granted GS repo collaborator access 2026-05-01) + future GS users running interactive Claude over their managed portfolio. Filed 2026-05-09 home-PC after Ray asked to incorporate the workflow into public GS.",
+    "status": "pending",
+    "priority": 4,
+    "interactive_only": true,
+    "interactive_only_reason": "Voice-bearing public-facing doc; Ray voice-passes after Claude drafts strawman. Generalization step (stripping GS-specific shape) needs Ray's eye on which examples / framings translate vs which stay private.",
+    "expected_touches": ["docs/", "CLAUDE.md"]
   }
 ]
