@@ -1,8 +1,7 @@
 # Contributing to GeneralStaff
 
-Pre-launch note: this repo is private at time of writing. This doc
-describes how contributions will work once public; current practice
-is Ray + the autonomous bot only.
+GeneralStaff is open source under AGPL-3.0-or-later. Contributions
+welcome — read this doc first.
 
 ## The short version
 
@@ -45,6 +44,51 @@ Design documents (`DESIGN.md`, `docs/internal/PIVOT-*.md`,
 `docs/internal/UI-VISION-*.md`) are append-only. New sections with
 date headers are the right shape; rewrites of earlier sections are
 not.
+
+## Pre-PR contributor checklist
+
+Before opening any PR with structural scope (new feature, dispatcher
+change, anything beyond a typo or one-file localized fix), run through
+this list:
+
+- [ ] `bun test` — all tests pass.
+- [ ] `bun x tsc --noEmit` — no type errors.
+- [ ] If touching `src/verification.ts` / `src/reviewer.ts` /
+      `src/safety.ts` / `src/prompts/` — explained in PR description
+      how the verification gate's load-bearing behavior is preserved.
+- [ ] If introducing or modifying a Hard Rule's enforcement path —
+      added a `docs/internal/RULE-RELAXATION-<date>.md` file
+      describing the change, its rationale, and what gates remain.
+- [ ] If adding a new architectural concept — appended a dated
+      section to `DESIGN.md` documenting it (don't rewrite earlier
+      sections).
+- [ ] If adding a new public CLI surface or config field — updated
+      `README.md`, `QUICKSTART.md` if user-facing, and the relevant
+      doc in `docs/conventions/` or `docs/integrations/`.
+- [ ] If touching anything in `src/security`, key handling, or the
+      audit log — flagged in PR description so a reviewer can pull
+      `SECURITY.md` open against the change.
+
+The dispatcher itself runs this checklist mentally for its own bot
+PRs (per the verification gate). Human contributors run it
+manually.
+
+## Maintainer's companion repo
+
+Ray maintains a private companion repo (`generalstaff-private`) for
+maintainer-only state: per-machine paths, project state for
+private-state projects (IP-sensitive missions, personal life-tools),
+session notes, and credentials plumbing. This pattern is intentional
+and documented in this public repo's `.gitignore` (each private-state
+project has its `state/<id>/` directory excluded).
+
+**Contributors do NOT need the private companion repo.** GeneralStaff
+runs cleanly without it. The companion-repo pattern is purely for
+the maintainer's own portfolio. If you ever need to contribute to a
+file under `state/<id>/`, that project is private and your PR should
+either touch a different project or wait for the maintainer to expose
+the relevant interface. If you're confused about whether a project is
+private-state, check `.gitignore` at repo root.
 
 ## Filing issues
 
