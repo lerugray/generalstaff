@@ -54,18 +54,21 @@ if (mode === "sequential-fleet-5") {
     state_dir: join(TEST_DIR, "state"),
     max_cycles_per_project_per_session: 100,
     max_consecutive_empty: 5,
+    weak_streak_threshold: 0, // disable gs-323 weak-streak so gs-292 limit is what halts
   });
 } else if (mode === "sequential-default-3") {
   dispatcher = makeDispatcherConfig({
     state_dir: join(TEST_DIR, "state"),
     max_cycles_per_project_per_session: 100,
     // max_consecutive_empty omitted — factory default 3
+    weak_streak_threshold: 0, // disable gs-323 weak-streak so gs-292 limit is what halts
   });
 } else if (mode === "sequential-project-7") {
   dispatcher = makeDispatcherConfig({
     state_dir: join(TEST_DIR, "state"),
     max_cycles_per_project_per_session: 100,
     max_consecutive_empty: 3,
+    weak_streak_threshold: 0, // disable gs-323 weak-streak so gs-292 limit is what halts
   });
   project = { ...projectBase, max_consecutive_empty: 7 };
 } else if (mode === "parallel-all-empty-2") {
@@ -76,6 +79,7 @@ if (mode === "sequential-fleet-5") {
     max_cycles_per_project_per_session: 100,
     max_parallel_slots: 2,
     max_consecutive_empty: 2,
+    weak_streak_threshold: 0, // disable gs-323 weak-streak so gs-292 limit is what halts
   });
 } else if (mode === "parallel-round-limit-max") {
   project = { ...projectBase, id: "proj-a", max_consecutive_empty: 4 };
@@ -85,6 +89,7 @@ if (mode === "sequential-fleet-5") {
     max_cycles_per_project_per_session: 100,
     max_parallel_slots: 2,
     max_consecutive_empty: 2,
+    weak_streak_threshold: 0, // disable gs-323 weak-streak so gs-292 limit is what halts
   });
 } else {
   console.error(JSON.stringify({ pass: false, error: `unknown mode ${mode}` }));
