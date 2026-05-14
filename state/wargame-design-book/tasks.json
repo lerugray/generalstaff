@@ -138,7 +138,7 @@
   {
     "id": "wdb-015",
     "title": "Fill in the assigned ISBN on the copyright page. In print/front-matter.md, replace the literal placeholder string `[to be assigned]` with `9798195268275` (the KDP-assigned paperback ISBN). DO NOT modify any other file. DO NOT rebuild the PDF (Ray runs print/build.sh manually). The change is a single string replace on the one ISBN line.",
-    "status": "pending",
+    "status": "done",
     "priority": 5,
     "expected_touches": [
       "print/front-matter.md"
