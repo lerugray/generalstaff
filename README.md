@@ -204,6 +204,7 @@ Three open-source projects in the fleet, same posture (your data, your keys, no 
 - [`projects.yaml.example`](projects.yaml.example) — config schema reference
 - [`docs/conventions/`](docs/conventions/) — usage-budget, roadmap, integrations
 - [`docs/internal/`](docs/internal/) — design decisions, phase closures, research notes
+- [`docs/HEARTBEAT.md`](docs/HEARTBEAT.md) — 24/7 inbox-driven dispatcher mode (experimental, 2026-05-14)
 - [`AGENTS.md`](AGENTS.md) — cross-platform agent-config (Claude Code, Cursor, Aider, Codex, Zed)
 - [`scripts/orchestration/README.md`](scripts/orchestration/README.md) — multi-agent spawn primitives
 

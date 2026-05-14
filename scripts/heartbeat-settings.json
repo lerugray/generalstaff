@@ -1,0 +1,16 @@
+{
+  "_comment": "GS heartbeat — Stop hook configuration. Loaded by `bun src/heartbeat/supervisor.ts` via the --settings flag. Not loaded by regular interactive `claude` sessions in this repo (those use .claude/settings.json instead).",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun src/heartbeat/hook.ts",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
