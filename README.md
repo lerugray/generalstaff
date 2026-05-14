@@ -89,6 +89,10 @@ Named for Kurt von Hammerstein-Equord's officer typology: clever/stupid × indus
 
 The architecture is the philosophy: gate, hands-off lists, default-off creative roles, open audit log. Built by a wargame designer thinking about AI failure modes the way wargames think about adversarial conditions — structurally, with explicit failure-mode enumeration, with discipline encoded as rules.
 
+## Why the gate matters
+
+The failure mode isn't unique to AI. Both the operator and the agent are vulnerable to confident industriousness without judgment — helper syndrome cuts both ways. The verification gate exists because instructions can be ignored by either party; the bot's enthusiasm tends to amplify the operator's optimism. The gate fires regardless. *Protection only fires when the operator reads the verdict and listens* — necessary but not sufficient.
+
 ## Hard rules
 
 Enforced in code or by convention. Relaxing any requires a `RULE-RELAXATION-<date>.md` log committed alongside the change.
