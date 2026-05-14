@@ -134,5 +134,14 @@
     "interactive_only": true,
     "interactive_only_reason": "Voice-bearing chapter content; needs Ray's eye on each flagged tell since some 'AI cadence' is actually his voice. Stop-slop tooling can flag, Ray approves, fixer applies.",
     "cancelled_note": "Cancelled 2026-04-27 morning per Ray: every chapter was stop-slopped at write time during initial drafting, so a separate sweep pass is unnecessary. The chapter_17 fix (commit 98ce07e on cursor/wdb-voice-drafts) was a single instance Ray spotted in passing, not the leading edge of a broader sweep."
+  },
+  {
+    "id": "wdb-015",
+    "title": "Fill in the assigned ISBN on the copyright page. In print/front-matter.md, replace the literal placeholder string `[to be assigned]` with `9798195268275` (the KDP-assigned paperback ISBN). DO NOT modify any other file. DO NOT rebuild the PDF (Ray runs print/build.sh manually). The change is a single string replace on the one ISBN line.",
+    "status": "pending",
+    "priority": 5,
+    "expected_touches": [
+      "print/front-matter.md"
+    ]
   }
 ]
