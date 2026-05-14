@@ -128,6 +128,42 @@
 #   voice_reference_override: []    # replaces project voice paths
 #                                   # for this task specifically
 #
+# -------------------------------------------------------------------
+# Pre-cycle advisor — Hammerstein integration (gs-327, 2026-05-14)
+# -------------------------------------------------------------------
+#
+# Optional pre-cycle audit layer. When enabled, GS shells out to the
+# `h` CLI (https://github.com/lerugray/hammerstein) between picker
+# and engineer with the proposed task plan + bounded cycle history.
+# The verdict lands in PROGRESS.jsonl as `advisor_verdict`.
+#
+# Full docs: docs/ADVISOR.md.
+#
+#   advisor.enabled: bool   (default: false — zero overhead)
+#       When true, advisor runs pre-cycle.
+#
+#   advisor.gate: bool   (default: false — advisory only)
+#       When true AND advisor verdict is "block", the cycle skips
+#       (cycle_skipped, reason "advisor_gated"). When false, the
+#       verdict is logged but the cycle proceeds regardless.
+#
+#   advisor.provider: string   (default: "hammerstein")
+#       v1 only supports "hammerstein" (uses the `h` CLI). v2+ may
+#       add direct OpenRouter/Claude/Ollama routing inside GS.
+#
+#   advisor.timeout_seconds: int   (default: 90)
+#       Wall-clock timeout. `h audit` typically runs ~60s on
+#       OpenRouter Qwen3.6-plus. Verdict on timeout: "timeout",
+#       cycle proceeds.
+#
+#   advisor.history_cycles: int   (default: 3)
+#       Recent cycles included in the plan context. Bounded per
+#       Hammerstein-audit recommendation to prevent advisor
+#       context-window dilution.
+#
+# Latency: ~60s per cycle when enabled. For 10-15 min cycle work,
+# acceptable overhead. For 30s mechanical jobs, disable advisor.
+#
 # Hard Rule 8 (BYOK): every credential above comes from your own
 # environment. Nothing is shipped, nothing is hosted on your behalf.
 

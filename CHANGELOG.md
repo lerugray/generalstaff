@@ -9,6 +9,81 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-14
+
+v0.4.0 ships two interconnected features that emerged from a single
+2026-05-14 home-PC drive session: **24/7 heartbeat-mode dispatch** (an
+event-driven outer launcher that sidesteps Anthropic's 2026-06-15
+`claude -p` SDK-billing carve-out) and an **optional pre-cycle
+Hammerstein advisor** layer (wires the manual `h audit "<plan>"`
+pattern into the dispatcher between picker and engineer). Both are
+additive, opt-in, and rollback-by-disabling. 2,034 tests passing, no
+breaking changes.
+
+### Added
+
+- **Heartbeat-mode dispatch (gs-326).** New `src/heartbeat/` module
+  keeps an interactive Claude Code session alive via the Stop-hook
+  contract, watches `io/inbox.jsonl` for action messages, restarts
+  the child for fresh context per message (same property `-p`
+  provides), bills against the regular subscription instead of the
+  SDK pool. Action vocabulary: `run_cycle <project>`,
+  `run_session [--max-cycles=N]`, `digest`, `status`,
+  `manual <text>`. Architecture inspired by
+  [Siigari/claude-heartbeat](https://github.com/Siigari/claude-heartbeat)
+  (MIT, 2026-05-13); this is a TypeScript port + GS-aware action
+  dispatcher.
+
+  Launchers: `scripts/heartbeat-run.ps1` (Windows),
+  `scripts/heartbeat-run.sh` (Unix). Inbox CLI:
+  `bun scripts/heartbeat-inbox.ts <action> [args]`. Settings
+  isolated to `scripts/heartbeat-settings.json` — passed via
+  `--settings`, doesn't affect normal interactive sessions on the
+  repo. Watchdog default 30 min (covers 5-15 min cycles); fsync'd
+  state writes; orphan reaper; graceful shutdown.
+
+  Coexists with existing scheduled-task dispatch; rollback is "stop
+  the supervisor." Full setup, action protocol, ToS framing:
+  [`docs/HEARTBEAT.md`](docs/HEARTBEAT.md).
+
+- **Pre-cycle advisor layer (gs-327).** Optional `advisor` block on
+  `ProjectConfig`. When `enabled: true`, GS shells out to the `h` CLI
+  (Hammerstein) between picker and engineer with the proposed task
+  plan + bounded recent-cycle history; verdict lands in
+  `PROGRESS.jsonl` as `advisor_verdict` event. With `gate: true`, a
+  `block` verdict skips the cycle (`cycle_skipped: advisor_gated`).
+
+  Defaults: off (zero overhead when not configured), provider
+  `hammerstein`, timeout 90s, history capped at 3 cycles
+  (Hammerstein-audit recommendation). Latency: ~60s typical per
+  cycle when enabled — acceptable for 10-15 min cycle work, disable
+  for 30s mechanical jobs. v1 supports only `provider: hammerstein`;
+  multi-provider direct routing deferred to v2.
+
+  Pre-flight `h audit` of the advisor plan itself ran 2026-05-14
+  with verdict "ship with modifications"; modifications landed
+  (history cap, gate as project-level Boolean, fixed verdict schema,
+  latency bound). Full setup: [`docs/ADVISOR.md`](docs/ADVISOR.md).
+
+### Changed
+
+- README status line bumped to v0.4.0 + 2,034 tests.
+- README adds dedicated sections for heartbeat + advisor.
+- `projects.yaml.example` documents the `advisor` block.
+- `.gitignore` excludes `io/` (heartbeat runtime state, per-machine).
+
+### Internals
+
+- New `src/types.ts` additions: `AdvisorConfig`, `AdvisorVerdict`,
+  `AdvisorVerdictKind`, `AdvisorProvider`. New ProgressEventType:
+  `advisor_verdict`.
+- New `src/advisor.ts` (advisor module, ~210 lines).
+- New `src/heartbeat/{types,hook,supervisor,dispatch}.ts` (~500
+  lines).
+- Cycle.ts integration: ~50 new lines around step 3a; dynamic-imports
+  `getRecentCycles` from state so test mocks aren't forced to enumerate
+  every export.
+
 ## [0.3.0] — 2026-05-08
 
 v0.3.0 ships the phased autonomous progression arc that was on the

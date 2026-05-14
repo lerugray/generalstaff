@@ -19,6 +19,7 @@ import {
 import { appendProgress } from "./audit";
 import { runEngineer, type EngineerResult } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
+import { runAdvisor, buildAdvisorPlan, normalizeAdvisorConfig } from "./advisor";
 import { runVerification } from "./verification";
 import { runReviewer, type ReviewerResult } from "./reviewer";
 import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
@@ -740,6 +741,78 @@ export async function executeCycle(
         : {}),
     }, cycleId);
     console.log(`Start SHA (${branch}): ${cycleStartSha.slice(0, 8)}`);
+
+    // 3a. Pre-cycle advisor (gs-327, 2026-05-14)
+    //
+    // Optional pre-cycle audit via external advisor (Hammerstein CLI by
+    // default). Zero overhead when project.advisor is unset / disabled.
+    // Verdict is always logged to PROGRESS.jsonl as `advisor_verdict`;
+    // with `gate: true`, a `block` verdict skips the cycle (cycle_skipped,
+    // reason `advisor_gated`). Hammerstein-audit-reviewed: history capped
+    // at 3 cycles, fixed verdict schema, latency-bounded by
+    // timeout_seconds. Implementation in src/advisor.ts. Docs: docs/
+    // ADVISOR.md.
+    const advisorCfg = normalizeAdvisorConfig(project.advisor);
+    if (advisorCfg && nextTask) {
+      // gs-327: dynamic-import getRecentCycles so test helpers that mock
+      // ./src/state don't have to enumerate every export the cycle imports
+      // (they vastly outnumber the cycle's needs). The dynamic resolution
+      // runs only when advisor is enabled, which the existing test surface
+      // never does. Defensive fall-through to empty history on any error.
+      let recentCycles: Awaited<ReturnType<typeof import("./state").getRecentCycles>> = [];
+      try {
+        const stateMod = await import("./state");
+        if (typeof stateMod.getRecentCycles === "function") {
+          recentCycles = await stateMod.getRecentCycles(
+            project.id,
+            advisorCfg.history_cycles ?? 3,
+            config,
+          );
+        }
+      } catch {
+        recentCycles = [];
+      }
+      const plan = buildAdvisorPlan(project, {
+        taskTitle: nextTask.title || nextTask.id,
+        // GreenfieldTask doesn't carry a description body in v1; pass
+        // an empty body so the advisor works from title + hands_off +
+        // recent-cycle history. Future: extend GreenfieldTask with an
+        // optional `description` field if richer task semantics are
+        // queued upstream.
+        taskBody: "",
+        handsOff: project.hands_off,
+        recentCycles: recentCycles.map((c) => ({
+          cycle_id: c.cycle_id,
+          cycle_ts: c.timestamp,
+          outcome: c.outcome,
+          summary: c.reason ?? undefined,
+        })),
+      });
+      const verdict = await runAdvisor(plan, advisorCfg);
+      const verdictLogPayload = {
+        task_id: nextTask.id,
+        verdict: verdict.verdict,
+        reason: verdict.reason,
+        provider: verdict.provider,
+        duration_sec: verdict.duration_sec,
+        // raw_output truncated to keep PROGRESS.jsonl line-bounded
+        raw_output: verdict.raw_output?.slice(0, 4000),
+      };
+      await appendProgress(
+        project.id,
+        "advisor_verdict",
+        verdictLogPayload,
+        cycleId,
+      );
+      console.log(
+        `Advisor (${verdict.provider}) → ${verdict.verdict} ` +
+          `(${verdict.duration_sec.toFixed(1)}s): ${verdict.reason.slice(0, 120)}`,
+      );
+      if (advisorCfg.gate && verdict.verdict === "block") {
+        result.reason = `advisor_gated: ${verdict.reason.slice(0, 200)}`;
+        break assemble;
+      }
+    }
 
     // 4. Engineer step
     //

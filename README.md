@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.3.0, 2,030 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.4.0, 2,034 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.4.0 adds 24/7 [heartbeat-mode dispatch](docs/HEARTBEAT.md) + optional [Hammerstein advisor](docs/ADVISOR.md) layer. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -169,6 +169,27 @@ h worth "<proposal>" # opportunity-cost check before committing Claude tokens
 
 Over time, `~/.hammerstein/logs/` accumulates your strategic decisions for curation into your personal corpus.
 
+**Wire it into the dispatcher (v0.4.0+).** Set `advisor.enabled: true` per project and GS calls `h audit` automatically between picker and engineer with the proposed task plan + bounded cycle history. Verdict lands in `PROGRESS.jsonl` as `advisor_verdict`. Opt-in (default off, zero overhead). With `gate: true`, a `block` verdict skips the cycle (`cycle_skipped: advisor_gated`). Full setup: [`docs/ADVISOR.md`](docs/ADVISOR.md).
+
+## 24/7 heartbeat dispatch (v0.4.0+)
+
+Anthropic separates `claude -p` and SDK billing into a dedicated credit bucket on **2026-06-15**. Scheduled-task launchers that ran on the regular subscription move to that bucket.
+
+GS heartbeat mode sidesteps it: keep an interactive Claude Code session alive via the Stop-hook contract, watch `io/inbox.jsonl` for action messages, restart-per-message for fresh context (same property `-p` provides), bill against the Max subscription. Architecture inspired by [Siigari/claude-heartbeat](https://github.com/Siigari/claude-heartbeat); GS port adds an action vocabulary (`run_cycle`, `run_session`, `digest`, `status`, `manual`) and structured outbox responses.
+
+```bash
+# Start the supervisor (visible cmd window on Windows; tmux/screen on Unix)
+.\scripts\heartbeat-run.ps1
+./scripts/heartbeat-run.sh
+
+# Queue work from any other shell
+bun scripts/heartbeat-inbox.ts run_cycle myproject
+bun scripts/heartbeat-inbox.ts run_session --max-cycles=3
+bun scripts/heartbeat-inbox.ts status
+```
+
+Additive over the existing scheduled-task path — rollback is "stop the supervisor." Full setup, action protocol, ToS framing, latency math: [`docs/HEARTBEAT.md`](docs/HEARTBEAT.md).
+
 ## Configuration
 
 Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in [`projects.yaml.example`](projects.yaml.example).
@@ -178,6 +199,7 @@ Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in 
 - `auto_merge: true` — auto-merge `bot/work` after clean cycles. Opt in after 5.
 - `dispatcher.session_budget` — cap on USD, tokens, or cycles.
 - `dispatcher.max_parallel_slots: N` — N cycles per round in parallel.
+- `advisor.enabled: true` — pre-cycle Hammerstein audit (opt-in, v0.4.0+). With `gate: true`, a `block` verdict skips the cycle. See [`docs/ADVISOR.md`](docs/ADVISOR.md).
 
 Hard Rules hold regardless of knob state. Every cycle still lands in `PROGRESS.jsonl`.
 

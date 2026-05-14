@@ -27,6 +27,60 @@ export interface ReviewerResponse {
 
 export type CycleOutcome = ReviewerVerdict | "cycle_skipped";
 
+// --- Advisor (gs-327, 2026-05-14) ---
+// Optional pre-cycle advisor layer (Hammerstein CLI by default). Calls an
+// external advisor with the task plan + bounded recent-cycle history; the
+// verdict is logged to PROGRESS.jsonl as an `advisor_verdict` event. By
+// default purely advisory (logged but doesn't block); per-project `gate:
+// true` flips block-verdicts into `cycle_skipped` with reason
+// `advisor_gated`. Latency: ~60s typical (synchronous; bounded by
+// `timeout_seconds`). Hammerstein-audit-reviewed.
+
+export type AdvisorProvider = "hammerstein";
+export const VALID_ADVISOR_PROVIDERS: readonly AdvisorProvider[] = [
+  "hammerstein",
+];
+
+export interface AdvisorConfig {
+  // When true, advisor runs pre-cycle (after pick, before engineer).
+  // Default: false (advisor entirely disabled, zero overhead).
+  enabled: boolean;
+  // When true AND advisor returns verdict "block", the cycle skips with
+  // outcome `cycle_skipped` + reason `advisor_gated`. Default: false
+  // (advisory-only — verdict logged, cycle proceeds regardless).
+  gate?: boolean;
+  // Which advisor backend. v1 only supports "hammerstein" (calls the
+  // `h` CLI from github.com/lerugray/hammerstein). v2+ may add direct
+  // OpenRouter/Claude/Ollama routing inside GS.
+  provider?: AdvisorProvider;
+  // Wall-clock timeout for the advisor call. Defaults to 90s — the
+  // hammerstein audit-this-plan template runs ~60s on OpenRouter
+  // qwen3.6-plus. On timeout: verdict = "timeout", proceed (or skip
+  // if gate=true with block-on-timeout policy — not implemented in v1;
+  // timeout always proceeds).
+  timeout_seconds?: number;
+  // How many recent cycles to include in the plan context. Per the
+  // Hammerstein audit recommendation (2026-05-14): cap at 3 to bound
+  // advisor context size and prevent signal dilution.
+  history_cycles?: number;
+}
+
+export type AdvisorVerdictKind =
+  | "proceed"
+  | "block"
+  | "revise"
+  | "timeout"
+  | "error";
+
+export interface AdvisorVerdict {
+  verdict: AdvisorVerdictKind;
+  reason: string;
+  raw_output?: string;
+  duration_sec: number;
+  provider: AdvisorProvider;
+  ts: string;
+}
+
 // --- projects.yaml schema ---
 
 export type WorkDetectionMode =
@@ -185,6 +239,10 @@ export interface ProjectConfig {
   // The `lifecycle_transition: "<from> -> <to>"` ROADMAP criterion passes
   // when this field equals the target.
   lifecycle?: ProjectLifecycle;
+  // gs-327 (2026-05-14): optional pre-cycle advisor layer (Hammerstein
+  // CLI by default, see AdvisorConfig). Unset / `{enabled: false}` is
+  // zero-overhead and preserves current behavior. See docs/ADVISOR.md.
+  advisor?: AdvisorConfig;
 }
 
 // gs-322 / Phase B+ followup. Two stages today; intentionally narrow.
@@ -391,7 +449,13 @@ export type ProgressEventType =
   // Phase B+ (2026-05-04): emitted by `gs phase rollback` when the
   // commander reverses one or more phase advances. Data carries
   // {from_phase, to_phase, undone_phases: string[], forced: boolean}.
-  | "phase_rolled_back";
+  | "phase_rolled_back"
+  // gs-327 (2026-05-14): pre-cycle advisor returned a verdict. Data
+  // carries {task_id, verdict, reason, provider, duration_sec,
+  // raw_output (truncated)}. Logged for every advisor run; gates a
+  // cycle only when project.advisor.gate=true AND verdict==="block"
+  // (in which case a sibling cycle_skipped event records the gating).
+  | "advisor_verdict";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -610,6 +674,8 @@ const VALID_EVENTS: readonly string[] = [
   // Phase B+ (2026-05-04): opt-in auto-advance + multi-phase rollback
   "phase_auto_advanced",
   "phase_rolled_back",
+  // gs-327 (2026-05-14): pre-cycle advisor verdict (Hammerstein etc.)
+  "advisor_verdict",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {
