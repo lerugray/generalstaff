@@ -65,8 +65,11 @@ async function runCycle(project: string): Promise<{ exit: number; summary: strin
   if (!project) {
     return { exit: 2, summary: "run_cycle requires a project id" };
   }
+  // cli.ts `cycle` takes --project=<id>. Construct arg before interpolating so
+  // bun's $ shell doesn't split "--project=" and the value into two tokens.
+  const projectArg = `--project=${project}`;
   const proc =
-    await $`bun src/cli.ts cycle ${project}`.cwd(REPO_ROOT).nothrow().quiet();
+    await $`bun src/cli.ts cycle ${projectArg}`.cwd(REPO_ROOT).nothrow().quiet();
   return {
     exit: proc.exitCode,
     summary: tailLines(proc.stdout.toString() + proc.stderr.toString(), 30),

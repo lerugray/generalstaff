@@ -144,7 +144,23 @@ function launch(): void {
   cleanup();
   console.log(`[GS-HEARTBEAT] launching claude --model ${MODEL} ...`);
 
-  const args = ["--model", MODEL, "--permission-mode", "auto"];
+  // gs-328 (2026-05-14): tightened launch flags after the first real
+  // smoke test surfaced two issues:
+  //   1. `--permission-mode auto` still surfaced a permission prompt
+  //      on first Bash use. Bumped to `bypassPermissions` — the
+  //      router only runs `bun src/heartbeat/dispatch.ts <action>`
+  //      and the dispatcher itself has bounded behavior. The cycle
+  //      (downstream) has its own permission posture independent of
+  //      this outer session.
+  //   2. The router agent went off-script when a Bash call errored
+  //      (read source files, tried to debug). Limit the tool surface
+  //      to Bash only via `--tools Bash` so the agent literally can't
+  //      Read/Edit/etc. Defense-in-depth alongside the system prompt.
+  const args = [
+    "--model", MODEL,
+    "--permission-mode", "bypassPermissions",
+    "--tools", "Bash",
+  ];
   if (SETTINGS_FILE) {
     args.push("--settings", SETTINGS_FILE);
   }

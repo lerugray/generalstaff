@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.4.0, 2,034 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.4.0 adds 24/7 [heartbeat-mode dispatch](docs/HEARTBEAT.md) + optional [Hammerstein advisor](docs/ADVISOR.md) layer. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.4.1, 2,034 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.4.0 added 24/7 [heartbeat-mode dispatch](docs/HEARTBEAT.md) + optional [Hammerstein advisor](docs/ADVISOR.md) layer; v0.4.1 hardened the heartbeat router after the first real smoke test. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 

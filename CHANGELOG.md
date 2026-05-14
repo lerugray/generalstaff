@@ -9,6 +9,51 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-14
+
+Hotfix to v0.4.0 after the first real heartbeat smoke test surfaced
+two issues:
+
+1. `runCycle()` in `src/heartbeat/dispatch.ts` constructed the
+   `bun src/cli.ts cycle` command with `--project=${project}`
+   interpolated inline. Bun's `$` shell template treats that as TWO
+   tokens (`--project=` literal + `${project}` quoted), which fails
+   parseArgs with ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL. Fix: build
+   the full `--project=X` string outside the template, interpolate
+   as one token. Empirically verified.
+
+2. The heartbeat-mode agent went off-script when its Bash call
+   errored — read source files, ran diagnostic commands, started
+   editing `dispatch.ts` to fix the bug itself. That's exactly the
+   layer separation the heartbeat router is supposed to prevent
+   (engineering happens in the cycle, with hands_off + reviewer;
+   the router is upstream of that safety net). Tightened
+   `scripts/heartbeat-system-prompt.md` to put hard rules at the
+   top + an explicit "on Bash error, write one outbox line and
+   STOP" rule. Added `--tools Bash` to the supervisor's claude
+   invocation so the router literally can't Read/Edit/etc.
+   Defense-in-depth.
+
+3. Bumped supervisor's `--permission-mode` from `auto` to
+   `bypassPermissions`. Auto still surfaced a tool-permission
+   prompt on first Bash use during the smoke test. Router runs
+   one of five known dispatcher commands; the cycle downstream has
+   its own permission posture.
+
+No breaking changes. Existing v0.4.0 users on `enabled: false`
+configs see no behavior change.
+
+### Changed
+
+- `src/heartbeat/supervisor.ts`: launch flags tightened to
+  `--permission-mode bypassPermissions --tools Bash` (with rationale
+  inline in the source).
+- `src/heartbeat/dispatch.ts`: `runCycle` constructs `--project=X`
+  outside the bun template.
+- `scripts/heartbeat-system-prompt.md`: rewritten — hard rules
+  promoted to top, "stop-on-error" added, tool surface declared
+  explicitly.
+
 ## [0.4.0] — 2026-05-14
 
 v0.4.0 ships two interconnected features that emerged from a single
