@@ -143,5 +143,35 @@
     "expected_touches": [
       "print/front-matter.md"
     ]
+  },
+  {
+    "id": "wdb-016",
+    "title": "Factual fix — page 127 references 'the Italian Front in 1866'. Ray flagged 2026-05-16: there was no 'Italian Front' in 1866 — the Italian Front as a named theatre is WWI (1915-1918), so the line most likely should read 1916 or 1917. (1866 had the Third Italian War of Independence — Custoza, Lissa — but that is not 'the Italian Front'.) Find the passage in docs/_chapters/*.md (grep 'Italian Front' / '1866'), read the surrounding context, and correct it: fix the year if it is a WWI reference, or fix the phrasing if the passage is genuinely about 1866.",
+    "status": "pending",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Content fix in a publishing book — wants a context check before correcting, and Ray's eye on the change.",
+    "expected_touches": [
+      "docs/_chapters/"
+    ]
+  },
+  {
+    "id": "wdb-017",
+    "title": "Factual-accuracy sweep of the manuscript. Following the page-127 'Italian Front in 1866' error (wdb-016), scan the rest of docs/_chapters/*.md for similar factual errors / hallucinations — wrong dates, misnamed or misdated battles, anachronistic terms, invented or misattributed references, garbled historical claims. The book is a wargame-design guide built on real military-history examples, so the accuracy of those examples is load-bearing for its credibility. Flag each finding with chapter + context; correct the clear errors, surface anything ambiguous for Ray.",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Manuscript content; corrections to a publishing book want Ray's eye, and ambiguous historical calls need his judgment.",
+    "expected_touches": [
+      "docs/_chapters/"
+    ]
+  },
+  {
+    "id": "wdb-018",
+    "title": "Final clear-for-publishing review. Once the factual-accuracy work (wdb-016, wdb-017) is done, run the final pre-publication pass: confirm the manuscript is content-clean, the front/back matter is correct (ISBN filled per wdb-015), the print PDF builds clean from print/build.sh, and the book is ready for KDP paperback submission. Output is a go/no-go — WDB cleared for publishing.",
+    "status": "pending",
+    "priority": 3,
+    "interactive_only": true,
+    "interactive_only_reason": "Publish go/no-go on Ray's book — his call."
   }
 ]
