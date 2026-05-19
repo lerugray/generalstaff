@@ -9,6 +9,62 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-19
+
+A backlog-clearing release: the 17-task `interactive_only` queue triaged
+to zero. Three fixes, four opt-in features, two docs.
+
+### Fixed
+
+- **The pre-cycle advisor never ran.** v0.4.0 shipped the advisor — the
+  `AdvisorConfig` type, `src/advisor.ts`, the `cycle.ts` call site — but
+  `src/projects.ts` never parsed the `advisor:` key out of
+  `projects.yaml`. So `project.advisor` was always `undefined`, and the
+  advisor block was dead on every project and every engineer_provider
+  since v0.4.0. `projects.ts` now parses and validates it. (gs-329)
+- **Heartbeat watchdog kill-loop.** The supervisor's 2-second watchdog
+  poll killed a stuck session but never cleared its own interval — so if
+  the child did not die on the first `killProcess`, the poll re-fired
+  every 2s, re-logging "killing stuck session" indefinitely. New
+  `escalatingKill`: kill, 5s grace, one escalated retry, then a loud
+  `process.exit(1)` hard-stop. The watchdog can no longer spin. (gs-328)
+- **`run_bot.sh` lost task-done status changes.** The embedded engineer
+  prompt told the bot to mark a task done *after* its final commit. The
+  dispatcher detects completed work by diffing committed `tasks.json`, so
+  a post-commit status write was never seen and was discarded at worktree
+  teardown. Reordered: mark done, `git add -A`, commit. (gs-289)
+
+### Added
+
+- **`engineer_claim_timeout_minutes`** — optional per-project early-kill.
+  If the engineer emits no task-claim signal within N minutes it is
+  killed early instead of burning the full cycle budget on a run stuck at
+  task selection. Opt-in; the budget timer is unchanged. (gs-302)
+- **`customer_facing_smoke`** — optional shell probe run after
+  `verification_command` on `public_facing` projects. A non-zero exit
+  fails the cycle regardless of the reviewer verdict. The hard gate the
+  rg-017 incident asked for: a `verified` verdict on a customer-facing
+  project should mean the customer surface was loaded, not just that unit
+  tests passed. (gs-316)
+- **`register --scaffold`** — `register` now idempotently appends the
+  GeneralStaff integration entries (`state/`, `bot_status.md`,
+  `.bot-worktree/`) to the target project's `.gitignore`. `--no-scaffold`
+  opts out. (gs-305)
+- **`task from-journal`** — a new `task` subcommand that surfaces journal
+  bullets (via the gs-312 affinity scanner) as task proposals: accept /
+  dismiss / edit / skip per bullet. Rule-based and local — no LLM, no
+  network. Opt-in; requires a `journal:` project config. (gs-313)
+
+### Docs
+
+- `docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md` — the
+  rg-017 post-mortem and the design behind `customer_facing_smoke`. (gs-317)
+- `docs/CLAUDE-WORKFLOWS.md` — the bite-sized, one-decision-at-a-time
+  surfacing workflow for interactive sessions over a fleet. (gs-326)
+
+No breaking changes. Every new feature is opt-in; a `projects.yaml`
+unchanged from v0.4.x behaves identically.
+
 ## [0.4.1] — 2026-05-14
 
 Hotfix to v0.4.0 after the first real heartbeat smoke test surfaced

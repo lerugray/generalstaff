@@ -100,7 +100,14 @@ import type { EngineerProvider, GreenfieldTask, ProjectConfig } from "./types";
 import { lookupCachedPreview } from "./integrations/mission_swarm/format";
 import { appendFleetMessage } from "./fleet_messages";
 
-const VERSION = "0.1.0";
+// Sourced from package.json so a release version bump propagates to
+// `gs --version` automatically. Previously a hardcoded const, it drifted
+// — left at "0.1.0" through v0.2.0..v0.4.1 while package.json moved on.
+const VERSION = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { version: string }
+).version;
 
 function printUsage() {
   console.log(`generalstaff v${VERSION}

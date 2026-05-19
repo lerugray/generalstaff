@@ -6,6 +6,15 @@ import { $ } from "bun";
 
 const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
 
+// Assert the CLI reports package.json's version — not a pinned literal,
+// so a release bump doesn't silently drift these tests (it did: the CLI
+// reported a stale "0.1.0" through four releases).
+const PKG_VERSION = (
+  JSON.parse(
+    readFileSync(join(import.meta.dir, "..", "package.json"), "utf8"),
+  ) as { version: string }
+).version;
+
 function comparablePath(pathValue: string): string {
   const isWindowsPath = /^[A-Za-z]:[\\/]/.test(pathValue);
   return process.platform === "win32" || isWindowsPath
@@ -45,27 +54,27 @@ describe("CLI", () => {
     it("prints the version and exits 0", async () => {
       const result = await runCli(["--version"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0.1.0");
+      expect(result.stdout.trim()).toBe(PKG_VERSION);
     });
 
     it("accepts -v shorthand", async () => {
       const result = await runCli(["-v"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0.1.0");
+      expect(result.stdout.trim()).toBe(PKG_VERSION);
     });
 
     // gs-262: --version --json emits scriptable metadata
     it("--version (no --json) output unchanged", async () => {
       const result = await runCli(["--version"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe("0.1.0");
+      expect(result.stdout.trim()).toBe(PKG_VERSION);
     });
 
     it("--version --json returns valid JSON with version field", async () => {
       const result = await runCli(["--version", "--json"]);
       expect(result.exitCode).toBe(0);
       const parsed = JSON.parse(result.stdout.trim());
-      expect(parsed.version).toBe("0.1.0");
+      expect(parsed.version).toBe(PKG_VERSION);
       expect(parsed).toHaveProperty("commit");
       expect(parsed).toHaveProperty("bun");
     });
@@ -85,7 +94,7 @@ describe("CLI", () => {
         const result = await runCli(["--version", "--json"], nonGitDir);
         expect(result.exitCode).toBe(0);
         const parsed = JSON.parse(result.stdout.trim());
-        expect(parsed.version).toBe("0.1.0");
+        expect(parsed.version).toBe(PKG_VERSION);
         expect(parsed.commit).toBeNull();
         expect(typeof parsed.bun).toBe("string");
       } finally {
@@ -98,7 +107,7 @@ describe("CLI", () => {
     it("prints usage and exits 0", async () => {
       const result = await runCli(["--help"]);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("generalstaff v0.1.0");
+      expect(result.stdout).toContain(`generalstaff v${PKG_VERSION}`);
       expect(result.stdout).toContain("Usage:");
       expect(result.stdout).toContain("session");
       expect(result.stdout).toContain("cycle");
@@ -975,7 +984,7 @@ dispatcher:
     it("prints version, bun, platform, and projects.yaml path", async () => {
       const result = await runCli(["version"], VERSION_TEST_DIR);
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("generalstaff v0.1.0");
+      expect(result.stdout).toContain(`generalstaff v${PKG_VERSION}`);
       expect(result.stdout).toContain("bun:");
       expect(result.stdout).toContain(Bun.version);
       expect(result.stdout).toContain("platform:");

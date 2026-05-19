@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.4.1, 2,034 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.4.0 added 24/7 [heartbeat-mode dispatch](docs/HEARTBEAT.md) + optional [Hammerstein advisor](docs/ADVISOR.md) layer; v0.4.1 hardened the heartbeat router after the first real smoke test. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.5.0, 2,052 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.5.0 fixes two long-standing bugs (a pre-cycle advisor inert since v0.4.0, a heartbeat watchdog that could spin in a kill-loop) and adds four opt-in features. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -204,6 +204,8 @@ Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in 
 - `dispatcher.session_budget` — cap on USD, tokens, or cycles.
 - `dispatcher.max_parallel_slots: N` — N cycles per round in parallel.
 - `advisor.enabled: true` — pre-cycle Hammerstein audit (opt-in, v0.4.0+). With `gate: true`, a `block` verdict skips the cycle. See [`docs/ADVISOR.md`](docs/ADVISOR.md).
+- `engineer_claim_timeout_minutes: N` — kill a stuck engineer early if it emits no task-claim signal within N minutes (v0.5.0+).
+- `customer_facing_smoke` — shell probe run after verification on `public_facing` projects; a non-zero exit fails the cycle (v0.5.0+).
 
 Hard Rules hold regardless of knob state. Every cycle still lands in `PROGRESS.jsonl`.
 
