@@ -2054,7 +2054,7 @@
   {
     "id": "gs-289",
     "title": "Prompt hardening follow-up to gs-282. Observed 2026-04-20 evening cycle 0_bas3: the bot correctly invoked 'bun /src/cli.ts task done' but then committed only the code changes, forgetting to 'git add state/generalstaff/tasks.json' before 'git commit'. The CLI-written status change lived in the worktree, got discarded during worktree teardown. A follow-up cycle (8_p2pg) self-healed by re-picking the still-pending task and landing e452baa 'gs-288: mark done' \u00e2\u0080\u0094 but this wastes a full cycle. Fix: in scripts/run_bot.sh and each engineer_command.sh (bookfinder/raybrain/gamr/devforge), add one line to the task-done instructions: 'Before committing, stage the tasks.json change with git add state/' along with the code changes. Keep the CLI-preferred / structured-JSON-fallback guidance intact; this is a staging-step clarification. interactive_only because scripts/ is hands_off.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": true
   },
@@ -2158,7 +2158,7 @@
   {
     "id": "gs-302",
     "title": "Engineer-step early-kill when no task-claim signal by N minutes. Follow-up to the 2026-04-23 incident where claude -p ran 35m on a 30-min cycle_budget_minutes and exited with zero commits \u00e2\u0080\u0094 the +5/+2 buffer shrink (this commit) trims worst-case waste but doesn't detect stuck runs early. Proper fix: engineer prompt emits a structured claim signal within the first N minutes ('claimed: gs-299'), session loop parses and threads it into ProgressEntry.data, dispatcher kills child if no claim arrives by a per-project default (e.g. 5 min). Depends on gs-291 (attempted_task_id in cycle_end event) which is already queued. interactive_only until gs-291 lands; src/prompts/ + src/engineer.ts + src/session.ts all touch hands_off territory. Expected diff: ~150-250 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true
   },
@@ -2375,7 +2375,7 @@
   {
     "id": "gs-317",
     "title": "Design note capturing the rg-017 incident + customer-facing smoke-gate design implications. Write docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md covering: (a) the rg-017 incident narrative (window.supabase shadow bug, silent from launch, caught only when Moontini stuck with it, root cause traceable to missing end-to-end browser test); (b) GS's current gaps — verification_command runs bot's own tests, reviewer checks scope match, neither exercises the customer-facing surface; (c) the two proposed primitives (gs-315 reviewer-prompt enrichment + gs-316 customer_facing_smoke verification step); (d) tradeoffs (gate flakiness vs missed bugs, per-project vs global, opt-in vs required); (e) catalogdna launch prerequisites (needs a smoke harness before going public — at minimum: signup + first-value end-to-end). Draft form first; Ray's voice pass before any public-facing version.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Design document; voice-bearing; needs Ray's framing of the lesson for the broader GS narrative.",
@@ -2487,7 +2487,7 @@
   {
     "id": "gs-326",
     "title": "Add public-GS doc capturing the bite-sized one-by-one decision surfacing pattern. Generalized port of the cross-machine rule saved 2026-05-09 in generalstaff-private/CLAUDE.local.md (Ray verbatim: 'absolutely love the workflow you've done for this session which is new compared to what we ever did before on unblocking stuff'). Public-side doc strips the GS-orchestrator-specific shape down to 'any interactive Claude Code session unblocking a multi-project portfolio' — keeps the load-bearing pattern (survey-then-strawman / leans-with-LOCK-markers / one-by-one AskUserQuestion / execute-between-questions / repo-state-grounded / commit-as-you-go) without the GS-state-update mechanics. Lives at docs/CLAUDE-WORKFLOWS.md (or similar; could go in CLAUDE.md as a new section). Also benefits Kunal (granted GS repo collaborator access 2026-05-01) + future GS users running interactive Claude over their managed portfolio. Filed 2026-05-09 home-PC after Ray asked to incorporate the workflow into public GS.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "Voice-bearing public-facing doc; Ray voice-passes after Claude drafts strawman. Generalization step (stripping GS-specific shape) needs Ray's eye on which examples / framings translate vs which stay private.",
@@ -2505,7 +2505,7 @@
   {
     "id": "gs-329",
     "title": "v0.4.x bug investigation: pre-cycle advisor (gs-327) does not fire when engineer_provider=aider. Reproduced 2026-05-14 evening on home-PC: added advisor:{enabled:true,gate:false,provider:hammerstein,timeout_seconds:90,history_cycles:3} block to gamr's projects.yaml entry, ran `bun src/cli.ts cycle --project=gamr` directly (not through heartbeat). Expected: cycle.ts step 3a fires h audit before engineer; advisor_verdict event in PROGRESS.jsonl + 'Advisor (hammerstein) → ...' stdout line. Actual: NO advisor log line, engineer ran immediately (exit=1 in 4s on gamr's pre-existing missing happy-dom test fixture). Note that engineer log line was 'Running engineer: bash engineer_command.sh ${cycle_budget_minutes}' — literal placeholder, suggesting the aider engineer_provider branch may also not be taking effect (template-string substitution didn't happen OR the cycle.ts is running engineer_command directly rather than buildAiderCommand). Two separable subhypotheses to test: (a) advisor wiring is conditional on engineer_provider=claude path and gets skipped for aider; (b) aider engineer_provider itself is broken / regressed since the last gamr cycle (10 days ago, 2026-05-04). The morning's WDB heartbeat smoke test succeeded against a claude-engineer project, so the claude-engineer + advisor path is the only one with a known-working surface. Investigation: (1) check cycle.ts step 1a peekNextBotPickableTask returns a task for gamr (greenfield+aider should not block peek); (2) confirm normalizeAdvisorConfig parses the YAML block I added (was identical to the schema example in projects.yaml.example so should be fine); (3) add a debug log in cycle.ts step 3a guard (`if (advisorCfg && nextTask)`) to print why-not when advisor doesn't fire; (4) verify buildAiderCommand is being called for aider engineer_provider — the literal-template-string log line is a smell. Until fixed, advisor enablement on aider-engineer projects is inert. Claude-engineer advisor enablement is unblocked by this bug.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "v0.4.x core-loop investigation; touches src/cycle.ts step 3a + possibly src/engineer.ts aider branch. Needs human eye to disentangle the two subhypotheses + decide whether the fix is conditional-wiring or aider-path-revival.",
