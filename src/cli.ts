@@ -170,7 +170,7 @@ Usage:
     # Stacks: bun-next, bun-plain, node-next, rust-cargo, python-uv, python-poetry, python-pip, go-mod
     # Writes .generalstaff-proposal/ staging dir — review then move files + register manually.
 
-  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git]
+  generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git] [--no-scaffold]
                                                           Append a bootstrapped project to projects.yaml (after review)
     Example: generalstaff register gamr --path=../gamr
     Example: generalstaff register gamr --path=../gamr --priority=3 --yes
@@ -3050,6 +3050,8 @@ switch (command) {
         stack: { type: "string" },
         yes: { type: "boolean", short: "y", default: false },
         "allow-non-git": { type: "boolean", default: false },
+        scaffold: { type: "boolean", default: true },
+        "no-scaffold": { type: "boolean", default: false },
       },
       allowPositionals: true,
     });
@@ -3057,7 +3059,7 @@ switch (command) {
     if (!regProjectId) {
       console.error(
         "Error: project-id is required\n" +
-          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git]",
+          "  Usage: generalstaff register <project-id> --path=<target-dir> [--priority=N] [--stack=<stack>] [--yes] [--allow-non-git] [--no-scaffold]",
       );
       process.exit(1);
     }
@@ -3091,6 +3093,7 @@ switch (command) {
       process.exit(1);
     }
     const { runRegister } = await import("./register");
+    const regScaffold = regValues["no-scaffold"] ? false : regValues.scaffold !== false;
     const regResult = await runRegister({
       projectId: regProjectId,
       projectPath: regValues.path,
@@ -3098,6 +3101,7 @@ switch (command) {
       priority: regPriority,
       stack: regValues.stack as (typeof REG_STACKS)[number] | undefined,
       allowNonGit: Boolean(regValues["allow-non-git"]),
+      scaffold: regScaffold,
     });
     if (!regResult.ok) {
       console.error(`Error: ${regResult.reason}`);
@@ -3106,6 +3110,9 @@ switch (command) {
     console.log(
       `Registered "${regProjectId}" in ${regResult.projectsYamlPath}.`,
     );
+    if (regResult.scaffoldMessage) {
+      console.log(regResult.scaffoldMessage);
+    }
     console.log("Appended:\n");
     console.log(regResult.appendedYaml);
     console.log(

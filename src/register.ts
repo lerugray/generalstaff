@@ -12,8 +12,70 @@ export interface RegisterOptions {
   priority?: number;
   stack?: StackKind;
   allowNonGit?: boolean;
+  /** gs-305: append GeneralStaff integration lines to the target .gitignore (default true). */
+  scaffold?: boolean;
   promptFn?: (question: string) => Promise<boolean>;
   warnFn?: (message: string) => void;
+}
+
+/** gs-305: canonical GeneralStaff lines appended under this header in target projects. */
+export const GENERALSTAFF_GITIGNORE_HEADER = "# GeneralStaff";
+export const GENERALSTAFF_GITIGNORE_ENTRIES = [
+  "state/",
+  "bot_status.md",
+  ".bot-worktree/",
+] as const;
+
+export interface EnsureGitignoreResult {
+  changed: boolean;
+  added: string[];
+  message: string;
+}
+
+// gs-305: idempotently ensure .gitignore contains the given entries (exact
+// line match). Appends a single header line when any entry is missing and the
+// header is not already present. Creates .gitignore when absent.
+export function ensureGitignoreEntries(
+  projectPath: string,
+  entries: readonly string[],
+  header: string = GENERALSTAFF_GITIGNORE_HEADER,
+): EnsureGitignoreResult {
+  const gitignorePath = join(projectPath, ".gitignore");
+  const content = existsSync(gitignorePath)
+    ? readFileSync(gitignorePath, "utf8")
+    : "";
+  const lines = content.length > 0 ? content.split("\n") : [];
+  const lineSet = new Set(lines);
+  const missing = entries.filter((entry) => !lineSet.has(entry));
+
+  if (missing.length === 0) {
+    return {
+      changed: false,
+      added: [],
+      message: "no .gitignore changes needed",
+    };
+  }
+
+  let newContent = content;
+  if (newContent.length > 0 && !newContent.endsWith("\n")) {
+    newContent += "\n";
+  }
+
+  const hasHeader = lineSet.has(header);
+  const toAppend: string[] = [];
+  if (!hasHeader) {
+    toAppend.push(header);
+  }
+  toAppend.push(...missing);
+  newContent += toAppend.join("\n") + "\n";
+
+  writeFileSync(gitignorePath, newContent, "utf8");
+
+  return {
+    changed: true,
+    added: missing,
+    message: `Scaffolded .gitignore: added ${missing.join(", ")}`,
+  };
 }
 
 // gs-259: extract the script filename from an engineer_command string.
@@ -41,6 +103,8 @@ export interface RegisterResult {
   appendedYaml?: string;
   skipped?: boolean;
   projectsYamlPath?: string;
+  /** gs-305: human-readable .gitignore scaffold outcome when scaffold ran. */
+  scaffoldMessage?: string;
 }
 
 async function defaultPrompt(question: string): Promise<boolean> {
@@ -273,5 +337,15 @@ export async function runRegister(
     writeFileSync(projectsYamlPath, newContent, "utf8");
   }
 
-  return { ok: true, appendedYaml: snippet, projectsYamlPath };
+  let scaffoldMessage: string | undefined;
+  const doScaffold = opts.scaffold !== false;
+  if (doScaffold && isGitRepo) {
+    const gitignoreResult = ensureGitignoreEntries(
+      resolvedProjectPath,
+      GENERALSTAFF_GITIGNORE_ENTRIES,
+    );
+    scaffoldMessage = gitignoreResult.message;
+  }
+
+  return { ok: true, appendedYaml: snippet, projectsYamlPath, scaffoldMessage };
 }

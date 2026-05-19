@@ -7,6 +7,11 @@ import {
   writeFileSync,
 } from "fs";
 import { join } from "path";
+import {
+  ensureGitignoreEntries,
+  GENERALSTAFF_GITIGNORE_ENTRIES,
+  GENERALSTAFF_GITIGNORE_HEADER,
+} from "../src/register";
 
 const CLI_PATH = join(import.meta.dir, "..", "src", "cli.ts");
 
@@ -275,5 +280,94 @@ dispatcher:
     const dispatcherIdx = content.indexOf("dispatcher:");
     expect(myprojIdx).toBeGreaterThan(0);
     expect(dispatcherIdx).toBeGreaterThan(myprojIdx);
+  });
+
+  it("scaffolds .gitignore on register by default", async () => {
+    const result = await runCli(
+      ["register", "myproj", `--path=${PROJECT_DIR}`, "--yes"],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Scaffolded .gitignore:");
+    const gitignore = readFileSync(join(PROJECT_DIR, ".gitignore"), "utf8");
+    expect(gitignore).toContain(GENERALSTAFF_GITIGNORE_HEADER);
+    for (const entry of GENERALSTAFF_GITIGNORE_ENTRIES) {
+      expect(gitignore).toContain(entry);
+    }
+  });
+
+  it("skips .gitignore scaffold when --no-scaffold is passed", async () => {
+    const result = await runCli(
+      [
+        "register",
+        "myproj",
+        `--path=${PROJECT_DIR}`,
+        "--yes",
+        "--no-scaffold",
+      ],
+      TEST_DIR,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("Scaffolded .gitignore:");
+    expect(existsSync(join(PROJECT_DIR, ".gitignore"))).toBe(false);
+  });
+});
+
+describe("ensureGitignoreEntries (gs-305)", () => {
+  const FIXTURE_DIR = join(import.meta.dir, "fixtures", "gitignore_scaffold");
+
+  beforeEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+    mkdirSync(FIXTURE_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  });
+
+  it("adds all GeneralStaff entries under the header on a fresh project dir", () => {
+    const first = ensureGitignoreEntries(
+      FIXTURE_DIR,
+      GENERALSTAFF_GITIGNORE_ENTRIES,
+    );
+    expect(first.changed).toBe(true);
+    expect(first.added).toEqual([...GENERALSTAFF_GITIGNORE_ENTRIES]);
+
+    const gitignorePath = join(FIXTURE_DIR, ".gitignore");
+    const afterFirst = readFileSync(gitignorePath, "utf8");
+    expect(afterFirst).toContain(GENERALSTAFF_GITIGNORE_HEADER);
+    for (const entry of GENERALSTAFF_GITIGNORE_ENTRIES) {
+      expect(afterFirst).toContain(entry);
+    }
+
+    const second = ensureGitignoreEntries(
+      FIXTURE_DIR,
+      GENERALSTAFF_GITIGNORE_ENTRIES,
+    );
+    expect(second.changed).toBe(false);
+    expect(second.message).toBe("no .gitignore changes needed");
+    expect(readFileSync(gitignorePath, "utf8")).toBe(afterFirst);
+  });
+
+  it("only appends missing entries when some lines already exist", () => {
+    writeFileSync(
+      join(FIXTURE_DIR, ".gitignore"),
+      "node_modules/\nstate/\n",
+      "utf8",
+    );
+
+    const result = ensureGitignoreEntries(
+      FIXTURE_DIR,
+      GENERALSTAFF_GITIGNORE_ENTRIES,
+    );
+    expect(result.changed).toBe(true);
+    expect(result.added).toEqual(["bot_status.md", ".bot-worktree/"]);
+
+    const content = readFileSync(join(FIXTURE_DIR, ".gitignore"), "utf8");
+    const stateOccurrences = content.split("\n").filter((l) => l === "state/");
+    expect(stateOccurrences.length).toBe(1);
+    expect(content).toContain(GENERALSTAFF_GITIGNORE_HEADER);
+    expect(content).toContain("bot_status.md");
+    expect(content).toContain(".bot-worktree/");
   });
 });
