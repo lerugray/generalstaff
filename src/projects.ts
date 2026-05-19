@@ -22,6 +22,8 @@ import type {
   WorkDetectionMode,
   ConcurrencyDetectionMode,
   EngineerProvider,
+  AdvisorConfig,
+  AdvisorProvider,
   SessionBudget,
   BudgetEnforcement,
   BudgetProviderSource,
@@ -29,6 +31,7 @@ import type {
 } from "./types";
 import {
   VALID_ENGINEER_PROVIDERS,
+  VALID_ADVISOR_PROVIDERS,
   VALID_BUDGET_ENFORCEMENTS,
   VALID_BUDGET_PROVIDER_SOURCES,
   VALID_BUDGET_ON_EXHAUSTED,
@@ -669,6 +672,99 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     };
   }
 
+  // gs-327 / gs-329: optional pre-cycle advisor config.
+  let advisor: AdvisorConfig | undefined;
+  if (raw.advisor !== undefined && raw.advisor !== null) {
+    if (typeof raw.advisor !== "object" || Array.isArray(raw.advisor)) {
+      throw new ProjectValidationError(
+        id,
+        "advisor",
+        `must be an object, got ${Array.isArray(raw.advisor) ? "array" : typeof raw.advisor}`,
+      );
+    }
+    const a = raw.advisor as Record<string, unknown>;
+    if (a.enabled === undefined || a.enabled === null) {
+      throw new ProjectValidationError(
+        id,
+        "advisor.enabled",
+        "is required when advisor block is present",
+      );
+    }
+    if (typeof a.enabled !== "boolean") {
+      throw new ProjectValidationError(
+        id,
+        "advisor.enabled",
+        `must be a boolean, got ${typeof a.enabled}`,
+      );
+    }
+    let gate: boolean | undefined;
+    if (a.gate !== undefined && a.gate !== null) {
+      if (typeof a.gate !== "boolean") {
+        throw new ProjectValidationError(
+          id,
+          "advisor.gate",
+          `must be a boolean if specified, got ${typeof a.gate}`,
+        );
+      }
+      gate = a.gate;
+    }
+    let advisorProvider: AdvisorProvider | undefined;
+    if (a.provider !== undefined && a.provider !== null) {
+      if (typeof a.provider !== "string") {
+        throw new ProjectValidationError(
+          id,
+          "advisor.provider",
+          `must be a string, got ${typeof a.provider}`,
+        );
+      }
+      if (!VALID_ADVISOR_PROVIDERS.includes(a.provider as AdvisorProvider)) {
+        throw new ProjectValidationError(
+          id,
+          "advisor.provider",
+          `must be one of: ${VALID_ADVISOR_PROVIDERS.join(", ")} — got "${a.provider}"`,
+        );
+      }
+      advisorProvider = a.provider as AdvisorProvider;
+    }
+    let timeoutSeconds: number | undefined;
+    if (a.timeout_seconds !== undefined && a.timeout_seconds !== null) {
+      if (
+        typeof a.timeout_seconds !== "number" ||
+        !Number.isInteger(a.timeout_seconds) ||
+        a.timeout_seconds < 1
+      ) {
+        throw new ProjectValidationError(
+          id,
+          "advisor.timeout_seconds",
+          `must be a positive integer if specified, got ${JSON.stringify(a.timeout_seconds)}`,
+        );
+      }
+      timeoutSeconds = a.timeout_seconds;
+    }
+    let historyCycles: number | undefined;
+    if (a.history_cycles !== undefined && a.history_cycles !== null) {
+      if (
+        typeof a.history_cycles !== "number" ||
+        !Number.isInteger(a.history_cycles) ||
+        a.history_cycles < 1
+      ) {
+        throw new ProjectValidationError(
+          id,
+          "advisor.history_cycles",
+          `must be a positive integer if specified, got ${JSON.stringify(a.history_cycles)}`,
+        );
+      }
+      historyCycles = a.history_cycles;
+    }
+    advisor = {
+      enabled: a.enabled,
+      gate,
+      provider: advisorProvider,
+      timeout_seconds: timeoutSeconds,
+      history_cycles: historyCycles,
+    };
+  }
+
   return {
     id,
     path,
@@ -691,6 +787,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     session_budget: sessionBudget,
     missionswarm,
     journal,
+    advisor,
     public_facing: publicFacing,
     lifecycle,
     max_consecutive_empty: maxConsecutiveEmpty,

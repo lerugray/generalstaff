@@ -931,6 +931,68 @@ projects:
   });
 });
 
+describe("advisor parsing (gs-329)", () => {
+  const BASE = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("defaults advisor to undefined when omitted", async () => {
+    const path = writeYaml(
+      "advisor-absent.yaml",
+      `
+projects:${BASE}
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].advisor).toBeUndefined();
+    cleanup();
+  });
+
+  it("parses a full advisor block from projects.yaml", async () => {
+    const path = writeYaml(
+      "advisor-full.yaml",
+      `
+projects:${BASE}
+    advisor:
+      enabled: true
+      gate: false
+      provider: hammerstein
+      timeout_seconds: 90
+      history_cycles: 3
+`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].advisor).toEqual({
+      enabled: true,
+      gate: false,
+      provider: "hammerstein",
+      timeout_seconds: 90,
+      history_cycles: 3,
+    });
+    cleanup();
+  });
+
+  it("rejects unknown advisor.provider values", async () => {
+    const path = writeYaml(
+      "advisor-bad-provider.yaml",
+      `
+projects:${BASE}
+    advisor:
+      enabled: true
+      provider: claude
+`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/advisor\.provider/);
+    cleanup();
+  });
+});
+
 describe("creative-work opt-in fields parsing (gs-278)", () => {
   it("defaults all creative-work fields to undefined when omitted", async () => {
     const path = writeYaml(

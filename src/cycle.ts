@@ -824,13 +824,35 @@ export async function executeCycle(
     // greenfield projects (catalogdna_bot_tasks, git_issues,
     // git_unmerged) passed through the peek as `undefined` and engineer
     // resolution falls back to project-level defaults.
-    console.log(`Running engineer: ${project.engineer_command}`);
-    engineerResult = await runEngineer(project, cycleId, config, dryRun, nextTask, {
+    // gs-329: log the *resolved* engineer command, not the raw
+    // engineer_command template — the template shows a literal
+    // ${cycle_budget_minutes} and, for non-claude providers, a command
+    // the provider doesn't even use. The dynamic import dodges test
+    // mocks that stub only runEngineer (same reason the advisor block
+    // above dynamic-imports ./state). The context object is shared with
+    // the runEngineer call below so the logged command matches what runs.
+    const engineerCtx = {
       isCreative,
       effectiveBranch: branch,
       voiceReferencePaths,
       draftsDir: project.creative_work_drafts_dir ?? "drafts/",
-    });
+    };
+    const { resolveEngineerCommand } = await import("./engineer");
+    const resolvedEngineerCmd =
+      resolveEngineerCommand?.(project, nextTask, engineerCtx)?.command ??
+      project.engineer_command.replace(
+        /\$\{cycle_budget_minutes\}/g,
+        String(project.cycle_budget_minutes),
+      );
+    console.log(`Running engineer: ${resolvedEngineerCmd}`);
+    engineerResult = await runEngineer(
+      project,
+      cycleId,
+      config,
+      dryRun,
+      nextTask,
+      engineerCtx,
+    );
     console.log(
       `Engineer finished: exit=${engineerResult.exitCode}, ` +
         `${engineerResult.durationSeconds.toFixed(0)}s`,
