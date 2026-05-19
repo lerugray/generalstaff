@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "util";
+import { createInterface } from "readline";
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { runSession, runSessionChain } from "./session";
@@ -43,6 +44,15 @@ import {
   TasksLoadError,
   TaskValidationError,
 } from "./tasks";
+import { scanJournalBulletsByProjectAffinity } from "./integrations/journal/scan";
+import {
+  acceptJournalProposal,
+  dismissJournalProposal,
+  editTextWithEditor,
+  filterUnseenProposals,
+  loadDismissedProposalIds,
+  proposalToTaskTitle,
+} from "./integrations/journal/proposals";
 import { pickNextProjects } from "./dispatcher";
 
 // gs-250: pull the trailing digit run out of a task id so the preview
@@ -257,6 +267,8 @@ Usage:
     Example: generalstaff task next                      # up to max_parallel_slots rows
     Example: generalstaff task next --project=myapp      # restrict preview to one project
     Example: generalstaff task next --json               # { slots: [{project_id, task_id, title}] }
+  generalstaff task from-journal --project=<id>           Review journal bullets as task proposals
+    Example: generalstaff task from-journal --project=myapp
 
   generalstaff cycle-redo --project=<id> --task=<task-id>  Reopen a done task as pending
     Example: generalstaff cycle-redo --project=myapp --task=my-042
@@ -1805,6 +1817,7 @@ switch (command) {
           "  count [--project=<id>]                             Report pending vs done counts\n" +
           "  validate [--project=<id>] [--json]                 Validate tasks.json schema across projects\n" +
           "  next [--project=<id>] [--json]                     Preview next task(s) the picker would pick\n" +
+          "  from-journal --project=<id>                        Review journal bullets as task proposals\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff task list --project=myapp\n" +
@@ -2339,9 +2352,149 @@ switch (command) {
           }
         }
       }
+    } else if (sub === "from-journal") {
+      // gs-313: interactive journal-proposal → tasks.json surface.
+      const { values: fjValues } = parseArgs({
+        args: args.slice(2),
+        options: { project: { type: "string" } },
+        allowPositionals: false,
+      });
+      if (!fjValues.project) {
+        console.error("Error: --project=<id> is required");
+        process.exit(1);
+      }
+      let fjProjects;
+      try {
+        fjProjects = await loadProjects();
+      } catch (err) {
+        if (err instanceof ProjectsYamlNotFoundError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      let fjProject;
+      try {
+        fjProject = getProject(fjProjects, fjValues.project);
+      } catch (err) {
+        if (err instanceof ProjectNotFoundError) {
+          console.error(
+            `Error: project '${err.projectId}' not found. Registered: ${err.availableIds.join(", ") || "(none)"}`,
+          );
+          process.exit(1);
+        }
+        throw err;
+      }
+      if (!fjProject.journal) {
+        console.error(
+          `Project ${fjValues.project} has no \`journal:\` config — nothing to scan.`,
+        );
+        process.exit(1);
+      }
+      const proposals = await scanJournalBulletsByProjectAffinity(
+        fjProject.journal.mission_bullet_root,
+        fjProject,
+      );
+      let dismissed;
+      try {
+        dismissed = await loadDismissedProposalIds(fjValues.project);
+      } catch (err) {
+        console.error(
+          `Error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+      const queue = filterUnseenProposals(proposals, dismissed);
+      if (queue.length === 0) {
+        console.log("No new journal proposals (all dismissed or none matched).");
+        break;
+      }
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const ask = (question: string): Promise<string> =>
+        new Promise((resolve) => {
+          rl.question(question, (answer) => resolve(answer.trim().toLowerCase()));
+        });
+      try {
+        for (let i = 0; i < queue.length; i++) {
+          const proposal = queue[i]!;
+          const title = proposalToTaskTitle(proposal);
+          console.log(`\nProposal ${i + 1}/${queue.length}`);
+          console.log(`  ${title}`);
+          console.log(
+            `  ${proposal.sourcePath}:${proposal.lineNumber}  date=${proposal.entryDate}  affinity=${proposal.affinityScore}`,
+          );
+          const choice = await ask(
+            "[a]ccept / [d]ismiss / [e]dit / [s]kip / [q]uit: ",
+          );
+          if (choice === "q" || choice === "quit") {
+            break;
+          }
+          if (choice === "s" || choice === "skip" || choice === "") {
+            continue;
+          }
+          if (choice === "d" || choice === "dismiss") {
+            await dismissJournalProposal(fjValues.project, proposal);
+            console.log("Dismissed (will not re-surface).");
+            continue;
+          }
+          if (choice === "a" || choice === "accept") {
+            try {
+              const task = await acceptJournalProposal(fjValues.project, proposal);
+              console.log(`Added ${task.id}: ${task.title}`);
+            } catch (err) {
+              if (err instanceof TaskValidationError) {
+                console.error(`Error: ${err.message}`);
+              } else if (err instanceof TasksLoadError) {
+                console.error(`Error: ${err.message}`);
+              } else {
+                throw err;
+              }
+            }
+            continue;
+          }
+          if (choice === "e" || choice === "edit") {
+            let edited: string;
+            try {
+              edited = await editTextWithEditor(title);
+            } catch (err) {
+              console.error(
+                `Error: editor failed — ${err instanceof Error ? err.message : String(err)}`,
+              );
+              i -= 1;
+              continue;
+            }
+            if (!edited) {
+              console.error("Error: edited task title cannot be empty");
+              i -= 1;
+              continue;
+            }
+            try {
+              const task = await acceptJournalProposal(fjValues.project, proposal, {
+                title: edited,
+              });
+              console.log(`Added ${task.id}: ${task.title}`);
+            } catch (err) {
+              if (err instanceof TaskValidationError) {
+                console.error(`Error: ${err.message}`);
+              } else if (err instanceof TasksLoadError) {
+                console.error(`Error: ${err.message}`);
+              } else {
+                throw err;
+              }
+            }
+            continue;
+          }
+          console.log(
+            "Unknown choice — use [a]ccept, [d]ismiss, [e]dit, [s]kip, or [q]uit.",
+          );
+          i -= 1;
+        }
+      } finally {
+        rl.close();
+      }
     } else {
       console.error(
-        "Error: task subcommand required (list, add, done, rm, interactive, count, validate, or next)\n" +
+        "Error: task subcommand required (list, add, done, rm, interactive, count, validate, next, or from-journal)\n" +
           "  Usage: generalstaff task list --project=<id>\n" +
           "         generalstaff task add --project=<id> <title>\n" +
           "         generalstaff task done --project=<id> --task=<task-id>\n" +
@@ -2349,7 +2502,8 @@ switch (command) {
           "         generalstaff task interactive --project=<id> <task-id> [--off]\n" +
           "         generalstaff task count [--project=<id>]\n" +
           "         generalstaff task validate [--project=<id>] [--json]\n" +
-          "         generalstaff task next [--project=<id>] [--json]",
+          "         generalstaff task next [--project=<id>] [--json]\n" +
+          "         generalstaff task from-journal --project=<id>",
       );
       process.exit(1);
     }

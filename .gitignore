@@ -159,3 +159,7 @@ LEAN-CTX.md
 # Orchestration staging area — transient task briefs / inbox prep,
 # not part of the orchestration layer itself.
 scripts/orchestration/spawns-staging/
+
+# gs-313: journal-proposal dismiss ledger -- operator-local state,
+# committed (would otherwise land in state/<project>/ for public-state projects).
+state/*/journal-proposals-seen.json
