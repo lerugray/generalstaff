@@ -72,8 +72,8 @@ the main working tree — work only in this directory.
 Read state/generalstaff/tasks.json and pick the highest-priority
 unfinished task (status: 'pending', lowest priority number first;
 among same-priority tasks, lowest gs-NNN numeric suffix first). Work
-on it, run tests (bun test && bun x tsc --noEmit) to verify your
-changes, and commit when tests pass.
+on it and run tests (bun test && bun x tsc --noEmit) to verify your
+changes. Then finish the cycle per the 'Finishing the cycle' steps below.
 
 ## Rules
 - Work ONLY on the task you pick. No scope creep.
@@ -83,19 +83,35 @@ changes, and commit when tests pass.
 - If you can't complete the task, write a note explaining why and move on.
 - Budget: ${BUDGET_MINUTES} minutes. Stop before the budget runs out.
 
-## Marking the task done
-After committing, mark the task done via the GeneralStaff CLI — do NOT
-line-edit state/generalstaff/tasks.json. Line-oriented edits have corrupted
-the JSON structure on multiple occasions (dropped commas between sibling
-objects, 2026-04-20). The CLI parses, mutates, and writes back a
-well-formed file:
+## Finishing the cycle
+Order matters. The dispatcher detects completed work by diffing
+state/generalstaff/tasks.json between the start and end of the cycle, so
+the 'task done' status change MUST land inside a commit. If you mark the
+task done AFTER your final commit, the status change stays uncommitted
+and is discarded when the worktree is torn down (observed 2026-04-20).
 
-  bun \"\$GENERALSTAFF_ROOT/src/cli.ts\" task done --project=generalstaff --task=<task-id>
+Do these steps in this order:
 
-GENERALSTAFF_ROOT is set by the dispatcher. If the CLI itself errors,
-fall back to: read the whole tasks.json, JSON.parse it, set the target
-task's status to 'done', write back with 2-space indent + trailing
-newline. Never do line-by-line edits on tasks.json." \
+1. Mark the task done via the GeneralStaff CLI — do NOT line-edit
+   state/generalstaff/tasks.json. Line-oriented edits have corrupted the
+   JSON structure on multiple occasions (dropped commas between sibling
+   objects, 2026-04-20). The CLI parses, mutates, and writes back a
+   well-formed file:
+
+     bun \"\$GENERALSTAFF_ROOT/src/cli.ts\" task done --project=generalstaff --task=<task-id>
+
+   GENERALSTAFF_ROOT is set by the dispatcher. If the CLI itself errors,
+   fall back to: read the whole tasks.json, JSON.parse it, set the
+   target task's status to 'done', write back with 2-space indent +
+   trailing newline. Never do line-by-line edits on tasks.json.
+
+2. Stage everything — your code changes AND the tasks.json status
+   change. Stage the whole tree so the state change is never missed:
+
+     git add -A
+
+3. Commit with a clear message describing what you did. Your code and
+   the 'done' status change land together in this one commit." \
   --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \
   --dangerously-skip-permissions \
   --mcp-config '{"mcpServers":{}}' \
