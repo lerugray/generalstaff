@@ -28,6 +28,7 @@
 import { spawn, execSync, type ChildProcess } from "child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
+import { escalatingKill } from "./kill";
 
 const IS_WIN = process.platform === "win32";
 const IO_DIR = process.env.HEARTBEAT_IO_DIR
@@ -182,7 +183,22 @@ function launch(): void {
       console.log(
         "[GS-HEARTBEAT] restart signal received — killing session for fresh context",
       );
-      if (child.pid) killProcess(child.pid);
+      clearInterval(poll);
+      currentPoll = null;
+      if (child.pid) {
+        void escalatingKill({
+          pid: child.pid,
+          kill: killProcess,
+          isRunning: isProcessRunning,
+        }).then((result) => {
+          if (!result.killed) {
+            console.error(
+              "[GS-HEARTBEAT] FATAL: restart kill failed — supervisor exiting",
+            );
+            process.exit(1);
+          }
+        });
+      }
       return;
     }
 
@@ -194,7 +210,23 @@ function launch(): void {
           `[GS-HEARTBEAT] watchdog: last tick was ${Math.round(age / 1000)}s ago ` +
             `(timeout ${WATCHDOG_TIMEOUT_MS / 1000}s) — killing stuck session`,
         );
-        if (child.pid) killProcess(child.pid);
+        clearInterval(poll);
+        currentPoll = null;
+        if (child.pid) {
+          void escalatingKill({
+            pid: child.pid,
+            kill: killProcess,
+            isRunning: isProcessRunning,
+          }).then((result) => {
+            if (!result.killed) {
+              console.error(
+                "[GS-HEARTBEAT] FATAL: watchdog kill failed — supervisor exiting",
+              );
+              process.exit(1);
+            }
+          });
+        }
+        return;
       }
     }
   }, 2000);
