@@ -2083,7 +2083,7 @@
   {
     "id": "gs-293",
     "title": "In-app intervention channel \u2014 operator UI pauses running CC session for real-time judgment input. When a bot cycle hits ambiguity it currently would abandon (proposal to bot-proposals/) or push through, instead: bot writes waiting-for-input signal with question context, dashboard surfaces prompt to operator, operator responds via UI, bot resumes. Real-time human-in-loop without abandoning the session. Polsia-differentiating feature \u2014 acknowledges the Hammerstein ceiling exists and makes it permeable. **Design sketch written 2026-04-21: docs/internal/INTERVENTION-CHANNEL-DESIGN-2026-04-21.md** \u2014 covers file-based IPC schemas (.bot-waiting-input + .operator-response + PROGRESS.jsonl intervention_request/response events), server-side detector + submit route (reuses existing SSE tail channel), UI pending-interventions panel, cycle-budget pause + new stopReason operator_abandoned, config surface (dispatcher.intervention.{enabled,timeout_seconds,on_timeout,poll_interval_ms,pause_cycle_budget} + per-project override, default disabled), 6-sub-task breakdown (gs-311 IPC+prompt / gs-312 server / gs-313 UI / gs-314 session-loop / gs-315 config-schema bot-pickable / gs-316 test matrix), 11-scenario test matrix, 6 open questions including abuse-prevention via per-cycle ask-budget. **Strong recommendation in the design doc: ship usage-budget (gs-295..301) first; intervention is a Phase 6.5+ differentiating feature for v1.x** \u2014 a second design pass + Ray sign-off expected before queueing the sub-tasks. Interactive because src/prompts/ + server + UI touch hands_off.",
-    "status": "pending",
+    "status": "skipped",
     "priority": 3,
     "interactive_only": true
   },
@@ -2242,7 +2242,7 @@
   {
     "id": "gs-305",
     "title": "Standardize project scaffold: extend `register` CLI to drop canonical GS-integration files into the target project's tree. Context: overnight 2026-04-23 through 2026-04-24 the fleet hit a pattern where each newly-registered project needed a cleanup pass \u2014 .gitignore entries for state/ junction + scratch/release/settings artifacts (to satisfy GS dispatcher's clean-tree preflight), plus engineer_command.sh + verify_command template scripts. Sandkasten / Auftragstaktik / WDB / ZP-private / Devforge all needed the same pattern applied by hand. Standardize: `register` CLI grows a --scaffold flag (or runs by default with --no-scaffold opt-out) that drops: (a) append `state/` and `bot_status.md` to .gitignore if not present; (b) append a standard 'GS dispatcher clean-tree preflight' block to .gitignore covering scratch/release/settings artifacts Ray flagged earlier today; (c) copy scripts/templates/engineer_command.sh into the project root if not present (idempotent); (d) copy scripts/templates/verify_command.sh similarly; (e) optionally run setup-state-junctions.ps1 on Windows or equivalent on POSIX. Non-scaffold branch (--no-scaffold) preserves current behavior for projects that self-manage. Tests: fresh fixture project dir \u2192 register with --scaffold \u2192 assert all four artifacts present with canonical content \u2192 register again \u2192 assert idempotent (no duplicate gitignore lines). Expected diff: ~200-300 LOC including the two template scripts. Interactive-only: touches scripts/ and projects.yaml flows plus new template files under scripts/templates/; requires human voice for the template scripts' inline comments.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "interactive_only": true
   },
@@ -2331,7 +2331,7 @@
   {
     "id": "gs-313",
     "title": "jr-004 — `generalstaff todo --from-journal` proposal surface. CLI lets Ray accept/dismiss/edit journal proposals. Accept adds to project tasks.json; dismiss records in local seen-file (never writes to journal); edit opens proposal in $EDITOR before accept. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-313. Expected diff: ~150-200 LOC.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "CLI UX flow decisions + $EDITOR handling are taste work.",
@@ -2386,7 +2386,7 @@
   {
     "id": "gs-314",
     "title": "jr-005 — reviewer-stage hook reads journal proposals as context when generating tasks. Per-project opt-in via journal.reviewer_context=true. Privacy floor: journal text goes into reviewer's context window only when reviewer_context=true AND provider is allow-listed for journal data (default local-compute only; cloud opt-in separate). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-314. Expected diff: ~120-180 LOC.",
-    "status": "pending",
+    "status": "skipped",
     "priority": 5,
     "interactive_only": true,
     "interactive_only_reason": "Touches src/reviewer.ts (hands_off) + privacy allow-list design is a taste call.",
@@ -2426,7 +2426,7 @@
   {
     "id": "gs-320",
     "title": "Two-way messaging integration (Telegram first) — Phase A read-only commands. (DEMOTED from Priority 1 to Priority 2 on 2026-04-25 ~06:30 EDT — gs-322 AGENTS.md wizard is structural, this is operational.) Build a Python listener process that bridges Telegram inbound to GS CLI / orchestration. Phase A scope: /status (calls orch-status.sh), /list (calls orch-list.sh), /tail <spawn-id> (relays outbox/result.md), /log <project> <N-events> (tail PROGRESS.jsonl). User allowlist on Ray's Telegram numeric ID only. Substrate: errbot Python chatops framework (gives plugin lifecycle + auth + command parsing for free). Out of scope for Phase A: write commands (/spawn, /kill, /queue) — those land in Phase B once the listener+auth plumbing is solid. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 1 for full design.",
-    "status": "pending",
+    "status": "skipped",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Major product-direction decision + needs Ray's auth setup (Telegram bot token, user ID allowlist). Once listener architecture is locked + Phase A is interactive, Phase B + C subtasks can be bot-pickable."
