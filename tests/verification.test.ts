@@ -244,6 +244,72 @@ describe("verification gate", () => {
     });
   });
 
+  describe("customer_facing_smoke (gs-316)", () => {
+    it("keeps passed when smoke exits 0 on a public_facing project", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        public_facing: true,
+        customer_facing_smoke: "true",
+      });
+      const result = await runVerification(project, "cycle-smoke-pass");
+
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("=== Customer-facing smoke ===");
+    });
+
+    it("returns failed when smoke exits non-zero despite passing main verification", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        public_facing: true,
+        customer_facing_smoke: "exit 1",
+      });
+      const result = await runVerification(project, "cycle-smoke-fail");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(1);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("=== Customer-facing smoke ===");
+    });
+
+    it("does not run smoke when project is not public_facing or smoke is unset", async () => {
+      const withoutFlag = makeProject({
+        verification_command: "test 1 -eq 1",
+        customer_facing_smoke: "exit 1",
+      });
+      const withoutSmoke = makeProject({
+        verification_command: "test 1 -eq 1",
+        public_facing: true,
+      });
+
+      const r1 = await runVerification(withoutFlag, "cycle-smoke-skip-1");
+      const r2 = await runVerification(withoutSmoke, "cycle-smoke-skip-2");
+
+      expect(r1.outcome).toBe("passed");
+      expect(r2.outcome).toBe("passed");
+      expect(readFileSync(r1.logPath, "utf8")).not.toContain(
+        "Customer-facing smoke",
+      );
+      expect(readFileSync(r2.logPath, "utf8")).not.toContain(
+        "Customer-facing smoke",
+      );
+    });
+
+    it("does not run smoke when main verification already failed", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 2",
+        public_facing: true,
+        customer_facing_smoke: "exit 1",
+      });
+      const result = await runVerification(project, "cycle-smoke-skip-fail");
+
+      expect(result.outcome).toBe("failed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).not.toContain("Customer-facing smoke");
+    });
+  });
+
   describe("audit trail", () => {
     it("writes progress entries for verification", async () => {
       const project = makeProject({ verification_command: "test 1 -eq 1" });

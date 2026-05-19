@@ -232,8 +232,12 @@ export interface ProjectConfig {
   // it because none loaded the page in a browser. Reviewer-prompt
   // enrichment is informational — does NOT block cycles, just
   // surfaces the gap. The harder verification gate is gs-316's
-  // customer_facing_smoke (planned next).
+  // customer_facing_smoke below.
   public_facing?: boolean;
+  // gs-316: optional shell command run after verification_command on
+  // public_facing projects when main verification passed. Non-zero exit
+  // fails the cycle. Unset — no smoke step (existing behavior unchanged).
+  customer_facing_smoke?: string;
   // Phase B+ followup: project lifecycle stage. Drives the
   // `lifecycle_transition` phase-completion criterion + (in future) the
   // dev-mode vs live-mode dashboard split documented in
@@ -372,6 +376,8 @@ export type ProgressEventType =
   | "engineer_completed"
   | "verification_run"
   | "verification_outcome"
+  | "customer_facing_smoke_run"
+  | "customer_facing_smoke_outcome"
   | "diff_summary"
   | "reviewer_invoked"
   | "reviewer_response"
@@ -658,7 +664,9 @@ export interface PhaseReadySentinel {
 const VALID_VERDICTS: readonly string[] = ["verified", "verified_weak", "verification_failed"];
 const VALID_EVENTS: readonly string[] = [
   "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
-  "verification_run", "verification_outcome", "diff_summary",
+  "verification_run", "verification_outcome",
+  "customer_facing_smoke_run", "customer_facing_smoke_outcome",
+  "diff_summary",
   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
   "reviewer_fallback", "reviewer_hallucination",
   "worktree_preflight", "cycle_rollback",

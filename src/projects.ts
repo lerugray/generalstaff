@@ -601,6 +601,31 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     publicFacing = raw.public_facing;
   }
 
+  // gs-316: optional customer-facing smoke command. Shell string; runs
+  // after verification_command on public_facing projects when main
+  // verification passed. Non-zero exit fails the cycle.
+  let customerFacingSmoke: string | undefined;
+  if (
+    raw.customer_facing_smoke !== undefined &&
+    raw.customer_facing_smoke !== null
+  ) {
+    if (typeof raw.customer_facing_smoke !== "string") {
+      throw new ProjectValidationError(
+        id,
+        "customer_facing_smoke",
+        `must be a string, got ${typeof raw.customer_facing_smoke}`,
+      );
+    }
+    if (raw.customer_facing_smoke === "") {
+      throw new ProjectValidationError(
+        id,
+        "customer_facing_smoke",
+        "must not be empty if specified — omit the field to skip the smoke gate",
+      );
+    }
+    customerFacingSmoke = raw.customer_facing_smoke;
+  }
+
   // Phase B+ followup: lifecycle stage. Drives the `lifecycle_transition`
   // phase-completion criterion + future dev/live dashboard split.
   // Optional; absent reads as "dev". Strict enum so a typo like
@@ -825,6 +850,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     journal,
     advisor,
     public_facing: publicFacing,
+    customer_facing_smoke: customerFacingSmoke,
     lifecycle,
     max_consecutive_empty: maxConsecutiveEmpty,
   };
@@ -1100,6 +1126,33 @@ export function validateConfig(
           "supply the command that runs the test suite and typechecker",
         ),
       );
+    }
+
+    const cfsLine =
+      locateFieldLine(source, i, "customer_facing_smoke") ?? projectLine;
+    if (
+      pr.customer_facing_smoke !== undefined &&
+      pr.customer_facing_smoke !== null
+    ) {
+      if (typeof pr.customer_facing_smoke !== "string") {
+        errors.push(
+          formatLine(
+            cfsLine,
+            `${prefix}: customer_facing_smoke — must be a string, got ${typeof pr.customer_facing_smoke}`,
+            "customer_facing_smoke was given as a list/map",
+            "replace with a single-line quoted shell command",
+          ),
+        );
+      } else if (pr.customer_facing_smoke === "") {
+        errors.push(
+          formatLine(
+            cfsLine,
+            `${prefix}: customer_facing_smoke — must not be empty`,
+            "customer_facing_smoke: is blank",
+            "supply a probe command or omit the field",
+          ),
+        );
+      }
     }
 
     const cbLine =
