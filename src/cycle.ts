@@ -907,7 +907,15 @@ export async function executeCycle(
     //     partial diff was still reviewed and marked verified.)
     if (engineerResult.exitCode === null || engineerResult.exitCode !== 0) {
       result.final_outcome = "verification_failed";
-      result.reason = `engineer exited abnormally (code=${engineerResult.exitCode})`;
+      if (
+        engineerResult.killedNoClaim &&
+        project.engineer_claim_timeout_minutes != null
+      ) {
+        result.reason =
+          `engineer killed early: no task-claim signal within ${project.engineer_claim_timeout_minutes} min (engineer_claim_timeout_minutes)`;
+      } else {
+        result.reason = `engineer exited abnormally (code=${engineerResult.exitCode})`;
+      }
       result.verification_outcome = "failed";
       result.reviewer_verdict = "verification_failed";
       result.diff_stats = diffSummaryStats(fullDiff);

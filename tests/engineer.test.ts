@@ -9,6 +9,7 @@ import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import type { ProjectConfig } from "../src/types";
+import { GENERALSTAFF_TASK_CLAIM_PREFIX } from "../src/prompts/engineer_claim";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "engineer_test");
 
@@ -279,6 +280,59 @@ describe("engineer module", () => {
 
       const logContent = readFileSync(result.logPath, "utf8");
       expect(logContent).toContain("Command: echo budget=25");
+    });
+  });
+
+  describe("claim-timeout early-kill (gs-302)", () => {
+    // ~3s — long enough for spawn + stdout capture, short enough for CI.
+    const claimTimeoutMin = 0.05;
+
+    it("kills engineer with no claim line and sets killedNoClaim", async () => {
+      const project = makeProject({
+        engineer_command: "sleep 30",
+        engineer_claim_timeout_minutes: claimTimeoutMin,
+        cycle_budget_minutes: 30,
+      });
+      const started = Date.now();
+      const result = await runEngineer(project, "cycle-no-claim-kill");
+
+      expect(result.killedNoClaim).toBe(true);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.durationSeconds).toBeLessThan(15);
+
+      const logContent = readFileSync(result.logPath, "utf8");
+      expect(logContent).toContain("=== NO TASK CLAIM within 0.05 min ===");
+
+      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+      const events = readFileSync(progressPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l));
+      const completed = events.find(
+        (e: { event: string }) => e.event === "engineer_completed",
+      );
+      expect(completed.data.killed_no_claim).toBe(true);
+
+      expect(Date.now() - started).toBeLessThan(15_000);
+    });
+
+    it("does not claim-timeout-kill when claim line appears in time", async () => {
+      const claimLine = `${GENERALSTAFF_TASK_CLAIM_PREFIX}{"attempted_task_id":"gs-302-test"}`;
+      const project = makeProject({
+        engineer_command: `printf '%s\\n' '${claimLine}' && sleep 2`,
+        engineer_claim_timeout_minutes: claimTimeoutMin,
+        cycle_budget_minutes: 30,
+      });
+      const result = await runEngineer(project, "cycle-with-claim");
+
+      expect(result.killedNoClaim).toBeUndefined();
+      expect(result.exitCode).toBe(0);
+      expect(result.attempted_task_id).toBe("gs-302-test");
+      expect(result.durationSeconds).toBeGreaterThanOrEqual(1.5);
+      expect(result.durationSeconds).toBeLessThan(10);
+
+      const logContent = readFileSync(result.logPath, "utf8");
+      expect(logContent).not.toContain("=== NO TASK CLAIM");
     });
   });
 });

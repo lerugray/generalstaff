@@ -32,6 +32,8 @@ export interface EngineerResult {
   durationSeconds: number;
   timedOut: boolean;
   logPath: string;
+  /** gs-302: claim-timeout timer killed the child before any claim line. */
+  killedNoClaim?: boolean;
   /** gs-291: parsed from engineer stdout claim line, else peeked task id when set. */
   attempted_task_id?: string;
 }
@@ -259,6 +261,7 @@ export async function runEngineer(
     });
 
     let timedOut = false;
+    let killedNoClaim = false;
     const timer = setTimeout(() => {
       timedOut = true;
       logStream.write(
@@ -267,8 +270,24 @@ export async function runEngineer(
       killChildTree(child);
     }, timeoutMs);
 
+    let claimTimer: ReturnType<typeof setTimeout> | undefined;
+    if (project.engineer_claim_timeout_minutes != null) {
+      const claimTimeoutMs =
+        project.engineer_claim_timeout_minutes * 60 * 1000;
+      claimTimer = setTimeout(() => {
+        if (parseTaskClaimFromEngineerStdout(stdoutCapture) === undefined) {
+          killedNoClaim = true;
+          logStream.write(
+            `\n\n=== NO TASK CLAIM within ${project.engineer_claim_timeout_minutes} min ===\n`,
+          );
+          killChildTree(child);
+        }
+      }, claimTimeoutMs);
+    }
+
     child.on("close", async (code) => {
       clearTimeout(timer);
+      if (claimTimer !== undefined) clearTimeout(claimTimer);
       clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 
@@ -287,6 +306,7 @@ export async function runEngineer(
         exit_code: code,
         duration_seconds: Math.round(durationSeconds),
         timed_out: timedOut,
+        ...(killedNoClaim ? { killed_no_claim: true } : {}),
       }, cycleId);
 
       resolve({
@@ -294,12 +314,14 @@ export async function runEngineer(
         durationSeconds,
         timedOut,
         logPath,
+        ...(killedNoClaim ? { killedNoClaim: true } : {}),
         ...(attempted_task_id ? { attempted_task_id } : {}),
       });
     });
 
     child.on("error", async (err) => {
       clearTimeout(timer);
+      if (claimTimer !== undefined) clearTimeout(claimTimer);
       clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 
@@ -341,6 +363,7 @@ export async function runEngineer(
         timed_out: false,
         error: err.message,
         command,
+        ...(killedNoClaim ? { killed_no_claim: true } : {}),
       }, cycleId);
 
       resolve({
@@ -348,6 +371,7 @@ export async function runEngineer(
         durationSeconds,
         timedOut: false,
         logPath,
+        ...(killedNoClaim ? { killedNoClaim: true } : {}),
         ...(attempted_task_id ? { attempted_task_id } : {}),
       });
     });

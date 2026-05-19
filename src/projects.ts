@@ -269,6 +269,29 @@ function validateBudgetHierarchy(
   }
 }
 
+/** Finite number > 0. Fractions allowed (gs-302 claim-timeout). */
+function parsePositiveNumber(
+  scopeId: string,
+  field: string,
+  value: unknown,
+): number {
+  if (typeof value !== "number") {
+    throw new ProjectValidationError(
+      scopeId,
+      field,
+      `must be a number, got ${typeof value}`,
+    );
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new ProjectValidationError(
+      scopeId,
+      field,
+      `must be > 0, got ${value}`,
+    );
+  }
+  return value;
+}
+
 /** Integer >= 1. Used for dispatcher + optional project fields (gs-292). */
 function parseMin1PositiveInt(
   scopeId: string,
@@ -346,6 +369,18 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     "cycle_budget_minutes",
     raw.cycle_budget_minutes,
   );
+
+  let engineerClaimTimeoutMinutes: number | undefined;
+  if (
+    raw.engineer_claim_timeout_minutes !== undefined &&
+    raw.engineer_claim_timeout_minutes !== null
+  ) {
+    engineerClaimTimeoutMinutes = parsePositiveNumber(
+      id,
+      "engineer_claim_timeout_minutes",
+      raw.engineer_claim_timeout_minutes,
+    );
+  }
 
   const workDetection = (raw.work_detection ?? "tasks_json") as WorkDetectionMode;
   if (!VALID_WORK_DETECTION.includes(workDetection)) {
@@ -772,6 +807,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     engineer_command: engineerCommand,
     verification_command: verificationCommand,
     cycle_budget_minutes: cycleBudget,
+    engineer_claim_timeout_minutes: engineerClaimTimeoutMinutes,
     work_detection: workDetection,
     concurrency_detection: concurrencyDetection,
     branch,
@@ -1104,6 +1140,36 @@ export function validateConfig(
           "set a positive integer (typical: 15–45 minutes)",
         ),
       );
+    }
+
+    const ectLine =
+      locateFieldLine(source, i, "engineer_claim_timeout_minutes") ?? projectLine;
+    if (
+      pr.engineer_claim_timeout_minutes !== undefined &&
+      pr.engineer_claim_timeout_minutes !== null
+    ) {
+      if (typeof pr.engineer_claim_timeout_minutes !== "number") {
+        errors.push(
+          formatLine(
+            ectLine,
+            `${prefix}: engineer_claim_timeout_minutes — must be a number, got ${typeof pr.engineer_claim_timeout_minutes}`,
+            "value was quoted or given as a non-number",
+            "remove quotes — YAML treats `0.05` as a number, `\"0.05\"` as a string",
+          ),
+        );
+      } else if (
+        !Number.isFinite(pr.engineer_claim_timeout_minutes) ||
+        pr.engineer_claim_timeout_minutes <= 0
+      ) {
+        errors.push(
+          formatLine(
+            ectLine,
+            `${prefix}: engineer_claim_timeout_minutes — must be > 0, got ${pr.engineer_claim_timeout_minutes}`,
+            "zero or negative claim timeout disables meaningful early-kill",
+            "set a positive number of minutes (fractions ok, e.g. 0.05 for ~3s)",
+          ),
+        );
+      }
     }
 
     const hoLine = locateFieldLine(source, i, "hands_off") ?? projectLine;

@@ -207,6 +207,11 @@ export interface ProjectConfig {
   // cycles on this project (sequential) and contributes the per-round
   // maximum in parallel mode.
   max_consecutive_empty?: number;
+  // gs-302: optional early-kill when the engineer prints no task-claim
+  // line (GENERALSTAFF_TASK_CLAIM_JSON) within this many minutes.
+  // Fractions allowed (e.g. 0.05 ≈ 3s). Unset disables the timer;
+  // existing projects keep the budget-only watchdog unchanged.
+  engineer_claim_timeout_minutes?: number;
   // gs-311: optional journal-source integration. When set, GS knows
   // where to find the user's mission-bullet-oss journal tree; inert
   // until jr-003 (scan library) lands. See
