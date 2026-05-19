@@ -2090,14 +2090,14 @@
   {
     "id": "gs-294",
     "title": "mission-bullet scaffold \u00e2\u0080\u0094 future personal-tool project. AI-assisted bullet journal sitting alongside GS and raybrain. NOT a project management tool (GS covers that), NOT a second brain (raybrain covers that). It fills the daily-capture-to-weekly-process-to-monthly-reflection gap between in-the-moment thought and structured memory. Bullet-journal prior art: Ryder Carroll's rapid-log + migration-forward method. Pattern: captures Ray's raw private thoughts and priorities, refines on-demand (never automatic) separate from the source, runs weekly/monthly reviews, migrates incomplete items forward, surfaces cross-time-scale drift (e.g. 'you mentioned X goal in April, haven't returned to it'). Stack: TS/Bun matching mission-swarm. Local JSON or SQLite persistence, no server. Private GS Mode B registration. Name: mission-bullet (mission-* family). Scaffold pass (~30 min) mirrors mission-swarm scaffold: folder + README + skeleton + private GitHub remote + GS registration + seed tasks. Then Ray drives real implementation in dedicated sessions. Where AI adds real value beyond 'LLM-wrapped notebook': raw-vs-refined separation (source stays verbatim), cross-scale reflection surfacing, gentle drift-detection without nagging, migration-candidate proposals, emergent theme discovery from un-tagged entries. Interactive because scaffold decisions (data schema, review rituals, AI touch points) are taste calls; implementation belongs to a future focused session when Ray has bandwidth.",
-    "status": "pending",
+    "status": "done",
     "priority": 4,
     "interactive_only": true
   },
   {
     "id": "gs-295",
     "title": "Usage-budget feature \u00e2 parent/tracking task. See docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md for full spec. Feature adds dispatcher.session_budget config with max_usd/max_tokens/max_cycles enforcement across the session loop, sourcing consumption from Claude Code JSONL (primary, mirrors ccusage), OpenRouter API, Anthropic API (cycles-only), and Ollama (zero-cost). Hard-stop default + advisory opt-in; fail-open with loud warning if consumption source is unavailable. Polsia differentiator: GS runs on subscriptions you already have \u00e2 no separate credit purchase. Sub-tasks gs-296 through gs-301 implement in dependency order: gs-297 (config schema) first, then gs-296 (provider abstraction + Claude Code reader), then gs-298 (session-loop integration), then gs-299 (reporting), then gs-301 (tests), then gs-300 (docs). Interactive because the coordination + open architecture decisions (cross-platform JSONL path, pre-cycle cost estimation, mixed-model pricing math) want a human eye.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true
   },
@@ -2275,7 +2275,7 @@
   {
     "id": "gs-308",
     "title": "mshook-003 — optional `--markov` pass for deep simulations. For projects with missionswarm.simulate_deep=true, invocation passes --markov to missionswarm; resulting markov.json cascade graph gets a compact summary in reviewer context. Blocks on mission-swarm shipping --markov output (ms-ma-00x in docs/markov-analysis-design.md). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-308. Expected diff: ~100-150 LOC.",
-    "status": "pending",
+    "status": "skipped",
     "priority": 5,
     "interactive_only": true,
     "interactive_only_reason": "Cascade-graph summary prompt is voice-bearing; first draft needs Ray's eye.",
@@ -2300,7 +2300,7 @@
   {
     "id": "gs-310",
     "title": "jr-001 — create github.com/lerugray/mission-bullet-oss (public fork). Extract current private mission-bullet codebase minus voice-specific tunings (entries/, reflections/, Ray-specific prompt tweaks in src/refine.ts / src/review.ts / src/claude-note.ts stay private). Add MIT license (recommended per design doc). Rewrite README to position as standalone journal tool; GS integration as optional, not headline. Set private repo as downstream fork. Blocks on parallel mission-bullet session finishing (fork point must be stable). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-310 and design in docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md §2.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "License choice + README are Ray's voice work. Fork-point depends on parallel session state."
@@ -2434,7 +2434,7 @@
   {
     "id": "gs-321",
     "title": "README tightening for public launch — replace prose-heavy sections with diagrams + real anecdotes from orchestration v0/v1/v2 dogfoods (retrogaze Ricky bug investigation, mission-bullet monthly review parity, OpenRouter smoke). Above-the-fold ~150 words: what it does, the verification-gate differentiator, 1 hero visual. Move deep Hammerstein content to docs/philosophy.md link. 'Works alongside' one-liner with logos for Claude Code / OpenRouter / Cursor / Aider. Visual continuity with docs/launch-posts/polsia-alternative.md. WAIT for: rayb-020 ingest stable + Ricky retrogaze bug fixes shipped (real success stories carry the launch story). Voice work — Ray-only authoring; bot-pickable subtasks could draft section-level proposals first via -Provider openrouter (Kimi K2.6) for ~$1-3 cost. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 2 for full design.",
-    "status": "pending",
+    "status": "done",
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "Public-facing copy is voice/taste work per the public-facing-copy stop-slop convention in CLAUDE.local.md. Section-level analysis + draft prose can be bot-pickable subtasks once the README structure is locked."
