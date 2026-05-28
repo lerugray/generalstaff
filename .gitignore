@@ -163,3 +163,4 @@ scripts/orchestration/spawns-staging/
 # gs-313: journal-proposal dismiss ledger -- operator-local state,
 # committed (would otherwise land in state/<project>/ for public-state projects).
 state/*/journal-proposals-seen.json
+launch/itch/downloads/
