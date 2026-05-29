@@ -49,5 +49,40 @@
     "creative": true,
     "completed_at": "2026-04-20T11:05:00Z",
     "outcome_notes": "Bot commit 91330bb on bot/work. Draft at drafts/readme-why-section-v1.md; README.md untouched (hands_off). Three candidate titles listed in an HTML comment at top — engineer recommended #1 'Why Bookfinder exists'. Body is ~316 words across five paragraphs: one-line setup, then three concrete-failure paragraphs (Anna's re-ranking with the Van Creveld / Tuchman examples straight from CLAUDE.md, EPUB-first + 25MB skip for extraction, stop-slop-in-the-prompt for summaries), then a deflating closer that the tool does only the glue. Voice: PIH-manual dry — parenthetical qualifiers, 'Nothing clever; just avoiding the trap,' no marketing verbs. Banned-word check (unleash / revolutionize / engagement-bait) clean. Verification gate (pytest + ruff) run before commit despite no code touched — 4 passed, ruff clean."
+  },
+  {
+    "id": "bf-006",
+    "title": "Retire lint debt in `bookfinder_general/download.py`. **Scope:** (1) Remove the unused `from pathlib import Path` import (F401 — Path is imported at line 7 but never used; string paths suffice for all os.path/open calls in this file). (2) Change the bare f-string `f\"[bookfinder] LibGen: no download link found on page\"` at line ~139 to a plain string (F541 — no `{...}` placeholder). These are the two violations held by the `per-file-ignores` entry for `download.py` in pyproject.toml. **Do NOT touch pyproject.toml** (it is hands_off). The no-op ignore entry for download.py can remain there harmlessly once the violations are fixed. **Verify:** `python -m pytest tests/ -q && python -m ruff check bookfinder_general/ tests/` must pass. Expected diff: ~3-5 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": ["bookfinder_general/download.py"]
+  },
+  {
+    "id": "bf-007",
+    "title": "Retire lint debt in `bookfinder_general/pdf_generator.py`. **Scope:** Remove the unused `import os` at line 7 (F401 — `os` is never referenced in this file; the only I/O is `pdf.output(output_path)` which takes a string directly). **Do NOT touch pyproject.toml** (it is hands_off). The no-op ignore entry for pdf_generator.py can remain harmlessly once the violation is fixed. **Verify:** `python -m pytest tests/ -q && python -m ruff check bookfinder_general/ tests/` must pass. Expected diff: ~1-2 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": ["bookfinder_general/pdf_generator.py"]
+  },
+  {
+    "id": "bf-008",
+    "title": "Add missing return-type annotations to `bookfinder_general/pdf_generator.py`. **Scope:** (1) Add `-> None` to `ResearchPDF.__init__`, `ResearchPDF.header`, and `ResearchPDF.footer` (all three are missing return annotations). (2) Annotate the `**kwargs` parameter in `__init__` as `**kwargs: object` (the standard annotation for pass-through kwargs that aren't inspected). (3) Add `from __future__ import annotations` at the top of the file (after the module docstring) so that forward references resolve correctly on 3.11+. No behavior change — pure annotation work. **Do NOT touch pyproject.toml or any hands_off file.** **Verify:** `python -m pytest tests/ -q && python -m ruff check bookfinder_general/ tests/` must pass. Expected diff: ~10-20 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": ["bookfinder_general/pdf_generator.py"]
+  },
+  {
+    "id": "bf-009",
+    "title": "Add offline tests for `bookfinder_general/download.py` utilities in a new file `tests/test_download.py`. **Scope — write exactly these four tests:** (1) `test_sanitize_filename_strips_bad_chars`: call `sanitize_filename('<title:foo/bar>')` and assert the result contains no `<>:\"/\\|?*` characters. (2) `test_sanitize_filename_truncates_long_name`: call `sanitize_filename('x' * 300 + '.pdf')` and assert `len(result) <= 210`. (3) `test_validate_file_bytes_accepts_pdf`: write `b'%PDF-1.4 fake content'` to a temp file, call `_validate_file_bytes(path, 'pdf')`, assert returns True. (4) `test_validate_file_bytes_rejects_html`: write `b'<!doctype html><html><body>error</body></html>'` to a temp file, call `_validate_file_bytes(path, 'pdf')`, assert returns False. Use `tempfile.NamedTemporaryFile` or `tmp_path` pytest fixture for the file-based tests. No network calls, no Playwright. **Do NOT touch any hands_off file.** **Verify:** `python -m pytest tests/ -q && python -m ruff check bookfinder_general/ tests/` must pass. Expected diff: ~50-70 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": ["tests/test_download.py"]
+  },
+  {
+    "id": "bf-010",
+    "title": "Add offline tests for `bookfinder_general/translator.py` utilities in a new file `tests/test_translator.py`. **Scope — write exactly these four tests:** (1) `test_split_for_translation_respects_max_chars`: call `_split_for_translation` with a 15-paragraph string where each paragraph is 1000 chars; assert every chunk is <= 4500 chars. (2) `test_split_for_translation_no_data_loss`: join the chunks back together and assert the total character count matches the input (allowing for whitespace differences from paragraph joins). (3) `test_detect_language_returns_de_for_german`: call `detect_language` with a sentence containing at least 4 German function words ('und', 'der', 'die', 'das') and assert the return value is 'de'. (4) `test_detect_language_defaults_to_en_for_empty`: call `detect_language` with an empty string or a string with no recognizable language markers and assert the return value is 'en'. No network calls — `detect_language` falls back to its heuristic if `deep_translator` is unavailable or raises; the heuristic is what we are testing. **Do NOT touch any hands_off file.** **Verify:** `python -m pytest tests/ -q && python -m ruff check bookfinder_general/ tests/` must pass. Expected diff: ~55-75 lines.",
+    "status": "pending",
+    "priority": 2,
+    "expected_touches": ["tests/test_translator.py"]
   }
 ]
