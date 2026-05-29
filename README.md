@@ -19,11 +19,12 @@ Better prompts won't fix this. Structure will.
 
 ## What GeneralStaff does instead
 
-Five mechanisms enforced by the dispatcher:
+Six mechanisms enforced by the dispatcher:
 
 - **Verification gate.** After every cycle: tests pass, diff non-empty, separate reviewer confirms scope match. A cycle is not `done` until all three hold. Failure rolls the cycle back. The gate is code, not a prompt, and it fires on every cycle.
 - **Hands-off lists.** Per-project glob patterns the bot cannot touch. Reviewer checks every diff against the list. Violation → rollback. Empty list = no registration.
 - **Worktree isolation.** The bot works in `.bot-worktree` on a `bot/work` branch. Your `master` is untouched until you merge. Bot pushes to `bot/work` on your remote, nowhere else.
+- **Repo-structure orientation + agent self-planning.** Every cycle, the engineer gets a ranked structural map of the repo at the top of its prompt (via `aider --show-repo-map`, capped at ~700 tokens) so it skips the cold-start re-discovery, then plans its own work and proceeds — no human plan-approval. The map is best-effort: if it can't be built, the cycle dispatches exactly as before. The `hands_off` list and the verification gate still bind regardless of the agent's plan.
 - **BYOK billing.** You pay Anthropic, OpenRouter, or whoever directly. No platform credits, no SaaS middleman, no revenue share.
 - **Open audit log.** Full prompts, responses, tool calls, and diffs in `state/<project>/PROGRESS.jsonl`. Grep-able, reviewable. Closed SaaS tools can't show you theirs.
 

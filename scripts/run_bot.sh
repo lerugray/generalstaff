@@ -56,12 +56,25 @@ echo "Installing dependencies in worktree..."
 cd "$WORKTREE_DIR"
 bun install --frozen-lockfile 2>/dev/null || bun install
 
+# --- Repo-structure orientation (feat/repo-context-dispatch) ---
+# Best-effort: map the WORKTREE (the actual code the bot edits). The
+# helper prints an orientation block on success + non-empty map, and
+# prints NOTHING / exits 0 on any failure or timeout. The claude path has
+# MCP disabled (--mcp-config '{}'), so a map STRING in the prompt is the
+# only way to give it instant structure. An empty REPO_CTX => the prompt
+# is dispatched exactly as before this feature existed.
+REPO_CTX="$(bash "$PROJECT_ROOT/scripts/gen-repo-context.sh" "$WORKTREE_DIR" 2>/dev/null || true)"
+
 # --- Run autonomous bot ---
 echo ""
 echo "Launching autonomous claude -p in worktree..."
 echo ""
 
-claude -p "You are an autonomous engineering bot working on the GeneralStaff project.
+# Build the seed prompt in a shell var so the (possibly empty) repo-map
+# orientation can be prepended at the TOP without disturbing the static
+# prompt below — which carries the task, the rules (incl. hands_off), and
+# the verification step, and stays intact and prominent after the map.
+SEED_PROMPT="You are an autonomous engineering bot working on the GeneralStaff project.
 
 ## Your environment
 You are working in a git worktree on the bot/work branch. The main
@@ -111,7 +124,22 @@ Do these steps in this order:
      git add -A
 
 3. Commit with a clear message describing what you did. Your code and
-   the 'done' status change land together in this one commit." \
+   the 'done' status change land together in this one commit.
+
+## Form your own plan (no approval needed)
+Form a short plan for the task you pick (which files you'll touch, in what
+order), then proceed and execute it — you do NOT need anyone to approve
+your plan first. The repo-structure orientation (if present above) is a
+fast map, not authoritative; verify against the actual files before
+editing. The hands-off list and the test-pass requirement above still bind
+regardless of your plan."
+
+# Prepend the repo-map orientation (empty => prompt unchanged).
+if [ -n "$REPO_CTX" ]; then
+  SEED_PROMPT="${REPO_CTX}"$'\n\n'"${SEED_PROMPT}"
+fi
+
+claude -p "$SEED_PROMPT" \
   --allowedTools "Read,Write,Edit,Bash,Grep,Glob" \
   --dangerously-skip-permissions \
   --mcp-config '{"mcpServers":{}}' \

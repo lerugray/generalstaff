@@ -1616,3 +1616,78 @@ README "Tested configurations" section now describes the Mac
 validation. CLAUDE.md "Working with this folder" section
 dropped the "no executable code yet" framing (also stale; was
 accurate pre-pivot through Phase 0).
+
+## §v9 — Repo-structure orientation injection + agent self-planning (2026-05-28)
+
+Every dispatched engineer agent now gets, at the TOP of its prompt, an
+instant structural map of the repo it is about to edit, plus an explicit
+instruction to form its OWN plan and proceed WITHOUT human plan-approval.
+This applies to all three dispatch paths: the dispatcher's aider path, the
+dispatcher's `claude -p` path (`scripts/run_bot.sh`), and GeneralStaff
+Desktop's session spawner (`generalstaff-desktop`).
+
+### Why
+
+A cold engineer agent otherwise burns its first cycles re-discovering the
+repo's shape — grepping, listing, reading whole files — before it touches
+anything. Handing it a ranked structural map up front (which files matter,
+what they export, how they relate) lets it skip straight to "which files
+does THIS task touch." The second half — "form your own plan, no approval
+needed" — removes the implicit wait-for-a-human-to-bless-the-plan beat that
+has no place in an autonomous cycle.
+
+### The map source: `aider --show-repo-map`
+
+aider is already installed — it IS the engineer engine on the aider path —
+so this adds zero new dependency. `aider --show-repo-map --map-tokens 700`
+emits a ranked tree-sitter + pagerank map STRING (signatures of the
+highest-PageRank files, capped at ~700 tokens). Because it's a plain string,
+it works for every dispatch target, including the `claude -p` path (which
+runs with MCP disabled) and GSD — no MCP server, no per-target plumbing.
+
+The shared generator is [`scripts/gen-repo-context.sh`](scripts/gen-repo-context.sh),
+taking `<repo_dir>` as `$1`. All three sites shell out to it.
+
+### Robustness (Hammerstein-audit mods — all load-bearing)
+
+- **Token cap 700** keeps the injected block bounded; it never bloats the
+  prompt or displaces the critical constraints.
+- **Constraints stay prominent.** The map rides ABOVE the static prompt;
+  the task, the `hands_off` list, and the verification gate all follow it
+  intact. The map is orientation, never a replacement.
+- **Self-plan reaffirms the backstop.** The injected "form your own plan"
+  paragraph explicitly states that `hands_off` + the verification gate
+  still bind regardless of the agent's plan. This is what makes
+  "no human plan-approval" safe: the gate replaces the human plan-check, so
+  a planning overreach is still caught structurally at verification time.
+- **SAFE FALLBACK — the single most important property.** If the map
+  command exits non-zero, returns empty, or times out, the helper prints
+  NOTHING and exits 0; the caller's capture var is empty and dispatch
+  proceeds EXACTLY as it did before this feature existed. We NEVER inject an
+  empty or broken block, and we NEVER break dispatch. Concretely: each call
+  site does `REPO_CTX="$(... || true)"` then prepends only when
+  `[ -n "$REPO_CTX" ]`. On macOS neither `timeout` nor `gtimeout` ships by
+  default, so the helper uses a portable background + sleep + kill watchdog
+  (preferring a real `timeout`/`gtimeout` when present).
+- **Language coverage varies.** aider's tree-sitter coverage doesn't cover
+  every language (e.g. GDScript can come back empty). The safe fallback
+  handles that gracefully — no injection — which is acceptable: a project
+  whose map is empty simply dispatches as before.
+
+### Falsification test (how to measure whether it earns its keep)
+
+The premise is "the map speeds the agent up without hurting correctness."
+Both halves are empirically testable. Run an A/B over a batch of replayed
+tasks (e.g. the gs-277 benchmark set) with the injection ON vs OFF and
+compare two metrics:
+
+1. **Cycles-to-first-meaningful-edit** (or wall-clock to first accepted
+   diff) — the map should lower this if the orientation hypothesis holds.
+2. **Verification-pass-rate** — must NOT drop. If self-planning + the map
+   raise the pass rate, that's upside; if they lower it, the map is
+   misleading the agent and the feature needs rethinking, not just tuning.
+
+If the map shows no edit-latency improvement AND no pass-rate change, the
+feature is inert and the injection overhead (a ~2-3s aider call per cycle)
+isn't paying for itself — fall back to OFF by removing the helper from the
+call sites (the safe-fallback shape means that's a clean revert).

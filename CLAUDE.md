@@ -188,6 +188,45 @@ explicitly, don't proactively write.
   without either field remain bot-pickable by default (matches
   pre-gs-195 behaviour).
 
+- **Repo-structure orientation + agent self-planning (2026-05-28,
+  `feat/repo-context-dispatch`).** Every dispatched engineer
+  cycle prepends a ranked structural map of the target repo to
+  the top of the engineer's prompt, then tells the agent to form
+  its OWN plan and proceed WITHOUT human plan-approval. The map
+  comes from [`scripts/gen-repo-context.sh`](scripts/gen-repo-context.sh)
+  `<repo_dir>`, which runs `aider --show-repo-map --map-tokens 700`
+  (aider is already the engineer engine, so zero new dependency)
+  and emits a plain map STRING — so it works for the aider path,
+  the `claude -p` path (`scripts/run_bot.sh`), and GeneralStaff
+  Desktop alike, with no MCP server.
+
+  - **Safe fallback (load-bearing).** If the map command exits
+    non-zero, returns empty, or times out, the helper prints
+    NOTHING and exits 0; the call site (`REPO_CTX="$(... || true)"`,
+    prepend only when non-empty) dispatches the cycle EXACTLY as
+    before. A broken or empty map never gets injected and never
+    breaks a cycle. macOS has no `timeout`/`gtimeout`, so the
+    helper uses a portable background+sleep+kill watchdog (30s).
+  - **Constraints stay prominent.** The map rides ABOVE the static
+    prompt; the task, the `hands_off` list, and the verification
+    gate all follow it intact. The self-plan paragraph reaffirms
+    that `hands_off` + the verification gate bind regardless of the
+    agent's plan — that gate is what makes "no human plan-approval"
+    safe (it replaces the human plan-check structurally).
+  - **Language coverage varies.** aider's tree-sitter coverage
+    doesn't cover every language (e.g. GDScript maps can be empty);
+    the safe fallback handles that — the project just dispatches as
+    before.
+  - **A/B / falsification.** Premise: the map lowers
+    cycles-to-first-meaningful-edit without lowering
+    verification-pass-rate. Both are measurable from
+    `state/<project>/PROGRESS.jsonl` over a replayed task batch
+    (e.g. the gs-277 benchmark set) with the injection on vs off.
+    Full rationale + the two metrics in DESIGN.md §v9.
+  - `scripts/` is on the hands_off list — edits to
+    `gen-repo-context.sh`, `run_bot.sh`, and `src/engineer_providers/`
+    are interactive-only.
+
 - **Parallel mode is opt-in (gs-186 / Phase 4).** The
   dispatcher supports running N cycles per round in parallel
   via `dispatcher.max_parallel_slots: N` in `projects.yaml`.
