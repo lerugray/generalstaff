@@ -161,6 +161,46 @@ To roll back: kill the supervisor (Ctrl+C the launcher console, or
 `taskkill /PID $(cat io/.supervisor.pid)` on Windows). Scheduled tasks
 resume on next tick. No state migration.
 
+## Per-cycle repo orientation + agent self-planning
+
+Since `feat/repo-context-dispatch` (2026-05-28), every engineer cycle —
+whichever path dispatches it (`run_cycle` over the aider engine, the
+`claude -p` engine in `scripts/run_bot.sh`, or a session spawned from
+GeneralStaff Desktop) — starts with two things baked into the top of the
+engineer's prompt:
+
+1. **A ranked structural map** of the repo it is about to edit. Built by
+   `scripts/gen-repo-context.sh <repo_dir>`, which runs
+   `aider --show-repo-map --map-tokens 700` (aider is already installed as
+   the engineer engine) and emits a plain map string. The agent uses it to
+   decide which files to read instead of cold-discovering the tree.
+2. **A "form your own plan, no approval needed" instruction.** The agent
+   plans its own work for the task and proceeds — there is no human
+   plan-approval beat in an autonomous cycle. The same paragraph reaffirms
+   that the `hands_off` list and the verification gate still bind no matter
+   what the agent plans; the gate is the structural backstop that replaces
+   a human plan-check.
+
+**Operator-relevant behavior:**
+
+- **It's best-effort and cannot break a cycle.** If `aider` is missing, the
+  map errors, comes back empty, or the 30s timeout fires, the helper prints
+  nothing and the cycle dispatches EXACTLY as it did before the feature
+  existed. You'll simply see no "Repository structure" block in that
+  cycle's `engineer.log`.
+- **You can confirm it fired** by grepping a cycle's `engineer.log` (or
+  `state/<project>/PROGRESS.jsonl`) for `## Repository structure
+  (orientation)`. Absence means the safe fallback engaged (often a
+  language aider's tree-sitter doesn't cover, e.g. GDScript).
+- **To disable it** for a path, remove the `gen-repo-context.sh` call from
+  that path's script (`scripts/run_bot.sh` for the claude path,
+  `src/engineer_providers/aider.ts` for the aider path,
+  `generalstaff-desktop`'s `sessions.rs` for GSD). The safe-fallback shape
+  means removal is a clean no-op revert.
+- **A/B it** before trusting it on a big fleet: run a replayed task batch
+  with the injection on vs off and compare cycles-to-first-meaningful-edit
+  and verification-pass-rate (DESIGN.md §v9 has the full method).
+
 ## Permission posture
 
 The supervisor launches claude with `--permission-mode auto` (NOT

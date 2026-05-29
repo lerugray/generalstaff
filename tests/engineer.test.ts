@@ -637,6 +637,30 @@ describe("buildAiderCommand — creative cycle branch override (gs-279)", () => 
     expect(command).toContain("gs-claim-test");
   });
 
+  it("wires the best-effort repo-context orientation into the aider --message (feat/repo-context-dispatch)", async () => {
+    const { buildAiderCommand } = await import("../src/engineer_providers/aider");
+    const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });
+    const command = buildAiderCommand(project);
+    // The helper is invoked on the WORKTREE after it's created, captured
+    // into REPO_CTX, and tolerant of failure (|| true). The static prompt
+    // moves into PROMPT and the two combine into MSG, which --message reads.
+    expect(command).toContain(
+      'REPO_CTX="$(bash "$GENERALSTAFF_ROOT/scripts/gen-repo-context.sh" "$WORKTREE_DIR" 2>/dev/null || true)"',
+    );
+    expect(command).toContain("PROMPT='You are an autonomous engineering bot");
+    expect(command).toContain('if [ -n "$REPO_CTX" ]; then');
+    expect(command).toContain("MSG=");
+    expect(command).toContain('--message "$MSG"');
+    // The capture must come AFTER the worktree exists (orientation maps the
+    // worktree, not master) and BEFORE aider launches.
+    const ctxIdx = command.indexOf("gen-repo-context.sh");
+    const wtIdx = command.indexOf('worktree add "$WORKTREE_DIR"');
+    const launchIdx = command.indexOf("Launching aider");
+    expect(wtIdx).toBeGreaterThanOrEqual(0);
+    expect(ctxIdx).toBeGreaterThan(wtIdx);
+    expect(launchIdx).toBeGreaterThan(ctxIdx);
+  });
+
   it("uses context.effectiveBranch in the generated bash when isCreative", async () => {
     const { buildAiderCommand } = await import("../src/engineer_providers/aider");
     const project = makeProject({ branch: "bot/work", engineer_provider: "aider" });

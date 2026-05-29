@@ -293,6 +293,14 @@ git -C "\$PROJECT_ROOT" worktree add "\$WORKTREE_DIR" "\$BRANCH"
 
 cd "\$WORKTREE_DIR"
 
+# feat/repo-context-dispatch: best-effort repo-structure orientation.
+# Map the WORKTREE (the actual code the agent edits), not master. The
+# helper prints an orientation block on success + non-empty map, and
+# prints NOTHING / exits 0 on any failure or timeout. \`|| true\` plus the
+# helper's own exit-0-on-failure means a broken map can never break the
+# cycle. An empty REPO_CTX => the prompt is dispatched exactly as before.
+REPO_CTX="\$(bash "\$GENERALSTAFF_ROOT/scripts/gen-repo-context.sh" "\$WORKTREE_DIR" 2>/dev/null || true)"
+
 # Best-effort dependency install. Provider-agnostic stack detection — we
 # don't hard-fail because aider can still do something useful even on an
 # install-skipped tree; the verification gate catches any real break.
@@ -324,6 +332,20 @@ echo ""
 echo "Launching aider..."
 echo ""
 
+# feat/repo-context-dispatch: combine the (possibly empty) runtime repo-map
+# orientation with the static engineer prompt. PROMPT holds the static,
+# build-time-quoted prompt. When REPO_CTX is non-empty it is prepended as
+# orientation, separated by a blank line; the static prompt — which carries
+# the task, the hands_off list, and the verification gate — always follows
+# intact and prominent. When REPO_CTX is empty MSG === PROMPT, i.e. the
+# exact pre-feature message.
+PROMPT=${qPrompt}
+if [ -n "\$REPO_CTX" ]; then
+  MSG="\${REPO_CTX}"$'\\n\\n'"\${PROMPT}"
+else
+  MSG="\${PROMPT}"
+fi
+
 # --auto-commits: aider commits after each accepted edit block. Simpler
 #   than deferring commits to GS because aider picks sensible messages
 #   from the diff.
@@ -344,7 +366,7 @@ aider \\
   --no-fancy-input \\
   --test-cmd ${qTestCmd} \\
   --auto-test \\
-  --message ${qPrompt}
+  --message "\$MSG"
 
 EXIT=\$?
 echo ""
