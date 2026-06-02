@@ -21,7 +21,7 @@ import { runEngineer, type EngineerResult } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runAdvisor, buildAdvisorPlan, normalizeAdvisorConfig } from "./advisor";
 import { runVerification } from "./verification";
-import { runReviewer, type ReviewerResult } from "./reviewer";
+import { runReviewer, runQuorumReview, type ReviewerResult } from "./reviewer";
 import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, matchesHandsOffSymlinkAware } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
@@ -1110,28 +1110,50 @@ export async function executeCycle(
         }
       }
 
-      console.log("Running reviewer agent...");
-      const reviewerResult = await runReviewer(
-        project,
-        cycleId,
-        {
-          projectId: project.id,
-          markedDoneTasks: markedDone,
-          sessionNoteOrNone: sessionNote,
-          fullDiff,
-          diffStat,
-          verificationCommand: project.verification_command,
-          verificationExitCode: verResult.exitCode,
-          verificationOutputTruncated: verificationOutput,
-          handsOffList: project.hands_off,
-          missionswarmContext,
-          publicFacing: project.public_facing,
-        },
-        config,
-        dryRun,
-        reviewerCwd,
-        reviewerProviderOverride ? { provider: reviewerProviderOverride } : undefined,
+      const reviewerPromptParams = {
+        projectId: project.id,
+        markedDoneTasks: markedDone,
+        sessionNoteOrNone: sessionNote,
+        fullDiff,
+        diffStat,
+        verificationCommand: project.verification_command,
+        verificationExitCode: verResult.exitCode,
+        verificationOutputTruncated: verificationOutput,
+        handsOffList: project.hands_off,
+        missionswarmContext,
+        publicFacing: project.public_facing,
+      };
+      // gs quorum-review: >1 configured reviewer => multi-voice quorum
+      // (parallel-independent, synthesized into one verdict). Absent or a
+      // single-entry list => the existing single-reviewer path (which honors
+      // the CLI/env provider override). The quorum config defines its own
+      // providers, so that single-provider override does not apply in quorum
+      // mode. The returned ReviewerResult shape is identical either way, so
+      // the sanity check + outcome logic below are unchanged.
+      const useQuorum = (project.review?.reviewers.length ?? 0) > 1;
+      console.log(
+        useQuorum
+          ? `Running quorum reviewer (${project.review!.reviewers.length} voices)...`
+          : "Running reviewer agent...",
       );
+      const reviewerResult = useQuorum
+        ? await runQuorumReview(
+            project,
+            cycleId,
+            reviewerPromptParams,
+            config,
+            dryRun,
+            reviewerCwd,
+          )
+        : await runReviewer(
+            project,
+            cycleId,
+            reviewerPromptParams,
+            config,
+            dryRun,
+            reviewerCwd,
+            reviewerProviderOverride ? { provider: reviewerProviderOverride } : undefined,
+          );
       console.log(`Reviewer verdict: ${reviewerResult.verdict}`);
       if (reviewerResult.parseError) {
         console.log(`Reviewer parse error: ${reviewerResult.parseError}`);

@@ -59,6 +59,15 @@ mock.module("../../src/verification", () => ({
 }));
 
 mock.module("../../src/reviewer", () => ({
+  // gs quorum-review: cycle.ts now also imports runQuorumReview, so the mock
+  // must export it for the static import to resolve. Unused here (no quorum
+  // fixture) — a minimal stub suffices.
+  runQuorumReview: async () => ({
+    verdict: "verified",
+    response: null,
+    rawResponse: "{}",
+    parseError: null,
+  }),
   runReviewer: async () => {
     reviewerCalled = true;
     return {

@@ -7,6 +7,7 @@ import {
   ProjectNotFoundError,
   validateConfig,
   assertValidConfig,
+  validateProject,
 } from "../src/projects";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -524,6 +525,73 @@ describe("validateConfig", () => {
       projects: [validProjectRaw({ hands_off: "secret/" })],
     });
     expect(errors.some((e) => e.includes("must be an array"))).toBe(true);
+  });
+
+  // gs quorum-review: multi-reviewer config validation lives in the
+  // authoritative validateProject (the load-path validator), not the
+  // core-field-only validateConfig linter — so these test it directly.
+  it("parses a valid quorum review config", () => {
+    const p = validateProject(
+      validProjectRaw({
+        review: {
+          reviewers: [
+            { provider: "claude" },
+            { provider: "openrouter", model: "qwen/qwen3-coder-30b-a3b-instruct", fallback: "claude" },
+            { provider: "ollama", model: "qwen3:8b", label: "local-framework-voice" },
+          ],
+          quorum_policy: "conservative",
+          min_real_reviews: 2,
+        },
+      }),
+    );
+    expect(p.review?.reviewers.length).toBe(3);
+    expect(p.review?.quorum_policy).toBe("conservative");
+    expect(p.review?.min_real_reviews).toBe(2);
+    expect(p.review?.reviewers[1].model).toBe("qwen/qwen3-coder-30b-a3b-instruct");
+  });
+
+  it("accepts a single-entry reviewers list (backward-compatible opt-out)", () => {
+    const p = validateProject(
+      validProjectRaw({ review: { reviewers: [{ provider: "claude" }] } }),
+    );
+    expect(p.review?.reviewers.length).toBe(1);
+  });
+
+  it("leaves review undefined when absent (default single-reviewer)", () => {
+    const p = validateProject(validProjectRaw());
+    expect(p.review).toBeUndefined();
+  });
+
+  it("rejects an empty reviewers array", () => {
+    expect(() => validateProject(validProjectRaw({ review: { reviewers: [] } }))).toThrow(
+      /review\.reviewers/,
+    );
+  });
+
+  it("rejects a reviewer entry with a non-string provider", () => {
+    expect(() =>
+      validateProject(validProjectRaw({ review: { reviewers: [{ provider: 123 }] } })),
+    ).toThrow(/review\.reviewers\[0\]\.provider/);
+  });
+
+  it("rejects an invalid quorum_policy", () => {
+    expect(() =>
+      validateProject(
+        validProjectRaw({
+          review: { reviewers: [{ provider: "claude" }, { provider: "ollama" }], quorum_policy: "unanimous" },
+        }),
+      ),
+    ).toThrow(/review\.quorum_policy/);
+  });
+
+  it("rejects min_real_reviews < 1", () => {
+    expect(() =>
+      validateProject(
+        validProjectRaw({
+          review: { reviewers: [{ provider: "claude" }, { provider: "ollama" }], min_real_reviews: 0 },
+        }),
+      ),
+    ).toThrow(/review\.min_real_reviews/);
   });
 });
 

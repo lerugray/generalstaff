@@ -28,6 +28,9 @@ import type {
   BudgetEnforcement,
   BudgetProviderSource,
   BudgetOnExhausted,
+  ReviewConfig,
+  ReviewerEntry,
+  QuorumPolicy,
 } from "./types";
 import {
   VALID_ENGINEER_PROVIDERS,
@@ -354,7 +357,7 @@ function requirePositiveInt(
   return value;
 }
 
-function validateProject(raw: Record<string, unknown>): ProjectConfig {
+export function validateProject(raw: Record<string, unknown>): ProjectConfig {
   const id = requireString("(unknown)", "id", raw.id);
   const path = requireString(id, "path", raw.path);
   const priority = requirePositiveInt(id, "priority", raw.priority);
@@ -825,6 +828,82 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     };
   }
 
+  // gs quorum-review (2026-06-02): optional multi-reviewer quorum config.
+  // Schema validation only — the synthesis contract lives in reviewer.ts.
+  let review: ReviewConfig | undefined;
+  if (raw.review !== undefined && raw.review !== null) {
+    if (typeof raw.review !== "object" || Array.isArray(raw.review)) {
+      throw new ProjectValidationError(
+        id,
+        "review",
+        `must be an object, got ${Array.isArray(raw.review) ? "array" : typeof raw.review}`,
+      );
+    }
+    const rv = raw.review as Record<string, unknown>;
+    if (!Array.isArray(rv.reviewers) || rv.reviewers.length === 0) {
+      throw new ProjectValidationError(
+        id,
+        "review.reviewers",
+        "must be a non-empty array of { provider, model?, fallback?, label? } entries",
+      );
+    }
+    const reviewers: ReviewerEntry[] = rv.reviewers.map((entry, i) => {
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        throw new ProjectValidationError(id, `review.reviewers[${i}]`, "must be an object");
+      }
+      const e = entry as Record<string, unknown>;
+      if (typeof e.provider !== "string" || e.provider.trim() === "") {
+        throw new ProjectValidationError(
+          id,
+          `review.reviewers[${i}].provider`,
+          "must be a non-empty string",
+        );
+      }
+      for (const opt of ["model", "fallback", "label"] as const) {
+        if (e[opt] !== undefined && e[opt] !== null && typeof e[opt] !== "string") {
+          throw new ProjectValidationError(
+            id,
+            `review.reviewers[${i}].${opt}`,
+            `must be a string if specified, got ${typeof e[opt]}`,
+          );
+        }
+      }
+      return {
+        provider: e.provider,
+        model: e.model as string | undefined,
+        fallback: e.fallback as string | undefined,
+        label: e.label as string | undefined,
+      };
+    });
+    let quorumPolicy: QuorumPolicy | undefined;
+    if (rv.quorum_policy !== undefined && rv.quorum_policy !== null) {
+      if (rv.quorum_policy !== "conservative" && rv.quorum_policy !== "majority") {
+        throw new ProjectValidationError(
+          id,
+          "review.quorum_policy",
+          `must be "conservative" or "majority" if specified, got ${JSON.stringify(rv.quorum_policy)}`,
+        );
+      }
+      quorumPolicy = rv.quorum_policy;
+    }
+    let minRealReviews: number | undefined;
+    if (rv.min_real_reviews !== undefined && rv.min_real_reviews !== null) {
+      if (
+        typeof rv.min_real_reviews !== "number" ||
+        !Number.isInteger(rv.min_real_reviews) ||
+        rv.min_real_reviews < 1
+      ) {
+        throw new ProjectValidationError(
+          id,
+          "review.min_real_reviews",
+          `must be a positive integer if specified, got ${JSON.stringify(rv.min_real_reviews)}`,
+        );
+      }
+      minRealReviews = rv.min_real_reviews;
+    }
+    review = { reviewers, quorum_policy: quorumPolicy, min_real_reviews: minRealReviews };
+  }
+
   return {
     id,
     path,
@@ -849,6 +928,7 @@ function validateProject(raw: Record<string, unknown>): ProjectConfig {
     missionswarm,
     journal,
     advisor,
+    review,
     public_facing: publicFacing,
     customer_facing_smoke: customerFacingSmoke,
     lifecycle,

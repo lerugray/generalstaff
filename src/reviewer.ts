@@ -11,6 +11,7 @@ import {
   type DispatcherConfig,
   type ReviewerVerdict,
   type ReviewerResponse,
+  type QuorumPolicy,
 } from "./types";
 
 export interface ReviewerResult {
@@ -149,15 +150,20 @@ export async function runReviewer(
   return { verdict, response, rawResponse, parseError };
 }
 
-async function spawnClaude(prompt: string, cwd: string): Promise<string> {
+async function spawnClaude(prompt: string, cwd: string, model?: string): Promise<string> {
   return new Promise<string>((resolve) => {
+    const args = [
+      "-p", prompt,
+      "--allowedTools", "Read,Bash,Grep,Glob",
+      "--output-format", "text",
+    ];
+    // gs quorum-review: per-call model override (e.g. a specific Claude tier
+    // as one quorum voice). Threaded as an arg — process.env is never touched
+    // — so parallel voices don't race on a shared GENERALSTAFF_REVIEWER_MODEL.
+    if (model) args.push("--model", model);
     const child = spawn(
       "claude",
-      [
-        "-p", prompt,
-        "--allowedTools", "Read,Bash,Grep,Glob",
-        "--output-format", "text",
-      ],
+      args,
       {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
@@ -346,12 +352,13 @@ export async function invokeReviewerProvider(
   provider: string,
   prompt: string,
   cwd: string,
+  model?: string,
 ): Promise<string> {
   const p = provider.toLowerCase();
   return withReviewerSemaphore(p, async () => {
-    if (p === "openrouter") return invokeOpenRouterReviewer(prompt);
-    if (p === "ollama") return invokeOllamaReviewer(prompt);
-    return spawnClaude(prompt, cwd);
+    if (p === "openrouter") return invokeOpenRouterReviewer(prompt, model);
+    if (p === "ollama") return invokeOllamaReviewer(prompt, model);
+    return spawnClaude(prompt, cwd, model);
   });
 }
 
@@ -367,12 +374,15 @@ export async function invokeReviewerWithFallback(
   opts: {
     provider?: string;
     fallback?: string;
+    model?: string;
     onFallback?: (primaryError: string) => void | Promise<void>;
   } = {},
 ): Promise<{ rawResponse: string; usedFallback: boolean }> {
   const provider = (opts.provider ?? "claude").toLowerCase();
   const fallback = (opts.fallback ?? "").toLowerCase();
-  const primary = await invokeReviewerProvider(provider, prompt, cwd);
+  // model applies to the primary voice only; the fallback provider uses its
+  // own default (a per-reviewer tuned model rarely transfers across providers).
+  const primary = await invokeReviewerProvider(provider, prompt, cwd, opts.model);
 
   const shouldFallback =
     primary.startsWith("[REVIEWER ERROR]") &&
@@ -394,7 +404,10 @@ export async function invokeReviewerWithFallback(
 // GENERALSTAFF_REVIEWER_MODEL. Returns the raw text content of the
 // first choice's message, or a `[REVIEWER ERROR] ...` string that
 // parseReviewerResponse will fail-safe to verification_failed on.
-export async function invokeOpenRouterReviewer(prompt: string): Promise<string> {
+export async function invokeOpenRouterReviewer(
+  prompt: string,
+  modelOverride?: string,
+): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
     return (
@@ -405,7 +418,7 @@ export async function invokeOpenRouterReviewer(prompt: string): Promise<string> 
     );
   }
   const model =
-    process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
+    modelOverride ?? process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -476,7 +489,10 @@ export function validateOllamaHost(raw: string): string {
   return cleaned;
 }
 
-export async function invokeOllamaReviewer(prompt: string): Promise<string> {
+export async function invokeOllamaReviewer(
+  prompt: string,
+  modelOverride?: string,
+): Promise<string> {
   let host: string;
   try {
     host = validateOllamaHost(process.env.OLLAMA_HOST ?? "http://localhost:11434");
@@ -484,7 +500,7 @@ export async function invokeOllamaReviewer(prompt: string): Promise<string> {
     const msg = err instanceof Error ? err.message : String(err);
     return `[REVIEWER ERROR] ${msg}`;
   }
-  const model = process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen3:8b";
+  const model = modelOverride ?? process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen3:8b";
 
   try {
     const response = await fetch(`${host}/api/chat`, {
@@ -796,5 +812,432 @@ function isTaskEvidenceItem(
       o.confidence === "medium" ||
       o.confidence === "low")
   );
+}
+
+// =====================================================================
+// Quorum review (gs quorum-review, 2026-06-02)
+// Multi-reviewer consensus with three load-bearing properties:
+//   1. Parallel independence — each voice judges the same diff alone.
+//   2. Synthesis, not pick-best — findings are UNIONED and tagged by
+//      agreement count; reviewer B's real catch is never discarded
+//      because reviewer A "scored better."
+//   3. Honest-error + quorum contract — an errored voice is DROPPED,
+//      never fabricated, never counted toward the quorum; below
+//      min_real_reviews real voices it falls back to single-reviewer
+//      and SAYS SO rather than presenting one survivor as quorum-vetted.
+// See docs/quorum-review-design-2026-06-02.md.
+// =====================================================================
+
+const VERDICT_RANK: Record<ReviewerVerdict, number> = {
+  verification_failed: 0,
+  verified_weak: 1,
+  verified: 2,
+};
+
+// One reviewer's contribution to a quorum, after it has run + parsed.
+export interface QuorumVoice {
+  label: string;
+  provider: string;
+  model?: string;
+  verdict: ReviewerVerdict;
+  response: ReviewerResponse | null;
+  rawResponse: string;
+  parseError: string | null;
+  // True when this voice did NOT produce a real review (transport error,
+  // timeout, or unparseable output). Honest-error contract hinges on this.
+  errored: boolean;
+  errorDetail?: string;
+}
+
+type FindingKind = "scope_drift" | "hands_off" | "silent_failure";
+
+export interface TaggedFinding {
+  finding: string;
+  kind: FindingKind;
+  agree: number; // how many REAL reviewers raised it (the confidence signal)
+}
+
+export interface QuorumSynthesis {
+  verdict: ReviewerVerdict;
+  response: ReviewerResponse; // merged, downstream-compatible
+  realCount: number;
+  droppedCount: number;
+  quorumReached: boolean;
+  perVoice: Array<{ label: string; verdict: ReviewerVerdict | "errored"; errorDetail?: string }>;
+  taggedFindings: TaggedFinding[];
+}
+
+// A voice errored (no real review happened) when the invoker returned the
+// [REVIEWER ERROR] sentinel OR the response could not be parsed to a real
+// verdict (parseReviewerResponse sets parseError and falls back to the
+// fail-safe). A genuine `verification_failed` has parseError === null and is
+// NOT treated as an error — it's a real, counted vote.
+export function voiceErrored(rawResponse: string, parseError: string | null): boolean {
+  return rawResponse.trimStart().startsWith("[REVIEWER ERROR]") || parseError !== null;
+}
+
+function mostConservative(verdicts: ReviewerVerdict[]): ReviewerVerdict {
+  return verdicts.reduce<ReviewerVerdict>(
+    (acc, v) => (VERDICT_RANK[v] < VERDICT_RANK[acc] ? v : acc),
+    "verified",
+  );
+}
+
+// Aggregate verdict across the REAL voices, by policy.
+//   conservative: any blocker from any reviewer holds the merge → the most
+//     conservative verdict present wins. Safest when auto_merge is on.
+//   majority: the verdict held by a STRICT majority wins; on a split (no
+//     strict majority) it falls to the most conservative present so the
+//     disagreement surfaces for the human relay (auto_merge: false case).
+export function aggregateVerdict(
+  verdicts: ReviewerVerdict[],
+  policy: QuorumPolicy,
+): ReviewerVerdict {
+  if (verdicts.length === 0) return "verification_failed";
+  if (policy === "conservative") return mostConservative(verdicts);
+  const counts = new Map<ReviewerVerdict, number>();
+  for (const v of verdicts) counts.set(v, (counts.get(v) ?? 0) + 1);
+  const half = verdicts.length / 2;
+  let majority: ReviewerVerdict | null = null;
+  for (const [v, c] of counts) if (c > half) majority = v;
+  return majority ?? mostConservative(verdicts);
+}
+
+// Union the findings across real voices, tagged by how many raised each.
+// Dedup is case-insensitive on the trimmed string, scoped per kind; a single
+// voice listing the same finding twice counts once toward agreement.
+export function unionFindings(real: QuorumVoice[]): TaggedFinding[] {
+  const fields: Record<FindingKind, keyof ReviewerResponse> = {
+    scope_drift: "scope_drift_files",
+    hands_off: "hands_off_violations",
+    silent_failure: "silent_failures",
+  };
+  const counts = new Map<string, TaggedFinding>();
+  for (const v of real) {
+    const r = v.response;
+    if (!r) continue;
+    for (const kind of Object.keys(fields) as FindingKind[]) {
+      const arr = (r[fields[kind]] as string[]) ?? [];
+      const seenThisVoice = new Set<string>();
+      for (const raw of arr) {
+        const norm = raw.trim();
+        if (norm === "") continue;
+        const key = `${kind}::${norm.toLowerCase()}`;
+        if (seenThisVoice.has(key)) continue;
+        seenThisVoice.add(key);
+        const existing = counts.get(key);
+        if (existing) existing.agree++;
+        else counts.set(key, { finding: norm, kind, agree: 1 });
+      }
+    }
+  }
+  // Highest agreement first (then stable by text) — the operator reads the
+  // 3/3 catches before the 1/3 uncertain ones.
+  return [...counts.values()].sort(
+    (a, b) => b.agree - a.agree || a.finding.localeCompare(b.finding),
+  );
+}
+
+function dedupTaskEvidence(
+  items: ReviewerResponse["task_evidence"],
+): ReviewerResponse["task_evidence"] {
+  const seen = new Set<string>();
+  const out: ReviewerResponse["task_evidence"] = [];
+  for (const it of items) {
+    const k = `${it.task}::${it.evidence}`;
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(it);
+    }
+  }
+  return out;
+}
+
+// The reason from the voice driving the verdict (most conservative real one)
+// — so the headline cites the actual blocking rationale, not an arbitrary one.
+function drivingReason(real: QuorumVoice[]): string {
+  const sorted = [...real].sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict]);
+  return sorted[0]?.response?.reason ?? "";
+}
+
+function quorumNotes(
+  perVoice: QuorumSynthesis["perVoice"],
+  realCount: number,
+  droppedCount: number,
+  quorumReached: boolean,
+  policy: QuorumPolicy,
+  minRealReviews: number,
+  tagged: TaggedFinding[],
+): string {
+  const lines: string[] = [];
+  lines.push(
+    `Quorum review — ${realCount} real / ${droppedCount} dropped ` +
+      `(policy=${policy}, min_real_reviews=${minRealReviews}).`,
+  );
+  if (!quorumReached) {
+    lines.push(
+      "Quorum NOT reached: fell back to single-reviewer over the surviving " +
+        "voice(s). This verdict is NOT vetted by a full quorum.",
+    );
+  }
+  lines.push("Per reviewer:");
+  for (const pv of perVoice) {
+    lines.push(
+      `  - ${pv.label}: ${pv.verdict}` +
+        (pv.errorDetail ? ` (dropped — ${pv.errorDetail.slice(0, 160)})` : ""),
+    );
+  }
+  if (tagged.length) {
+    lines.push("Findings (agreement = # reviewers raising it):");
+    for (const t of tagged) lines.push(`  - [${t.agree}x] ${t.kind}: ${t.finding}`);
+  } else {
+    lines.push("No findings raised by any real reviewer.");
+  }
+  return lines.join("\n");
+}
+
+// PURE synthesis of already-run voices into one ReviewerResult-shaped verdict.
+// Separated from orchestration so the honest-error + union contract is
+// unit-testable without spawning real reviewers.
+export function synthesizeQuorum(
+  voices: QuorumVoice[],
+  policy: QuorumPolicy,
+  minRealReviews: number,
+): QuorumSynthesis {
+  const real = voices.filter((v) => !v.errored && v.response);
+  const droppedCount = voices.length - real.length;
+  const realCount = real.length;
+  const quorumReached = realCount >= minRealReviews;
+
+  const perVoice: QuorumSynthesis["perVoice"] = voices.map((v) => ({
+    label: v.label,
+    verdict: v.errored || !v.response ? "errored" : v.verdict,
+    errorDetail: v.errored ? v.errorDetail ?? v.parseError ?? undefined : undefined,
+  }));
+
+  // Zero real reviews → fail safe (mirrors the single path's malformed
+  // default). NEVER fabricate a passing verdict from errored voices.
+  if (realCount === 0) {
+    return {
+      verdict: "verification_failed",
+      response: {
+        verdict: "verification_failed",
+        reason:
+          `Quorum review: 0/${voices.length} reviewers produced a real review ` +
+          `(all errored or unparseable). Failing safe.`,
+        scope_drift_files: [],
+        hands_off_violations: [],
+        task_evidence: [],
+        silent_failures: [],
+        notes: quorumNotes(perVoice, 0, droppedCount, false, policy, minRealReviews, []),
+      },
+      realCount: 0,
+      droppedCount,
+      quorumReached: false,
+      perVoice,
+      taggedFindings: [],
+    };
+  }
+
+  const tagged = unionFindings(real);
+  const realVerdicts = real.map((v) => v.verdict);
+  // Sub-quorum: single-reviewer fallback = the conservative pick over the
+  // survivors (don't elevate a lone survivor's optimism to a quorum pass).
+  const verdict = quorumReached
+    ? aggregateVerdict(realVerdicts, policy)
+    : mostConservative(realVerdicts);
+
+  const scope_drift_files = tagged.filter((t) => t.kind === "scope_drift").map((t) => t.finding);
+  const hands_off_violations = tagged.filter((t) => t.kind === "hands_off").map((t) => t.finding);
+  const silent_failures = tagged.filter((t) => t.kind === "silent_failure").map((t) => t.finding);
+  const task_evidence = dedupTaskEvidence(real.flatMap((v) => v.response!.task_evidence));
+
+  const headline = quorumReached
+    ? `Quorum ${realCount}/${voices.length} reviewers (policy=${policy}) → ${verdict}.`
+    : `Quorum NOT reached (${realCount}/${minRealReviews} real reviews, ` +
+      `${droppedCount} dropped) — single-reviewer fallback → ${verdict}.`;
+  const reason = drivingReason(real) ? `${headline} ${drivingReason(real)}` : headline;
+
+  return {
+    verdict,
+    response: {
+      verdict,
+      reason,
+      scope_drift_files,
+      hands_off_violations,
+      task_evidence,
+      silent_failures,
+      notes: quorumNotes(perVoice, realCount, droppedCount, quorumReached, policy, minRealReviews, tagged),
+    },
+    realCount,
+    droppedCount,
+    quorumReached,
+    perVoice,
+    taggedFindings: tagged,
+  };
+}
+
+// Orchestrator: run every configured reviewer voice in parallel + independent,
+// then synthesize. Returns the SAME ReviewerResult shape as runReviewer, so
+// the cycle.ts call-site, the hands_off sanity check, and all logging consume
+// it unchanged. Caller gates on project.review.reviewers.length > 1.
+export async function runQuorumReview(
+  project: ProjectConfig,
+  cycleId: string,
+  promptParams: ReviewerPromptParams,
+  config?: DispatcherConfig,
+  dryRun: boolean = false,
+  cwdOverride?: string,
+): Promise<ReviewerResult> {
+  const reviewCfg = project.review!;
+  const reviewers = reviewCfg.reviewers;
+  const policy: QuorumPolicy = reviewCfg.quorum_policy ?? "conservative";
+  const minReal = reviewCfg.min_real_reviews ?? 2;
+  const prompt = buildReviewerPrompt(promptParams);
+  const cwd = cwdOverride ?? project.path;
+
+  await writeCycleFile(project.id, cycleId, "reviewer-prompt.txt", prompt, config);
+  await appendProgress(
+    project.id,
+    "reviewer_invoked",
+    {
+      prompt_length: prompt.length,
+      dry_run: dryRun,
+      quorum: true,
+      reviewer_count: reviewers.length,
+      quorum_policy: policy,
+      min_real_reviews: minReal,
+    },
+    cycleId,
+  );
+
+  if (dryRun) {
+    const dryResponse: ReviewerResponse = {
+      verdict: "verified",
+      reason: "[DRY RUN] Simulated quorum pass",
+      scope_drift_files: [],
+      hands_off_violations: [],
+      task_evidence: [],
+      silent_failures: [],
+      notes: `Dry run — ${reviewers.length} quorum reviewers not invoked`,
+    };
+    const raw = JSON.stringify(dryResponse, null, 2);
+    await writeCycleFile(project.id, cycleId, "reviewer-response.txt", raw, config);
+    await appendProgress(
+      project.id,
+      "reviewer_verdict",
+      { verdict: "verified", reason: dryResponse.reason, dry_run: true, quorum: true },
+      cycleId,
+    );
+    return { verdict: "verified", response: dryResponse, rawResponse: raw, parseError: null };
+  }
+
+  // Each invoker is already wrapped in the per-provider semaphore (gs-187),
+  // so parallel OpenRouter/Ollama voices serialize per-provider rather than
+  // stampeding the free tier / local GPU.
+  const voices: QuorumVoice[] = await Promise.all(
+    reviewers.map(async (entry): Promise<QuorumVoice> => {
+      const label = entry.label ?? (entry.model ? `${entry.provider}:${entry.model}` : entry.provider);
+      let rawResponse: string;
+      try {
+        const r = await invokeReviewerWithFallback(prompt, cwd, {
+          provider: entry.provider,
+          fallback: entry.fallback ?? "",
+          model: entry.model,
+          onFallback: async (primaryError) => {
+            await appendProgress(
+              project.id,
+              "reviewer_fallback",
+              {
+                reviewer: label,
+                primary_provider: entry.provider,
+                fallback_provider: entry.fallback,
+                primary_error: primaryError.slice(0, 500),
+              },
+              cycleId,
+            );
+          },
+        });
+        rawResponse = r.rawResponse;
+      } catch (err) {
+        rawResponse = `[REVIEWER ERROR] quorum voice ${label} threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`;
+      }
+      const { verdict, response, parseError } = parseReviewerResponse(rawResponse);
+      const errored = voiceErrored(rawResponse, parseError);
+      return {
+        label,
+        provider: entry.provider,
+        model: entry.model,
+        verdict,
+        response,
+        rawResponse,
+        parseError,
+        errored,
+        errorDetail: errored ? parseError ?? rawResponse.slice(0, 200) : undefined,
+      };
+    }),
+  );
+
+  const synth = synthesizeQuorum(voices, policy, minReal);
+
+  // Audit trail: full per-voice raw + the synthesis (the merged response is
+  // also written to reviewer-response.txt below so existing tooling finds it).
+  await writeCycleFile(
+    project.id,
+    cycleId,
+    "reviewer-quorum.json",
+    JSON.stringify(
+      {
+        policy,
+        min_real_reviews: minReal,
+        real: synth.realCount,
+        dropped: synth.droppedCount,
+        quorum_reached: synth.quorumReached,
+        aggregate_verdict: synth.verdict,
+        tagged_findings: synth.taggedFindings,
+        per_voice: voices.map((v) => ({
+          label: v.label,
+          provider: v.provider,
+          model: v.model,
+          verdict: v.errored ? "errored" : v.verdict,
+          errored: v.errored,
+          error_detail: v.errorDetail,
+          raw: v.rawResponse.slice(0, 4000),
+        })),
+      },
+      null,
+      2,
+    ),
+    config,
+  );
+
+  const mergedRaw = JSON.stringify(synth.response, null, 2);
+  await writeCycleFile(project.id, cycleId, "reviewer-response.txt", mergedRaw, config);
+  await appendProgress(
+    project.id,
+    "reviewer_response",
+    { response_length: mergedRaw.length, quorum: true },
+    cycleId,
+  );
+  await appendProgress(
+    project.id,
+    "reviewer_verdict",
+    {
+      verdict: synth.verdict,
+      reason: synth.response.reason,
+      scope_drift_files: synth.response.scope_drift_files,
+      hands_off_violations: synth.response.hands_off_violations,
+      silent_failures: synth.response.silent_failures,
+      quorum: true,
+      real_reviews: synth.realCount,
+      dropped_reviews: synth.droppedCount,
+      quorum_reached: synth.quorumReached,
+    },
+    cycleId,
+  );
+
+  return { verdict: synth.verdict, response: synth.response, rawResponse: mergedRaw, parseError: null };
 }
 

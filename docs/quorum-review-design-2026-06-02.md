@@ -1,7 +1,13 @@
 # Multi-reviewer quorum review — design proposal
 
-**Status:** Proposal, 2026-06-02. Not yet implemented. Additive + opt-in; default
-single-reviewer behavior is unchanged.
+**Status:** Implemented, 2026-06-02. Additive + opt-in; default single-reviewer
+behavior is unchanged (absent `review` or a single-entry `reviewers` list ==
+today's path). Synthesis contract: `synthesizeQuorum` in `src/reviewer.ts`;
+orchestrator `runQuorumReview`; config type `ReviewConfig` in `src/types.ts`
+(validated in `src/projects.ts`); one call-site swap in `src/cycle.ts`. Tests:
+`tests/quorum.test.ts` (honest-error + union-by-agreement + aggregate-verdict) +
+`review` validation cases in `tests/projects.test.ts`. The v2 reviewer-track-
+record layer below is still future work.
 **Scope:** GeneralStaff core review step (`reviewer_provider`).
 
 ## Motivation

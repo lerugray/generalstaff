@@ -23,6 +23,41 @@ export interface ReviewerResponse {
   notes: string;
 }
 
+// --- Quorum review config (multi-reviewer; gs quorum-review 2026-06-02) ---
+// Opt-in per project. Absent `review` or a single-entry `reviewers` list ==
+// today's single-reviewer behavior (backward compatible). Two or more
+// reviewers => parallel-independent voices synthesized into one verdict with
+// an honest-error + min-real-reviews contract.
+// See docs/quorum-review-design-2026-06-02.md.
+
+export type QuorumPolicy = "conservative" | "majority";
+
+export interface ReviewerEntry {
+  // Provider invoker: "claude" | "openrouter" | "ollama" | (custom name
+  // falls through to claude). Same routing space as
+  // GENERALSTAFF_REVIEWER_PROVIDER.
+  provider: string;
+  // Per-reviewer model override. When unset, the provider's own default
+  // (or GENERALSTAFF_REVIEWER_MODEL) is used. Threaded per-call — env is
+  // never mutated — so parallel voices stay genuinely independent.
+  model?: string;
+  // Optional per-reviewer fallback provider if this voice errors.
+  fallback?: string;
+  // Display label for audit output; defaults to provider (or provider:model).
+  label?: string;
+}
+
+export interface ReviewConfig {
+  reviewers: ReviewerEntry[];
+  // Aggregate-verdict policy. Default "conservative" (any blocker from any
+  // reviewer holds the merge — safest when auto_merge is on).
+  quorum_policy?: QuorumPolicy;
+  // Minimum number of *real* (non-errored) reviews for a genuine quorum.
+  // Below this, synthesis transparently falls back to single-reviewer and
+  // says so — it never presents one survivor as if vetted by many. Default 2.
+  min_real_reviews?: number;
+}
+
 // --- Cycle outcome (three-state from Phase 1 plan §8) ---
 
 export type CycleOutcome = ReviewerVerdict | "cycle_skipped";
@@ -252,6 +287,14 @@ export interface ProjectConfig {
   // CLI by default, see AdvisorConfig). Unset / `{enabled: false}` is
   // zero-overhead and preserves current behavior. See docs/ADVISOR.md.
   advisor?: AdvisorConfig;
+  // gs quorum-review (2026-06-02): optional multi-reviewer quorum. Absent or
+  // a single-entry `reviewers` list => current single-reviewer behavior
+  // (backward compatible). Two or more reviewers => parallel-independent
+  // voices, synthesized into one verdict with an honest-error +
+  // min_real_reviews contract. Opt-in because it multiplies reviewer spend
+  // N× (Hard Rule 8 — operator pays per reviewer).
+  // See docs/quorum-review-design-2026-06-02.md.
+  review?: ReviewConfig;
 }
 
 // gs-322 / Phase B+ followup. Two stages today; intentionally narrow.
