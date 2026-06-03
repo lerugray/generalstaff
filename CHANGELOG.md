@@ -9,6 +9,38 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-03
+
+Two framework features, both opt-in and backward-compatible. A
+`projects.yaml` unchanged from v0.5.x behaves identically. 2,077 tests
+passing.
+
+### Added
+
+- **Multi-reviewer quorum review.** Add a `review:` block to any project
+  to replace the single-reviewer gate with two or more independent voices
+  run in parallel and synthesized into one verdict. Each entry declares a
+  `provider`, optional `model`, `fallback`, and `label`. Two policies:
+  `conservative` (any blocker holds the merge; the default, safest when
+  `auto_merge: true`) and `majority`. `min_real_reviews` (default 2) sets
+  the floor for a genuine quorum: if fewer voices respond without error,
+  GS falls back to single-reviewer and says so in the audit log rather
+  than presenting one survivor as if vetted by many. Absent `review:` is
+  the existing single-reviewer behavior, bit-for-bit. (db77c28)
+- **Repo-structure map + agent self-planning on every engineer dispatch.**
+  Every cycle injects a ranked structural map of the repo at the top of
+  the engineer prompt (`aider --show-repo-map`, capped at ~700 tokens),
+  then has the agent plan its own work before touching files, with no
+  human plan-approval. The map is best-effort: if it can't be built, the
+  cycle dispatches exactly as before. The `hands_off` list and the
+  verification gate still bind regardless of the agent's plan. All
+  engineer providers (claude, aider, GSD). (e445062 / 736514d)
+
+### Ops / marketing
+
+Landing page (GitHub Pages), itch.io page plus cover and banner, CI
+deploy workflow. Framework behavior unchanged.
+
 ## [0.5.0] — 2026-05-19
 
 A backlog-clearing release: the 17-task `interactive_only` queue triaged

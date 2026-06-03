@@ -167,6 +167,77 @@
 # Hard Rule 8 (BYOK): every credential above comes from your own
 # environment. Nothing is shipped, nothing is hosted on your behalf.
 
+# -------------------------------------------------------------------
+# Multi-reviewer quorum review (db77c28, 2026-06-02)
+# -------------------------------------------------------------------
+#
+# Optional. When `review:` is absent (the default), GS uses a single
+# reviewer driven by GENERALSTAFF_REVIEWER_PROVIDER — identical to
+# all prior releases. Add `review:` with two or more entries to get
+# parallel-independent reviewer voices synthesized into one verdict.
+# A single-entry `reviewers` list is also valid (backward-compatible
+# opt-in without changing the quorum behavior).
+#
+#   review.reviewers: list   (required when `review:` is present)
+#       Each entry is one reviewer voice run independently in
+#       parallel. Fields per entry:
+#
+#       provider: string   (required)
+#           One of `claude`, `openrouter`, `ollama`, or any custom
+#           name that falls through to the claude path. Same routing
+#           space as GENERALSTAFF_REVIEWER_PROVIDER.
+#
+#       model: string   (optional)
+#           Per-reviewer model override. When unset, the provider's
+#           own default (or GENERALSTAFF_REVIEWER_MODEL) is used.
+#           Voices are threaded per-call so env is never mutated —
+#           parallel voices stay genuinely independent.
+#
+#       fallback: string   (optional)
+#           Per-reviewer fallback provider if this voice errors.
+#           Same semantics as GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER.
+#
+#       label: string   (optional)
+#           Display label in audit output and PROGRESS.jsonl.
+#           Defaults to `provider` (or `provider:model` when model
+#           is set).
+#
+#   review.quorum_policy: "conservative" | "majority"   (optional)
+#       How individual reviewer verdicts are synthesized.
+#
+#       conservative (default): any `verification_failed` from any
+#           reviewer holds the merge — safest when `auto_merge: true`.
+#           One dissenting voice is sufficient to roll the cycle back.
+#
+#       majority: pass when more reviewers approve than block. Use
+#           when you want the aggregate signal rather than the strictest
+#           individual voice (e.g. three reviewers where one tends to
+#           over-fire on scope).
+#
+#   review.min_real_reviews: int   (optional, default: 2)
+#       Minimum number of non-errored reviewer responses to count as
+#       a genuine quorum. If fewer voices respond without error, GS
+#       transparently falls back to single-reviewer behavior and says
+#       so in the audit log — it never presents one survivor as if
+#       vetted by many. Must be >= 1.
+#
+# Example — three-voice conservative quorum:
+#
+#   review:
+#     reviewers:
+#       - provider: claude
+#       - provider: openrouter
+#         model: qwen/qwen3-coder-30b-a3b-instruct
+#         fallback: claude
+#       - provider: ollama
+#         model: qwen3:8b
+#         label: local-framework-voice
+#     quorum_policy: conservative
+#     min_real_reviews: 2
+#
+# No breaking changes. Absent `review:` == today's single-reviewer
+# behavior bit-for-bit.
+
 projects:
   - id: catalogdna
     path: C:/Users/rweis/OneDrive/Documents/catalogdna
