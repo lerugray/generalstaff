@@ -156,6 +156,9 @@ LEAN-CTX.md
 .cursorrules
 .aider*
 
+# Repo-map tags cache (per-machine, regenerated tool cache; never committed).
+.repomap.tags.cache*
+
 # Orchestration staging area — transient task briefs / inbox prep,
 # not part of the orchestration layer itself.
 scripts/orchestration/spawns-staging/
