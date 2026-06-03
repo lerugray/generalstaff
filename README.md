@@ -53,7 +53,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,030 passing tests across 69 test files.
+- 2,077 passing tests across 72 test files.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 
