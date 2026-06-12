@@ -85,6 +85,27 @@ The maintainer, plus any external contributors who emerge.
 
 ---
 
+## 9. Agent conduct (any coding agent working in this repo)
+
+Added 2026-06-12, adapted from the FerroxLabs agents-md pattern after a
+fleet review found these three clauses missing from the house files.
+
+1. **Disagree before doing the work when the premise is wrong.** If the
+   instruction rests on a false premise (a file that doesn't exist, a
+   behavior the code doesn't have, a constraint that isn't real), say so
+   and stop — don't implement against the broken premise. Scope rails
+   protect *what* you touch; this protects *why*.
+2. **Two failed corrections = stop.** If the operator has corrected the
+   same issue twice and your third attempt would be another variation on
+   the same guess, stop and ask for a sharper prompt or a reset instead
+   of thrashing. Burned context is worse than a restart.
+3. **Project learnings** (compact correction ledger — one line per
+   correction, newest first; distinct from the dated narrative in
+   Revisions):
+   <!-- Append one-liners here as corrections land. -->
+
+---
+
 ## Revisions
 
 <!-- Update mode appends dated sections below. -->
