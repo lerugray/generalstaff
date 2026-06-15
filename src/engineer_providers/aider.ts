@@ -16,6 +16,7 @@ import {
   GENERALSTAFF_TASK_CLAIM_PREFIX,
   engineerTaskClaimPromptSection,
 } from "../prompts/engineer_claim";
+import { ENGINEER_DISCIPLINE } from "../prompts/engineer_discipline";
 
 // OpenRouter's Qwen 3.6 Plus — newer general-purpose flagship (released
 // 2026-04-02, ~$0.325/$1.95 per M tokens). The gs-277 benchmark
@@ -40,28 +41,6 @@ export const DEFAULT_AIDER_MODEL = "openrouter/qwen/qwen3.6-plus";
 function shellSingleQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
-
-// Engineering discipline injected into the (non-creative) engineer prompt.
-// Distilled from the ponytail skill (github.com/DietrichGebert/ponytail, MIT):
-// a "lazy senior dev" ladder biasing the bot toward the minimal solution.
-// Mode-B cycles (boilerplate, mechanical refactors) fail by over-engineering,
-// not wrong direction — this is the cheap counterweight. Deliberately NOT
-// applied to creative cycles (prose drafting), where code-minimalism is moot.
-const PONYTAIL_DISCIPLINE = `## Engineering discipline — lazy senior dev
-The best code is the code you never wrote. Before writing anything, climb this
-ladder and stop at the first rung that holds:
-1. Does this need to exist at all? Speculative need -> skip it, say so in one line. (YAGNI)
-2. Does the standard library do it? Use it.
-3. Does a native platform feature cover it? Prefer it over a new dependency.
-4. Does an already-installed dependency solve it? Use it — never add a new one for what a few lines do.
-5. Can it be one line? One line.
-6. Only then: the minimum code that works.
-Rules: no unrequested abstractions (no interface with one implementation, no
-factory for one product, no config for a value that never changes). Deletion over
-addition; shortest working diff wins; fewest files. Boring over clever. Mark a
-deliberate shortcut with a \`ponytail:\` comment naming its upgrade path. Never
-simplify away input validation at trust boundaries, error handling that prevents
-data loss, security, accessibility, or anything the task explicitly requested.`;
 
 // Build the prompt aider sees as its --message. Mirrors the shape of the
 // claude engineer prompt in per-project engineer_command.sh files: task
@@ -188,7 +167,7 @@ tree is on master and may be in use by a human. Work only in this directory.
 
 ${taskBlock}
 
-${PONYTAIL_DISCIPLINE}
+${ENGINEER_DISCIPLINE}
 
 ## What you can do
 - Add, modify, or delete files at the paths the task explicitly names.

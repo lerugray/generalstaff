@@ -186,6 +186,8 @@ Read state/${projectId}/tasks.json and pick the highest-priority unfinished task
 (status: 'pending', lowest priority number first; among same-priority
 tasks, lowest id first). Work on exactly that task — no scope creep.
 
+\${GENERALSTAFF_ENGINEER_DISCIPLINE:-}
+
 ## What you can do
 - Add, modify, or delete files at the paths the task explicitly names.
 - Add test files that support the claimed work.

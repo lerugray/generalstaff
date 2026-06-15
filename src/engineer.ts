@@ -23,6 +23,7 @@ import type {
   CycleCreativeContext,
 } from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
+import { ENGINEER_DISCIPLINE } from "./prompts/engineer_discipline";
 import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
 
 export type { CycleCreativeContext };
@@ -219,6 +220,14 @@ export async function runEngineer(
         }
       : {};
 
+    // ponytail engineering discipline — non-creative cycles only. The claude
+    // path's engineer_command.sh references $GENERALSTAFF_ENGINEER_DISCIPLINE;
+    // aider embeds the same text directly. Empty for creative (prose) cycles,
+    // where code-minimalism is meaningless.
+    const disciplineEnv: Record<string, string> = context?.isCreative
+      ? {}
+      : { GENERALSTAFF_ENGINEER_DISCIPLINE: ENGINEER_DISCIPLINE };
+
     // gs-282: expose GeneralStaff's own root so engineer prompts can point
     // the bot at the `task done` CLI regardless of which project's worktree
     // it's running inside. Line-oriented edits to `state/<id>/tasks.json`
@@ -240,7 +249,7 @@ export async function runEngineer(
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...rootEnv, ...creativeEnv, ...peekedTaskEnv },
+      env: { ...process.env, ...rootEnv, ...creativeEnv, ...disciplineEnv, ...peekedTaskEnv },
     });
     setActiveEngineerChild(child);
 
