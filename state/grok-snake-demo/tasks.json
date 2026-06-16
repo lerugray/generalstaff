@@ -1,0 +1,11 @@
+[
+  {
+    "id": "snake-001",
+    "title": "Create snake.html \u2014 a single-file, playable Snake game using an HTML5 canvas and vanilla JavaScript. Arrow keys steer the snake; eating food grows the snake and increments a visible score; colliding with a wall or the snake's own body ends the game and shows a Game Over message with a way to restart (e.g. press Space or R). No external libraries and no build step \u2014 all HTML, CSS, and JS inline in one snake.html file at the repo root.",
+    "status": "pending",
+    "priority": 1,
+    "expected_touches": [
+      "snake.html"
+    ]
+  }
+]
