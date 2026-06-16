@@ -2510,5 +2510,19 @@
     "interactive_only": true,
     "interactive_only_reason": "v0.4.x core-loop investigation; touches src/cycle.ts step 3a + possibly src/engineer.ts aider branch. Needs human eye to disentangle the two subhypotheses + decide whether the fix is conditional-wiring or aider-path-revival.",
     "expected_touches": ["src/cycle.ts", "src/advisor.ts", "src/engineer.ts", "src/projects.ts"]
+  },
+  {
+    "id": "gs-330",
+    "title": "GeneralStaff v0.7.0 headline: wire the wintermute judgment-gate (judge()) into the bot as a PRE-EXECUTION gate. Build per the scope in the wintermute repo (GS-GATE-SCOPE.md): a small TS gate module (src/judgment_gate.ts) mirroring reviewer.ts's providers/ LLM call (canonical Hammerstein system-prompt -> KEEP/REJECT verdict); insert in src/work_detection.ts isTaskBotPickable (NOT hands_off) as a new skip/flag reason 'judged_stupid_industrious'; vendor the Hammerstein system-prompt into src/prompts/ (HANDS_OFF - operator sign-off at build time); add a projects.yaml flag judgment_gate: off|flag|skip, DEFAULT flag-first (advisory, NOT a veto - per Hammerstein's own anti-veto stance + the false-reject risk shown by wintermute v2's contestable boundary). Then cut v0.7.0: version bump + changelog + messaging-vs-code audit. Decided 2026-06-16; GS was v0.6.0 + 5 commits (engineer ponytail-discipline + agent-conduct docs).",
+    "status": "pending",
+    "priority": 1,
+    "interactive_only": true,
+    "interactive_only_reason": "Vendors the Hammerstein system-prompt into src/prompts/ (hands_off) and is a safety-adjacent / design-axis build needing operator sign-off; not a mechanical bot task.",
+    "expected_touches": [
+      "src/judgment_gate.ts",
+      "src/work_detection.ts",
+      "src/prompts/",
+      "projects.yaml"
+    ]
   }
 ]
