@@ -1,6 +1,6 @@
 {
   "name": "generalstaff",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Open-source autonomous engineering dispatcher with verification gates",
   "type": "module",
   "bin": {

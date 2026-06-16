@@ -411,10 +411,45 @@ export function diffSummaryStats(diff: string): DiffStats {
   };
 }
 
+// gs-332: the `task done` CLI resolves tasks.json via getRootDir()=process.cwd()
+// and engineers run it with cwd=the worktree, so a completed task's status flip
+// lands in the worktree's tasks.json — which isn't necessarily committed to
+// bot/work (state/ may be hands_off, or the path is a junction to a file
+// outside the repo). So the committed-diff signal alone can miss a genuinely
+// completed task and roll the cycle back as false "scope drift". This helper
+// checks the candidate tasks.json copies (worktree first, then project-local,
+// then GS-root) for the attempted task being now done. Pure file IO so it's
+// unit-testable without git. Returns a human-readable "marked done" line, or null.
+export async function findDoneTaskAcrossLayouts(
+  candidatePaths: string[],
+  taskId: string,
+): Promise<string | null> {
+  for (const lp of candidatePaths) {
+    if (!existsSync(lp)) continue;
+    try {
+      const tasks = JSON.parse(await readFile(lp, "utf8")) as Array<{
+        id?: string;
+        title?: string;
+        status?: string;
+      }>;
+      const t = Array.isArray(tasks)
+        ? tasks.find((x) => x.id === taskId)
+        : undefined;
+      if (t && t.status === "done") {
+        return `${t.id}: ${(t.title ?? "").slice(0, 120)} (status -> done)`.trim();
+      }
+    } catch {
+      // ignore unreadable/malformed tasks.json — try the next candidate
+    }
+  }
+  return null;
+}
+
 async function detectMarkedDoneTasks(
   project: ProjectConfig,
   startSha: string,
   endSha: string,
+  attemptedTaskId?: string,
 ): Promise<string> {
   if (startSha === endSha) return "(No changes detected)";
 
@@ -439,27 +474,42 @@ async function detectMarkedDoneTasks(
   }
 
   if (project.work_detection === "tasks_json") {
-    // Check tasks.json diff for status changes to "done"
+    // Primary: status changes to "done" committed in the bot/work diff.
     try {
       const diff =
         await $`git -C ${project.path} diff ${startSha} ${endSha} -- state/${project.id}/tasks.json`.text();
-      if (!diff.trim()) return "(tasks.json not modified)";
-
-      // Extract lines where status changed to "done"
-      const doneLines = diff
-        .split("\n")
-        .filter((l) => l.startsWith("+") && /"status":\s*"done"/.test(l));
-
-      if (doneLines.length === 0) return "(No tasks newly marked done)";
-
-      // Try to extract task titles from context
-      const addedLines = diff
-        .split("\n")
-        .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
-      return addedLines.map((l) => l.slice(1).trim()).join("\n");
+      if (diff.trim()) {
+        const doneLines = diff
+          .split("\n")
+          .filter((l) => l.startsWith("+") && /"status":\s*"done"/.test(l));
+        if (doneLines.length > 0) {
+          const addedLines = diff
+            .split("\n")
+            .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+          return addedLines.map((l) => l.slice(1).trim()).join("\n");
+        }
+      }
     } catch {
-      return "(Could not read tasks.json diff)";
+      // fall through to live-state fallback
     }
+
+    // gs-332 fallback: the `task done` CLI resolves tasks.json via
+    // getRootDir()=process.cwd(); engineers run it with cwd=the worktree, so
+    // the status flip lands in the worktree's tasks.json (uncommitted when
+    // state/ is hands_off). Check the worktree copy first (still present at
+    // detect time), then project-local and GS-root.
+    if (attemptedTaskId) {
+      const found = await findDoneTaskAcrossLayouts(
+        [
+          join(project.path, ".bot-worktree", "state", project.id, "tasks.json"),
+          join(project.path, "state", project.id, "tasks.json"),
+          join(getRootDir(), "state", project.id, "tasks.json"),
+        ],
+        attemptedTaskId,
+      );
+      if (found) return found;
+    }
+    return "(No tasks newly marked done)";
   }
 
   if (project.work_detection === "git_issues") {
@@ -1110,6 +1160,7 @@ export async function executeCycle(
         project,
         cycleStartSha,
         cycleEndSha,
+        nextTask?.id,
       );
       const sessionNote = await findSessionNote(
         project,

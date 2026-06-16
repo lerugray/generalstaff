@@ -9,6 +9,27 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-06-16
+
+A reviewer-signal fix. 2,117 tests passing.
+
+### Fixed
+
+- **A genuinely-completed cycle could be rolled back as false "scope drift"
+  (gs-332).** The reviewer judges scope-match partly from which task the cycle
+  marked done — a signal derived only from the bot/work committed diff of
+  tasks.json. But the `task done` CLI resolves tasks.json via `getRootDir()` =
+  the process cwd, and engineers run it with cwd = the worktree, so the status
+  flip lands in the *worktree's* tasks.json, which isn't always in the committed
+  diff (state/ may be hands_off, or the path is a junction to a file outside the
+  repo). A real completed task could therefore be rolled back as unclaimed work.
+  `detectMarkedDoneTasks` now falls back to reading the resolved tasks.json
+  (worktree → project-local → GS-root) for the attempted task's status —
+  additive, only consulted when the committed diff carries no done-marking
+  (`findDoneTaskAcrossLayouts`, unit-tested). Surfaced by the v0.7.1
+  grok-provider demo: grok built a complete, verified Snake game every run, but
+  the cycle kept rolling back until this landed. Engine-agnostic.
+
 ## [0.7.1] — 2026-06-16
 
 Adds a third engineer provider. Backward-compatible; existing projects behave

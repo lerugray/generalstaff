@@ -2565,12 +2565,13 @@
   {
     "id": "gs-332",
     "title": "markedDone detection can silently fail -> false 'scope drift' rollback. detectMarkedDoneTasks (cycle.ts) reads the bot/work committed diff of tasks.json, but the engineer's `task done` CLI resolves tasks.json via getRootDir()=process.cwd() and engineers run it with cwd=the WORKTREE, so the status flip lands in the worktree's tasks.json: uncommitted when state/ is hands_off, absent from project.path/state and GS-root/state, and only in the bot/work diff under the state-junction layout. Net: a completed task rolls back as scope drift. Repro: grok-snake-demo (project-local tasks.json + state/ hands_off + no junction); grok built+verified+committed a real Snake game, cycle still rolled back. Fix candidates: (a) detectMarkedDoneTasks fallback that reads the worktree's tasks.json (attempted 2026-06-16, didn't land cleanly under time pressure, reverted; needs proper unit-tested impl); (b) make the engineer-CLI getRootDir resolve to GENERALSTAFF_ROOT not cwd; (c) document standalone projects need state-junctions. NOT a grok-provider defect (engine-agnostic).",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Touches the cycle.ts reviewer-signal path (detectMarkedDoneTasks); needs a tested fix + design call on getRootDir semantics. Diagnosed but not fixed in the 2026-06-16 session.",
     "expected_touches": [
       "src/cycle.ts"
-    ]
+    ],
+    "done_note": "Fixed in v0.7.2 (findDoneTaskAcrossLayouts fallback in detectMarkedDoneTasks). Root cause confirmed empirically: task-done CLI writes the worktree tasks.json (getRootDir=cwd), invisible to the committed-diff signal. Fallback reads worktree->project-local->GS-root. grok-snake-demo cycle now goes VERIFIED. +6 unit tests."
   }
 ]

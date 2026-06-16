@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.7.1, 2,111 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.x adds an opt-in pre-cycle judgment gate (a Hammerstein slop screen that flags or skips stupid-industrious tasks before the engineer runs) and a `grok` engineer provider (run cycles on xAI's Grok CLI, off your Claude quota). Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.7.2, 2,117 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.x adds an opt-in pre-cycle judgment gate (a Hammerstein slop screen that flags or skips stupid-industrious tasks before the engineer runs) and a `grok` engineer provider (run cycles on xAI's Grok CLI, off your Claude quota). Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -53,7 +53,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,111 passing tests across 73 test files.
+- 2,117 passing tests across 74 test files.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 
