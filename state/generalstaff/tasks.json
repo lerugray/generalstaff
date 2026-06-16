@@ -2554,5 +2554,23 @@
       "projects.yaml"
     ],
     "done_note": "Shipped in v0.7.0 (commit 08fd1c7), released to GitHub (Latest). Gate module + cycle wiring + off|flag|skip config + 28 tests + docs. Public AGPL prompt vendored; advisory flag-first, off by default. Live-smoke + adversarial-review verified."
+  },
+  {
+    "id": "gs-331",
+    "title": "v0.7.1: add `grok` engineer_provider \u2014 run cycle engineer work on xAI's Grok CLI, billed to the flat-rate grok.com sub (no per-token cost, off the Anthropic cap). buildGrokCommand mirrors the aider bash contract; reuses the provider-agnostic prompt; sub-backed auth (~/.grok/auth.json), no API key.",
+    "status": "done",
+    "priority": 1,
+    "done_note": "Shipped v0.7.1 (36a2f09), released to GitHub. +8 tests, bash -n verified, live autonomous-edit verified. Live demo cycle (grok-snake-demo) confirmed grok builds a complete Snake game end-to-end."
+  },
+  {
+    "id": "gs-332",
+    "title": "markedDone detection can silently fail -> false 'scope drift' rollback. detectMarkedDoneTasks (cycle.ts) reads the bot/work committed diff of tasks.json, but the engineer's `task done` CLI resolves tasks.json via getRootDir()=process.cwd() and engineers run it with cwd=the WORKTREE, so the status flip lands in the worktree's tasks.json: uncommitted when state/ is hands_off, absent from project.path/state and GS-root/state, and only in the bot/work diff under the state-junction layout. Net: a completed task rolls back as scope drift. Repro: grok-snake-demo (project-local tasks.json + state/ hands_off + no junction); grok built+verified+committed a real Snake game, cycle still rolled back. Fix candidates: (a) detectMarkedDoneTasks fallback that reads the worktree's tasks.json (attempted 2026-06-16, didn't land cleanly under time pressure, reverted; needs proper unit-tested impl); (b) make the engineer-CLI getRootDir resolve to GENERALSTAFF_ROOT not cwd; (c) document standalone projects need state-junctions. NOT a grok-provider defect (engine-agnostic).",
+    "status": "pending",
+    "priority": 2,
+    "interactive_only": true,
+    "interactive_only_reason": "Touches the cycle.ts reviewer-signal path (detectMarkedDoneTasks); needs a tested fix + design call on getRootDir semantics. Diagnosed but not fixed in the 2026-06-16 session.",
+    "expected_touches": [
+      "src/cycle.ts"
+    ]
   }
 ]
