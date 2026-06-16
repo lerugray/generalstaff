@@ -2153,7 +2153,7 @@
     "title": "Usage-budget feature \u00e2 integration test matrix. Covers 11 scenarios from the test-matrix section of docs/internal/USAGE-BUDGET-DESIGN-2026-04-21.md: (1) no session_budget set \u00e2 existing behavior unchanged (regression guard); (2) max_usd budget hit mid-session, enforcement='hard' \u00e2 stops with stopReason='budget'; (3) max_usd budget hit, enforcement='advisory' \u00e2 warning logged, continues to natural end; (4) max_tokens budget variant; (5) max_cycles budget variant; (6) per-project cap enforces correctly within fleet cap (project stops first); (7) per-project > fleet-wide validation rejection; (8) exactly-one-unit validation rejection (two units both set); (9) consumption source unavailable \u00e2 fail-open with warning, session completes normally; (10) Claude Code JSONL file missing \u00e2 same fail-open path; (11) fresh 5-hour window vs mid-window consumption math. Tests live in tests/integration/usage_budget.test.ts with shared fixtures under tests/usage/fixtures/. Depends on gs-298 + gs-299 both merged. Expected diff: ~300-500 LOC.",
     "status": "superseded",
     "priority": 3,
-    "supersedes_note": "Split 2026-04-24 into gs-301a through gs-301e after 7 bot attempts all failed verification on 400-700 LOC single-cycle test generation. Root cause: task scope too large for single cycle — engineer produces 500+ LOC of TypeScript in one shot, inevitably hits tsc errors or failing assertions. Implementation surface (gs-298 usage-budget gate + gs-299 session_report surfacing) is complete and testable; scenarios 1-11 have been redistributed across 5 atomic tasks at ~100-150 LOC each."
+    "supersedes_note": "Split 2026-04-24 into gs-301a through gs-301e after 7 bot attempts all failed verification on 400-700 LOC single-cycle test generation. Root cause: task scope too large for single cycle \u2014 engineer produces 500+ LOC of TypeScript in one shot, inevitably hits tsc errors or failing assertions. Implementation surface (gs-298 usage-budget gate + gs-299 session_report surfacing) is complete and testable; scenarios 1-11 have been redistributed across 5 atomic tasks at ~100-150 LOC each."
   },
   {
     "id": "gs-302",
@@ -2171,7 +2171,7 @@
       "src/session_report.ts",
       "tests/session_report.test.ts"
     ],
-    "done_note": "Shipped in src/notify.ts (the actual home for the session-complete Telegram notification — task description pointed at src/session_report.ts which is the unrelated stop-reason-stats analyst report; flagged in commit message). (a) Header tag now threshold-based via computeHeaderTag(verified, failed): >=75% [OK], 25-74% [PARTIAL], <25% [FAIL]. Zero-attempts (all-skipped) reads as [OK] — nothing failed. Skipped cycles don't move the ratio. (b) New 'Touched: project-id (cycles), ...' line right after the header, suppressed when projectCounts is empty. (c)+(d) Tasks grouped by first-seen project_id with [project-id] prefix on each bullet — 'What got done' iterates groups in first-seen order so the reading order matches the Touched: line. SessionNotificationParams gains tasksDone: SessionTaskEntry[] (was string[]) + projectCounts: SessionProjectCount[] (new); the now-redundant success: boolean field is removed (header derives from counts). Call site in src/session.ts builds projectCounts from fleetBuckets via inline first-seen-order Map walk over verified→failed→skipped. Acceptance: 11 verified + 1 failed → [OK] (gs-303 spec); 0 verified + 5 failed → [FAIL] (gs-303 spec). Diff: ~110 LOC src/notify.ts (interface expansion + threshold helper + grouping helper + format rewrite) + ~30 LOC src/session.ts (call-site shape change) + ~140 LOC tests/notify.test.ts (8 threshold cases, 2 breakdown cases, 1 grouping case, 2 integration-style updates). 43/43 notify tests pass; 1956 total fleet tests pass, 0 fail; tsc clean."
+    "done_note": "Shipped in src/notify.ts (the actual home for the session-complete Telegram notification \u2014 task description pointed at src/session_report.ts which is the unrelated stop-reason-stats analyst report; flagged in commit message). (a) Header tag now threshold-based via computeHeaderTag(verified, failed): >=75% [OK], 25-74% [PARTIAL], <25% [FAIL]. Zero-attempts (all-skipped) reads as [OK] \u2014 nothing failed. Skipped cycles don't move the ratio. (b) New 'Touched: project-id (cycles), ...' line right after the header, suppressed when projectCounts is empty. (c)+(d) Tasks grouped by first-seen project_id with [project-id] prefix on each bullet \u2014 'What got done' iterates groups in first-seen order so the reading order matches the Touched: line. SessionNotificationParams gains tasksDone: SessionTaskEntry[] (was string[]) + projectCounts: SessionProjectCount[] (new); the now-redundant success: boolean field is removed (header derives from counts). Call site in src/session.ts builds projectCounts from fleetBuckets via inline first-seen-order Map walk over verified\u2192failed\u2192skipped. Acceptance: 11 verified + 1 failed \u2192 [OK] (gs-303 spec); 0 verified + 5 failed \u2192 [FAIL] (gs-303 spec). Diff: ~110 LOC src/notify.ts (interface expansion + threshold helper + grouping helper + format rewrite) + ~30 LOC src/session.ts (call-site shape change) + ~140 LOC tests/notify.test.ts (8 threshold cases, 2 breakdown cases, 1 grouping case, 2 integration-style updates). 43/43 notify tests pass; 1956 total fleet tests pass, 0 fail; tsc clean."
   },
   {
     "id": "gs-301a",
@@ -2237,7 +2237,7 @@
       "src/work_detection.ts",
       "tests/work_detection.test.ts"
     ],
-    "done_note": "Shipped: greenfieldHasMoreWork / greenfieldCountRemaining / greenfieldCountRemainingDetailed now resolve tasks.json via a new resolveTasksPath() helper that tries <projectPath>/state/<id>/tasks.json first then falls back to <getRootDir()>/state/<id>/tasks.json. Eliminates the per-machine setup-state-junctions / .ps1 symlink workaround documented in CLAUDE.local.md for parallel-mode pickers. The legacy 'reads from projectPath, not GS-root' test (gamr-style projects with their own state) still passes — fallback only triggers when the per-project file is missing. Two new tests under the greenfield describe: (a) projectPath has no state/ dir, GS-root has tasks.json -> fallback returns the count; (b) both populated -> projectPath wins (precedence regression guard). Diff: ~30 LOC src/work_detection.ts + ~60 LOC tests. 48/48 work_detection tests pass; 1947 total fleet tests pass, 0 fail."
+    "done_note": "Shipped: greenfieldHasMoreWork / greenfieldCountRemaining / greenfieldCountRemainingDetailed now resolve tasks.json via a new resolveTasksPath() helper that tries <projectPath>/state/<id>/tasks.json first then falls back to <getRootDir()>/state/<id>/tasks.json. Eliminates the per-machine setup-state-junctions / .ps1 symlink workaround documented in CLAUDE.local.md for parallel-mode pickers. The legacy 'reads from projectPath, not GS-root' test (gamr-style projects with their own state) still passes \u2014 fallback only triggers when the per-project file is missing. Two new tests under the greenfield describe: (a) projectPath has no state/ dir, GS-root has tasks.json -> fallback returns the count; (b) both populated -> projectPath wins (precedence regression guard). Diff: ~30 LOC src/work_detection.ts + ~60 LOC tests. 48/48 work_detection tests pass; 1947 total fleet tests pass, 0 fail."
   },
   {
     "id": "gs-305",
@@ -2248,7 +2248,7 @@
   },
   {
     "id": "gs-306",
-    "title": "mshook-001 — mission-swarm reviewer-stage preview hook. Add src/integrations/mission_swarm/{hook.ts, types.ts, subprocess.ts}. runMissionSwarmPreview(task, project) spawns `missionswarm run` + `missionswarm summarize` as subprocesses when project.missionswarm is configured; returns the summary string for reviewer context. Cache keyed on sha256(task.description + audience + n_agents + n_rounds) under ~/.generalstaff/cache/missionswarm/. Graceful skip on missing config or subprocess failure (no-op, logs). Wire into src/reviewer.ts behind the has-missionswarm-config check. Full spec + sketch code + test strategy in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-306. SHIPPED 2026-04-24 commit 4879a00 — live E2E validated via scripts/smoke-missionswarm-hook.ts (48s first run, cacheHit=true on second run, gaming-community voice on register). Wiring landed in src/cycle.ts rather than src/reviewer.ts since that's where ReviewerPromptParams is assembled; src/types.ts not src/config.ts for the schema extension (no src/config.ts file exists).",
+    "title": "mshook-001 \u2014 mission-swarm reviewer-stage preview hook. Add src/integrations/mission_swarm/{hook.ts, types.ts, subprocess.ts}. runMissionSwarmPreview(task, project) spawns `missionswarm run` + `missionswarm summarize` as subprocesses when project.missionswarm is configured; returns the summary string for reviewer context. Cache keyed on sha256(task.description + audience + n_agents + n_rounds) under ~/.generalstaff/cache/missionswarm/. Graceful skip on missing config or subprocess failure (no-op, logs). Wire into src/reviewer.ts behind the has-missionswarm-config check. Full spec + sketch code + test strategy in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-306. SHIPPED 2026-04-24 commit 4879a00 \u2014 live E2E validated via scripts/smoke-missionswarm-hook.ts (48s first run, cacheHit=true on second run, gaming-community voice on register). Wiring landed in src/cycle.ts rather than src/reviewer.ts since that's where ReviewerPromptParams is assembled; src/types.ts not src/config.ts for the schema extension (no src/config.ts file exists).",
     "status": "done",
     "priority": 3,
     "interactive_only": true,
@@ -2262,10 +2262,12 @@
   },
   {
     "id": "gs-307",
-    "title": "mshook-002 — surface mission-swarm preview in `generalstaff todo`. Add [simulated] marker on tasks with a cached preview; --verbose dumps the first paragraph of the summary inline. Reads from ~/.generalstaff/cache/missionswarm/. Blocks on gs-306 landed. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-307. Expected diff: ~50-80 LOC. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. Helper at src/integrations/mission_swarm/format.ts (lookupCachedPreview + firstParagraphOf). cli.ts todo case gains --verbose flag + the [simulated] suffix.",
+    "title": "mshook-002 \u2014 surface mission-swarm preview in `generalstaff todo`. Add [simulated] marker on tasks with a cached preview; --verbose dumps the first paragraph of the summary inline. Reads from ~/.generalstaff/cache/missionswarm/. Blocks on gs-306 landed. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-307. Expected diff: ~50-80 LOC. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. Helper at src/integrations/mission_swarm/format.ts (lookupCachedPreview + firstParagraphOf). cli.ts todo case gains --verbose flag + the [simulated] suffix.",
     "status": "done",
     "priority": 4,
-    "expected_blocked_by": ["gs-306"],
+    "expected_blocked_by": [
+      "gs-306"
+    ],
     "expected_touches": [
       "src/cli.ts",
       "src/integrations/mission_swarm/format.ts",
@@ -2274,12 +2276,14 @@
   },
   {
     "id": "gs-308",
-    "title": "mshook-003 — optional `--markov` pass for deep simulations. For projects with missionswarm.simulate_deep=true, invocation passes --markov to missionswarm; resulting markov.json cascade graph gets a compact summary in reviewer context. Blocks on mission-swarm shipping --markov output (ms-ma-00x in docs/markov-analysis-design.md). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-308. Expected diff: ~100-150 LOC.",
+    "title": "mshook-003 \u2014 optional `--markov` pass for deep simulations. For projects with missionswarm.simulate_deep=true, invocation passes --markov to missionswarm; resulting markov.json cascade graph gets a compact summary in reviewer context. Blocks on mission-swarm shipping --markov output (ms-ma-00x in docs/markov-analysis-design.md). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-308. Expected diff: ~100-150 LOC.",
     "status": "skipped",
     "priority": 5,
     "interactive_only": true,
     "interactive_only_reason": "Cascade-graph summary prompt is voice-bearing; first draft needs Ray's eye.",
-    "expected_blocked_by": ["gs-306"],
+    "expected_blocked_by": [
+      "gs-306"
+    ],
     "expected_touches": [
       "src/integrations/mission_swarm/hook.ts",
       "src/integrations/mission_swarm/markov.ts",
@@ -2288,10 +2292,12 @@
   },
   {
     "id": "gs-309",
-    "title": "mshook-004 — cache invalidation on task-description edit. Mostly covered by gs-306's hash-based cache key; this task verifies the expected behavior in a test + documents it. Old cache stays on disk (GC'd separately later). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-309. Expected diff: ~30-50 LOC.",
+    "title": "mshook-004 \u2014 cache invalidation on task-description edit. Mostly covered by gs-306's hash-based cache key; this task verifies the expected behavior in a test + documents it. Old cache stays on disk (GC'd separately later). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-309. Expected diff: ~30-50 LOC.",
     "status": "done",
     "priority": 4,
-    "expected_blocked_by": ["gs-306"],
+    "expected_blocked_by": [
+      "gs-306"
+    ],
     "expected_touches": [
       "tests/integrations/mission_swarm/hook.test.ts"
     ],
@@ -2299,7 +2305,7 @@
   },
   {
     "id": "gs-310",
-    "title": "jr-001 — create github.com/lerugray/mission-bullet-oss (public fork). Extract current private mission-bullet codebase minus voice-specific tunings (entries/, reflections/, Ray-specific prompt tweaks in src/refine.ts / src/review.ts / src/claude-note.ts stay private). Add MIT license (recommended per design doc). Rewrite README to position as standalone journal tool; GS integration as optional, not headline. Set private repo as downstream fork. Blocks on parallel mission-bullet session finishing (fork point must be stable). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-310 and design in docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md §2.",
+    "title": "jr-001 \u2014 create github.com/lerugray/mission-bullet-oss (public fork). Extract current private mission-bullet codebase minus voice-specific tunings (entries/, reflections/, Ray-specific prompt tweaks in src/refine.ts / src/review.ts / src/claude-note.ts stay private). Add MIT license (recommended per design doc). Rewrite README to position as standalone journal tool; GS integration as optional, not headline. Set private repo as downstream fork. Blocks on parallel mission-bullet session finishing (fork point must be stable). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-310 and design in docs/internal/INTEGRATIONS-DESIGN-2026-04-24.md \u00a72.",
     "status": "done",
     "priority": 3,
     "interactive_only": true,
@@ -2307,7 +2313,7 @@
   },
   {
     "id": "gs-311",
-    "title": "jr-002 — add journal.mission_bullet_root config key to projects.yaml schema + validator. No-op at runtime until jr-003 lands. Fields: mission_bullet_root (required string, absolute path), scan_days (optional int, default 7), reviewer_context (optional bool, default false). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-311. Expected diff: ~40-60 LOC. Can land anytime — not blocked on jr-001 since the schema is just a shape. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. JournalProjectConfig interface in src/types.ts; validator in src/projects.ts (not src/config.ts, which doesn't exist).",
+    "title": "jr-002 \u2014 add journal.mission_bullet_root config key to projects.yaml schema + validator. No-op at runtime until jr-003 lands. Fields: mission_bullet_root (required string, absolute path), scan_days (optional int, default 7), reviewer_context (optional bool, default false). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-311. Expected diff: ~40-60 LOC. Can land anytime \u2014 not blocked on jr-001 since the schema is just a shape. SHIPPED 2026-04-24 commit 5aeb7c9 as part of the gs-306 Hour 3 stretch. JournalProjectConfig interface in src/types.ts; validator in src/projects.ts (not src/config.ts, which doesn't exist).",
     "status": "done",
     "priority": 4,
     "expected_touches": [
@@ -2317,10 +2323,13 @@
   },
   {
     "id": "gs-312",
-    "title": "jr-003 — scan-bullets-by-project-affinity library. src/integrations/journal/scan.ts: pure library that takes journal root + project config + scan window (default 7 days), returns JournalProposal[]. Keyword-match on project id + name + configured aliases; bullets with no match filtered out. Counts only `- [ ]` (tasks) and `- !` (alerts); ignores `- *` (observations) and plain `- ` (notes). Never writes to the journal. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-312. Expected diff: ~180-250 LOC.",
+    "title": "jr-003 \u2014 scan-bullets-by-project-affinity library. src/integrations/journal/scan.ts: pure library that takes journal root + project config + scan window (default 7 days), returns JournalProposal[]. Keyword-match on project id + name + configured aliases; bullets with no match filtered out. Counts only `- [ ]` (tasks) and `- !` (alerts); ignores `- *` (observations) and plain `- ` (notes). Never writes to the journal. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-312. Expected diff: ~180-250 LOC.",
     "status": "done",
     "priority": 4,
-    "expected_blocked_by": ["gs-310", "gs-311"],
+    "expected_blocked_by": [
+      "gs-310",
+      "gs-311"
+    ],
     "expected_touches": [
       "src/integrations/journal/scan.ts",
       "src/integrations/journal/types.ts",
@@ -2330,12 +2339,14 @@
   },
   {
     "id": "gs-313",
-    "title": "jr-004 — `generalstaff todo --from-journal` proposal surface. CLI lets Ray accept/dismiss/edit journal proposals. Accept adds to project tasks.json; dismiss records in local seen-file (never writes to journal); edit opens proposal in $EDITOR before accept. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-313. Expected diff: ~150-200 LOC.",
+    "title": "jr-004 \u2014 `generalstaff todo --from-journal` proposal surface. CLI lets Ray accept/dismiss/edit journal proposals. Accept adds to project tasks.json; dismiss records in local seen-file (never writes to journal); edit opens proposal in $EDITOR before accept. Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-313. Expected diff: ~150-200 LOC.",
     "status": "done",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "CLI UX flow decisions + $EDITOR handling are taste work.",
-    "expected_blocked_by": ["gs-312"],
+    "expected_blocked_by": [
+      "gs-312"
+    ],
     "expected_touches": [
       "src/cli.ts",
       "src/integrations/journal/proposals.ts",
@@ -2344,7 +2355,7 @@
   },
   {
     "id": "gs-315",
-    "title": "Reviewer-prompt enrichment for `public_facing: true` projects. Add optional `public_facing?: boolean` field to ProjectConfig. When true AND the cycle's diff touches customer-reachable surfaces (frontend/, auth, signup, checkout, API routes — heuristic TBD), the reviewer's prompt gets an extra section: 'This project ships to users. Before returning verified, confirm the verification step exercises at least one end-to-end user journey (not just unit tests). If it only exercises unit tests, downgrade to verified_weak and flag in notes that the customer-facing surface is untested.' Motivation: the rg-017 incident (2026-04-24) — window.supabase shadow bug broke site-wide login from launch; zero unit tests caught it because no test loaded index.html in a browser. Reviewer-prompt enrichment surfaces these gaps without blocking cycles — turns 'shipped, broken' into 'shipped with verified_weak + explicit note'. Expected diff: ~30-50 LOC across src/types.ts, src/projects.ts validator, src/prompts/reviewer.ts. Cheap, no new execution model.",
+    "title": "Reviewer-prompt enrichment for `public_facing: true` projects. Add optional `public_facing?: boolean` field to ProjectConfig. When true AND the cycle's diff touches customer-reachable surfaces (frontend/, auth, signup, checkout, API routes \u2014 heuristic TBD), the reviewer's prompt gets an extra section: 'This project ships to users. Before returning verified, confirm the verification step exercises at least one end-to-end user journey (not just unit tests). If it only exercises unit tests, downgrade to verified_weak and flag in notes that the customer-facing surface is untested.' Motivation: the rg-017 incident (2026-04-24) \u2014 window.supabase shadow bug broke site-wide login from launch; zero unit tests caught it because no test loaded index.html in a browser. Reviewer-prompt enrichment surfaces these gaps without blocking cycles \u2014 turns 'shipped, broken' into 'shipped with verified_weak + explicit note'. Expected diff: ~30-50 LOC across src/types.ts, src/projects.ts validator, src/prompts/reviewer.ts. Cheap, no new execution model.",
     "status": "done",
     "priority": 2,
     "interactive_only": true,
@@ -2359,12 +2370,14 @@
   },
   {
     "id": "gs-316",
-    "title": "customer_facing_smoke verification step + retrogaze reference implementation. Option A from the 2026-04-24 design discussion (post-rg-017 lesson). Add `customer_facing_smoke?: string` field to ProjectConfig — shell command run AFTER verification_command on any cycle on a `public_facing: true` project that touches customer-reachable surfaces. Failure → verdict is verification_failed regardless of what the reviewer says. First reference implementation: retrogaze's smoke is a Playwright probe that loads retrogazeai.com/app (or a local docker-compose bring-up), asserts window.supabase is preserved, attempts a real login against a test account, asserts 200. Reuse the probe-live.mjs already written. Graduation path: optional first (opt-in per project); required only after the harness is proven stable. gs-315 needs to land first so reviewer-prompt flags public_facing projects before the gate is live. Expected diff: ~100-150 LOC across src/types.ts, src/projects.ts validator, src/verification.ts, tests/. Plus the retrogaze-side Playwright harness integration (separate repo).",
+    "title": "customer_facing_smoke verification step + retrogaze reference implementation. Option A from the 2026-04-24 design discussion (post-rg-017 lesson). Add `customer_facing_smoke?: string` field to ProjectConfig \u2014 shell command run AFTER verification_command on any cycle on a `public_facing: true` project that touches customer-reachable surfaces. Failure \u2192 verdict is verification_failed regardless of what the reviewer says. First reference implementation: retrogaze's smoke is a Playwright probe that loads retrogazeai.com/app (or a local docker-compose bring-up), asserts window.supabase is preserved, attempts a real login against a test account, asserts 200. Reuse the probe-live.mjs already written. Graduation path: optional first (opt-in per project); required only after the harness is proven stable. gs-315 needs to land first so reviewer-prompt flags public_facing projects before the gate is live. Expected diff: ~100-150 LOC across src/types.ts, src/projects.ts validator, src/verification.ts, tests/. Plus the retrogaze-side Playwright harness integration (separate repo).",
     "status": "done",
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "Touches verification pipeline (hands_off) + cross-repo harness bring-up needs Ray's judgment on per-project smoke scope.",
-    "expected_blocked_by": ["gs-315"],
+    "expected_blocked_by": [
+      "gs-315"
+    ],
     "expected_touches": [
       "src/types.ts",
       "src/projects.ts",
@@ -2374,7 +2387,7 @@
   },
   {
     "id": "gs-317",
-    "title": "Design note capturing the rg-017 incident + customer-facing smoke-gate design implications. Write docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md covering: (a) the rg-017 incident narrative (window.supabase shadow bug, silent from launch, caught only when Moontini stuck with it, root cause traceable to missing end-to-end browser test); (b) GS's current gaps — verification_command runs bot's own tests, reviewer checks scope match, neither exercises the customer-facing surface; (c) the two proposed primitives (gs-315 reviewer-prompt enrichment + gs-316 customer_facing_smoke verification step); (d) tradeoffs (gate flakiness vs missed bugs, per-project vs global, opt-in vs required); (e) catalogdna launch prerequisites (needs a smoke harness before going public — at minimum: signup + first-value end-to-end). Draft form first; Ray's voice pass before any public-facing version.",
+    "title": "Design note capturing the rg-017 incident + customer-facing smoke-gate design implications. Write docs/internal/CUSTOMER-FACING-SMOKE-DESIGN-2026-04-24.md covering: (a) the rg-017 incident narrative (window.supabase shadow bug, silent from launch, caught only when Moontini stuck with it, root cause traceable to missing end-to-end browser test); (b) GS's current gaps \u2014 verification_command runs bot's own tests, reviewer checks scope match, neither exercises the customer-facing surface; (c) the two proposed primitives (gs-315 reviewer-prompt enrichment + gs-316 customer_facing_smoke verification step); (d) tradeoffs (gate flakiness vs missed bugs, per-project vs global, opt-in vs required); (e) catalogdna launch prerequisites (needs a smoke harness before going public \u2014 at minimum: signup + first-value end-to-end). Draft form first; Ray's voice pass before any public-facing version.",
     "status": "done",
     "priority": 2,
     "interactive_only": true,
@@ -2385,12 +2398,14 @@
   },
   {
     "id": "gs-314",
-    "title": "jr-005 — reviewer-stage hook reads journal proposals as context when generating tasks. Per-project opt-in via journal.reviewer_context=true. Privacy floor: journal text goes into reviewer's context window only when reviewer_context=true AND provider is allow-listed for journal data (default local-compute only; cloud opt-in separate). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md §gs-314. Expected diff: ~120-180 LOC.",
+    "title": "jr-005 \u2014 reviewer-stage hook reads journal proposals as context when generating tasks. Per-project opt-in via journal.reviewer_context=true. Privacy floor: journal text goes into reviewer's context window only when reviewer_context=true AND provider is allow-listed for journal data (default local-compute only; cloud opt-in separate). Spec in docs/internal/INTEGRATIONS-PLAN-2026-04-24.md \u00a7gs-314. Expected diff: ~120-180 LOC.",
     "status": "skipped",
     "priority": 5,
     "interactive_only": true,
     "interactive_only_reason": "Touches src/reviewer.ts (hands_off) + privacy allow-list design is a taste call.",
-    "expected_blocked_by": ["gs-312"],
+    "expected_blocked_by": [
+      "gs-312"
+    ],
     "expected_touches": [
       "src/reviewer.ts",
       "src/integrations/journal/reviewer_context.ts",
@@ -2399,7 +2414,7 @@
   },
   {
     "id": "gs-318",
-    "title": "Anti-state-wipe pre-commit gate. Add `detectStateFileDeletions(diff)` helper to src/cycle.ts that returns deleted paths matching `state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json}` or `state/_fleet/PROGRESS.jsonl`. Wire as gate 6e (after the JSON syntax gate, before the reviewer call) — when the list is non-empty, set verdict to verification_failed, append `state_wipe_blocked` PROGRESS event with deleted_files, and short-circuit. Motivation: 2026-04-24 incident — home-PC chained dispatcher session committed cycle 5756a5f deleting 21 state files (-6743 lines net) across all 6 public-state projects + _fleet, and the reviewer marked it verified. Pure-parsing helper, no filesystem reads, returns paths for the failure-reason string.",
+    "title": "Anti-state-wipe pre-commit gate. Add `detectStateFileDeletions(diff)` helper to src/cycle.ts that returns deleted paths matching `state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json}` or `state/_fleet/PROGRESS.jsonl`. Wire as gate 6e (after the JSON syntax gate, before the reviewer call) \u2014 when the list is non-empty, set verdict to verification_failed, append `state_wipe_blocked` PROGRESS event with deleted_files, and short-circuit. Motivation: 2026-04-24 incident \u2014 home-PC chained dispatcher session committed cycle 5756a5f deleting 21 state files (-6743 lines net) across all 6 public-state projects + _fleet, and the reviewer marked it verified. Pure-parsing helper, no filesystem reads, returns paths for the failure-reason string.",
     "status": "done",
     "priority": 1,
     "interactive_only": true,
@@ -2411,7 +2426,7 @@
   },
   {
     "id": "gs-322",
-    "title": "AGENTS.md wizard — project-intent extraction at register time. PRIORITY 1 (structural improvement on the task-completion meta itself, per Ray 2026-04-25). Build a Claude Code skill at .claude/skills/agents-md-wizard/ that runs a conversational discovery wizard producing AGENTS.md at the project root. AGENTS.md is the cross-platform standard (Google/OpenAI/Cursor/Aider/Zed/Copilot et al, late 2025) — using it gives free integration with every other AI tool Ray uses, and is project-neutral by design (won't impose business-mindset on satire/personal/side-hustle projects). Phase A scope: fork prd-taskmaster (MIT, ~/.claude/skills/prd-taskmaster/) as substrate, adapt for AGENTS.md output, type-branched question sets (business / game / research / infra = heavy 8-12 questions; side-hustle / personal-tool / nonsense = lightweight 2-3 questions; skip = no plan); 3 universal questions every type asks (what is this / what is this NOT / when is this done). Hook into `generalstaff register` with skip-by-default prompt. New CLI: `generalstaff plan <project>` for standalone runs. Wizard runs as Tier 3 spawn with -Provider openrouter (Kimi K2.6 for heavy branches, free-tier like google/gemma-3 for lightweight) — ~$1-3 cost per heavy plan, near-zero for lightweight. Phase B (reviewer integration with verified_misaligned soft-flag) + Phase C (iterative-update mode + scope-drift detection) + Phase D (portfolio view) follow once Phase A validates. Total estimate ~2-3 days for A+B+C; Phase A alone ~3-4 hours by forking prd-taskmaster. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 1 for full design + decisions Ray confirmed 2026-04-25 ~06:30 EDT.",
+    "title": "AGENTS.md wizard \u2014 project-intent extraction at register time. PRIORITY 1 (structural improvement on the task-completion meta itself, per Ray 2026-04-25). Build a Claude Code skill at .claude/skills/agents-md-wizard/ that runs a conversational discovery wizard producing AGENTS.md at the project root. AGENTS.md is the cross-platform standard (Google/OpenAI/Cursor/Aider/Zed/Copilot et al, late 2025) \u2014 using it gives free integration with every other AI tool Ray uses, and is project-neutral by design (won't impose business-mindset on satire/personal/side-hustle projects). Phase A scope: fork prd-taskmaster (MIT, ~/.claude/skills/prd-taskmaster/) as substrate, adapt for AGENTS.md output, type-branched question sets (business / game / research / infra = heavy 8-12 questions; side-hustle / personal-tool / nonsense = lightweight 2-3 questions; skip = no plan); 3 universal questions every type asks (what is this / what is this NOT / when is this done). Hook into `generalstaff register` with skip-by-default prompt. New CLI: `generalstaff plan <project>` for standalone runs. Wizard runs as Tier 3 spawn with -Provider openrouter (Kimi K2.6 for heavy branches, free-tier like google/gemma-3 for lightweight) \u2014 ~$1-3 cost per heavy plan, near-zero for lightweight. Phase B (reviewer integration with verified_misaligned soft-flag) + Phase C (iterative-update mode + scope-drift detection) + Phase D (portfolio view) follow once Phase A validates. Total estimate ~2-3 days for A+B+C; Phase A alone ~3-4 hours by forking prd-taskmaster. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) \u00a7Priority 1 for full design + decisions Ray confirmed 2026-04-25 ~06:30 EDT.",
     "status": "phase_a_done",
     "priority": 1,
     "interactive_only": true,
@@ -2421,11 +2436,11 @@
       "src/cli.ts",
       "tests/agents_md_wizard.test.ts"
     ],
-    "phase_a_notes": "Shipped 2026-04-25 in-session by Ray + Claude Opus 4.7 after a Kimi K2.6 spawn attempt failed to produce work (5min runtime, exit 0, zero edits — confirmed Ray's routing rule that long agentic coding sessions stay on Claude). Architecture revision from the original Kimi proposal: in-session SKILL (not Tier 3 spawn) since Tier 3 spawns can't ask the user questions interactively in the user's terminal. Files: .claude/skills/agents-md-wizard/{SKILL.md, README.md, questions/*.json (8 types), templates/agents-md.md}; src/cli.ts post-register suggestion; tests/agents_md_wizard.test.ts (46 tests, 386 expects, all passing). No prd-taskmaster dependency — borrowed the Q&A→markdown pattern, built fresh. Phase B (reviewer integration) and Phase C (drift detection) remain pending."
+    "phase_a_notes": "Shipped 2026-04-25 in-session by Ray + Claude Opus 4.7 after a Kimi K2.6 spawn attempt failed to produce work (5min runtime, exit 0, zero edits \u2014 confirmed Ray's routing rule that long agentic coding sessions stay on Claude). Architecture revision from the original Kimi proposal: in-session SKILL (not Tier 3 spawn) since Tier 3 spawns can't ask the user questions interactively in the user's terminal. Files: .claude/skills/agents-md-wizard/{SKILL.md, README.md, questions/*.json (8 types), templates/agents-md.md}; src/cli.ts post-register suggestion; tests/agents_md_wizard.test.ts (46 tests, 386 expects, all passing). No prd-taskmaster dependency \u2014 borrowed the Q&A\u2192markdown pattern, built fresh. Phase B (reviewer integration) and Phase C (drift detection) remain pending."
   },
   {
     "id": "gs-320",
-    "title": "Two-way messaging integration (Telegram first) — Phase A read-only commands. (DEMOTED from Priority 1 to Priority 2 on 2026-04-25 ~06:30 EDT — gs-322 AGENTS.md wizard is structural, this is operational.) Build a Python listener process that bridges Telegram inbound to GS CLI / orchestration. Phase A scope: /status (calls orch-status.sh), /list (calls orch-list.sh), /tail <spawn-id> (relays outbox/result.md), /log <project> <N-events> (tail PROGRESS.jsonl). User allowlist on Ray's Telegram numeric ID only. Substrate: errbot Python chatops framework (gives plugin lifecycle + auth + command parsing for free). Out of scope for Phase A: write commands (/spawn, /kill, /queue) — those land in Phase B once the listener+auth plumbing is solid. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 1 for full design.",
+    "title": "Two-way messaging integration (Telegram first) \u2014 Phase A read-only commands. (DEMOTED from Priority 1 to Priority 2 on 2026-04-25 ~06:30 EDT \u2014 gs-322 AGENTS.md wizard is structural, this is operational.) Build a Python listener process that bridges Telegram inbound to GS CLI / orchestration. Phase A scope: /status (calls orch-status.sh), /list (calls orch-list.sh), /tail <spawn-id> (relays outbox/result.md), /log <project> <N-events> (tail PROGRESS.jsonl). User allowlist on Ray's Telegram numeric ID only. Substrate: errbot Python chatops framework (gives plugin lifecycle + auth + command parsing for free). Out of scope for Phase A: write commands (/spawn, /kill, /queue) \u2014 those land in Phase B once the listener+auth plumbing is solid. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) \u00a7Priority 1 for full design.",
     "status": "skipped",
     "priority": 2,
     "interactive_only": true,
@@ -2433,7 +2448,7 @@
   },
   {
     "id": "gs-321",
-    "title": "README tightening for public launch — replace prose-heavy sections with diagrams + real anecdotes from orchestration v0/v1/v2 dogfoods (retrogaze Ricky bug investigation, mission-bullet monthly review parity, OpenRouter smoke). Above-the-fold ~150 words: what it does, the verification-gate differentiator, 1 hero visual. Move deep Hammerstein content to docs/philosophy.md link. 'Works alongside' one-liner with logos for Claude Code / OpenRouter / Cursor / Aider. Visual continuity with docs/launch-posts/polsia-alternative.md. WAIT for: rayb-020 ingest stable + Ricky retrogaze bug fixes shipped (real success stories carry the launch story). Voice work — Ray-only authoring; bot-pickable subtasks could draft section-level proposals first via -Provider openrouter (Kimi K2.6) for ~$1-3 cost. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) §Priority 2 for full design.",
+    "title": "README tightening for public launch \u2014 replace prose-heavy sections with diagrams + real anecdotes from orchestration v0/v1/v2 dogfoods (retrogaze Ricky bug investigation, mission-bullet monthly review parity, OpenRouter smoke). Above-the-fold ~150 words: what it does, the verification-gate differentiator, 1 hero visual. Move deep Hammerstein content to docs/philosophy.md link. 'Works alongside' one-liner with logos for Claude Code / OpenRouter / Cursor / Aider. Visual continuity with docs/launch-posts/polsia-alternative.md. WAIT for: rayb-020 ingest stable + Ricky retrogaze bug fixes shipped (real success stories carry the launch story). Voice work \u2014 Ray-only authoring; bot-pickable subtasks could draft section-level proposals first via -Provider openrouter (Kimi K2.6) for ~$1-3 cost. See docs/internal/STRATEGIC-ROADMAP-2026-04-25.md (private repo) \u00a7Priority 2 for full design.",
     "status": "done",
     "priority": 3,
     "interactive_only": true,
@@ -2441,7 +2456,7 @@
   },
   {
     "id": "gs-319",
-    "title": "Reviewer-prompt rule for state-file deletions (belt-and-suspenders behind gs-318). Add a fifth numbered question to the reviewer prompt's '## Your task' section: 'Does the diff DELETE any file matching state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json} or state/_fleet/PROGRESS.jsonl? If yes, verdict is verification_failed.' Frames the rule explicitly as the second line of defense — the static gate (gs-318) catches the case in pure parsing, but if the gate has a gap (new state-file pattern, regex miss), the reviewer is the backstop. Static text only — no new prompt parameter.",
+    "title": "Reviewer-prompt rule for state-file deletions (belt-and-suspenders behind gs-318). Add a fifth numbered question to the reviewer prompt's '## Your task' section: 'Does the diff DELETE any file matching state/<id>/{tasks.json,MISSION.md,PROGRESS.jsonl,STATE.json} or state/_fleet/PROGRESS.jsonl? If yes, verdict is verification_failed.' Frames the rule explicitly as the second line of defense \u2014 the static gate (gs-318) catches the case in pure parsing, but if the gate has a gap (new state-file pattern, regex miss), the reviewer is the backstop. Static text only \u2014 no new prompt parameter.",
     "status": "done",
     "priority": 1,
     "interactive_only": true,
@@ -2482,39 +2497,53 @@
     "completion_notes": "Shipped 2026-05-06 morning as paired ship with ham-021 (Hammerstein README downstream-interface doc). README copy: pre-queue plan audit / priority calls / opportunity-cost framing as the three concrete fits; corpus loop framed as manual curation (not auto-ingest) per accuracy discipline; both-projects-work-standalone framing preserves the substitute-for-Claude thesis the audit flagged. Stop-slop pass clean (no robust/comprehensive/seamless/streamlined). Audit pre-flight via Hammerstein found the version-compat concern that drove ham-021's stable-interface doc.",
     "priority": 3,
     "interactive_only": false,
-    "expected_touches": ["README.md"]
+    "expected_touches": [
+      "README.md"
+    ]
   },
   {
     "id": "gs-326",
-    "title": "Add public-GS doc capturing the bite-sized one-by-one decision surfacing pattern. Generalized port of the cross-machine rule saved 2026-05-09 in generalstaff-private/CLAUDE.local.md (Ray verbatim: 'absolutely love the workflow you've done for this session which is new compared to what we ever did before on unblocking stuff'). Public-side doc strips the GS-orchestrator-specific shape down to 'any interactive Claude Code session unblocking a multi-project portfolio' — keeps the load-bearing pattern (survey-then-strawman / leans-with-LOCK-markers / one-by-one AskUserQuestion / execute-between-questions / repo-state-grounded / commit-as-you-go) without the GS-state-update mechanics. Lives at docs/CLAUDE-WORKFLOWS.md (or similar; could go in CLAUDE.md as a new section). Also benefits Kunal (granted GS repo collaborator access 2026-05-01) + future GS users running interactive Claude over their managed portfolio. Filed 2026-05-09 home-PC after Ray asked to incorporate the workflow into public GS.",
+    "title": "Add public-GS doc capturing the bite-sized one-by-one decision surfacing pattern. Generalized port of the cross-machine rule saved 2026-05-09 in generalstaff-private/CLAUDE.local.md (Ray verbatim: 'absolutely love the workflow you've done for this session which is new compared to what we ever did before on unblocking stuff'). Public-side doc strips the GS-orchestrator-specific shape down to 'any interactive Claude Code session unblocking a multi-project portfolio' \u2014 keeps the load-bearing pattern (survey-then-strawman / leans-with-LOCK-markers / one-by-one AskUserQuestion / execute-between-questions / repo-state-grounded / commit-as-you-go) without the GS-state-update mechanics. Lives at docs/CLAUDE-WORKFLOWS.md (or similar; could go in CLAUDE.md as a new section). Also benefits Kunal (granted GS repo collaborator access 2026-05-01) + future GS users running interactive Claude over their managed portfolio. Filed 2026-05-09 home-PC after Ray asked to incorporate the workflow into public GS.",
     "status": "done",
     "priority": 4,
     "interactive_only": true,
     "interactive_only_reason": "Voice-bearing public-facing doc; Ray voice-passes after Claude drafts strawman. Generalization step (stripping GS-specific shape) needs Ray's eye on which examples / framings translate vs which stay private.",
-    "expected_touches": ["docs/", "CLAUDE.md"]
+    "expected_touches": [
+      "docs/",
+      "CLAUDE.md"
+    ]
   },
   {
     "id": "gs-328",
-    "title": "v0.4.2 bug: heartbeat supervisor 'killed stuck session' kill-loop without exit. Reproduced 2026-05-14 evening on home-PC: launched supervisor via scripts/heartbeat-run.ps1 in a visible PowerShell window (sonnet model, default config from v0.4.1), queued a run_cycle gamr message via heartbeat-inbox CLI. Within ~2-3 min the spawned claude session entered a loop printing 'killed stuck session' repeatedly while the parent supervisor + visible window stayed alive. Ray verbatim: 'the new session keeps saying killed stuck session but its not exiting, i went and killed it to not waste usage' — he manually closed the window to stop the bleed. Hypothesis: supervisor's stuck-session watchdog detect-path works (correctly identifies child hang) but the kill primitive doesn't actually terminate the child on Windows, so the watchdog re-fires on the next tick while the child claude continues consuming tokens. Investigation: (a) reproduce with verbose supervisor logging to capture the exact kill-call signature; (b) compare process.kill() semantics between POSIX and Windows (Bun's spawn() on Windows may need taskkill /T /F for tree termination); (c) check whether the .restart flag interaction creates the loop (supervisor sets .restart, kills child, child doesn't die, supervisor sees alive child + .restart still set, kills again). Fix shape: switch the supervisor's kill primitive to a Windows-aware path (taskkill /PID <pid> /T /F on win32, signal-based on POSIX), add a fallback hard-kill timeout (~5s) after which the supervisor itself exits with a loud error rather than looping. interactive_only because src/heartbeat/supervisor.ts touches the dispatch / supervision surface that needs human eye on the kill-semantics call.",
+    "title": "v0.4.2 bug: heartbeat supervisor 'killed stuck session' kill-loop without exit. Reproduced 2026-05-14 evening on home-PC: launched supervisor via scripts/heartbeat-run.ps1 in a visible PowerShell window (sonnet model, default config from v0.4.1), queued a run_cycle gamr message via heartbeat-inbox CLI. Within ~2-3 min the spawned claude session entered a loop printing 'killed stuck session' repeatedly while the parent supervisor + visible window stayed alive. Ray verbatim: 'the new session keeps saying killed stuck session but its not exiting, i went and killed it to not waste usage' \u2014 he manually closed the window to stop the bleed. Hypothesis: supervisor's stuck-session watchdog detect-path works (correctly identifies child hang) but the kill primitive doesn't actually terminate the child on Windows, so the watchdog re-fires on the next tick while the child claude continues consuming tokens. Investigation: (a) reproduce with verbose supervisor logging to capture the exact kill-call signature; (b) compare process.kill() semantics between POSIX and Windows (Bun's spawn() on Windows may need taskkill /T /F for tree termination); (c) check whether the .restart flag interaction creates the loop (supervisor sets .restart, kills child, child doesn't die, supervisor sees alive child + .restart still set, kills again). Fix shape: switch the supervisor's kill primitive to a Windows-aware path (taskkill /PID <pid> /T /F on win32, signal-based on POSIX), add a fallback hard-kill timeout (~5s) after which the supervisor itself exits with a loud error rather than looping. interactive_only because src/heartbeat/supervisor.ts touches the dispatch / supervision surface that needs human eye on the kill-semantics call.",
     "status": "done",
     "priority": 1,
     "interactive_only": true,
     "interactive_only_reason": "v0.4.x heartbeat infrastructure bug. Active usage-waste risk every time the supervisor enters the loop. Diagnosis needs Windows process-tree semantics + supervisor.ts changes; fix decisions (taskkill vs Bun's subprocess.kill flags, fallback timeout shape) want a human call. Memory entry [[heartbeat-stuck-session-is-usage-waste-signal]] captures the operational signal.",
-    "expected_touches": ["src/heartbeat/supervisor.ts", "src/heartbeat/types.ts", "tests/heartbeat/"]
+    "expected_touches": [
+      "src/heartbeat/supervisor.ts",
+      "src/heartbeat/types.ts",
+      "tests/heartbeat/"
+    ]
   },
   {
     "id": "gs-329",
-    "title": "v0.4.x bug investigation: pre-cycle advisor (gs-327) does not fire when engineer_provider=aider. Reproduced 2026-05-14 evening on home-PC: added advisor:{enabled:true,gate:false,provider:hammerstein,timeout_seconds:90,history_cycles:3} block to gamr's projects.yaml entry, ran `bun src/cli.ts cycle --project=gamr` directly (not through heartbeat). Expected: cycle.ts step 3a fires h audit before engineer; advisor_verdict event in PROGRESS.jsonl + 'Advisor (hammerstein) → ...' stdout line. Actual: NO advisor log line, engineer ran immediately (exit=1 in 4s on gamr's pre-existing missing happy-dom test fixture). Note that engineer log line was 'Running engineer: bash engineer_command.sh ${cycle_budget_minutes}' — literal placeholder, suggesting the aider engineer_provider branch may also not be taking effect (template-string substitution didn't happen OR the cycle.ts is running engineer_command directly rather than buildAiderCommand). Two separable subhypotheses to test: (a) advisor wiring is conditional on engineer_provider=claude path and gets skipped for aider; (b) aider engineer_provider itself is broken / regressed since the last gamr cycle (10 days ago, 2026-05-04). The morning's WDB heartbeat smoke test succeeded against a claude-engineer project, so the claude-engineer + advisor path is the only one with a known-working surface. Investigation: (1) check cycle.ts step 1a peekNextBotPickableTask returns a task for gamr (greenfield+aider should not block peek); (2) confirm normalizeAdvisorConfig parses the YAML block I added (was identical to the schema example in projects.yaml.example so should be fine); (3) add a debug log in cycle.ts step 3a guard (`if (advisorCfg && nextTask)`) to print why-not when advisor doesn't fire; (4) verify buildAiderCommand is being called for aider engineer_provider — the literal-template-string log line is a smell. Until fixed, advisor enablement on aider-engineer projects is inert. Claude-engineer advisor enablement is unblocked by this bug.",
+    "title": "v0.4.x bug investigation: pre-cycle advisor (gs-327) does not fire when engineer_provider=aider. Reproduced 2026-05-14 evening on home-PC: added advisor:{enabled:true,gate:false,provider:hammerstein,timeout_seconds:90,history_cycles:3} block to gamr's projects.yaml entry, ran `bun src/cli.ts cycle --project=gamr` directly (not through heartbeat). Expected: cycle.ts step 3a fires h audit before engineer; advisor_verdict event in PROGRESS.jsonl + 'Advisor (hammerstein) \u2192 ...' stdout line. Actual: NO advisor log line, engineer ran immediately (exit=1 in 4s on gamr's pre-existing missing happy-dom test fixture). Note that engineer log line was 'Running engineer: bash engineer_command.sh ${cycle_budget_minutes}' \u2014 literal placeholder, suggesting the aider engineer_provider branch may also not be taking effect (template-string substitution didn't happen OR the cycle.ts is running engineer_command directly rather than buildAiderCommand). Two separable subhypotheses to test: (a) advisor wiring is conditional on engineer_provider=claude path and gets skipped for aider; (b) aider engineer_provider itself is broken / regressed since the last gamr cycle (10 days ago, 2026-05-04). The morning's WDB heartbeat smoke test succeeded against a claude-engineer project, so the claude-engineer + advisor path is the only one with a known-working surface. Investigation: (1) check cycle.ts step 1a peekNextBotPickableTask returns a task for gamr (greenfield+aider should not block peek); (2) confirm normalizeAdvisorConfig parses the YAML block I added (was identical to the schema example in projects.yaml.example so should be fine); (3) add a debug log in cycle.ts step 3a guard (`if (advisorCfg && nextTask)`) to print why-not when advisor doesn't fire; (4) verify buildAiderCommand is being called for aider engineer_provider \u2014 the literal-template-string log line is a smell. Until fixed, advisor enablement on aider-engineer projects is inert. Claude-engineer advisor enablement is unblocked by this bug.",
     "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "v0.4.x core-loop investigation; touches src/cycle.ts step 3a + possibly src/engineer.ts aider branch. Needs human eye to disentangle the two subhypotheses + decide whether the fix is conditional-wiring or aider-path-revival.",
-    "expected_touches": ["src/cycle.ts", "src/advisor.ts", "src/engineer.ts", "src/projects.ts"]
+    "expected_touches": [
+      "src/cycle.ts",
+      "src/advisor.ts",
+      "src/engineer.ts",
+      "src/projects.ts"
+    ]
   },
   {
     "id": "gs-330",
     "title": "GeneralStaff v0.7.0 headline: wire the wintermute judgment-gate (judge()) into the bot as a PRE-EXECUTION gate. Build per the scope in the wintermute repo (GS-GATE-SCOPE.md): a small TS gate module (src/judgment_gate.ts) mirroring reviewer.ts's providers/ LLM call (canonical Hammerstein system-prompt -> KEEP/REJECT verdict); insert in src/work_detection.ts isTaskBotPickable (NOT hands_off) as a new skip/flag reason 'judged_stupid_industrious'; vendor the Hammerstein system-prompt into src/prompts/ (HANDS_OFF - operator sign-off at build time); add a projects.yaml flag judgment_gate: off|flag|skip, DEFAULT flag-first (advisory, NOT a veto - per Hammerstein's own anti-veto stance + the false-reject risk shown by wintermute v2's contestable boundary). Then cut v0.7.0: version bump + changelog + messaging-vs-code audit. Decided 2026-06-16; GS was v0.6.0 + 5 commits (engineer ponytail-discipline + agent-conduct docs).",
-    "status": "pending",
+    "status": "done",
     "priority": 1,
     "interactive_only": true,
     "interactive_only_reason": "Vendors the Hammerstein system-prompt into src/prompts/ (hands_off) and is a safety-adjacent / design-axis build needing operator sign-off; not a mechanical bot task.",
@@ -2523,6 +2552,7 @@
       "src/work_detection.ts",
       "src/prompts/",
       "projects.yaml"
-    ]
+    ],
+    "done_note": "Shipped in v0.7.0 (commit 08fd1c7), released to GitHub (Latest). Gate module + cycle wiring + off|flag|skip config + 28 tests + docs. Public AGPL prompt vendored; advisory flag-first, off by default. Live-smoke + adversarial-review verified."
   }
 ]
