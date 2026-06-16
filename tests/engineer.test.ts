@@ -406,6 +406,78 @@ describe("resolveEngineerCommand (gs-270, Phase 7)", () => {
     // not as a raw unquoted character that would break out of the shell.
     expect(command).toContain("path/with'\\''quote");
   });
+
+  // gs-331 (v0.7.1): grok engineer provider — sub-backed Grok CLI.
+  it("generates a grok bash command when engineer_provider: grok", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "ignored-when-grok",
+      cycle_budget_minutes: 30,
+      engineer_provider: "grok",
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("grok");
+    expect(command).toContain("grok \\");
+    expect(command).toContain("--always-approve");
+    expect(command).toContain("--single");
+    expect(command).toContain("--model");
+    expect(command).toContain("worktree");
+    expect(command).toContain(project.verification_command);
+    expect(command).not.toContain("ignored-when-grok");
+    // Sub-backed auth, NOT OpenRouter per-token.
+    expect(command).toContain(".grok/auth.json");
+    expect(command).not.toContain("OPENROUTER_API_KEY");
+  });
+
+  it("includes engineer_model override in the generated grok command", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "grok",
+      engineer_model: "grok-build",
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("grok-build");
+  });
+
+  it("uses the default grok model when engineer_model is unset", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const { DEFAULT_GROK_MODEL } = await import("../src/engineer_providers/grok");
+    const project = makeProject({ engineer_provider: "grok" });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain(DEFAULT_GROK_MODEL);
+  });
+
+  it("honors a task-level engineer_provider: grok override (source=task)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "claude",
+      engineer_command: "echo claude",
+    });
+    const task = {
+      id: "t-1",
+      title: "do it",
+      status: "pending",
+      priority: 1,
+      engineer_provider: "grok",
+    } as const;
+    const { provider, source, command } = resolveEngineerCommand(
+      project,
+      task as never,
+    );
+    expect(provider).toBe("grok");
+    expect(source).toBe("task");
+    expect(command).toContain("grok \\");
+  });
+
+  it("shell-quotes hands_off single quotes safely on the grok path too", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "grok",
+      hands_off: ["path/with'quote"],
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("path/with'\\''quote");
+  });
 });
 
 describe("runEngineer dry-run with alternative provider (gs-270)", () => {
@@ -423,6 +495,22 @@ describe("runEngineer dry-run with alternative provider (gs-270)", () => {
     expect(logContent!).toContain("provider=aider");
     expect(logContent!).toContain("aider");
     expect(logContent!).not.toContain("this-is-ignored-for-aider");
+  });
+
+  it("logs provider=grok in dry-run output", async () => {
+    const project = makeProject({
+      engineer_provider: "grok",
+      engineer_command: "this-is-ignored-for-grok",
+    });
+    const result = await runEngineer(project, "cycle-grok-dry", undefined, true);
+    expect(result.exitCode).toBe(0);
+
+    const logContent = await readCycleFile("test-proj", "cycle-grok-dry", "engineer.log");
+    expect(logContent).not.toBeNull();
+    expect(logContent!).toContain("[DRY RUN]");
+    expect(logContent!).toContain("provider=grok");
+    expect(logContent!).toContain("grok");
+    expect(logContent!).not.toContain("this-is-ignored-for-grok");
   });
 
   it("logs provider=claude in dry-run for default path", async () => {

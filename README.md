@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.7.0, 2,105 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.0 adds an opt-in pre-cycle judgment gate — a Hammerstein slop screen that flags (or skips) stupid-industrious tasks before the engineer runs. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.7.1, 2,111 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.x adds an opt-in pre-cycle judgment gate (a Hammerstein slop screen that flags or skips stupid-industrious tasks before the engineer runs) and a `grok` engineer provider (run cycles on xAI's Grok CLI, off your Claude quota). Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -53,7 +53,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,105 passing tests across 73 test files.
+- 2,111 passing tests across 73 test files.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 
@@ -161,6 +161,7 @@ Runtime enforcement at cycle boundaries. Stacks with instruction-layer tools:
 - **[AGENTS.md / agents-md](https://github.com/TheRealSeanDonahoe/agents-md)** — drop-in rules file teaching coding agents to push back on bad requests and verify before claiming done.
 - **[lean-ctx](https://github.com/tzervas/lean-ctx)** — context runtime compressing file reads and search results into compact wire format.
 - **[aider](https://aider.chat) + OpenRouter** — set `engineer_provider: aider` to route cycles through Qwen3 Coder (~40× cheaper than Claude Sonnet). Bulk scaffolding; complex work stays on `claude`.
+- **[Grok CLI](https://x.ai/cli)** — set `engineer_provider: grok` to run cycles on xAI's Grok CLI, billed to your flat-rate grok.com subscription (no per-token cost). Sign in with `grok login`; no API key. Bulk scaffolding; complex work stays on `claude`. (v0.7.1+)
 
 ## Strategic-reasoning companion
 
@@ -202,6 +203,7 @@ Additive over the existing scheduled-task path — rollback is "stop the supervi
 Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in [`projects.yaml.example`](projects.yaml.example).
 
 - `engineer_provider: aider` — route to OpenRouter Qwen3 Coder (~$0.05-0.10/cycle).
+- `engineer_provider: grok` — route to xAI's Grok CLI on your flat-rate grok.com sub, no per-token cost (`grok login`; no API key). (v0.7.1+)
 - `creative_work_allowed: true` — Hard Rule 1 carve-out for creative-draft cycles.
 - `auto_merge: true` — auto-merge `bot/work` after clean cycles. Opt in after 5.
 - `dispatcher.session_budget` — cap on USD, tokens, or cycles.

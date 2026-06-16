@@ -23,6 +23,7 @@ import type {
   CycleCreativeContext,
 } from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
+import { buildGrokCommand } from "./engineer_providers/grok";
 import { ENGINEER_DISCIPLINE } from "./prompts/engineer_discipline";
 import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
 
@@ -124,6 +125,12 @@ export function resolveEngineerCommand(
         provider,
         source,
         command: buildAiderCommand(effectiveProject, context, nextTask),
+      };
+    case "grok":
+      return {
+        provider,
+        source,
+        command: buildGrokCommand(effectiveProject, context, nextTask),
       };
   }
 }

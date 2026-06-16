@@ -60,30 +60,39 @@
 # Engineer provider (Phase 7, gs-270). Optional per-project.
 # -------------------------------------------------------------------
 #
-#   engineer_provider: claude | aider   (optional, default: claude)
+#   engineer_provider: claude | aider | grok   (optional, default: claude)
 #       Which agent runs as the cycle's engineer. Default "claude" is
 #       the current behavior — the dispatcher runs the project's
 #       `engineer_command` string verbatim (typically a wrapper around
-#       `claude -p`). Set to "aider" to route the engineer half of
-#       the cycle to aider + OpenRouter — GS then generates the full
+#       `claude -p`). Set to "aider" or "grok" to route the engineer
+#       half of the cycle to that provider — GS then generates the full
 #       invocation (worktree setup + provider CLI + prompt) internally
 #       and the `engineer_command` field is ignored.
 #
-#       Why you'd opt in: aider + OpenRouter Qwen3 Coder Plus is ~40x
-#       cheaper per input token than Claude Sonnet and does not
-#       consume your Claude subscription quota. Best for bulk
-#       scaffolding work (type definitions, test boilerplate, UI
+#       Why you'd opt in: keep cycle work off your Claude subscription
+#       quota.
+#         - aider + OpenRouter Qwen3 Coder is ~40x cheaper per input
+#           token than Claude Sonnet (pay-per-token via your OR credits).
+#         - grok runs xAI's Grok CLI, billed to your flat-rate grok.com
+#           subscription — no per-token cost at all. (gs-331, v0.7.1+)
+#       Best for bulk scaffolding (types, test boilerplate, UI
 #       components). Complex / algorithmic work should stay on claude.
 #
 #       Pre-req when set to aider:
 #         - aider installed locally (`pip install aider-chat`)
 #         - OPENROUTER_API_KEY in the process env (Hard Rule 8 / BYOK)
+#       Pre-req when set to grok:
+#         - Grok CLI installed (`curl -fsSL https://x.ai/cli/install.sh | bash`)
+#         - signed in (`grok login`, writes ~/.grok/auth.json) OR a
+#           GROK_DEPLOYMENT_KEY in the env (Hard Rule 8 / BYOK). No
+#           per-token API key — the CLI is subscription-backed.
 #
 #   engineer_model: string   (optional, provider-dependent default)
-#       Model override. For aider, any OpenRouter model id works; the
-#       default is "openrouter/qwen/qwen3-coder-plus". Ignored for
-#       the claude path (the model is chosen by the project's
-#       engineer_command wrapper).
+#       Model override. For aider, any OpenRouter model id works (default
+#       "openrouter/qwen/qwen3-coder-plus"). For grok, a Grok model id
+#       (default "grok-composer-2.5-fast"; "grok-build" is the reasoning
+#       variant). Ignored for the claude path (the model is chosen by the
+#       project's engineer_command wrapper).
 #
 # -------------------------------------------------------------------
 # Creative-work opt-in (Phase 7 / gs-278). Per-project. Off by default.

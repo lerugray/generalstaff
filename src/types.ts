@@ -168,15 +168,18 @@ export type WorkDetectionMode =
 export type ConcurrencyDetectionMode = "catalogdna" | "worktree" | "none";
 
 // gs-270: Phase 7 engineer-swap. Projects opt into an alternative engineer
-// provider (aider on OpenRouter, etc.) to keep subscription-quota pressure
-// off the default `claude -p` engineer. Default is "claude" (current
-// behavior: run `engineer_command` verbatim). Non-claude providers have GS
-// generate the full bash invocation internally — worktree setup, deps,
-// provider CLI, prompt — so projects don't need a per-provider wrapper.
-export type EngineerProvider = "claude" | "aider";
+// provider (aider on OpenRouter, grok on the xAI subscription, etc.) to keep
+// subscription-quota pressure off the default `claude -p` engineer. Default is
+// "claude" (current behavior: run `engineer_command` verbatim). Non-claude
+// providers have GS generate the full bash invocation internally — worktree
+// setup, deps, provider CLI, prompt — so projects don't need a per-provider
+// wrapper. gs-331 (v0.7.1): "grok" runs xAI's Grok CLI headlessly, auth'd by
+// the operator's flat-rate grok.com sub login (no per-token key).
+export type EngineerProvider = "claude" | "aider" | "grok";
 export const VALID_ENGINEER_PROVIDERS: readonly EngineerProvider[] = [
   "claude",
   "aider",
+  "grok",
 ];
 
 // gs-297: Session usage budget. Caps how much of the user's LLM

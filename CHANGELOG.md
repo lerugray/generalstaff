@@ -9,6 +9,28 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-06-16
+
+Adds a third engineer provider. Backward-compatible; existing projects behave
+identically. 2,111 tests passing.
+
+### Added
+
+- **`grok` engineer provider.** Set `engineer_provider: grok` on a project to
+  run the engineer half of each cycle on xAI's [Grok CLI](https://x.ai/cli)
+  instead of `claude -p` or aider. As with the aider provider, GS generates the
+  full invocation internally (worktree setup → deps → repo-context → CLI →
+  exit) and the `engineer_command` field is ignored.
+  - **Billed to your flat-rate grok.com subscription — no per-token cost, no
+    Claude-quota burn.** Auth is the CLI's own `grok login` (`~/.grok/auth.json`)
+    or a `GROK_DEPLOYMENT_KEY` env var (Hard Rule 8 BYOK); there is no API key
+    to pass.
+  - Runs headless and autonomous (`grok --single … --always-approve`). Default
+    model `grok-composer-2.5-fast`; override via `engineer_model` (`grok-build`
+    is the reasoning variant) or per-task `task.engineer_model`.
+  - Pre-req: `curl -fsSL https://x.ai/cli/install.sh | bash`, then `grok login`.
+    Docs: README + `projects.yaml.example`.
+
 ## [0.7.0] — 2026-06-16
 
 One framework feature, opt-in and backward-compatible. A `projects.yaml`
