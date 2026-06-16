@@ -116,6 +116,48 @@ export interface AdvisorVerdict {
   ts: string;
 }
 
+// --- Judgment gate (gs-330, 2026-06-16, v0.7.0) ---
+// Optional lightweight pre-cycle gate. After the picker resolves the next
+// task and before the engineer spends tokens, the canonical Hammerstein
+// system-prompt judges whether the task is LOAD-BEARING toward its goal or
+// STUPID-INDUSTRIOUS slop (effort that pattern-matches progress but doesn't
+// advance it). Verdict KEEP / REJECT, logged to PROGRESS.jsonl as a
+// `judgment_verdict` event.
+//
+// Distinct from the advisor (gs-327): the advisor shells out to the external
+// Hammerstein `h` CLI for a broad free-text audit; this gate calls OpenRouter
+// inline (no external binary — just OPENROUTER_API_KEY, which the reviewer
+// path already uses) for a focused KEEP/REJECT slop screen. They compose.
+//
+// Modes:
+//   - "off"  : disabled, zero overhead (the global default; the gate never runs).
+//   - "flag" : run the gate, log the verdict, PROCEED regardless (advisory).
+//   - "skip" : run the gate; on REJECT skip the cycle (cycle_skipped, reason
+//              `judged_stupid_industrious`). KEEP / error / no-key PROCEED.
+// Flag-first by design — the framework calls itself "not a veto" and the
+// boundary is contestable on borderline tasks, so the default never blocks
+// legitimate work; `skip` is an opt-in for autonomous / auto-generated task
+// pipelines. Graceful no-op on missing key / fetch failure / malformed
+// verdict (verdict "error" → proceed; never blocks on gate infrastructure).
+export type JudgmentGateMode = "off" | "flag" | "skip";
+export const VALID_JUDGMENT_GATE_MODES: readonly JudgmentGateMode[] = [
+  "off",
+  "flag",
+  "skip",
+];
+
+export type JudgmentVerdictKind = "keep" | "reject" | "error";
+
+export interface JudgmentVerdict {
+  verdict: JudgmentVerdictKind;
+  reason: string;
+  quadrant?: string;
+  raw_output?: string;
+  duration_sec: number;
+  model: string;
+  ts: string;
+}
+
 // --- projects.yaml schema ---
 
 export type WorkDetectionMode =
@@ -242,6 +284,11 @@ export interface ProjectConfig {
   // cycles on this project (sequential) and contributes the per-round
   // maximum in parallel mode.
   max_consecutive_empty?: number;
+  // gs-330: optional pre-cycle judgment gate. "off" (default) / "flag"
+  // (advisory) / "skip" (REJECT skips the cycle). See JudgmentGateMode
+  // above. BYOK per Hard Rule 8 — needs OPENROUTER_API_KEY; graceful
+  // no-op (proceeds) when the key is unset. Composes with `advisor`.
+  judgment_gate?: JudgmentGateMode;
   // gs-302: optional early-kill when the engineer prints no task-claim
   // line (GENERALSTAFF_TASK_CLAIM_JSON) within this many minutes.
   // Fractions allowed (e.g. 0.05 ≈ 3s). Unset disables the timer;
@@ -509,7 +556,13 @@ export type ProgressEventType =
   // raw_output (truncated)}. Logged for every advisor run; gates a
   // cycle only when project.advisor.gate=true AND verdict==="block"
   // (in which case a sibling cycle_skipped event records the gating).
-  | "advisor_verdict";
+  | "advisor_verdict"
+  // gs-330 (2026-06-16): pre-cycle judgment gate returned a verdict. Data
+  // carries {task_id, verdict, reason, quadrant?, model, duration_sec,
+  // raw_output (truncated)}. Logged for every gate run; gates a cycle only
+  // when project.judgment_gate==="skip" AND verdict==="reject" (in which
+  // case a sibling cycle_skipped event records the gating).
+  | "judgment_verdict";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -732,6 +785,8 @@ const VALID_EVENTS: readonly string[] = [
   "phase_rolled_back",
   // gs-327 (2026-05-14): pre-cycle advisor verdict (Hammerstein etc.)
   "advisor_verdict",
+  // gs-330 (2026-06-16): pre-cycle judgment-gate verdict (KEEP/REJECT slop screen)
+  "judgment_verdict",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

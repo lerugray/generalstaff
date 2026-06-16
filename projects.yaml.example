@@ -168,6 +168,48 @@
 # environment. Nothing is shipped, nothing is hosted on your behalf.
 
 # -------------------------------------------------------------------
+# Pre-cycle judgment gate — inline Hammerstein slop screen (gs-330, 2026-06-16)
+# -------------------------------------------------------------------
+#
+# Optional, lightweight sibling of the advisor above. Instead of shelling
+# out to the external `h` CLI, the judgment gate calls OpenRouter INLINE
+# with the canonical Hammerstein system-prompt and asks one focused
+# question of the picked task: is it LOAD-BEARING toward the project goal,
+# or STUPID-INDUSTRIOUS slop (effort that pattern-matches progress but
+# doesn't advance it)? Verdict KEEP / REJECT, logged to PROGRESS.jsonl as
+# `judgment_verdict`. No external binary required — just OPENROUTER_API_KEY
+# (the same key the OpenRouter reviewer path already uses).
+#
+# Full docs: docs/JUDGMENT-GATE.md.
+#
+#   judgment_gate: off | flag | skip   (default: off — zero overhead)
+#       off  — disabled; the gate never runs.
+#       flag — run the gate, log the verdict, PROCEED regardless (advisory).
+#       skip — run the gate; on REJECT skip the cycle (cycle_skipped,
+#              reason "judged_stupid_industrious"). KEEP / error / no-key
+#              all proceed.
+#
+# Flag-first by design: the Hammerstein framework calls itself "not a veto"
+# and the load-bearing-vs-slop boundary is genuinely contestable on
+# borderline tasks, so the default never blocks legitimate work. Reach for
+# `skip` only on autonomous / auto-generated task pipelines where slop
+# sub-goals actually appear — for a hand-written tasks.json it's mostly a
+# no-op safety net.
+#
+# Model: OpenRouter qwen/qwen3.6-plus by default (well under a cent/task;
+# override with GENERALSTAFF_JUDGMENT_GATE_MODEL). Latency: ~10-20s/cycle
+# when enabled. Composes with `advisor` (both can run). Graceful no-op: a missing
+# key, fetch failure, timeout, or unparseable verdict all PROCEED — only an
+# explicit REJECT under `skip` blocks a cycle.
+#
+#   # Recommended dogfood setting for the generalstaff self-managed project
+#   # (global default stays off so upgrading users get no surprise calls):
+#   judgment_gate: flag
+#
+# Hard Rule 8 (BYOK): the OpenRouter key comes from your own environment.
+# Nothing is shipped, nothing is hosted on your behalf.
+
+# -------------------------------------------------------------------
 # Multi-reviewer quorum review (db77c28, 2026-06-02)
 # -------------------------------------------------------------------
 #

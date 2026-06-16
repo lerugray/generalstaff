@@ -7,7 +7,7 @@
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.6.0, 2,077 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.6.0 ships multi-reviewer quorum review and repo-structure map + agent self-planning on every engineer dispatch. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.7.0, 2,105 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.0 adds an opt-in pre-cycle judgment gate — a Hammerstein slop screen that flags (or skips) stupid-industrious tasks before the engineer runs. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -53,7 +53,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,077 passing tests across 72 test files.
+- 2,105 passing tests across 73 test files.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 
@@ -176,6 +176,8 @@ Over time, `~/.hammerstein/logs/` accumulates your strategic decisions for curat
 
 **Wire it into the dispatcher (v0.4.0+).** Set `advisor.enabled: true` per project and GS calls `h audit` automatically between picker and engineer with the proposed task plan + bounded cycle history. Verdict lands in `PROGRESS.jsonl` as `advisor_verdict`. Opt-in (default off, zero overhead). With `gate: true`, a `block` verdict skips the cycle (`cycle_skipped: advisor_gated`). Full setup: [`docs/ADVISOR.md`](docs/ADVISOR.md).
 
+**Or skip the binary (v0.7.0+).** If you don't want to install the `h` CLI, the lighter `judgment_gate` does a focused KEEP/REJECT slop screen on the picked task via inline OpenRouter (just `OPENROUTER_API_KEY`). Set `judgment_gate: flag` (advisory) or `skip` (skips the cycle on a REJECT). It composes with the advisor. Full setup: [`docs/JUDGMENT-GATE.md`](docs/JUDGMENT-GATE.md).
+
 ## 24/7 heartbeat dispatch (v0.4.0+)
 
 Anthropic separates `claude -p` and SDK billing into a dedicated credit bucket on **2026-06-15**. Scheduled-task launchers that ran on the regular subscription move to that bucket.
@@ -204,7 +206,8 @@ Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in 
 - `auto_merge: true` — auto-merge `bot/work` after clean cycles. Opt in after 5.
 - `dispatcher.session_budget` — cap on USD, tokens, or cycles.
 - `dispatcher.max_parallel_slots: N` — N cycles per round in parallel.
-- `advisor.enabled: true` — pre-cycle Hammerstein audit (opt-in, v0.4.0+). With `gate: true`, a `block` verdict skips the cycle. See [`docs/ADVISOR.md`](docs/ADVISOR.md).
+- `advisor.enabled: true` — pre-cycle Hammerstein audit via the external `h` CLI (opt-in, v0.4.0+). With `gate: true`, a `block` verdict skips the cycle. See [`docs/ADVISOR.md`](docs/ADVISOR.md).
+- `judgment_gate: flag` — pre-cycle Hammerstein slop screen, inline OpenRouter, no external binary (opt-in, v0.7.0+; `off`|`flag`|`skip`). `skip` skips the cycle on a REJECT. See [`docs/JUDGMENT-GATE.md`](docs/JUDGMENT-GATE.md).
 - `engineer_claim_timeout_minutes: N` — kill a stuck engineer early if it emits no task-claim signal within N minutes (v0.5.0+).
 - `customer_facing_smoke` — shell probe run after verification on `public_facing` projects; a non-zero exit fails the cycle (v0.5.0+).
 - `review.reviewers` — list of independent reviewer voices (each with `provider`, optional `model`, `fallback`, `label`); synthesized into one verdict with quorum policy (v0.6.0+).

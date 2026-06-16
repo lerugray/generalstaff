@@ -9,6 +9,52 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-16
+
+One framework feature, opt-in and backward-compatible. A `projects.yaml`
+unchanged from v0.6.x behaves identically — the gate is off by default.
+2,105 tests passing.
+
+### Added
+
+- **Pre-cycle judgment gate.** A lightweight, self-contained slop screen.
+  Set `judgment_gate: flag` (or `skip`) on a project and — after the picker
+  resolves the next task, before the engineer spends a cycle's tokens — GS
+  runs the canonical Hammerstein system-prompt against the picked task: is it
+  *load-bearing* toward the project goal, or *stupid-industrious* slop (effort
+  that pattern-matches progress but doesn't advance it)? Verdict KEEP /
+  REJECT, logged to `PROGRESS.jsonl` as a `judgment_verdict` event.
+  - `off` (default) — disabled, zero overhead.
+  - `flag` — log the verdict, proceed regardless (advisory).
+  - `skip` — on REJECT, skip the cycle (`cycle_skipped`, reason
+    `judged_stupid_industrious`); the task stays bot-pickable for next cycle.
+
+  Flag-first by design: the framework calls itself "not a veto," and the
+  load-bearing-vs-slop boundary is genuinely contestable on borderline tasks,
+  so the default never blocks legitimate work. It fills the gap the reviewer
+  can't: the reviewer is *post*-execution (is the code correct?); this gate is
+  *pre*-execution (is the task the right shape?). Previously the bot could
+  spend a whole cycle writing correct code for a wrong-shaped task and the
+  reviewer would pass it.
+
+  Inline OpenRouter (`qwen/qwen3.6-plus` by default; override via
+  `GENERALSTAFF_JUDGMENT_GATE_MODEL`), well under a cent/task, ~10-20s/cycle.
+  No external binary — just `OPENROUTER_API_KEY` (Hard Rule 8 BYOK; same key
+  the OpenRouter reviewer already uses). Graceful no-op: a missing key, fetch
+  failure, timeout, or unparseable verdict all proceed — only an explicit
+  REJECT under `skip` ever blocks a cycle. Composes with the external-CLI
+  `advisor` (both can run). The Hammerstein system-prompt is vendored verbatim
+  from the public, AGPL-3.0 [Hammerstein framework](https://github.com/lerugray/hammerstein)
+  at `src/prompts/hammerstein_gate.md`. Full docs:
+  [`docs/JUDGMENT-GATE.md`](docs/JUDGMENT-GATE.md).
+
+  Proved out in the `wintermute` experiment — the gate reliably separates
+  load-bearing from slop on clear-cut cases and is contestable only on
+  genuinely borderline items. That result is single-model on a toy goal; a
+  frontier-model pass is a documented v2 candidate. The gate earns its keep
+  most where tasks are vaguer or auto-generated; for a hand-curated
+  `tasks.json` it's a mostly-quiet safety net.
+
 ## [0.6.0] — 2026-06-03
 
 Two framework features, both opt-in and backward-compatible. A

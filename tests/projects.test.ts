@@ -593,6 +593,29 @@ describe("validateConfig", () => {
       ),
     ).toThrow(/review\.min_real_reviews/);
   });
+
+  // gs-330: pre-cycle judgment gate config (off | flag | skip).
+  it("parses judgment_gate off / flag / skip", () => {
+    expect(validateProject(validProjectRaw({ judgment_gate: "off" })).judgment_gate).toBe("off");
+    expect(validateProject(validProjectRaw({ judgment_gate: "flag" })).judgment_gate).toBe("flag");
+    expect(validateProject(validProjectRaw({ judgment_gate: "skip" })).judgment_gate).toBe("skip");
+  });
+
+  it("leaves judgment_gate undefined when absent (default off at the cycle site)", () => {
+    expect(validateProject(validProjectRaw()).judgment_gate).toBeUndefined();
+  });
+
+  it("rejects an invalid judgment_gate value", () => {
+    expect(() => validateProject(validProjectRaw({ judgment_gate: "veto" }))).toThrow(
+      /judgment_gate/,
+    );
+  });
+
+  it("rejects a non-string judgment_gate value", () => {
+    expect(() => validateProject(validProjectRaw({ judgment_gate: true }))).toThrow(
+      /judgment_gate/,
+    );
+  });
 });
 
 describe("assertValidConfig", () => {

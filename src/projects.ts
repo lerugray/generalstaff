@@ -31,6 +31,7 @@ import type {
   ReviewConfig,
   ReviewerEntry,
   QuorumPolicy,
+  JudgmentGateMode,
 } from "./types";
 import {
   VALID_ENGINEER_PROVIDERS,
@@ -38,6 +39,7 @@ import {
   VALID_BUDGET_ENFORCEMENTS,
   VALID_BUDGET_PROVIDER_SOURCES,
   VALID_BUDGET_ON_EXHAUSTED,
+  VALID_JUDGMENT_GATE_MODES,
 } from "./types";
 
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
@@ -828,6 +830,24 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     };
   }
 
+  // gs-330: optional pre-cycle judgment gate. A simple string enum —
+  // off (default) | flag | skip. Unset is treated as "off" at the cycle
+  // site, so we leave it undefined here when absent rather than coercing.
+  let judgmentGate: JudgmentGateMode | undefined;
+  if (raw.judgment_gate !== undefined && raw.judgment_gate !== null) {
+    if (
+      typeof raw.judgment_gate !== "string" ||
+      !VALID_JUDGMENT_GATE_MODES.includes(raw.judgment_gate as JudgmentGateMode)
+    ) {
+      throw new ProjectValidationError(
+        id,
+        "judgment_gate",
+        `must be one of: ${VALID_JUDGMENT_GATE_MODES.join(", ")} — got ${JSON.stringify(raw.judgment_gate)}`,
+      );
+    }
+    judgmentGate = raw.judgment_gate as JudgmentGateMode;
+  }
+
   // gs quorum-review (2026-06-02): optional multi-reviewer quorum config.
   // Schema validation only — the synthesis contract lives in reviewer.ts.
   let review: ReviewConfig | undefined;
@@ -928,6 +948,7 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     missionswarm,
     journal,
     advisor,
+    judgment_gate: judgmentGate,
     review,
     public_facing: publicFacing,
     customer_facing_smoke: customerFacingSmoke,

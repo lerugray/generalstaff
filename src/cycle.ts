@@ -20,6 +20,7 @@ import { appendProgress } from "./audit";
 import { runEngineer, type EngineerResult } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runAdvisor, buildAdvisorPlan, normalizeAdvisorConfig } from "./advisor";
+import { runJudgmentGate, shouldGateSkipCycle } from "./judgment_gate";
 import { runVerification } from "./verification";
 import { runReviewer, runQuorumReview, type ReviewerResult } from "./reviewer";
 import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
@@ -810,6 +811,49 @@ export async function executeCycle(
       );
       if (advisorCfg.gate && verdict.verdict === "block") {
         result.reason = `advisor_gated: ${verdict.reason.slice(0, 200)}`;
+        break assemble;
+      }
+    }
+
+    // 3b. Pre-cycle judgment gate (gs-330, 2026-06-16, v0.7.0)
+    //
+    // Lightweight, self-contained slop screen: the canonical Hammerstein
+    // system-prompt judges whether the picked task is load-bearing toward the
+    // project goal or stupid-industrious slop. Off by default (zero overhead).
+    // "flag" logs the verdict and proceeds (advisory); "skip" skips the cycle
+    // on REJECT (cycle_skipped, reason `judged_stupid_industrious`). Graceful
+    // no-op (always proceeds) on a missing OPENROUTER_API_KEY, a call failure,
+    // a timeout, or an unparseable verdict — only an explicit REJECT under
+    // `skip` blocks a cycle. Inline OpenRouter, so distinct from the external-
+    // CLI advisor above; the two compose. Implementation: src/judgment_gate.ts.
+    const gateMode = project.judgment_gate ?? "off";
+    if (gateMode !== "off" && nextTask) {
+      const gv = await runJudgmentGate(
+        { id: project.id, notes: project.notes },
+        { id: nextTask.id, title: nextTask.title },
+      );
+      await appendProgress(
+        project.id,
+        "judgment_verdict",
+        {
+          task_id: nextTask.id,
+          verdict: gv.verdict,
+          reason: gv.reason,
+          quadrant: gv.quadrant,
+          model: gv.model,
+          duration_sec: gv.duration_sec,
+          mode: gateMode,
+          // raw_output truncated to keep PROGRESS.jsonl line-bounded
+          raw_output: gv.raw_output?.slice(0, 4000),
+        },
+        cycleId,
+      );
+      console.log(
+        `Judgment gate (${gv.model}) → ${gv.verdict.toUpperCase()} ` +
+          `(${gv.duration_sec.toFixed(1)}s): ${gv.reason.slice(0, 120)}`,
+      );
+      if (shouldGateSkipCycle(gateMode, gv.verdict)) {
+        result.reason = `judged_stupid_industrious: ${gv.reason.slice(0, 200)}`;
         break assemble;
       }
     }
