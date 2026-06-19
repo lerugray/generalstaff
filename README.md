@@ -2,6 +2,10 @@
 
 ![GeneralStaff — the local-first alternative to Polsia. Open Source · BYOK · No SaaS Tax](docs/images/banner.png)
 
+## In plain English
+
+GeneralStaff lets you describe, in plain words, the software you want, then puts AI to work building it while you stay in charge. The catch with letting AI write code on its own is that it tends to report a job as finished when it isn't. GeneralStaff stops that. Before any work is accepted it has to pass a check: the tests must pass, real changes must exist, and a second AI has to confirm the work matches what was asked. If it fails, the work is thrown out instead of kept, and you can read a full record of everything the AI did.
+
 **Verification-gate discipline for autonomous coding agents.**
 **Your code. Your keys. Your audit log.**
 
