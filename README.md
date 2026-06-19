@@ -6,6 +6,8 @@
 
 GeneralStaff lets you describe, in plain words, the software you want, then puts AI to work building it while you stay in charge. The catch with letting AI write code on its own is that it tends to report a job as finished when it isn't. GeneralStaff stops that. Before any work is accepted it has to pass a check: the tests must pass, real changes must exist, and a second AI has to confirm the work matches what was asked. If it fails, the work is thrown out instead of kept, and you can read a full record of everything the AI did.
 
+GeneralStaff was built and is run by a non-programmer, directing AI in plain English instead of writing the code by hand. The skill is in structuring the work so the AI produces something you can trust, and GeneralStaff itself was built that way.
+
 **Verification-gate discipline for autonomous coding agents.**
 **Your code. Your keys. Your audit log.**
 
