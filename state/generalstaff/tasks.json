@@ -2577,12 +2577,13 @@
   {
     "id": "gs-334",
     "title": "Scoper code-grounding: stop surfacing already-shipped/partial work as net-new forks. ROOT CAUSE (2026-06-22): survey() in src/scope.ts feeds the scoper only the MISSION header + git commit MESSAGES + queued task TITLES, never the actual code surface, so it judges 'already built?' from commit subject lines (intent, not completion). RESULT on 2026-06-22: it surfaced 2 already-SHIPPED features as net-new design-forks (retrogaze subscription-mgmt page, shipped inside frontend/index.html+app.js; devforge hands_off smoke guards, shipped inside tests/smoke-test.js) plus 5 partials framed as net-new. KEY: an ls-files/file-list alone does NOT fix this — both false positives were features implemented INSIDE existing files, invisible to a file list. FIX must do per-candidate GREP verification: for each scoped candidate, grep the working tree for feature keywords and feed the hits into the gate context so in-file features are detected before classification. Land the fix in BOTH src/scope.ts (the GS v0.8.0 autonomous port) AND wintermute/fleet_loop.py (the live loop that actually wrote these forks). Add a regression test. Reference: the 2026-06-22 backlog session ran a 4-agent per-candidate code verification that caught these — same method, automated.",
-    "status": "pending",
+    "status": "done",
     "priority": 2,
     "interactive_only": true,
     "interactive_only_reason": "Touches core autonomous-mode scoping logic (scope.ts) + the live Wintermute fleet_loop.py cross-repo; needs careful design + tests, not a bot cycle.",
     "expected_touches": [
       "src/scope.ts"
-    ]
+    ],
+    "done_note": "DONE 2026-06-22. Code-grounding landed in BOTH scope/gate (GS TS, 9429712: deriveProbeTerms+groundScopedItems+renderCodeEvidence+SOURCE_GLOBS, gate reject rule, +10 tests, suite 2197/0) AND wintermute fleet_loop.py (home-PC c51726e, pushed). Used a per-candidate git grep (source files only, docs excluded) feeding the gate, NOT a file list (which misses in-file features). Behaviorally verified on the real false positives: retrogaze sub-mgmt + devforge hands_off guards -> code hits -> REJECT; veridian unwrap cleanup -> target present -> KEEP; zero-page Steamworks -> absent -> KEEP."
   }
 ]
