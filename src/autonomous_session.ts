@@ -38,6 +38,8 @@ import {
   survey,
   scope,
   parseScopedItems,
+  groundScopedItems,
+  renderCodeEvidence,
   DEFAULT_SCOPER_MODEL,
   DEFAULT_SCOPE_COUNT,
 } from "./scope";
@@ -314,8 +316,15 @@ export async function runAutonomousSession(
       const items = parseScopedItems(rawScope, count);
       result.scopedCount = items.length;
       if (items.length > 0) {
+        // gs-334: ground each item against the ACTUAL code (git grep of its key
+        // terms) so the gate rejects already-shipped work — survey() sees only
+        // commit messages + task titles, never the code surface.
+        const codeEvidence = renderCodeEvidence(
+          groundScopedItems(project.path, items),
+        );
         const classified = await runClassifyGate(project, items, rawScope, {
           apiKey,
+          codeEvidence,
         });
         result.classified = classified;
         const isLive = liveProjects.has(project.id);

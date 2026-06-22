@@ -116,3 +116,25 @@ describe("parseClassifiedItems — pairs each CLASS with its preceding VERDICT",
     expect(parseClassifiedItems(raw)).toHaveLength(0);
   });
 });
+
+// gs-334: code-grounding injected into the classify prompt.
+describe("buildClassifyUserPrompt — code-grounding (gs-334)", () => {
+  it("omits the code section when no evidence is given (back-compat)", () => {
+    const p = buildClassifyUserPrompt({ id: "x" }, "1. do a thing");
+    expect(p).not.toContain("CODE PRESENCE");
+    expect(p).not.toContain("ALREADY-BUILT CHECK");
+    expect(p).toContain("PROPOSED ITEMS:");
+  });
+
+  it("injects the evidence block + already-implemented reject rule", () => {
+    const p = buildClassifyUserPrompt(
+      { id: "x" },
+      "1. Add subscription page",
+      '1. Add subscription page\n   - "subscription" → 2 file(s): app.js, api.py',
+    );
+    expect(p).toContain("ALREADY-BUILT CHECK");
+    expect(p).toContain("already-implemented");
+    expect(p).toContain("CODE PRESENCE");
+    expect(p).toContain("app.js, api.py");
+  });
+});

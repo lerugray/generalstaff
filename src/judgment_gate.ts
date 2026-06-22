@@ -338,23 +338,42 @@ export async function runJudgmentGate(
 export function buildClassifyUserPrompt(
   project: { id: string; notes?: string },
   scopeText: string,
+  codeEvidence?: string,
 ): string {
   const header =
     `Project: ${project.id}` +
     (project.notes?.trim() ? ` — ${project.notes.trim()}` : "");
+  // gs-334: optional code-presence grounding so the gate REJECTs already-built
+  // work the commit-message-only survey can't see.
+  const groundingRule = codeEvidence
+    ? "ALREADY-BUILT CHECK: a CODE PRESENCE section follows the items — the repo " +
+      "was grepped for each item's key terms. If the evidence shows an item's " +
+      "described capability is ALREADY implemented in the codebase, REJECT it " +
+      "(WHY: already-implemented; cite the files). For cleanup/removal items, the " +
+      "target pattern still being PRESENT means the work is NOT done — judge those " +
+      "on their merits.\n"
+    : "";
+  const evidenceBlock = codeEvidence
+    ? "\n\nCODE PRESENCE (git grep of each item's key terms across the repo's " +
+      "tracked files):\n" +
+      codeEvidence
+    : "";
   return (
     "Apply the framework above as a PRE-EXECUTION GATE on the proposed project " +
     "work items below. For EACH numbered item, output exactly three lines, in " +
     "the item's order:\n" +
     "VERDICT: KEEP or REJECT\n" +
-    "WHY: short reason (REJECT = stupid-industrious / busywork / premature)\n" +
+    "WHY: short reason (REJECT = stupid-industrious / busywork / premature / " +
+    "already-implemented)\n" +
     "CLASS: BOT-SAFE (mechanical, bounded, no taste/feel/scope/revenue/legal " +
     "judgment; safe to auto-dispatch) or DESIGN-FORK (needs a human taste/scope/" +
     "revenue/legal call; must NOT be auto-dispatched).\n" +
+    groundingRule +
     "Go item by item, in order. No preamble.\n\n" +
     header +
     "\n\nPROPOSED ITEMS:\n" +
-    scopeText
+    scopeText +
+    evidenceBlock
   );
 }
 
@@ -416,6 +435,9 @@ export interface RunClassifyGateOptions {
   promptPath?: string;
   timeoutMs?: number;
   apiKey?: string;
+  // gs-334: rendered code-presence evidence (groundScopedItems +
+  // renderCodeEvidence) so the gate can REJECT already-built items.
+  codeEvidence?: string;
 }
 
 /** Run the combined GATE+CLASSIFY pass for one project's scoped items. `items`
@@ -450,7 +472,7 @@ export async function runClassifyGate(
     return errItems();
   }
 
-  const user = buildClassifyUserPrompt(project, scopeText);
+  const user = buildClassifyUserPrompt(project, scopeText, opts.codeEvidence);
   let raw: string;
   try {
     raw = await invokeGate(

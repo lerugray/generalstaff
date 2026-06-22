@@ -158,6 +158,127 @@ export function parseScopedItems(text: string, max?: number): ScopedItem[] {
   return items;
 }
 
+// --- Code-grounding for the GATE (gs-334, 2026-06-22) ---
+// survey() feeds the scoper only commit MESSAGES + task TITLES, never the code,
+// so it re-proposed already-SHIPPED work (a subscription page that lives inside
+// index.html+app.js; hands_off guards inside smoke-test.js — both invisible to a
+// commit log AND to a bare file list). Fix: before the GATE classifies an item,
+// grep the working tree for the item's key terms and hand the gate that evidence
+// so it can REJECT what the code already provides. A file list misses in-file
+// features; grep does not.
+
+const PROBE_STOP = new Set([
+  "the", "and", "for", "with", "into", "that", "this", "its", "are", "add",
+  "adds", "new", "page", "route", "button", "panel", "view", "show", "support",
+  "supports", "enable", "enables", "build", "builds", "create", "creates",
+  "wire", "wires", "implement", "implements", "feature", "across", "each",
+  "via", "from", "using", "use", "make", "ensure", "ensures", "structural",
+  "guard", "guards", "assert", "asserts", "test", "tests", "smoke", "file",
+  "files", "code", "counter", "indicator", "setup", "pending",
+]);
+
+/** Derive a small set of distinctive grep probes from a scoped item's title:
+ *  quoted strings + code-ish identifiers (snake_case / camelCase / CONSTANT_CASE
+ *  / dotted filenames) first (strongest signal), then distinctive content words.
+ *  Pure + deterministic. */
+export function deriveProbeTerms(title: string, max = 8): string[] {
+  const probes: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    const v = t.trim();
+    const k = v.toLowerCase();
+    if (v.length >= 3 && v.length <= 40 && !seen.has(k)) {
+      seen.add(k);
+      probes.push(v);
+    }
+  };
+  // Quoted strings — exact, strong.
+  for (const m of title.matchAll(/["'`]([^"'`]{3,40})["'`]/g)) push(m[1]);
+  // Identifiers with an internal separator (snake / kebab / dotted path / file).
+  for (const m of title.matchAll(
+    /\b([A-Za-z][A-Za-z0-9]*(?:[_./-][A-Za-z0-9]+)+)\b/g,
+  ))
+    push(m[1]);
+  // camelCase and CONSTANT_CASE.
+  for (const m of title.matchAll(/\b([a-z]+[A-Z][A-Za-z0-9]*)\b/g)) push(m[1]);
+  for (const m of title.matchAll(/\b([A-Z]{2,}(?:_[A-Z0-9]+)*)\b/g)) push(m[1]);
+  // Distinctive content words (>=4 chars, not generic dev vocabulary).
+  for (const w of title.toLowerCase().match(/[a-z][a-z0-9]{3,}/g) ?? []) {
+    if (!PROBE_STOP.has(w)) push(w);
+  }
+  return probes.slice(0, max);
+}
+
+// Restrict grounding greps to SOURCE files. Prose/docs (*.md, planning notes,
+// READMEs) mention a feature's words whether or not it's built — and a doc that
+// *plans* a feature is the opposite signal from code that *implements* it. Only
+// real code/markup/config carries "is it implemented" signal. (git grep already
+// searches only tracked files, so gitignored build dirs never appear.)
+const SOURCE_GLOBS = [
+  "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.py", "*.rs", "*.go",
+  "*.rb", "*.java", "*.kt", "*.swift", "*.c", "*.h", "*.cpp", "*.hpp", "*.cc",
+  "*.cs", "*.gd", "*.vue", "*.svelte", "*.php", "*.lua", "*.html", "*.css",
+  "*.scss", "*.sql", "*.toml", "*.yaml", "*.yml",
+  ":(exclude)*-lock.json", ":(exclude)*.min.js", ":(exclude)*.min.css",
+];
+
+export interface GroundedItemEvidence {
+  title: string;
+  probes: string[];
+  /** Per-probe, the tracked SOURCE files that contain it (capped). */
+  hits: Array<{ term: string; files: string[] }>;
+}
+
+/** For each scoped item, grep the repo's TRACKED files for its probe terms and
+ *  collect which files match. Read-only (git grep). Never throws — a failed grep
+ *  yields no hits for that term (degrades to "no evidence", never crashes the
+ *  run). */
+export function groundScopedItems(
+  repoPath: string,
+  items: ScopedItem[],
+  opts: { maxFilesPerTerm?: number } = {},
+): GroundedItemEvidence[] {
+  const maxFiles = opts.maxFilesPerTerm ?? 6;
+  return items.map((it) => {
+    const probes = deriveProbeTerms(it.title);
+    const hits: Array<{ term: string; files: string[] }> = [];
+    for (const term of probes) {
+      const r = spawnSync(
+        "git",
+        ["-C", repoPath, "grep", "-ilF", "-e", term, "--", ...SOURCE_GLOBS],
+        { encoding: "utf-8", timeout: 10_000 },
+      );
+      const files = (r.stdout ?? "")
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .slice(0, maxFiles);
+      if (files.length > 0) hits.push({ term, files });
+    }
+    return { title: it.title, probes, hits };
+  });
+}
+
+/** Render grounding evidence as a compact, numbered block for the GATE prompt
+ *  (numbers align with the scoper's numbered item list). Pure. */
+export function renderCodeEvidence(ev: GroundedItemEvidence[]): string {
+  return ev
+    .map((e, i) => {
+      if (e.hits.length === 0) {
+        return (
+          `${i + 1}. ${e.title}\n` +
+          `   (no code matches for: ${e.probes.join(", ") || "n/a"} → likely NOT built yet)`
+        );
+      }
+      const lines = e.hits.map(
+        (h) =>
+          `   - "${h.term}" → ${h.files.length} file(s): ${h.files.join(", ")}`,
+      );
+      return `${i + 1}. ${e.title}\n${lines.join("\n")}`;
+    })
+    .join("\n");
+}
+
 /** POST the scope prompt to OpenRouter, AbortController-bounded. Returns the
  *  raw model text (parse with parseScopedItems). Throws on any failure — the
  *  caller catches and skips the project. Mirrors judgment_gate.ts's invokeGate. */
