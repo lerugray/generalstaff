@@ -302,6 +302,22 @@
     max-width: 58ch;
     text-wrap: pretty;
   }
+  .auto-block {
+    border-top: 1px dashed var(--rule);
+    margin-top: 56px;
+    padding-top: 44px;
+  }
+  h3.auto-head {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(26px, 3vw, 34px);
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 0 0 20px;
+    max-width: 24ch;
+    text-wrap: balance;
+  }
+  h3.auto-head em { font-style: italic; color: var(--rust); }
 
   /* ───── problem ───── */
   .problem-grid {
@@ -822,7 +838,7 @@
       <li><a href="#get">Get started</a></li>
       <li><a href="https://github.com/lerugray/generalstaff">Repo ↗</a></li>
     </ul>
-    <span class="ver">v0.5.0</span>
+    <span class="ver">v0.8.0</span>
   </nav>
 
   <!-- HERO -->
@@ -945,6 +961,29 @@
         <span class="ln"><span class="dim">[work]  rollback → workspace clean · retry 1/3</span></span>
         <span class="ln"><span class="ok">[gate]  ✓ PASS — 248/248 tests · build ok · claim verified</span></span>
         <span class="ln"><span class="acc">[keep]  commit a83f1c2 · signed · audit #224<span class="caret"></span></span></span>
+      </div>
+    </div>
+
+    <div class="auto-block">
+      <div class="gate-label">— new in v0.8.0: autonomous mode —</div>
+      <h3 class="auto-head">It proposes the work now, too. <em>You still decide what's worth doing.</em></h3>
+      <p class="sec-lede">
+        Through v0.7, GeneralStaff only ran the work you queued. Autonomous mode — opt-in,
+        off by default — adds the step in front: it reads a project's real state (its mission,
+        git history, open tasks), proposes concrete next work, and runs each proposal through
+        the same gate. Keep or reject — and mechanical, or a call only you should make. The
+        mechanical work it dispatches; the judgment calls it hands back.
+      </p>
+
+      <div class="gate-outcome">
+        <div class="outcome kept">
+          <div class="tag"><span class="glyph">✓</span> Dispatched</div>
+          <p>Bot-safe work runs through the normal cycle and lands on a branch — gated and rolled back exactly like work you queued yourself. It never pushes or merges; the merge stays your call.</p>
+        </div>
+        <div class="outcome reject">
+          <div class="tag"><span class="glyph">⑂</span> Routed to you</div>
+          <p>Anything that turns on taste, scope, money, or a live product isn't decided for you. It surfaces as a short list of decisions and waits.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -1089,7 +1128,7 @@
     </div>
     <ul>
       <li><a href="https://github.com/lerugray/generalstaff">github / generalstaff</a></li>
-      <li><a href="https://github.com/lerugray/generalstaff/blob/master/CHANGELOG.md">changelog · v0.5.0</a></li>
+      <li><a href="https://github.com/lerugray/generalstaff/blob/master/CHANGELOG.md">changelog · v0.8.0</a></li>
       <li><a href="https://github.com/lerugray/generalstaff/issues">support</a></li>
       <li><a href="https://lerugray.github.io/hammerstein/">built on Hammerstein, our open-source AI-discipline framework ↗</a></li>
     </ul>

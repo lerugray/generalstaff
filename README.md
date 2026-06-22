@@ -13,7 +13,7 @@ GeneralStaff was built and is run by a non-programmer, directing AI in plain Eng
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.7.2, 2,117 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.7.x adds an opt-in pre-cycle judgment gate (a Hammerstein slop screen that flags or skips stupid-industrious tasks before the engineer runs) and a `grok` engineer provider (run cycles on xAI's Grok CLI, off your Claude quota). Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.8.0, 2,187 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.8.0 adds opt-in **autonomous mode** (`gs autonomous`): GeneralStaff can propose its own next work, judge it through the Hammerstein gate, then dispatch the mechanical parts and route the taste/scope/revenue calls to you — default-off, never auto-pushes. v0.7.x added the pre-cycle judgment gate and a `grok` engineer provider. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -33,6 +33,10 @@ Six mechanisms enforced by the dispatcher:
 - **Repo-structure orientation + agent self-planning.** Every cycle, the engineer gets a ranked structural map of the repo at the top of its prompt (via `aider --show-repo-map`, capped at ~700 tokens) so it skips the cold-start re-discovery, then plans its own work and proceeds — no human plan-approval. The map is best-effort: if it can't be built, the cycle dispatches exactly as before. The `hands_off` list and the verification gate still bind regardless of the agent's plan.
 - **BYOK billing.** You pay Anthropic, OpenRouter, or whoever directly. No platform credits, no SaaS middleman, no revenue share.
 - **Open audit log.** Full prompts, responses, tool calls, and diffs in `state/<project>/PROGRESS.jsonl`. Grep-able, reviewable. Closed SaaS tools can't show you theirs.
+
+### Autonomous mode (v0.8.0, opt-in)
+
+The six mechanisms above govern work you *queue*. Autonomous mode (`gs autonomous`) adds the step in front — it proposes the work too, then puts it through the same gates. For each opted-in project it surveys real state (MISSION + git log + queued tasks), scopes concrete next work via an off-cap model, runs the Hammerstein gate to judge **keep/reject** *and* classify **bot-safe vs design-fork**, then routes: mechanical work is dispatched through the normal cycle; taste/scope/revenue/legal calls — and anything held back on a live product — surface to you (`gs forks`). It's **default-off** (a project without an `autonomous:` block is never touched) and **never pushes or merges**: dispatched work lands on the bot branch and in a review ledger (`gs branches`), and the merge stays your call. The decision and dispatch ledgers are local and gitignored — the machinery is open source, which projects you run and what they decide is yours. See [`projects.yaml.example`](projects.yaml.example) for the config.
 
 ## What it catches
 

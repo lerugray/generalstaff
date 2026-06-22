@@ -148,14 +148,163 @@ export const VALID_JUDGMENT_GATE_MODES: readonly JudgmentGateMode[] = [
 
 export type JudgmentVerdictKind = "keep" | "reject" | "error";
 
+// --- Autonomous-mode item class (gs-332, 2026-06-22, v0.8.0) ---
+// Alongside KEEP/REJECT, the gate classifies a proposed work item as either
+// safe to auto-dispatch (mechanical, bounded) or needing a human taste/scope/
+// revenue/legal call. Ported from wintermute's gate_classify BOT-SAFE /
+// DESIGN-FORK split. BOT-SAFE+KEEP items are the only ones an autonomous
+// session may dispatch (Phase 2); DESIGN-FORK (and live-held bot-safe) items
+// route to the fork-ledger for Ray. Absent on a verdict means the gate didn't
+// emit a parseable CLASS line — treated as needs-human, never auto-dispatched.
+export type JudgmentClass = "bot-safe" | "design-fork";
+export const VALID_JUDGMENT_CLASSES: readonly JudgmentClass[] = [
+  "bot-safe",
+  "design-fork",
+];
+
 export interface JudgmentVerdict {
   verdict: JudgmentVerdictKind;
   reason: string;
   quadrant?: string;
+  // gs-332: BOT-SAFE / DESIGN-FORK classification when the gate runs in
+  // classify mode (autonomous scoping). Undefined for the plain KEEP/REJECT
+  // slop screen (the v0.7.0 pre-cycle gate path).
+  class?: JudgmentClass;
   raw_output?: string;
   duration_sec: number;
   model: string;
   ts: string;
+}
+
+// --- Autonomous mode (gs-332, 2026-06-22, v0.8.0) ---
+// GS's opt-in autonomous front-end (wintermute folded in). For each project
+// with `autonomous.enabled`, a session runs SURVEY (read MISSION + git log +
+// tasks.json) → SCOPE (an off-cap model proposes work items) → GATE+CLASSIFY
+// (one Hammerstein call returns KEEP/REJECT + BOT-SAFE/DESIGN-FORK per item)
+// → LEDGER (design-forks / live-held → fork-ledger for Ray). Phase 1 is the
+// dry-run: scope-quality validation only, no dispatch. Default-off — existing
+// GS users see zero change. BYOK per Hard Rule 8 (the scoper + gate models
+// run on the operator's OPENROUTER_API_KEY).
+
+// Per-project autonomous opt-in. Absent / `{enabled:false}` => the project is
+// never surveyed/scoped (zero overhead).
+export interface AutonomousConfig {
+  // Master switch. Default false. When true the project participates in
+  // `gs autonomous` survey+scope+gate+ledger.
+  enabled: boolean;
+  // Model the SCOPE step routes to (proposes the work items). Overrides the
+  // fleet default. Public default: "openrouter/qwen3.6-plus" (same provider
+  // the judgment gate already uses — one OPENROUTER_API_KEY).
+  scoper_model?: string;
+  // How many work items SCOPE proposes for this project. Overrides the fleet
+  // default (3, matching wintermute).
+  scope_count?: number;
+  // Revenue / live product. When true, even BOT-SAFE+KEEP items are HELD for
+  // Ray's review (ledgered as `live-held`) rather than auto-dispatched — the
+  // higher-stakes rail. Default false (pre-revenue: bot-safe may auto-dispatch
+  // in Phase 2). Private data (Ray's roster) — not a public default.
+  live?: boolean;
+  // Phase 2+ opt-in: a shell command an operator wires to advise on design-
+  // forks (e.g. Weiss). Inert in Phase 1. Public users leave it unset.
+  design_fork_advisor_command?: string;
+}
+
+// Fleet-wide autonomous defaults on the dispatcher. Per-project AutonomousConfig
+// fields override these. Caps are Phase 2 (dispatch) — inert in the Phase 1
+// dry-run, but the schema lands now to avoid a later migration.
+export interface AutonomousDispatcherConfig {
+  // Fleet default scoper model. Public default "openrouter/qwen3.6-plus".
+  scoper_model?: string;
+  // Fleet default items proposed per project. Default 3.
+  scope_count?: number;
+  // Phase 2: cap on NON-live (pre-revenue) auto-dispatches per run. Default 2.
+  dispatch_cap?: number;
+  // Phase 2: also branch-dispatch on live/revenue projects (never pushed/
+  // merged — the merge stays gated on Ray). Default false.
+  live_dispatch?: boolean;
+  // Phase 2: separate, conservative cap on live-project dispatches per run.
+  // Default 1.
+  live_dispatch_cap?: number;
+}
+
+// One work item the SCOPE step proposed for a project.
+export interface ScopedItem {
+  // The one-line title (markdown/numbering/tag stripped).
+  title: string;
+  // The scoper's self-tag, parsed from a trailing [MECHANICAL] / [DESIGN]
+  // marker. Advisory only — the GATE's CLASS is authoritative. null when the
+  // scoper omitted the tag.
+  tag: "mechanical" | "design" | null;
+}
+
+// The result of SURVEY+SCOPE for one project.
+export interface ProjectScope {
+  project: string;
+  // The compact state digest fed to the scoper (MISSION + git log + queued).
+  digest: string;
+  items: ScopedItem[];
+}
+
+// One scoped item after the GATE+CLASSIFY pass, joined by (project, order).
+export interface ClassifiedItem {
+  title: string;
+  verdict: JudgmentVerdictKind;
+  class?: JudgmentClass;
+  // Why the gate ruled this way (one line), when emitted.
+  reason?: string;
+}
+
+// --- Autonomous-mode ledgers (gs-332) ---
+// Durable, deduped, cross-run JSON state. Both are gitignored, per-host
+// (Ray's private decision/branch data) — the machinery is public, the DATA
+// is not. Surfaced at the next interactive session's catch-up.
+
+export type ForkKind = "design-fork" | "live-held";
+export type LedgerStatus = "pending" | "resolved";
+
+// A decision that needs Ray (a design-fork, or a bot-safe item held because
+// the project is live/revenue). Resolved entries are KEPT (status="resolved")
+// so they never re-surface. Mirrors wintermute's fork-ledger schema.
+export interface ForkEntry {
+  id: string;           // `${project}::${slug(title)}` — the dedup key
+  project: string;
+  title: string;
+  kind: ForkKind;
+  status: LedgerStatus;
+  first_seen: string;   // ISO 8601 / run timestamp
+  last_seen: string;
+  resolution: string | null;
+}
+
+export interface ForkLedger {
+  forks: ForkEntry[];
+  updated?: string;
+}
+
+// An auto-dispatched cycle awaiting review+merge. The loop never pushes/merges,
+// so without this the work strands on the host's local clone. Unlike
+// wintermute (one unique branch per dispatch), GS dispatches reuse cycle.ts,
+// which lands every cycle on the project's shared bot branch — so the dedup key
+// is the cycle_id (unique per dispatch), and `sha` pins the exact reviewable
+// commit for the gs-bot-diff-review "cherry-pick the cycle SHA" flow.
+export interface DispatchEntry {
+  id: string;           // `${project}::${cycle_id}` — the dedup key
+  project: string;
+  title: string;
+  branch: string;       // the shared bot branch the cycle landed on
+  cycle_id?: string;    // the dispatching cycle
+  sha?: string;         // the cycle's end SHA — the precise reviewable commit
+  live: boolean;
+  status: string;       // cycle outcome (verified / verified_weak / failed)
+  review_status: LedgerStatus;
+  first_seen: string;
+  last_seen: string;
+  resolution: string | null;
+}
+
+export interface DispatchLedger {
+  dispatches: DispatchEntry[];
+  updated?: string;
 }
 
 // --- projects.yaml schema ---
@@ -345,6 +494,12 @@ export interface ProjectConfig {
   // N× (Hard Rule 8 — operator pays per reviewer).
   // See docs/quorum-review-design-2026-06-02.md.
   review?: ReviewConfig;
+  // gs-332 (2026-06-22, v0.8.0): optional autonomous-mode opt-in. Absent /
+  // `{enabled:false}` => the project is never surveyed/scoped (zero overhead,
+  // existing behavior). When enabled, `gs autonomous` runs SURVEY→SCOPE→
+  // GATE+CLASSIFY→LEDGER for it. Per-project fields override the dispatcher's
+  // `autonomous` fleet defaults. BYOK per Hard Rule 8. See AutonomousConfig.
+  autonomous?: AutonomousConfig;
 }
 
 // gs-322 / Phase B+ followup. Two stages today; intentionally narrow.
@@ -400,6 +555,11 @@ export interface DispatcherConfig {
   // carve out tighter caps for individual projects and must fit
   // within this cap when both are set with the same unit.
   session_budget?: SessionBudget;
+  // gs-332 (2026-06-22, v0.8.0): fleet-wide autonomous-mode defaults
+  // (scoper model, items-per-project, Phase 2 dispatch caps). Per-project
+  // ProjectConfig.autonomous fields override these. Absent => built-in
+  // defaults (scoper "openrouter/qwen3.6-plus", scope_count 3).
+  autonomous?: AutonomousDispatcherConfig;
 }
 
 export interface ProjectsYaml {

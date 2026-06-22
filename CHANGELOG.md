@@ -9,6 +9,58 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-22
+
+Autonomous mode. GeneralStaff has always *executed* the tasks you queue —
+dispatch, verify, review, gate the merge. This release adds the step in front:
+it can now propose its own work, judge it, and either run it or route the
+decision to you. Opt-in, default-off; existing projects behave identically.
+2,187 tests passing.
+
+### Added
+
+- **Autonomous mode (`gs autonomous`).** For each project that opts in
+  (`autonomous: { enabled: true }`), a run does four things: **SURVEY** its
+  real state (MISSION + git log + already-queued tasks), **SCOPE** concrete
+  next work via an off-cap model, run the Hammerstein **GATE+CLASSIFY** (the
+  same judgment gate from v0.7.0, now also tagging each item BOT-SAFE vs
+  DESIGN-FORK in one call), then **ROUTE**: bot-safe work gets dispatched
+  through the normal cycle; taste/scope/revenue/legal calls — and anything held
+  back on a live product — land in a ledger for you. The point: the parts of a
+  portfolio that need a human decision surface as decisions, and the mechanical
+  parts get done, without you having to drive each one.
+- **Two modes, safe by default.** `gs autonomous` previews — it scopes,
+  gates, and writes the decision ledger but dispatches nothing. `gs autonomous
+  --execute` dispatches the bot-safe work through the existing cycle (engineer →
+  verification gate → reviewer → bot branch), reusing every safety rail
+  unchanged. It **never pushes or merges** — dispatched branches land in a
+  dispatch-ledger and the merge stays your call. `--cycle-dry-run` runs the full
+  dispatch path with the engineer as a no-op, for a zero-cost trial of the
+  wiring.
+- **Live-product rail.** Projects marked `live: true` are revenue surfaces:
+  even their bot-safe work is held for review rather than auto-run, unless you
+  pass `--live-dispatch` (a separate, tighter cap; still branch-only,
+  never pushed). Mirrors the rail that's been running the standalone fleet loop.
+- **`gs forks` / `gs branches`.** Review surfaces: `forks` lists the pending
+  decisions awaiting you (design-forks + live-held); `branches` lists the
+  auto-dispatched branches awaiting review+merge. Both ledgers dedup across runs
+  and preserve resolved entries so nothing re-surfaces once you've handled it.
+- **Config: an `autonomous:` block** on a project (`enabled`, `scoper_model`,
+  `scope_count`, `live`) and on the dispatcher (fleet defaults +
+  `dispatch_cap` / `live_dispatch` / `live_dispatch_cap`). BYOK per Hard Rule 8:
+  the scoper and gate run on your `OPENROUTER_API_KEY` (default model
+  `qwen/qwen3.6-plus`, well under a cent per call). The ledger DATA files are
+  gitignored — the machinery is public, which projects you run and what they
+  decide is yours.
+
+### Notes
+
+- Default-off everywhere: a project without an `autonomous:` block is never
+  surveyed or scoped — zero overhead, identical behavior to v0.7.x.
+- Dispatch reuses `cycle.ts` deliberately (not a separate executor), so the
+  reviewer, hands_off enforcement, and `PROGRESS.jsonl` audit trail all apply to
+  autonomously-generated work exactly as they do to hand-queued tasks.
+
 ## [0.7.2] — 2026-06-16
 
 A reviewer-signal fix. 2,117 tests passing.

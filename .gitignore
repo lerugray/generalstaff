@@ -46,6 +46,20 @@ state/session.pid
 state/*/cycles/
 state/_fleet/cycles/
 
+# gs-332 (v0.8.0): autonomous-mode ledgers. The MACHINERY is public; the
+# DATA is per-host runtime state (which projects forked which decisions /
+# which branches await review) and carries Ray's private roster + live-
+# product flags. Gitignored, never committed — the public/private split
+# documented in docs/internal/GS-AUTONOMOUS-MODE-AND-MC-CONSOLE-PLAN-2026-06-22.md.
+state/fork-ledger.json
+state/dispatch-ledger.json
+# Wildcard fallback: the ledger path follows dispatcher.state_dir, so a custom
+# state_dir would otherwise write these private files outside the literal
+# state/ prefix above. Belt-and-suspenders so the roster/decision DATA can
+# never be committed regardless of state_dir.
+**/fork-ledger.json
+**/dispatch-ledger.json
+
 # Maintainer-private project state (per-machine). For projects where
 # tasks.json / MISSION.md / PROGRESS.jsonl contain IP-sensitive or
 # personally-identifying content that shouldn't land on the public repo.

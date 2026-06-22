@@ -219,6 +219,32 @@
 # Nothing is shipped, nothing is hosted on your behalf.
 
 # -------------------------------------------------------------------
+# Autonomous mode (gs-332, v0.8.0) — OPT-IN, default off
+# -------------------------------------------------------------------
+#
+# GS's autonomous front-end. For each project with `autonomous.enabled`,
+# `gs autonomous` SURVEYs its state (MISSION + git log + queued tasks),
+# asks an off-cap model to SCOPE concrete next work, runs the Hammerstein
+# GATE+CLASSIFY (KEEP/REJECT + BOT-SAFE/DESIGN-FORK), then routes:
+# DESIGN-FORK + live-held decisions -> a fork-ledger for you (`gs forks`);
+# BOT-SAFE work -> dispatched through the normal cycle (Phase 2). Absent /
+# `enabled: false` => the project is never scoped (zero overhead).
+#
+#   autonomous:
+#     enabled: true                   # opt this project in (default false)
+#     scoper_model: qwen/qwen3.6-plus # optional; overrides the fleet default
+#     scope_count: 3                  # optional; items to propose (default 3)
+#     live: false                     # optional; see the PRIVACY note below
+#
+# PRIVACY — `live: true` marks a REVENUE / live product: even bot-safe work
+# is HELD for your review rather than auto-dispatched. WHICH projects are
+# revenue products is private data — set `live: true` only in your real
+# (gitignored) projects.yaml, never in a publicly-committed file. The
+# fork-ledger / dispatch-ledger DATA files are gitignored for the same reason.
+#
+# BYOK (Hard Rule 8): the scoper + gate run on your OPENROUTER_API_KEY.
+
+# -------------------------------------------------------------------
 # Multi-reviewer quorum review (db77c28, 2026-06-02)
 # -------------------------------------------------------------------
 #
@@ -394,3 +420,15 @@ dispatcher:
   # bump only if utilization stays high. Drop back to 1 if
   # reviewer-spend or UX feedback warrants.
   max_parallel_slots: 1
+
+  # Autonomous-mode fleet defaults (gs-332, v0.8.0). Per-project
+  # `autonomous:` fields override these. NOTE: unlike most dispatcher
+  # fields (which silently default on bad input), a MALFORMED autonomous
+  # block here THROWS at config load — a misconfigured scoper/cap should
+  # be loud, not silently ignored (same posture as session_budget).
+  # autonomous:
+  #   scoper_model: qwen/qwen3.6-plus  # fleet default scoper
+  #   scope_count: 3                   # default items proposed per project
+  #   dispatch_cap: 2                  # Phase 2: non-live dispatches per run
+  #   live_dispatch: false             # Phase 2: also branch-dispatch live products
+  #   live_dispatch_cap: 1             # Phase 2: conservative live cap

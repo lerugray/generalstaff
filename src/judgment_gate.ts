@@ -40,6 +40,9 @@ import type {
   JudgmentGateMode,
   JudgmentVerdict,
   JudgmentVerdictKind,
+  JudgmentClass,
+  ScopedItem,
+  ClassifiedItem,
 } from "./types";
 
 /** Whether a gate verdict should skip the cycle, given the configured mode.
@@ -145,6 +148,7 @@ function stripThink(s: string): string {
 export function parseGateVerdict(raw: string): {
   verdict: JudgmentVerdictKind;
   quadrant?: string;
+  class?: JudgmentClass;
   reason: string;
 } {
   const text = stripThink(raw);
@@ -160,6 +164,10 @@ export function parseGateVerdict(raw: string): {
   const qMatch = text.match(/QUADRANT:[\s*]*(.+?)[\s*]*$/im);
   const quadrant = qMatch?.[1]?.trim() || undefined;
 
+  // gs-332: CLASS is only present in autonomous classify mode (BOT-SAFE /
+  // DESIGN-FORK). Absent in the v0.7.0 single-task slop screen → undefined.
+  const cls = parseGateClass(text);
+
   // WHY: capture to the next blank line or end of text.
   const wMatch = text.match(/WHY:[\s*]*([\s\S]+?)(?:\n\s*\n|$)/i);
   let reason = wMatch?.[1]?.replace(/[\s*]+$/, "").trim() ?? "";
@@ -169,9 +177,18 @@ export function parseGateVerdict(raw: string): {
       text
         .split(/\r?\n/)
         .map((l) => l.trim())
-        .find((l) => l && !/^(VERDICT|QUADRANT|WHY)\s*:/i.test(l)) ?? "";
+        .find((l) => l && !/^(VERDICT|QUADRANT|WHY|CLASS)\s*:/i.test(l)) ?? "";
   }
-  return { verdict, quadrant, reason };
+  return { verdict, quadrant, class: cls, reason };
+}
+
+/** Extract a BOT-SAFE / DESIGN-FORK CLASS token from a gate response, if
+ *  present. Returns undefined when there's no parseable CLASS line (the
+ *  single-task slop-screen path, which never asks for one). */
+export function parseGateClass(raw: string): JudgmentClass | undefined {
+  const cMatch = raw.match(/CLASS:[\s*]*(BOT-?SAFE|DESIGN-?FORK)\b/i);
+  if (!cMatch) return undefined;
+  return /design/i.test(cMatch[1]) ? "design-fork" : "bot-safe";
 }
 
 /** POST the system+user pair to OpenRouter, AbortController-bounded. Mirrors
@@ -303,4 +320,155 @@ export async function runJudgmentGate(
     model,
     ts,
   };
+}
+
+// --- Autonomous-mode GATE+CLASSIFY (gs-332, 2026-06-22, v0.8.0) ---
+// One combined pass per project: the Hammerstein system-prompt judges each
+// scoped item KEEP/REJECT *and* classifies it BOT-SAFE/DESIGN-FORK. Faithful
+// port of wintermute's gate_classify, refined to run per-project (robust
+// ordering — no dependence on the model echoing `=== PROJECT ===` headers)
+// while keeping the verdict+class combined in a single call (the plan's
+// "single GATE+CLASSIFY call, not two" decision).
+
+/** The classify user-turn. Sends the RAW scoper output (full numbered list
+ *  with each item's title, "why load-bearing" sentence, and [MECHANICAL]/
+ *  [DESIGN] hint) plus a project header — matching wintermute's gate_classify,
+ *  which judges with that full context rather than titles alone. Paired with
+ *  loadGatePrompt() as the system message. */
+export function buildClassifyUserPrompt(
+  project: { id: string; notes?: string },
+  scopeText: string,
+): string {
+  const header =
+    `Project: ${project.id}` +
+    (project.notes?.trim() ? ` — ${project.notes.trim()}` : "");
+  return (
+    "Apply the framework above as a PRE-EXECUTION GATE on the proposed project " +
+    "work items below. For EACH numbered item, output exactly three lines, in " +
+    "the item's order:\n" +
+    "VERDICT: KEEP or REJECT\n" +
+    "WHY: short reason (REJECT = stupid-industrious / busywork / premature)\n" +
+    "CLASS: BOT-SAFE (mechanical, bounded, no taste/feel/scope/revenue/legal " +
+    "judgment; safe to auto-dispatch) or DESIGN-FORK (needs a human taste/scope/" +
+    "revenue/legal call; must NOT be auto-dispatched).\n" +
+    "Go item by item, in order. No preamble.\n\n" +
+    header +
+    "\n\nPROPOSED ITEMS:\n" +
+    scopeText
+  );
+}
+
+/** Parse the classify response into per-item {verdict, class, reason}, in
+ *  order. Pairs each CLASS with the most-recent preceding VERDICT (faithful
+ *  port of wintermute's parse_judged_by_proj `pend` logic) — robust to extra
+ *  prose between items. Accepts a reason either inline on the VERDICT line or
+ *  on a separate WHY line (the 3-line format the prompt requests). An item is
+ *  only emitted when its CLASS line is seen. */
+export function parseClassifiedItems(
+  raw: string,
+): Array<{ verdict: JudgmentVerdictKind; class: JudgmentClass; reason: string }> {
+  const text = stripThink(raw);
+  const out: Array<{
+    verdict: JudgmentVerdictKind;
+    class: JudgmentClass;
+    reason: string;
+  }> = [];
+  let pendVerdict: JudgmentVerdictKind | null = null;
+  let pendReason = "";
+  for (const line of text.split(/\r?\n/)) {
+    const vm = line.match(/VERDICT:[\s*]*(KEEP|REJECT)\b/i);
+    if (vm) {
+      pendVerdict = vm[1].toUpperCase() === "REJECT" ? "reject" : "keep";
+      // A reason may ride inline on the VERDICT line (older 2-line format).
+      const rm = line.match(
+        /VERDICT:[\s*]*(?:KEEP|REJECT)\b[\s*]*[—\-:]*\s*(.*)$/i,
+      );
+      pendReason = rm?.[1]?.trim() ?? "";
+      continue;
+    }
+    // A standalone WHY line (3-line format) overrides the inline reason.
+    const wm = line.match(/WHY:[\s*]*(.+?)[\s*]*$/i);
+    if (wm && pendVerdict) {
+      pendReason = wm[1].trim();
+      continue;
+    }
+    const cm = line.match(/CLASS:[\s*]*(BOT-?SAFE|DESIGN-?FORK)\b/i);
+    if (cm) {
+      out.push({
+        verdict: pendVerdict ?? "error",
+        class: /design/i.test(cm[1]) ? "design-fork" : "bot-safe",
+        reason: pendReason,
+      });
+      pendVerdict = null;
+      pendReason = "";
+    }
+  }
+  return out;
+}
+
+// The classify gate, like the scoper, is a reasoning model on a multi-item
+// prompt — give it the same generous budget the single-task slop screen's 60s
+// default would overrun. Override via RunClassifyGateOptions.timeoutMs.
+const DEFAULT_CLASSIFY_TIMEOUT_MS = 150_000;
+
+export interface RunClassifyGateOptions {
+  model?: string;
+  promptPath?: string;
+  timeoutMs?: number;
+  apiKey?: string;
+}
+
+/** Run the combined GATE+CLASSIFY pass for one project's scoped items. `items`
+ *  is the parsed list (used to align verdicts back by order); `scopeText` is
+ *  the RAW scoper output the gate actually reads (full why/tag context).
+ *  Gracefully degrades — a missing key / prompt-load / fetch failure yields an
+ *  "error" verdict (no class) for every item rather than throwing, matching
+ *  runJudgmentGate's documented no-op-on-infra-failure contract. Items the
+ *  model failed to classify also default to "error" (needs-human; never
+ *  auto-dispatched). */
+export async function runClassifyGate(
+  project: { id: string; notes?: string },
+  items: ScopedItem[],
+  scopeText: string,
+  opts: RunClassifyGateOptions = {},
+): Promise<ClassifiedItem[]> {
+  if (items.length === 0) return [];
+  const errItems = (): ClassifiedItem[] =>
+    items.map((it) => ({ title: it.title, verdict: "error" as const }));
+
+  const model =
+    opts.model ??
+    process.env.GENERALSTAFF_JUDGMENT_GATE_MODEL ??
+    DEFAULT_GATE_MODEL;
+  const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return errItems();
+
+  let system: string;
+  try {
+    system = await loadGatePrompt(opts.promptPath);
+  } catch {
+    return errItems();
+  }
+
+  const user = buildClassifyUserPrompt(project, scopeText);
+  let raw: string;
+  try {
+    raw = await invokeGate(
+      system,
+      user,
+      model,
+      apiKey,
+      opts.timeoutMs ?? DEFAULT_CLASSIFY_TIMEOUT_MS,
+    );
+  } catch {
+    return errItems();
+  }
+
+  const parsed = parseClassifiedItems(raw);
+  return items.map((it, i) => ({
+    title: it.title,
+    verdict: parsed[i]?.verdict ?? "error",
+    class: parsed[i]?.class,
+    reason: parsed[i]?.reason,
+  }));
 }

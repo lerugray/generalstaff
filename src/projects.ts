@@ -32,6 +32,8 @@ import type {
   ReviewerEntry,
   QuorumPolicy,
   JudgmentGateMode,
+  AutonomousConfig,
+  AutonomousDispatcherConfig,
 } from "./types";
 import {
   VALID_ENGINEER_PROVIDERS,
@@ -848,6 +850,76 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     judgmentGate = raw.judgment_gate as JudgmentGateMode;
   }
 
+  // gs-332: optional autonomous-mode opt-in. `enabled` is required when the
+  // block is present; the rest are optional overrides of the dispatcher's
+  // autonomous fleet defaults. Absent => undefined (project never scoped).
+  let autonomous: AutonomousConfig | undefined;
+  if (raw.autonomous !== undefined && raw.autonomous !== null) {
+    if (typeof raw.autonomous !== "object" || Array.isArray(raw.autonomous)) {
+      throw new ProjectValidationError(
+        id,
+        "autonomous",
+        `must be an object, got ${Array.isArray(raw.autonomous) ? "array" : typeof raw.autonomous}`,
+      );
+    }
+    const a = raw.autonomous as Record<string, unknown>;
+    if (typeof a.enabled !== "boolean") {
+      throw new ProjectValidationError(
+        id,
+        "autonomous.enabled",
+        `must be a boolean, got ${typeof a.enabled}`,
+      );
+    }
+    autonomous = { enabled: a.enabled };
+    if (a.scoper_model !== undefined && a.scoper_model !== null) {
+      if (typeof a.scoper_model !== "string" || a.scoper_model.trim() === "") {
+        throw new ProjectValidationError(
+          id,
+          "autonomous.scoper_model",
+          "must be a non-empty string",
+        );
+      }
+      autonomous.scoper_model = a.scoper_model;
+    }
+    if (a.scope_count !== undefined && a.scope_count !== null) {
+      if (
+        typeof a.scope_count !== "number" ||
+        !Number.isInteger(a.scope_count) ||
+        a.scope_count < 1
+      ) {
+        throw new ProjectValidationError(
+          id,
+          "autonomous.scope_count",
+          `must be a positive integer, got ${JSON.stringify(a.scope_count)}`,
+        );
+      }
+      autonomous.scope_count = a.scope_count;
+    }
+    if (a.live !== undefined && a.live !== null) {
+      if (typeof a.live !== "boolean") {
+        throw new ProjectValidationError(
+          id,
+          "autonomous.live",
+          `must be a boolean, got ${typeof a.live}`,
+        );
+      }
+      autonomous.live = a.live;
+    }
+    if (
+      a.design_fork_advisor_command !== undefined &&
+      a.design_fork_advisor_command !== null
+    ) {
+      if (typeof a.design_fork_advisor_command !== "string") {
+        throw new ProjectValidationError(
+          id,
+          "autonomous.design_fork_advisor_command",
+          "must be a string",
+        );
+      }
+      autonomous.design_fork_advisor_command = a.design_fork_advisor_command;
+    }
+  }
+
   // gs quorum-review (2026-06-02): optional multi-reviewer quorum config.
   // Schema validation only — the synthesis contract lives in reviewer.ts.
   let review: ReviewConfig | undefined;
@@ -954,6 +1026,7 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     customer_facing_smoke: customerFacingSmoke,
     lifecycle,
     max_consecutive_empty: maxConsecutiveEmpty,
+    autonomous,
   };
 }
 
@@ -1557,7 +1630,72 @@ function validateDispatcher(
     max_consecutive_empty: dispatcherMaxConsecutiveEmpty(raw),
     session_budget: sessionBudget,
     weak_streak_threshold: dispatcherWeakStreakThreshold(raw),
+    autonomous: dispatcherAutonomous(raw),
   };
+}
+
+// gs-332: fleet-wide autonomous-mode defaults. Like session_budget, this
+// throws on bad input rather than silently defaulting — a misconfigured
+// scoper/cap should be loud, not silently ignored. Absent => undefined
+// (built-in defaults apply at the autonomous_session call site).
+function dispatcherAutonomous(
+  raw: Record<string, unknown>,
+): AutonomousDispatcherConfig | undefined {
+  const v = raw.autonomous;
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) {
+    throw new ProjectValidationError(
+      "dispatcher",
+      "autonomous",
+      `must be an object, got ${Array.isArray(v) ? "array" : typeof v}`,
+    );
+  }
+  const a = v as Record<string, unknown>;
+  const out: AutonomousDispatcherConfig = {};
+  const intAtLeast = (field: string, val: unknown, min: number): number => {
+    if (typeof val !== "number" || !Number.isInteger(val) || val < min) {
+      throw new ProjectValidationError(
+        "dispatcher",
+        field,
+        `must be an integer >= ${min}, got ${JSON.stringify(val)}`,
+      );
+    }
+    return val;
+  };
+  if (a.scoper_model !== undefined && a.scoper_model !== null) {
+    if (typeof a.scoper_model !== "string" || a.scoper_model.trim() === "") {
+      throw new ProjectValidationError(
+        "dispatcher",
+        "autonomous.scoper_model",
+        "must be a non-empty string",
+      );
+    }
+    out.scoper_model = a.scoper_model;
+  }
+  if (a.scope_count !== undefined && a.scope_count !== null) {
+    out.scope_count = intAtLeast("autonomous.scope_count", a.scope_count, 1);
+  }
+  if (a.dispatch_cap !== undefined && a.dispatch_cap !== null) {
+    out.dispatch_cap = intAtLeast("autonomous.dispatch_cap", a.dispatch_cap, 0);
+  }
+  if (a.live_dispatch_cap !== undefined && a.live_dispatch_cap !== null) {
+    out.live_dispatch_cap = intAtLeast(
+      "autonomous.live_dispatch_cap",
+      a.live_dispatch_cap,
+      0,
+    );
+  }
+  if (a.live_dispatch !== undefined && a.live_dispatch !== null) {
+    if (typeof a.live_dispatch !== "boolean") {
+      throw new ProjectValidationError(
+        "dispatcher",
+        "autonomous.live_dispatch",
+        `must be a boolean, got ${typeof a.live_dispatch}`,
+      );
+    }
+    out.live_dispatch = a.live_dispatch;
+  }
+  return out;
 }
 
 function dispatcherMaxConsecutiveEmpty(raw: Record<string, unknown>): number {

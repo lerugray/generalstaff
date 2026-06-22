@@ -7,7 +7,10 @@ import { basename, join, resolve } from "path";
 import { runSession, runSessionChain } from "./session";
 import { runSingleCycle, countCommitsAhead } from "./cycle";
 import { $ } from "bun";
-import { loadFleetState, getProjectSummary, getRootDir, cycleDir } from "./state";
+import { loadFleetState, getProjectSummary, getRootDir, cycleDir, getStateDir } from "./state";
+import { runAutonomousSession, formatRunSummary } from "./autonomous_session";
+import { readForkLedger, pendingForks } from "./fork_ledger";
+import { readDispatchLedger, pendingDispatches } from "./dispatch_ledger";
 import {
   loadProjects,
   loadProjectsYaml,
@@ -137,6 +140,12 @@ Usage:
   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
+
+  generalstaff autonomous [--dry-run] [--project=<id>,...]  Autonomous mode (v0.8.0, opt-in): survey+scope+gate, route decisions
+    Example: generalstaff autonomous                     # dry-run scope+gate over autonomous-enabled projects
+    Example: generalstaff autonomous --project=myapp     # restrict to one project
+  generalstaff forks                                      List pending autonomous-mode decisions awaiting your review
+  generalstaff branches                                   List auto-dispatched branches awaiting review+merge
 
   generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet] [--auto-merge-failed]
                                                           Show fleet state
@@ -396,6 +405,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "serve",
   "integrations",
   "phase",
+  "autonomous",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -4464,6 +4474,116 @@ switch (command) {
     console.error(`Unknown phase subcommand: ${sub}`);
     console.error("Run `generalstaff phase --help` for usage.");
     process.exit(1);
+  }
+
+  // gs-332 (v0.8.0): autonomous mode — Phase 1 dry-run. SURVEY→SCOPE→
+  // GATE+CLASSIFY→LEDGER across projects with `autonomous.enabled: true`.
+  case "autonomous": {
+    if (args[1] === "--help" || args[1] === "help") {
+      console.log(
+        "Usage: generalstaff autonomous [--execute] [--live-dispatch] [--cycle-dry-run] [--project=<id>[,<id>...]]\n" +
+          "\n" +
+          "Opt-in autonomous mode (v0.8.0). For each project with\n" +
+          "`autonomous.enabled: true`: survey its state (MISSION + git log + tasks),\n" +
+          "ask an off-cap model to scope work, run the Hammerstein GATE+CLASSIFY,\n" +
+          "then route — design-fork / live-held decisions to the fork-ledger (see\n" +
+          "`generalstaff forks`); BOT-SAFE work is dispatched in --execute mode.\n" +
+          "\n" +
+          "  (default)            PREVIEW: scope+gate+fork-ledger only; nothing runs.\n" +
+          "  --execute            dispatch BOT-SAFE work through the normal cycle\n" +
+          "                       (engineer→verify→reviewer→bot branch). NEVER pushes\n" +
+          "                       or merges — branches land in the dispatch-ledger\n" +
+          "                       (see `generalstaff branches`); the merge stays your call.\n" +
+          "  --live-dispatch      also branch-dispatch on live/revenue projects\n" +
+          "                       (off by default; separate, tighter cap).\n" +
+          "  --cycle-dry-run      with --execute: run the full dispatch path but with\n" +
+          "                       the engineer as a no-op (safe wiring trial, no edits).\n" +
+          "  --project=<id>,...   restrict to a subset of enabled projects\n" +
+          "\n" +
+          "BYOK per Hard Rule 8: needs OPENROUTER_API_KEY (scoper + gate).\n",
+      );
+      break;
+    }
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        execute: { type: "boolean" },
+        "live-dispatch": { type: "boolean" },
+        "cycle-dry-run": { type: "boolean" },
+        project: { type: "string" },
+      },
+      strict: false,
+    });
+    const yaml = await loadProjectsYaml();
+    const enabled = yaml.projects.filter((p) => p.autonomous?.enabled);
+    if (enabled.length === 0) {
+      console.log(
+        "No projects have `autonomous.enabled: true` — nothing to do.\n" +
+          "Add an `autonomous: { enabled: true }` block to a project in projects.yaml.",
+      );
+      break;
+    }
+    const projectFilter =
+      typeof values.project === "string"
+        ? values.project
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+    const result = await runAutonomousSession(yaml, {
+      execute: values.execute === true,
+      liveDispatch: values["live-dispatch"] === true,
+      cycleDryRun: values["cycle-dry-run"] === true,
+      projectFilter,
+    });
+    console.log(formatRunSummary(result));
+    break;
+  }
+
+  // gs-332 (v0.8.0): list pending autonomous-mode decisions awaiting Ray.
+  case "forks": {
+    const yaml = await loadProjectsYaml();
+    const ledgerPath = join(getStateDir(yaml.dispatcher), "fork-ledger.json");
+    const ledger = readForkLedger(ledgerPath);
+    const pending = pendingForks(ledger);
+    if (pending.length === 0) {
+      console.log("No pending autonomous-mode decisions in the fork-ledger.");
+      break;
+    }
+    console.log(
+      `${pending.length} pending decision(s) awaiting review — ${ledgerPath}\n`,
+    );
+    for (const f of pending) {
+      console.log(`• [${f.project}] (${f.kind}) ${f.title}`);
+      console.log(`    first seen ${f.first_seen}`);
+    }
+    break;
+  }
+
+  // gs-332 (v0.8.0): list auto-dispatched branches awaiting review+merge.
+  case "branches": {
+    const yaml = await loadProjectsYaml();
+    const ledgerPath = join(
+      getStateDir(yaml.dispatcher),
+      "dispatch-ledger.json",
+    );
+    const ledger = readDispatchLedger(ledgerPath);
+    const pending = pendingDispatches(ledger);
+    if (pending.length === 0) {
+      console.log("No auto-dispatched branches awaiting review.");
+      break;
+    }
+    console.log(
+      `${pending.length} branch(es) awaiting review+merge — ${ledgerPath}\n`,
+    );
+    for (const d of pending) {
+      console.log(
+        `• [${d.project}] ${d.branch}@${(d.sha ?? "").slice(0, 8)}` +
+          ` (${d.status}${d.live ? ", LIVE" : ""}) — ${d.title}`,
+      );
+      console.log(`    first seen ${d.first_seen}`);
+    }
+    break;
   }
 
   default:

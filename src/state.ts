@@ -54,14 +54,17 @@ export function botWorktreePath(project: ProjectConfig): string {
   return join(project.path, ".bot-worktree");
 }
 
-function getStateDir(config?: DispatcherConfig): string {
+export function getStateDir(config?: DispatcherConfig): string {
   const root = getRootDir();
   return config?.state_dir
     ? join(root, config.state_dir)
     : join(root, "state");
 }
 
-function projectStateDir(projectId: string, config?: DispatcherConfig): string {
+export function projectStateDir(
+  projectId: string,
+  config?: DispatcherConfig,
+): string {
   return join(getStateDir(config), projectId);
 }
 
