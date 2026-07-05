@@ -173,5 +173,15 @@
     "priority": 3,
     "interactive_only": true,
     "interactive_only_reason": "Publish go/no-go on Ray's book — his call."
+  },
+  {
+    "id": "wdb-019",
+    "title": "Public-site internal-artifacts leak fix — the live Jekyll site was serving 4 internal editorial/QA/handoff artifacts (including the human-editor audit doc, which exposed AI-workflow details publicly). Add a Jekyll exclude list for internal directories under docs/ and live-verify the pages 404.",
+    "status": "done",
+    "priority": 1,
+    "done_note": "Shipped 2026-07-04 (mac night, commit 3b73dc7): Jekyll _config.yml exclude list added; the 4 artifacts (incl. the human-editor audit) confirmed 404 on the live site after deploy; files themselves remain in the repo, just out of the built site. Future internal directories under docs/ need to be added to the same exclude list.",
+    "expected_touches": [
+      "docs/_config.yml"
+    ]
   }
 ]
