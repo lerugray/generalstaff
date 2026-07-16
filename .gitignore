@@ -103,6 +103,8 @@ state/asciigpt/
 state/clever-lazy/
 state/gs-scheduler/
 state/hammerstein-model/
+state/snesos/
+state/free-indirect/
 
 # Bun / Node
 node_modules/
