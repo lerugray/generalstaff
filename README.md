@@ -100,6 +100,14 @@ Named for Kurt von Hammerstein-Equord's officer typology: clever/stupid × indus
 
 The architecture is the philosophy: gate, hands-off lists, default-off creative roles, open audit log. Built by a wargame designer thinking about AI failure modes the way wargames think about adversarial conditions — structurally, with explicit failure-mode enumeration, with discipline encoded as rules.
 
+## What this became
+
+GeneralStaff started as the dispatcher this README documents. Daily use produced a second thing: a written operating discipline for directing AI at all. The operator keeps rules files that record each hard-won lesson once so no future session repeats it, ledgers that carry open decisions until someone resolves them, and verification conventions that treat a model's "done" as a claim to check. The dispatcher enforces that discipline at cycle boundaries. The discipline itself now runs the operator's whole portfolio, on any machine and any model, and a session started tomorrow picks up tonight's open decisions from the ledger.
+
+The clearest proof is [SNESOS](https://snes-os.com), a boot-to-shell operating system for the Super Nintendo: 65816 assembly, a working mouse driver, a windowed GUI in progress, boots verified on real hardware. The operator wrote none of the code. The code holds up because the discipline reads every specification against its sources through an adversarial critic before it becomes canon, gates every build stage behind an emulator probe, and re-verifies each worker's output with an independent check before any human relies on it.
+
+The dispatcher in this repo is the runnable, open-source piece of that discipline: the verification gate, the hands-off lists, the audit log.
+
 ## Why the gate matters
 
 The failure mode isn't unique to AI. Both the operator and the agent are vulnerable to confident industriousness without judgment — helper syndrome cuts both ways. The verification gate exists because instructions can be ignored by either party; the bot's enthusiasm tends to amplify the operator's optimism. The gate fires regardless. *Protection only fires when the operator reads the verdict and listens* — necessary but not sufficient.
