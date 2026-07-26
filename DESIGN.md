@@ -1,6 +1,9 @@
 # GeneralStaff — Architecture Sketch
 
-Status: design only, not yet implemented. Captured 2026-04-13 from an
+> **v1 design record; implementation superseded — see the current code.**
+> This file is append-only architecture history, not a current runtime spec.
+
+Historical v1 status: design only, not yet implemented. Captured 2026-04-13 from an
 interactive session with Ray. To be folded into a build session in the
 next 1-2 days.
 
@@ -1691,3 +1694,27 @@ If the map shows no edit-latency improvement AND no pass-rate change, the
 feature is inert and the injection overhead (a ~2-3s aider call per cycle)
 isn't paying for itself — fall back to OFF by removing the helper from the
 call sites (the safe-fallback shape means that's a clean revert).
+
+## RULE-RELAXATION — unattended dogfood permission modes (2026-07-26)
+
+This entry supersedes v1 safety rule 5 for two maintainer-only,
+operator-owned-machine paths. It records existing behavior; it does not
+change runtime permissions.
+
+- `scripts/run_bot.sh` launches the dogfood Claude engineer with
+  `--dangerously-skip-permissions`.
+- `src/heartbeat/supervisor.ts` launches the outer interactive router with
+  `--permission-mode bypassPermissions` and restricts its tool surface to
+  Bash. The router dispatches bounded GeneralStaff actions; downstream
+  engineer cycles retain their own permission posture.
+
+Why the relaxation exists: both paths run unattended on the maintainer's
+own machines, where an approval prompt would stall the run. The permission
+bypass is not presented as a general safety mechanism. Worktree isolation,
+mandatory hands-off rules, verification, reviewer gating, rollback, and
+audit logging remain the compensating controls at cycle boundaries.
+
+Scope boundary: this is dogfood policy, not the recommended default for
+third-party projects. Any broader use requires a separate explicit rule
+relaxation; changing these modes back to a stricter working Claude Code
+mode remains preferable when unattended execution can still complete.

@@ -90,7 +90,7 @@ src/heartbeat/hook.ts (Stop hook)
     ↑ fires after each agent turn
     │
     ▼
-claude (interactive, --permission-mode auto)
+claude (interactive, --permission-mode bypassPermissions; Bash only)
     ↑ spawned + supervised by
 src/heartbeat/supervisor.ts
     │
@@ -203,19 +203,23 @@ engineer's prompt:
 
 ## Permission posture
 
-The supervisor launches claude with `--permission-mode auto` (NOT
-`--dangerously-skip-permissions`). Reasons:
+The supervisor currently launches claude with
+`--permission-mode bypassPermissions` and `--tools Bash`. This is an
+explicit maintainer dogfood relaxation for unattended runs on machines the
+maintainer owns:
 
-- Workspace-trust prompts are bypassed by `auto` mode.
-- Tool-permission decisions go through Claude's auto-classifier
-  (gentler than the full bypass).
+- `auto` mode still surfaced a first-use Bash approval prompt and stalled the
+  unattended router.
+- The Bash-only tool surface prevents the outer router from directly using
+  Read, Write, or Edit when an action fails.
 - The dispatcher target (`generalstaff cycle`) has its own safety net
   (hands-off list, reviewer gates, verification commands) — the outer
   heartbeat session is just an event router, not the engineer.
 
-If you need the full bypass (sandbox without internet, etc.), edit
-`src/heartbeat/supervisor.ts` directly; the bypass flag is intentionally
-not exposed as an env override.
+The permission mode is fixed in `src/heartbeat/supervisor.ts` and is not
+exposed as an environment override. This documents actual behavior; it is
+not a recommendation to use bypass mode generally. See the 2026-07-26
+RULE-RELAXATION entry in [`DESIGN.md`](../DESIGN.md).
 
 ## ToS
 

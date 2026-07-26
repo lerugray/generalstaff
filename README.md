@@ -1,5 +1,7 @@
 # GeneralStaff
 
+[![Test](https://github.com/lerugray/generalstaff/actions/workflows/test.yml/badge.svg)](https://github.com/lerugray/generalstaff/actions/workflows/test.yml)
+
 ![GeneralStaff — the local-first alternative to Polsia. Open Source · BYOK · No SaaS Tax](docs/images/banner.png)
 
 ## In plain English
@@ -13,7 +15,7 @@ GeneralStaff was built and is run by a non-programmer, directing AI in plain Eng
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.8.0, 2,187 passing tests, 30+ managed projects. Cross-platform (Windows, macOS, Linux). v0.8.0 adds opt-in **autonomous mode** (`gs autonomous`): GeneralStaff can propose its own next work, judge it through the Hammerstein gate, then dispatch the mechanical parts and route the taste/scope/revenue calls to you — default-off, never auto-pushes. v0.7.x added the pre-cycle judgment gate and a `grok` engineer provider. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.8.0, 2,190 passing + 4 skipped across 2,194 tests in 80 files, and 30+ managed projects. CI is the source of truth for the test count. Cross-platform (Windows, macOS, Linux). Current `master` fails closed on worktree/SHA preflight and rollback failure (blocking the project for the session), checks C-quoted and renamed paths without quote/rename gaps, removes Bash from the reviewer, and masks likely secrets in persisted artifacts and reviewer egress. Autonomous mode remains opt-in, default-off, and never auto-pushes. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -63,7 +65,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,117 passing tests across 74 test files.
+- 2,190 passing + 4 skipped across 2,194 tests in 80 files; the CI badge above is the source of truth as the suite moves.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 
@@ -85,7 +87,7 @@ File counterexamples on the [issue tracker](https://github.com/lerugray/generals
 
 - **Not a Claude wrapper.** Multi-provider: `claude -p`, `aider + OpenRouter`, Ollama for unattended runs.
 - **Not an alignment tool.** It does not make the agent smarter. It catches the agent at cycle boundaries.
-- **Not a SaaS.** No hosted offering, no credits, no telemetry, no GeneralStaff server. Export = `git clone`.
+- **Not a SaaS.** No hosted offering, no credits, no telemetry. The optional dashboard is a local server on your machine. Export = `git clone`.
 - **Not a chat UI.** Dispatched labor: you write work orders, the dispatcher runs cycles, you read SITREPs.
 
 ## Why this over the alternatives
@@ -155,15 +157,17 @@ Guided setup: provider config, register your first project, run one verified cyc
 
 ### Manual flow
 
-Requires `git`, `bash` (Git Bash works on Windows), `bun` 1.2+, `claude` CLI in PATH.
+Requires `git`, `bash` (Git Bash works on Windows), and `bun` 1.3.0+.
+The selected engineer also needs its CLI on PATH (`claude`, `aider`, or
+`grok`); `gs welcome` checks before launching the first cycle.
 
 ```bash
-generalstaff bootstrap /path/to/project "what this project is" --id=myproject
+gs bootstrap /path/to/project "what this project is" --id=myproject
 # review .generalstaff-proposal/ output, move hands_off.yaml into place
-generalstaff register myproject --path=/path/to/project
-generalstaff cycle --project=myproject --dry-run
-generalstaff session --budget=90
-generalstaff history --lines=20
+gs register myproject --path=/path/to/project
+gs cycle --project=myproject --dry-run
+gs session --budget=90
+gs history --lines=20
 ```
 
 Bot pushes to `bot/work` on your remote only. Full config: [`projects.yaml.example`](projects.yaml.example).
@@ -171,6 +175,16 @@ Bot pushes to `bot/work` on your remote only. Full config: [`projects.yaml.examp
 ### Tested configurations
 
 Primary dogfood trail (223 verified cycles) on **Windows 11 + Claude Code**. macOS bootstrap validated end-to-end 2026-05-01. Real-cycle mileage on macOS/Linux is lighter than Windows; rougher edges in less-trodden paths.
+
+## Observability
+
+Run `gs doctor` after install or whenever a project stops dispatching; it
+checks prerequisites, project paths, state directories, provider setup, and
+common stranded runtime state.
+
+Run `generalstaff serve --open` for the local fleet dashboard (default
+`127.0.0.1:3737`). It exposes fleet, project, cycle, inbox, and session-tail
+views from local state; it is not a hosted service and does not add telemetry.
 
 ## Works alongside
 

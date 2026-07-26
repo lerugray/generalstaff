@@ -4,6 +4,7 @@ import { join, resolve } from "path";
 import { parse as parseYaml } from "yaml";
 import { getRootDir } from "./state";
 import { detectStack, type StackKind } from "./bootstrap";
+import type { EngineerProvider } from "./types";
 
 export interface RegisterOptions {
   projectId: string;
@@ -12,6 +13,12 @@ export interface RegisterOptions {
   priority?: number;
   stack?: StackKind;
   allowNonGit?: boolean;
+  /** Optional provider selected by onboarding for the project's engineer. */
+  engineerProvider?: EngineerProvider;
+  /** Provider-specific engineer model selected by onboarding. */
+  engineerModel?: string;
+  /** Override the GeneralStaff root that owns projects.yaml (tests/onboarding). */
+  rootDirOverride?: string;
   /** gs-305: append GeneralStaff integration lines to the target .gitignore (default true). */
   scaffold?: boolean;
   promptFn?: (question: string) => Promise<boolean>;
@@ -120,7 +127,7 @@ async function defaultPrompt(question: string): Promise<boolean> {
 export async function runRegister(
   opts: RegisterOptions,
 ): Promise<RegisterResult> {
-  const rootDir = getRootDir();
+  const rootDir = opts.rootDirOverride ?? getRootDir();
   const projectId = opts.projectId;
 
   if (!projectId || !/^[a-z0-9_-]+$/i.test(projectId)) {
@@ -264,7 +271,13 @@ export async function runRegister(
   // references a script file (e.g. `bash engineer_command.sh`), check
   // the script exists inside the project path. For bare binaries
   // (e.g. `make test`) we skip — PATH resolution is out of scope.
-  const scriptName = extractScriptName(stack.engineerCommand);
+  // Non-Claude providers generate their complete command internally, so the
+  // detected stack's legacy engineer_command is ignored and does not need a
+  // project-local wrapper file.
+  const scriptName =
+    opts.engineerProvider && opts.engineerProvider !== "claude"
+      ? null
+      : extractScriptName(stack.engineerCommand);
   if (scriptName !== null) {
     const scriptPath = join(resolvedProjectPath, scriptName);
     if (!existsSync(scriptPath)) {
@@ -282,6 +295,12 @@ export async function runRegister(
     `  - id: ${projectId}`,
     `    path: ${resolvedProjectPath}`,
     `    priority: ${priority}`,
+    ...(opts.engineerProvider
+      ? [`    engineer_provider: ${opts.engineerProvider}`]
+      : []),
+    ...(opts.engineerModel
+      ? [`    engineer_model: ${JSON.stringify(opts.engineerModel)}`]
+      : []),
     `    engineer_command: "${stack.engineerCommand}"`,
     `    verification_command: "${stack.verifyCommand}"`,
     `    cycle_budget_minutes: 30`,

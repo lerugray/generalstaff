@@ -324,10 +324,9 @@ elif [ -f Cargo.toml ]; then
   cargo fetch 2>/dev/null || true
 fi
 
-# Aider's OpenRouter path needs OPENROUTER_API_KEY in the env. If it's
-# missing, surface that loudly — aider will fail anyway, but a clear
-# upstream error saves log-reading time.
-if [ -z "\${OPENROUTER_API_KEY:-}" ]; then
+# Aider's OpenRouter path needs OPENROUTER_API_KEY in the env. Ollama
+# models use the local daemon instead and do not require that key.
+if [[ ${qModel} == openrouter/* ]] && [ -z "\${OPENROUTER_API_KEY:-}" ]; then
   echo "WARNING: OPENROUTER_API_KEY is not set — aider will fail to authenticate." >&2
 fi
 

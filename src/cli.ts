@@ -120,7 +120,7 @@ Usage:
     Example: generalstaff welcome
     Example: generalstaff welcome --skip-cycle           # preview the flow without running a real cycle
     # Walks you through provider setup -> register your first project -> run one verified
-    # cycle -> read the audit log. Estimated 30 minutes. Light staff-officer voice; substance
+    # cycle -> read the audit log. Setup is ~5 minutes; a real cycle often takes 10–60+.
     # is plain. If you've already configured GS, the wizard offers to skip steps that have
     # been done. Compose-not-replace: it calls into bootstrap + register + cycle under the hood.
 

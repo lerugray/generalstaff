@@ -32,7 +32,7 @@ session window:
 | gs-152 | `src/providers/registry.ts` | `loadProviderRegistry` + `getProviderForRole` + `ProviderConfigError` |
 | gs-153 | `provider_config.yaml.example` | Documented schema + example-stays-valid test |
 | gs-154 | `src/digest_llm.ts` | `generateDigestNarrative` with fallback |
-| gs-155 | `src/cycle_summary_llm.ts` | `generateCycleDescription` with fallback |
+| gs-155 | `src/cycle_summary_llm.ts` | `generateCycleDescription` with fallback (retired 2026-07-26; never wired beyond its own test) |
 | gs-156 | `tests/providers.calibration.test.ts` | Dual-run reviewer calibration harness (Claude vs Ollama agreement test) |
 | gs-157 | `src/cli.ts` | `generalstaff providers list` subcommand (+ `--json`) |
 | gs-158 | `src/session.ts` | Digest-narrative wired behind `GENERALSTAFF_DIGEST_NARRATIVE_PROVIDER` env flag |

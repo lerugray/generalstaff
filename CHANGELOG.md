@@ -9,13 +9,16 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
+Current test baseline: 2,190 passing + 4 skipped across 2,194 tests in
+80 files. CI is the source of truth as the suite changes.
+
 ## [0.8.0] — 2026-06-22
 
 Autonomous mode. GeneralStaff has always *executed* the tasks you queue —
 dispatch, verify, review, gate the merge. This release adds the step in front:
 it can now propose its own work, judge it, and either run it or route the
 decision to you. Opt-in, default-off; existing projects behave identically.
-2,187 tests passing.
+Current test coverage is reported in the Unreleased baseline above and by CI.
 
 ### Added
 
@@ -63,7 +66,8 @@ decision to you. Opt-in, default-off; existing projects behave identically.
 
 ## [0.7.2] — 2026-06-16
 
-A reviewer-signal fix. 2,117 tests passing.
+A reviewer-signal fix. Current test coverage is reported by CI rather than
+frozen in this historical entry.
 
 ### Fixed
 

@@ -2,8 +2,8 @@
 // GeneralStaff — heartbeat supervisor
 //
 // Port of upstream claude-heartbeat supervisor.js with GS conventions +
-// the --permission-mode auto launch shape (per
-// feedback_claude_launch_use_permission_mode_auto memory).
+// the interactive --permission-mode bypassPermissions launch shape used
+// for unattended maintainer dogfood.
 //
 // Spawns claude in interactive mode with the Stop hook configured to fire
 // src/heartbeat/hook.ts. Polls for the .restart flag (heartbeat-driven
@@ -20,10 +20,9 @@
 //   HEARTBEAT_SETTINGS     — path to settings JSON passed via --settings
 //   HEARTBEAT_SYSTEM_FILE  — path to append-system-prompt file
 //
-// Permission mode is FIXED to `auto`. To force a different mode, edit this
-// file. The bypass-permissions mode is intentionally NOT exposed as an env
-// override; if you need that, you're past the safety net this supervisor
-// is supposed to provide.
+// Permission mode is FIXED to `bypassPermissions` and the tool surface is
+// fixed to Bash. This is not exposed as an env override. See DESIGN.md's
+// 2026-07-26 RULE-RELAXATION entry for scope and compensating controls.
 
 import { spawn, execSync, type ChildProcess } from "child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";

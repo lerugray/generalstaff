@@ -98,6 +98,10 @@ describe("stepProvider", () => {
     expect(result.ok).toBe(true);
     expect(result.kind).toBe("openrouter");
     expect(result.envVar).toBe("OPENROUTER_API_KEY");
+    expect(result.engineerProvider).toBe("aider");
+    expect(result.engineerModel).toBe(
+      "openrouter/qwen/qwen3-next-80b-a3b-instruct:free",
+    );
 
     const configPath = join(rootDir, "provider_config.yaml");
     expect(existsSync(configPath)).toBe(true);
@@ -121,6 +125,8 @@ describe("stepProvider", () => {
     expect(result.ok).toBe(true);
     expect(result.kind).toBe("ollama");
     expect(result.envVar).toBeUndefined();
+    expect(result.engineerProvider).toBe("aider");
+    expect(result.engineerModel).toBe("ollama_chat/llama3.1");
 
     const configPath = join(rootDir, "provider_config.yaml");
     const content = readFileSync(configPath, "utf8");
@@ -177,6 +183,8 @@ describe("stepProvider", () => {
     expect(result.ok).toBe(true);
     expect(result.kind).toBe("claude");
     expect(result.envVar).toBeUndefined();
+    expect(result.engineerProvider).toBe("claude");
+    expect(result.engineerModel).toBeUndefined();
     expect(result.claudeUsesSubscription).toBe(true);
 
     const content = readFileSync(join(rootDir, "provider_config.yaml"), "utf8");
@@ -339,6 +347,58 @@ describe("stepProject", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("Invalid project id");
   });
+
+  it("registers the selected engineer and stages only the wrapper it needs", async () => {
+    const aiderRoot = join(FIXTURE_ROOT, "gs-aider");
+    const aiderProject = makeProjectFixture("aider-project");
+    mkdirSync(aiderRoot, { recursive: true });
+    writeFileSync(
+      join(aiderProject, "package.json"),
+      JSON.stringify({ name: "aider-project", scripts: { test: "bun test" } }),
+    );
+    const aiderIo = scriptedIO([
+      aiderProject,
+      "aider-project",
+      "exercise the aider onboarding path",
+    ]);
+    const aiderResult = await stepProject(
+      aiderIo.promptFn,
+      aiderIo.writeFn,
+      {
+        engineerProvider: "aider",
+        engineerModel: "openrouter/qwen/example",
+        rootDirOverride: aiderRoot,
+      },
+    );
+    expect(aiderResult.ok).toBe(true);
+    const aiderYaml = readFileSync(join(aiderRoot, "projects.yaml"), "utf8");
+    expect(aiderYaml).toContain("engineer_provider: aider");
+    expect(aiderYaml).toContain('engineer_model: "openrouter/qwen/example"');
+    expect(existsSync(join(aiderProject, "engineer_command.sh"))).toBe(false);
+
+    const claudeRoot = join(FIXTURE_ROOT, "gs-claude");
+    const claudeProject = makeProjectFixture("claude-project");
+    mkdirSync(claudeRoot, { recursive: true });
+    writeFileSync(
+      join(claudeProject, "package.json"),
+      JSON.stringify({ name: "claude-project", scripts: { test: "bun test" } }),
+    );
+    const claudeIo = scriptedIO([
+      claudeProject,
+      "claude-project",
+      "exercise the claude onboarding path",
+    ]);
+    const claudeResult = await stepProject(
+      claudeIo.promptFn,
+      claudeIo.writeFn,
+      {
+        engineerProvider: "claude",
+        rootDirOverride: claudeRoot,
+      },
+    );
+    expect(claudeResult.ok).toBe(true);
+    expect(existsSync(join(claudeProject, "engineer_command.sh"))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------
@@ -446,6 +506,19 @@ describe("stepCycle", () => {
     expect(result.cycleRan).toBe(false);
     // Skipped output should mention the test mode
     expect(io.output.some((t) => t.includes("skipCycle"))).toBe(true);
+  });
+
+  it("does not launch when the selected engineer CLI is missing", async () => {
+    const io = scriptedIO(["y"]);
+    const result = await stepCycle(io.promptFn, io.writeFn, {
+      projectId: "x",
+      projectPath: "/tmp/x",
+      engineerProvider: "aider",
+      engineerCliAvailable: () => false,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.cycleRan).toBe(false);
+    expect(result.reason).toContain("`aider` is not available on PATH");
   });
 });
 

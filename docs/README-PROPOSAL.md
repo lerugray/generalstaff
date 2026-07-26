@@ -94,7 +94,7 @@ _Voice: reference PROGRESS.jsonl as observable evidence per VOICE.md §Dogfoodin
 
 ## 7. Prerequisites / Installation
 
-- Toolchain list: git, bash, bun 1.2+, claude CLI (source: `README.md`
+- Toolchain list: git, bash, bun 1.3.0+, selected engineer CLI (source: `README.md`
   lines 54–55).
 - `git clone` + `bun install` + `bun link` + `generalstaff doctor`
   block (source: `README.md` lines 57–63).

@@ -1,13 +1,14 @@
 # GeneralStaff Quickstart
 
-**Status:** v0.3.0+. Five-minute path from clone to first verified cycle.
+**Status:** v0.8.0+. Setup is usually about five minutes; a first real cycle
+often takes 10–60+ minutes depending on the provider, model, and project.
 **Audience:** new users wanting a working dispatcher pointed at their own project. Read [`README.md`](README.md) first for what GeneralStaff is and why it exists.
 
 ---
 
 ## 1. Prerequisites
 
-- **Bun** 1.1+ ([install](https://bun.sh)). Used for everything — runtime, test runner, package manager.
+- **Bun** 1.3.0+ ([install](https://bun.sh)). Used for everything — runtime, test runner, package manager.
 - **Git** with your project on a branch you're willing to let the bot modify (the bot writes to `bot/work`, never to `master`).
 - **An LLM provider key.** One of:
   - Anthropic API key (BYOK), OR
@@ -23,7 +24,7 @@ GeneralStaff is BYOK. You pay your provider directly. There is no GeneralStaff p
 git clone https://github.com/lerugray/generalstaff.git
 cd generalstaff
 bun install
-./install.sh        # writes a `gs` shim to ~/.local/bin
+./install.sh        # writes `gs` + `generalstaff` shims and offers to update PATH
 ```
 
 Windows users: run `install.ps1` instead. Both scripts do the same thing — make `gs` available on PATH.

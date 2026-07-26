@@ -4,7 +4,8 @@
 // runRegister, runSession) into one guided flow for non-technical
 // users. The wizard's purpose is to take someone from "just cloned
 // the repo" to "ran one verified cycle and understands what they
-// just saw" in roughly 30 minutes of wall clock time.
+// just saw". Setup usually takes about five minutes; the first real
+// cycle varies widely by provider, model, and project.
 //
 // Voice: light staff-officer framing — "Commander", "brief your
 // first staff officer", "receive your first dispatch". The military
@@ -25,6 +26,7 @@ import { getRootDir } from "./state";
 import { runBootstrap, type BootstrapResult } from "./bootstrap";
 import { runRegister, type RegisterResult } from "./register";
 import { loadProviderRegistry } from "./providers/registry";
+import type { EngineerProvider } from "./types";
 
 // ---------------------------------------------------------------
 // Public API
@@ -87,9 +89,10 @@ This briefing covers three steps:
   2. Briefing your first staff officer (registering a project)
   3. Receiving your first dispatch (a verified cycle + audit log)
 
-Estimated time: about 30 minutes. You can quit at any prompt
-with Ctrl-C; nothing irreversible happens until each step's
-final confirmation.
+Setup usually takes about 5 minutes. The first cycle often takes
+10–60+ minutes depending on the provider, model, and project. You
+can quit at any prompt with Ctrl-C; nothing irreversible happens
+until each step's final confirmation.
 `;
 
 const PROVIDER_INTRO = `
@@ -140,7 +143,7 @@ const DISPATCH_INTRO = `
 
 Now we run one cycle. The Staff will:
   - Open a fresh git worktree on a \`bot/work\` branch
-  - Run Claude Code on the starter task
+  - Run your selected engineer on the starter task
   - Run your project's verification command
   - Compare the diff to the task's stated scope
   - Decide: VERIFIED, REJECTED, or WEAK
@@ -340,6 +343,9 @@ function claudeCliAvailable(): boolean {
 interface ProviderStepResult {
   ok: boolean;
   kind?: "ollama" | "openrouter" | "claude";
+  model?: string;
+  engineerProvider?: EngineerProvider;
+  engineerModel?: string;
   envVar?: string;
   // claude only: true when the subscription / CLI-session auth path
   // was selected (no api_key_env written). False / undefined means
@@ -352,6 +358,25 @@ export interface StepProviderOptions {
   // Inject `claude` CLI availability for tests. Defaults to a real
   // `claude --version` probe via spawnSync.
   claudeAvailable?: () => boolean;
+}
+
+function engineerSelectionForProvider(
+  kind: "ollama" | "openrouter" | "claude",
+  model: string,
+): { provider: EngineerProvider; model?: string } {
+  if (kind === "claude") {
+    return { provider: "claude" };
+  }
+  if (kind === "openrouter") {
+    return {
+      provider: "aider",
+      model: model.startsWith("openrouter/") ? model : `openrouter/${model}`,
+    };
+  }
+  return {
+    provider: "aider",
+    model: model.startsWith("ollama_chat/") ? model : `ollama_chat/${model}`,
+  };
 }
 
 export async function stepProvider(
@@ -378,7 +403,15 @@ export async function stepProvider(
     if (isYes(skip)) {
       // Pick the first kind for downstream display purposes.
       const first = Array.from(registry.providers.values())[0];
-      return { ok: true, kind: first.kind, envVar: first.api_key_env };
+      const engineer = engineerSelectionForProvider(first.kind, first.model);
+      return {
+        ok: true,
+        kind: first.kind,
+        model: first.model,
+        envVar: first.api_key_env,
+        engineerProvider: engineer.provider,
+        engineerModel: engineer.model,
+      };
     }
     write("\nOverwriting existing provider_config.yaml.");
   }
@@ -515,7 +548,22 @@ export async function stepProvider(
   writeFileSync(configPath, lines.join("\n"), "utf8");
   write(`\nWrote ${configPath}.`);
 
-  return { ok: true, kind, envVar, claudeUsesSubscription };
+  const engineer = engineerSelectionForProvider(kind, model);
+  write(
+    `First-cycle engineer: ${engineer.provider}` +
+      (engineer.model ? ` (${engineer.model})` : "") +
+      ".",
+  );
+
+  return {
+    ok: true,
+    kind,
+    model,
+    envVar,
+    engineerProvider: engineer.provider,
+    engineerModel: engineer.model,
+    claudeUsesSubscription,
+  };
 }
 
 // ---------------------------------------------------------------
@@ -532,6 +580,11 @@ interface ProjectStepResult {
 export async function stepProject(
   prompt: PromptFn,
   write: WriteFn,
+  options: {
+    engineerProvider?: EngineerProvider;
+    engineerModel?: string;
+    rootDirOverride?: string;
+  } = {},
 ): Promise<ProjectStepResult> {
   write(PROJECT_INTRO);
 
@@ -642,6 +695,34 @@ export async function stepProject(
     }
   }
 
+  // Claude remains the one provider that executes the detected stack's
+  // project-local engineer_command. Bootstrap stages that wrapper for review;
+  // onboarding copies it into place so registration and the first cycle do
+  // not fail on a missing script. Aider/Grok commands are generated inside GS.
+  if ((options.engineerProvider ?? "claude") === "claude") {
+    const stagedEngineer = join(
+      projectPath,
+      ".generalstaff-proposal",
+      "engineer_command.sh",
+    );
+    const rootedEngineer = join(projectPath, "engineer_command.sh");
+    if (existsSync(stagedEngineer) && !existsSync(rootedEngineer)) {
+      try {
+        writeFileSync(
+          rootedEngineer,
+          readFileSync(stagedEngineer, "utf8"),
+          "utf8",
+        );
+        write(`Moved engineer_command.sh into ${rootedEngineer}.`);
+      } catch (e) {
+        return {
+          ok: false,
+          reason: `Failed to move engineer_command.sh: ${(e as Error).message}. Copy it from .generalstaff-proposal/ into the project root, then re-run \`gs welcome\`.`,
+        };
+      }
+    }
+  }
+
   // Register.
   write("\nWiring this project into GeneralStaff's projects.yaml...");
   let registerResult: RegisterResult;
@@ -651,6 +732,9 @@ export async function stepProject(
       projectPath,
       assumeYes: true,
       allowNonGit,
+      engineerProvider: options.engineerProvider,
+      engineerModel: options.engineerModel,
+      rootDirOverride: options.rootDirOverride,
     });
   } catch (e) {
     return {
@@ -748,6 +832,8 @@ export async function stepCycle(
     projectId: string;
     projectPath: string;
     skipCycle?: boolean;
+    engineerProvider?: EngineerProvider;
+    engineerCliAvailable?: (command: string) => boolean;
   },
 ): Promise<CycleStepResult> {
   write(DISPATCH_INTRO);
@@ -771,20 +857,48 @@ export async function stepCycle(
     return { ok: true, cycleRan: false };
   }
 
+  const engineerProvider = options.engineerProvider ?? "claude";
+  const engineerCli = engineerProvider;
+  const cliAvailable =
+    options.engineerCliAvailable ??
+    ((command: string): boolean => {
+      try {
+        const probe = spawnSync(command, ["--version"], {
+          timeout: 3000,
+          stdio: "ignore",
+        });
+        return probe.status === 0;
+      } catch {
+        return false;
+      }
+    });
+  if (!cliAvailable(engineerCli)) {
+    const installHint =
+      engineerProvider === "claude"
+        ? "Install Claude Code and authenticate it, then run `gs welcome` again."
+        : engineerProvider === "aider"
+          ? "Install aider (`aider-install`), then run `gs welcome` again."
+          : "Install the Grok CLI and run `grok login`, then run `gs welcome` again.";
+    return {
+      ok: false,
+      cycleRan: false,
+      reason: `Selected engineer CLI \`${engineerCli}\` is not available on PATH. ${installHint}`,
+    };
+  }
+
   // Invoke the dispatcher via shell (`gs cycle`) rather than calling
   // runSession directly. runSession's option surface is wide
   // (parallel slots, provider config, fleet messages) and a fresh
   // user shouldn't be passing all of those defaults; the CLI
   // invocation already has the right defaults wired.
   write(
-    "\nLaunching one cycle on the dispatcher. This may take a few minutes — the Staff handles claude-code subprocess management, verification, and audit logging.",
+    `\nLaunching one cycle with the ${engineerProvider} engineer. This can take 10–60+ minutes depending on the model and project — the Staff handles subprocess management, verification, and audit logging.`,
   );
   write(
     "  (live output below; quit with Ctrl-C if it hangs)",
   );
   write("");
 
-  const { spawnSync } = await import("child_process");
   // Use `bun run src/cli.ts cycle ...` so the wizard works from a
   // dev checkout; in a published install, `gs cycle ...` would be
   // the same effect. We call into the project's own GS to avoid
@@ -1004,7 +1118,11 @@ export async function runWelcome(
     result.completedSteps.push("provider");
 
     // Project step
-    const projectResult = await stepProject(prompt, write);
+    const projectResult = await stepProject(prompt, write, {
+      engineerProvider: providerResult.engineerProvider,
+      engineerModel: providerResult.engineerModel,
+      rootDirOverride: rootDir,
+    });
     if (!projectResult.ok) {
       write(`\nProject step failed: ${projectResult.reason}`);
       result.reason = projectResult.reason;
@@ -1031,6 +1149,7 @@ export async function runWelcome(
       projectId: projectResult.projectId!,
       projectPath: projectResult.projectPath!,
       skipCycle: opts.skipCycle,
+      engineerProvider: providerResult.engineerProvider,
     });
     if (!cycleResult.ok) {
       write(`\nCycle step failed: ${cycleResult.reason}`);

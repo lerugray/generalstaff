@@ -9,7 +9,8 @@ spec for Phase 6 scaffolding tasks until superseded by
 - `docs/internal/UI-VISION-2026-04-15.md` — Kriegspiel / command-room aesthetic
 - `docs/internal/UI-VISION-2026-04-19.md` — dev-mode vs live-mode Fleet card
 - `docs/phase-5-references/` — five HTML mockups that establish visual vocabulary
-- `web/index.html` — existing landing mockup
+- `web/index.html` — retired static dashboard mockup (removed 2026-07-26;
+  superseded by the routed local server in `src/server.ts`)
 
 ---
 
