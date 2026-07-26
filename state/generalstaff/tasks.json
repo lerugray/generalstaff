@@ -2588,8 +2588,20 @@
  },
  {
   "id": "gs-335",
-  "status": "pending",
+  "status": "in_progress",
   "title": "Enforce worktree confinement in code, not convention (K3 fresh-eyes finding #1, spot-check confirmed)",
-  "description": "K3 fresh-eyes review 2026-07-26 (generalstaff-private/docs/internal/GS-FRESH-EYES-K3-2026-07-26.md), top finding, orchestrator-confirmed against src/engineer.ts spawn: engineer runs bash -c <cmd> with cwd = project.path (MAIN working tree); .bot-worktree confinement exists only inside the operator's engineer_command.sh convention, and the agent runs with --dangerously-skip-permissions. Fix shape: dispatcher creates/validates the worktree itself and spawns with cwd = worktree path (+ optionally verifies post-cycle that the main tree is untouched). Review carries 9 more ranked findings \u2014 triage them when picking this up."
+  "description": "K3 fresh-eyes review 2026-07-26 (generalstaff-private/docs/internal/GS-FRESH-EYES-K3-2026-07-26.md), top finding, orchestrator-confirmed against src/engineer.ts spawn: engineer runs bash -c <cmd> with cwd = project.path (MAIN working tree); .bot-worktree confinement exists only inside the operator's engineer_command.sh convention, and the agent runs with --dangerously-skip-permissions. Fix shape: dispatcher creates/validates the worktree itself and spawns with cwd = worktree path (+ optionally verifies post-cycle that the main tree is untouched). Review carries 9 more ranked findings \u2014 triage them when picking this up. || Batch-A codex lane DISPATCHED 2026-07-26 (findings 1,2,5,7,10 with verify-first instruction)."
+ },
+ {
+  "id": "gs-336",
+  "status": "pending",
+  "title": "K3 review batch B: onboarding/docs/CI (findings 3,4,8,9) \u2014 queued behind gs-335 batch A",
+  "description": "From GS-FRESH-EYES-K3-2026-07-26.md: (3) quickstart broken as written \u2014 bun link/alias the `generalstaff` name, PATH-append the shim dir (or default docs to generalstaff), wire wizard's chosen provider into the first cycle's ENGINEER + gate on engineer CLI present, honest time estimate; (4) contradictory test counts (2187 vs 2117 vs reality) + NO test CI \u2014 add GH Actions bun install+test+typecheck job + badge, cite one CI-derived number; (8) dogfood scripts contradict DESIGN.md rule 5 (skip-permissions vs Auto Mode) \u2014 align or RULE-RELAXATION log + sync HEARTBEAT.md; (9) stale surfaces: DESIGN.md 'not yet implemented' header, orphaned web/index.html, dead cycle_summary_llm.ts + dead scripts, README missing serve/doctor, bun floor mismatch. Then README refresh + cut v0.9.0 release (Ray pre-approved 2026-07-26: 'if we need a readme update and new release go for it')."
+ },
+ {
+  "id": "gs-337",
+  "status": "pending",
+  "title": "Structural paydown (K3 finding 6): extract post-cycle pipeline, unify session loops, dedupe auto-merge",
+  "description": "executeCycle ~820 lines w/ labeled-break goto; runSession ~1150 w/ two near-identical 300-line loops; session-end auto-merge implemented twice AND BOTH RUN (different audit behavior \u2014 check for real double-merge bugs while unifying); autoCommitState x3; cli.ts 4.6k lines; test-mock-driven dynamic imports. Pure structural, no behavior change; separate from safety batch by design. Needs a careful lane + strong verify (full suite before/after)."
  }
 ]
