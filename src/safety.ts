@@ -296,8 +296,10 @@ export function matchesHandsOff(
 // baseDir) and re-checks, so alias-style bypasses are caught.
 //
 // baseDir is the directory the diff path is relative to (typically the
-// bot worktree). Falls back silently to the direct check if the path
-// can't be resolved (e.g. deleted file, missing worktree).
+// bot worktree). Missing/deleted paths fall back to the direct check;
+// symlinks that resolve outside baseDir fail closed.
+export const OUT_OF_TREE_SYMLINK_VIOLATION = "<symlink target outside project tree>";
+
 export function matchesHandsOffSymlinkAware(
   filePath: string,
   handsOff: string[],
@@ -314,7 +316,14 @@ export function matchesHandsOffSymlinkAware(
     if (!lstat.isSymbolicLink()) return null;
     const real = realpathSync(fullPath);
     const rel = relative(baseDir, real);
-    if (!rel || rel.startsWith("..")) return null;
+    if (
+      !rel ||
+      rel === ".." ||
+      rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+      isAbsolute(rel)
+    ) {
+      return OUT_OF_TREE_SYMLINK_VIOLATION;
+    }
     const posix = rel.split(/[\\/]/).join("/");
     return matchesHandsOff(posix, handsOff);
   } catch {

@@ -26,6 +26,7 @@ import { runReviewer, runQuorumReview, type ReviewerResult } from "./reviewer";
 import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, matchesHandsOffSymlinkAware } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
+import { formatSecretRedactionWarning, redactSecrets } from "./secrets";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -55,6 +56,12 @@ async function getGitSha(
   } catch {
     return "unknown";
   }
+}
+
+export function validateKnownGitSha(sha: string, label: string): string | null {
+  return sha === "unknown" || sha.length === 0
+    ? `could not resolve ${label}`
+    : null;
 }
 
 // Count commits reachable from `branch` but not from `base`.
@@ -210,20 +217,64 @@ export async function preflightCleanupWorktree(
   return { wasStale: true, removed: !existsSync(wt) };
 }
 
+export function validateExpectedWorktree(
+  expectedBranch: string,
+  expectedSha: string,
+  actualBranch: string,
+  actualSha: string,
+  hasGitMarker: boolean,
+): string | null {
+  if (!hasGitMarker) return "worktree has no .git marker";
+  if (actualBranch !== expectedBranch) {
+    return `worktree is on ${actualBranch || "(detached)"}, expected ${expectedBranch}`;
+  }
+  if (actualSha !== expectedSha) {
+    return `worktree HEAD ${actualSha || "(unknown)"} does not match expected ${expectedSha}`;
+  }
+  return null;
+}
+
+/**
+ * Dispatcher-owned confinement preflight. The legacy engineer launchers may
+ * recreate this same worktree, but dispatch does not begin until Git has
+ * proved that the expected branch can be checked out at the expected SHA.
+ */
+export async function prepareExpectedWorktree(
+  project: ProjectConfig,
+  branch: string,
+  expectedSha: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const wt = botWorktreePath(project);
+  try {
+    await $`git -C ${project.path} worktree prune`.quiet().nothrow();
+    await $`git -C ${project.path} worktree add ${wt} ${branch}`.quiet();
+    const [actualBranch, actualSha] = await Promise.all([
+      $`git -C ${wt} symbolic-ref --short HEAD`.quiet().text().then((s) => s.trim()),
+      $`git -C ${wt} rev-parse HEAD`.quiet().text().then((s) => s.trim()),
+    ]);
+    const reason = validateExpectedWorktree(
+      branch,
+      expectedSha,
+      actualBranch,
+      actualSha,
+      existsSync(join(wt, ".git")),
+    );
+    return reason ? { ok: false, reason } : { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 async function getGitDiff(
   projectPath: string,
   startSha: string,
   endSha: string,
 ): Promise<string> {
-  if (startSha === "unknown" || endSha === "unknown") return "";
   if (startSha === endSha) return "";
-  try {
-    const result =
-      await $`git -C ${projectPath} diff ${startSha} ${endSha}`.text();
-    return result;
-  } catch {
-    return "";
-  }
+  return $`git -C ${projectPath} diff ${startSha} ${endSha}`.text();
 }
 
 async function getGitDiffStat(
@@ -242,15 +293,60 @@ async function getGitDiffStat(
   }
 }
 
-export function extractChangedFiles(diff: string): string[] {
-  const files: string[] = [];
-  for (const line of diff.split("\n")) {
-    const match = line.match(/^diff --git a\/.+ b\/(.+)$/);
-    if (match) {
-      files.push(match[1]);
+export interface GitNameStatusEntry {
+  status: string;
+  oldPath?: string;
+  newPath: string;
+}
+
+/**
+ * Parse `git diff --name-status -z`. With `-z`, Git emits raw path bytes
+ * separated by NULs, so quoted names, backslashes, tabs, newlines, and
+ * non-ASCII paths do not need ad-hoc unquoting. Rename/copy records carry
+ * two path fields.
+ */
+export function parseGitNameStatusZ(output: string): GitNameStatusEntry[] {
+  if (!output) return [];
+  const fields = output.split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  const entries: GitNameStatusEntry[] = [];
+  for (let i = 0; i < fields.length;) {
+    const status = fields[i++];
+    if (!status) continue;
+    if (/^[RC]\d*$/.test(status)) {
+      const oldPath = fields[i++];
+      const newPath = fields[i++];
+      if (oldPath === undefined || newPath === undefined) {
+        throw new Error(`malformed git --name-status -z record for ${status}`);
+      }
+      entries.push({ status, oldPath, newPath });
+      continue;
     }
+    const newPath = fields[i++];
+    if (newPath === undefined) {
+      throw new Error(`malformed git --name-status -z record for ${status}`);
+    }
+    entries.push({ status, newPath });
   }
-  return files;
+  return entries;
+}
+
+export function extractChangedFiles(nameStatusZ: string): string[] {
+  const files: string[] = [];
+  for (const entry of parseGitNameStatusZ(nameStatusZ)) {
+    if (entry.oldPath !== undefined) files.push(entry.oldPath);
+    files.push(entry.newPath);
+  }
+  return [...new Set(files)];
+}
+
+async function getGitNameStatusZ(
+  projectPath: string,
+  startSha: string,
+  endSha: string,
+): Promise<string> {
+  if (startSha === endSha) return "";
+  return $`git -C ${projectPath} diff --name-status -z ${startSha} ${endSha}`.text();
 }
 
 // gs-133: cross-reference reviewer-reported hands_off_violations against
@@ -362,28 +458,23 @@ export async function detectMalformedJsonFiles(
 // Pure parsing — no filesystem reads. Returns the deleted-state-file
 // paths for surfacing in the failure reason. Empty list = gate
 // passes.
-export function detectStateFileDeletions(diff: string): string[] {
-  if (!diff) return [];
+export function detectStateFileDeletions(nameStatusZ: string): string[] {
+  if (!nameStatusZ) return [];
   const STATE_FILE = /^state\/[^/]+\/(tasks\.json|MISSION\.md|PROGRESS\.jsonl|STATE\.json)$/;
   const FLEET_FILE = /^state\/_fleet\/PROGRESS\.jsonl$/;
   const isStateFile = (path: string): boolean =>
     STATE_FILE.test(path) || FLEET_FILE.test(path);
 
   const deletions: string[] = [];
-  // Per-file chunks start with `diff --git `. Split on that boundary
-  // (with lookahead so the marker stays at the start of each chunk)
-  // and inspect each chunk for the deletion marker.
-  const chunks = diff.split(/^(?=diff --git )/m);
-  for (const chunk of chunks) {
-    const header = chunk.match(/^diff --git a\/(.+?) b\/.+$/m);
-    if (!header) continue;
-    const path = header[1];
-    if (!isStateFile(path)) continue;
-    if (/^deleted file mode /m.test(chunk)) {
-      deletions.push(path);
+  for (const entry of parseGitNameStatusZ(nameStatusZ)) {
+    if (entry.status === "D" && isStateFile(entry.newPath)) {
+      deletions.push(entry.newPath);
+    } else if (entry.status.startsWith("R") && entry.oldPath && isStateFile(entry.oldPath)) {
+      // A rename removes the source path just as surely as a deletion.
+      deletions.push(entry.oldPath);
     }
   }
-  return deletions;
+  return [...new Set(deletions)];
 }
 
 export function diffSummaryStats(diff: string): DiffStats {
@@ -634,6 +725,7 @@ export async function executeCycle(
   let voiceReferencePaths: string[] = [];
   let nextTask: GreenfieldTask | undefined;
   let engineerResult: EngineerResult | undefined;
+  let mainHeadStartSha = "unknown";
 
   assemble: {
     // 1. Pre-flight skip paths
@@ -792,6 +884,17 @@ export async function executeCycle(
         : {}),
     }, cycleId);
     console.log(`Start SHA (${branch}): ${cycleStartSha.slice(0, 8)}`);
+    const startShaError = validateKnownGitSha(cycleStartSha, `start SHA for ${branch}`);
+    if (startShaError) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `safety preflight failed: ${startShaError}; ` +
+        "project blocked for the rest of this session";
+      result.blocked_for_session = true;
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      terminus = "full";
+      break assemble;
+    }
 
     // 3a. Pre-cycle advisor (gs-327, 2026-05-14)
     //
@@ -939,6 +1042,52 @@ export async function executeCycle(
         String(project.cycle_budget_minutes),
       );
     console.log(`Running engineer: ${resolvedEngineerCmd}`);
+
+    mainHeadStartSha = await getGitSha(project.path, "HEAD");
+    const mainStartError = validateKnownGitSha(
+      mainHeadStartSha,
+      "main HEAD before engineer dispatch",
+    );
+    if (mainStartError) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `safety preflight failed: ${mainStartError}; ` +
+        "project blocked for the rest of this session";
+      result.blocked_for_session = true;
+      result.cycle_end_sha = cycleStartSha;
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      terminus = "full";
+      break assemble;
+    }
+
+    const worktreePreflight = await prepareExpectedWorktree(
+      project,
+      branch,
+      cycleStartSha,
+    );
+    if (!worktreePreflight.ok) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `engineer confinement preflight failed for ${branch}: ${worktreePreflight.reason}; ` +
+        "engineer was not dispatched";
+      result.cycle_end_sha = cycleStartSha;
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      terminus = "full";
+      await appendProgress(project.id, "worktree_preflight", {
+        status: "failed",
+        branch,
+        expected_sha: cycleStartSha,
+        reason: worktreePreflight.reason,
+      }, cycleId);
+      console.error(`\nERROR: ${result.reason}`);
+      break assemble;
+    }
+    await appendProgress(project.id, "worktree_preflight", {
+      status: "verified",
+      branch,
+      expected_sha: cycleStartSha,
+    }, cycleId);
+
     engineerResult = await runEngineer(
       project,
       cycleId,
@@ -967,19 +1116,58 @@ export async function executeCycle(
     const cycleEndSha = await getGitSha(project.path, branch);
     result.cycle_end_sha = cycleEndSha;
     console.log(`End SHA (${branch}): ${cycleEndSha.slice(0, 8)}`);
+    terminus = "full";
+
+    const mainHeadEndSha = await getGitSha(project.path, "HEAD");
+    const endShaError =
+      validateKnownGitSha(cycleEndSha, `${branch} after engineer execution`) ??
+      validateKnownGitSha(mainHeadEndSha, "main HEAD after engineer execution");
+    if (endShaError) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `safety failure: ${endShaError}; project blocked for the rest of this session`;
+      result.blocked_for_session = true;
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      console.error(`\nERROR: ${result.reason}`);
+      break assemble;
+    }
 
     // 6. Diff capture (between branch SHAs — works regardless of which dir we're in)
-    const fullDiff = await getGitDiff(project.path, cycleStartSha, cycleEndSha);
+    let fullDiff = "";
+    let nameStatusZ = "";
+    try {
+      [fullDiff, nameStatusZ] = await Promise.all([
+        getGitDiff(project.path, cycleStartSha, cycleEndSha),
+        getGitNameStatusZ(project.path, cycleStartSha, cycleEndSha),
+      ]);
+    } catch (err) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `safety failure: could not capture cycle diff or changed paths: ` +
+        `${err instanceof Error ? err.message : String(err)}`;
+      result.blocked_for_session = true;
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      console.error(`\nERROR: ${result.reason}`);
+      break assemble;
+    }
     const diffStat = await getGitDiffStat(
       project.path,
       cycleStartSha,
       cycleEndSha,
     );
+    const redactedDiff = redactSecrets(fullDiff || "(empty diff)\n");
+    if (redactedDiff.hits.length > 0) {
+      console.warn(formatSecretRedactionWarning("diff.patch", redactedDiff.hits));
+      await appendProgress(project.id, "secret_redaction", {
+        artifact: "diff.patch",
+        hits: redactedDiff.hits,
+      }, cycleId);
+    }
     await writeCycleFile(
       project.id,
       cycleId,
       "diff.patch",
-      fullDiff || "(empty diff)\n",
+      redactedDiff.redacted,
       config,
     );
     await appendProgress(project.id, "diff_summary", {
@@ -989,10 +1177,6 @@ export async function executeCycle(
       files_changed: diffStat,
       diff_length: fullDiff.length,
     }, cycleId);
-
-    // Past this point we're committed to a "full" terminal block regardless
-    // of whether verification+reviewer actually run.
-    terminus = "full";
 
     // 6a. If engineer exited abnormally (killed mid-task or non-zero exit),
     //     block verification + reviewer. Partial work from a killed engineer
@@ -1017,6 +1201,23 @@ export async function executeCycle(
       break assemble;
     }
 
+    // A command that ignored the prepared worktree can commit straight to
+    // the main branch. An empty bot-branch diff must never launder that
+    // unreviewed main movement into verified_weak.
+    if (!fullDiff.trim() && mainHeadEndSha !== mainHeadStartSha) {
+      result.final_outcome = "verification_failed";
+      result.reason =
+        `engineer confinement failure: main HEAD moved ` +
+        `${mainHeadStartSha.slice(0, 8)} → ${mainHeadEndSha.slice(0, 8)} ` +
+        `while ${branch} remained unchanged; unreviewed main-branch commit detected`;
+      result.blocked_for_session = true;
+      result.verification_outcome = "failed";
+      result.reviewer_verdict = "verification_failed";
+      result.diff_stats = { files_changed: 0, insertions: 0, deletions: 0 };
+      console.error(`\nERROR: ${result.reason}`);
+      break assemble;
+    }
+
     // 6b. Skip verification and reviewer if diff is empty — nothing to test or review
     if (!fullDiff.trim()) {
       result.final_outcome = "verified_weak";
@@ -1033,7 +1234,7 @@ export async function executeCycle(
     // src/reviewer.ts` and edits through the alias is caught. baseDir is the
     // bot worktree — the place the diff paths actually resolve against.
     const diffStats = diffSummaryStats(fullDiff);
-    const changedFiles = extractChangedFiles(fullDiff);
+    const changedFiles = extractChangedFiles(nameStatusZ);
     const wtBase = botWorktreePath(project);
     const violations: Array<{ file: string; pattern: string }> = [];
     for (const file of changedFiles) {
@@ -1098,7 +1299,7 @@ export async function executeCycle(
     //     never a normal cycle outcome. Catches the 2026-04-24
     //     incident where a cycle wiped 21 state files in one commit
     //     (see detectStateFileDeletions for full context).
-    const stateDeletions = detectStateFileDeletions(fullDiff);
+    const stateDeletions = detectStateFileDeletions(nameStatusZ);
     if (stateDeletions.length > 0) {
       const list = stateDeletions.join(", ");
       result.final_outcome = "verification_failed";
@@ -1209,7 +1410,7 @@ export async function executeCycle(
         projectId: project.id,
         markedDoneTasks: markedDone,
         sessionNoteOrNone: sessionNote,
-        fullDiff,
+        fullDiff: redactedDiff.redacted,
         diffStat,
         verificationCommand: project.verification_command,
         verificationExitCode: verResult.exitCode,
@@ -1321,9 +1522,12 @@ export async function executeCycle(
     const canRollback =
       result.cycle_start_sha !== "unknown" &&
       result.cycle_start_sha !== "skipped" &&
+      result.cycle_end_sha !== "unknown" &&
+      result.cycle_end_sha !== "skipped" &&
       result.cycle_start_sha !== result.cycle_end_sha;
     if (result.final_outcome === "verification_failed" && canRollback) {
       const beforeSha = result.cycle_end_sha;
+      let rollbackSucceeded = false;
       try {
         // Use update-ref so the reset works even when the branch is the
         // checked-out ref in a worktree (the typical .bot-worktree
@@ -1335,17 +1539,22 @@ export async function executeCycle(
           `Rolled back ${branch}: ${beforeSha.slice(0, 8)} → ${result.cycle_start_sha.slice(0, 8)}`,
         );
         result.cycle_end_sha = result.cycle_start_sha;
+        rollbackSucceeded = true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.log(
-          `Warning: rollback of ${branch} failed: ${msg}`,
-        );
+        result.blocked_for_session = true;
+        result.reason =
+          `${result.reason}; CRITICAL: rollback of ${branch} failed (${msg}) — ` +
+          "project blocked for the rest of this session";
+        console.error(`ERROR: ${result.reason}`);
       }
       await appendProgress(project.id, "cycle_rollback", {
         branch,
         before_sha: beforeSha,
         after_sha: result.cycle_end_sha,
         reason: result.reason,
+        success: rollbackSucceeded,
+        blocked_for_session: result.blocked_for_session === true,
       }, cycleId);
     }
 

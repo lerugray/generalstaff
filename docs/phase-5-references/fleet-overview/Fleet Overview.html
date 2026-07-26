@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>generalstaff — fleet overview</title>
+<meta name="viewport" content="width=1280">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Archivo+Narrow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #f1e7d3;
+    --paper-2:     #ede1c9;
+    --paper-edge:  #e4d5b7;
+    --ink:         #2a2418;
+    --ink-soft:    #4a4131;
+    --ink-faint:   #8a7f66;
+    --ink-ghost:   #b7ab8e;
+    --rule:        #3a3122;
+    --rule-soft:   #c9bb9b;
+    --rust:        #8a3a1c;   /* single accent, used once */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+  }
+
+  /* subtle paper grain + vignette */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 60%, rgba(80,55,15,0.10) 100%),
+      radial-gradient(circle at 20% 10%, rgba(255,255,255,0.25), transparent 40%);
+    z-index: 0;
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    mix-blend-mode: multiply;
+    background-image:
+      radial-gradient(rgba(90,65,25,0.12) 1px, transparent 1px),
+      radial-gradient(rgba(90,65,25,0.08) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    z-index: 0;
+  }
+
+  .sheet {
+    position: relative;
+    z-index: 1;
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  /* ——— masthead ——— */
+
+  .masthead {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: end;
+    gap: 32px;
+    padding-bottom: 14px;
+    border-bottom: 1.5px solid var(--rule);
+  }
+
+  .wordmark {
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 32px;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    color: var(--ink);
+  }
+  .wordmark .dot {
+    color: var(--rust);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    font-size: 14px;
+    vertical-align: 6px;
+    margin-right: 10px;
+  }
+
+  .sub {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 11px;
+    color: var(--ink-soft);
+    justify-self: start;
+    align-self: center;
+    padding-left: 4px;
+    border-left: 1px solid var(--rule-soft);
+    padding: 4px 0 4px 14px;
+    line-height: 1.5;
+  }
+  .sub b { font-weight: 600; color: var(--ink); letter-spacing: 0.14em; }
+
+  .stamp {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-soft);
+    text-align: right;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+  }
+  .stamp .k { color: var(--ink-faint); }
+
+  /* ——— masthead band under rule ——— */
+
+  .docline {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 0 44px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    font-size: 10.5px;
+    color: var(--ink-faint);
+  }
+  .docline .title {
+    font-family: 'Spectral', Georgia, serif;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13.5px;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* ——— summary strip ——— */
+
+  .summary {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1.2fr;
+    gap: 0;
+    margin-bottom: 56px;
+    border-top: 0.5px solid var(--rule-soft);
+    border-bottom: 0.5px solid var(--rule-soft);
+  }
+
+  .cell {
+    padding: 22px 24px 20px;
+    border-right: 0.5px solid var(--rule-soft);
+    position: relative;
+  }
+  .cell:last-child { border-right: none; }
+  .cell:first-child { padding-left: 0; }
+  .cell:last-child { padding-right: 0; }
+
+  .lab {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 14px;
+  }
+  .big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+  .big .slash {
+    color: var(--ink-ghost);
+    font-weight: 400;
+    margin: 0 4px;
+  }
+  .big .denom {
+    color: var(--ink-faint);
+    font-weight: 400;
+    font-size: 22px;
+  }
+  .note {
+    font-family: 'Spectral', Georgia, serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-soft);
+    margin-top: 10px;
+    line-height: 1.35;
+  }
+  .note .em {
+    font-style: normal;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+    background: rgba(138,58,28,0.08);
+    padding: 1px 6px 2px;
+    margin-right: 4px;
+    border-radius: 0;
+  }
+  .attn .note .em { background: rgba(138,58,28,0.14); color: var(--rust); }
+  .attn .big    { color: var(--rust); }
+
+  .summary .headline {
+    padding: 22px 32px 20px 0;
+    border-right: 0.5px solid var(--rule-soft);
+  }
+  .headline .over {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-faint);
+    margin-bottom: 10px;
+  }
+  .headline h1 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 400;
+    font-size: 30px;
+    line-height: 1.12;
+    letter-spacing: -0.012em;
+    color: var(--ink);
+    text-wrap: pretty;
+    max-width: 22ch;
+  }
+  .headline h1 em {
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  /* ——— fleet table ——— */
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 18px;
+  }
+  .sec-head h2 {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-weight: 500;
+    font-size: 18px;
+    letter-spacing: 0;
+    color: var(--ink);
+  }
+  .sec-head h2 .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 400;
+    color: var(--ink-faint);
+    font-size: 13px;
+    margin-left: 10px;
+    letter-spacing: 0.04em;
+  }
+  .sec-head .legend {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    font-size: 10px;
+    color: var(--ink-faint);
+  }
+  .sec-head .legend span { margin-left: 18px; }
+  .sec-head .legend b { color: var(--ink-soft); font-weight: 600; letter-spacing: 0.18em; }
+
+  table.fleet {
+    width: 100%;
+    border-collapse: collapse;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+  }
+
+  table.fleet thead th {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--ink-faint);
+    text-align: right;
+    padding: 0 14px 12px;
+    border-bottom: 1.25px solid var(--rule);
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  table.fleet thead th.l { text-align: left; padding-left: 0; }
+  table.fleet thead th.r { padding-right: 0; }
+  table.fleet thead th small {
+    display: block;
+    font-family: 'Spectral', serif;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-size: 10.5px;
+    color: var(--ink-ghost);
+    margin-top: 4px;
+  }
+
+  table.fleet tbody td {
+    padding: 20px 14px 18px;
+    border-bottom: 0.5px solid var(--rule-soft);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--ink);
+    text-align: right;
+    vertical-align: baseline;
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+  table.fleet tbody td.l { text-align: left; padding-left: 0; }
+  table.fleet tbody td.r { padding-right: 0; }
+
+  /* project name column */
+  td.project {
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+    padding-top: 18px;
+  }
+  td.project .marker {
+    display: inline-block;
+    width: 0.45em;
+    color: var(--ink-ghost);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 400;
+    margin-right: 10px;
+    vertical-align: 2px;
+  }
+
+  /* last cycle — relative time, mono but slightly quieter */
+  td.ago {
+    color: var(--ink-soft);
+    font-size: 13.5px;
+  }
+
+  /* big count */
+  td.count {
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  td.verified { color: var(--ink); }
+  td.failed   { color: var(--ink-soft); }
+  td.failed.hot { color: var(--rust); font-weight: 500; }
+
+  /* bot-pickable — the one thing we want to see at a glance */
+  td.pickable {
+    font-size: 16px;
+    font-weight: 500;
+  }
+  td.pickable.zero { color: var(--ink-ghost); font-weight: 400; }
+  td.pickable.hit  { color: var(--rust); }
+  td.pickable.hit::after {
+    content: "•";
+    color: var(--rust);
+    margin-left: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    vertical-align: 1px;
+  }
+
+  /* auto-merge as typographic readout, not pill */
+  td.am {
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  td.am.on  { color: var(--ink); }
+  td.am.off { color: var(--ink-ghost); }
+  td.am.on::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    background: var(--ink);
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+  td.am.off::before {
+    content: "";
+    display: inline-block;
+    width: 6px; height: 6px;
+    border: 1px solid var(--ink-ghost);
+    margin-right: 8px;
+    vertical-align: 2px;
+  }
+
+  td.branch {
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  td.branch .slash { color: var(--ink-ghost); }
+
+  /* dash for empty / not applicable */
+  .dash { color: var(--ink-ghost); font-weight: 400; }
+
+  /* TOTAL row */
+  tr.total td {
+    border-bottom: none;
+    border-top: 1.25px solid var(--rule);
+    padding-top: 20px;
+    padding-bottom: 18px;
+    font-weight: 500;
+  }
+  tr.total td.project {
+    font-family: 'Archivo Narrow', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.24em;
+    color: var(--ink);
+    padding-top: 22px;
+  }
+  tr.total td.count { font-size: 17px; font-weight: 600; }
+  tr.total td.pickable.hit { color: var(--rust); font-weight: 600; }
+
+  /* ——— notes / footer ——— */
+
+  .afterword {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 48px;
+    margin-top: 56px;
+    padding-top: 22px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .afterword h3 {
+    margin: 0 0 10px;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ink-faint);
+  }
+  .afterword p {
+    margin: 0;
+    font-family: 'Spectral', Georgia, serif;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .afterword p code,
+  .afterword p .mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--ink);
+    background: transparent;
+  }
+
+  .colophon {
+    margin-top: 72px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'Archivo Narrow', sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    font-size: 10px;
+    color: var(--ink-ghost);
+    padding-top: 16px;
+    border-top: 0.5px solid var(--rule-soft);
+  }
+  .colophon .run {
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+
+  <!-- ——— masthead ——— -->
+  <header class="masthead">
+    <div class="wordmark"><span class="dot">●</span>generalstaff</div>
+    <div class="sub">
+      Local dispatcher · <b>Fleet overview</b>
+    </div>
+    <div class="stamp">
+      <span class="k">sheet</span>&nbsp;&nbsp;01 / fleet<br>
+      <span class="k">host</span>&nbsp;&nbsp;&nbsp;localhost:7823
+    </div>
+  </header>
+
+  <div class="docline">
+    <span>Dispatcher · read-only view</span>
+    <span class="title">“A quiet desk for loud machines.”</span>
+    <span>Rev. 0.4 · April 2026</span>
+  </div>
+
+  <!-- ——— summary band ——— -->
+  <section class="summary">
+    <div class="cell headline">
+      <div class="over">At a glance</div>
+      <h1>Three projects under dispatch. <em>One has pickup work waiting.</em></h1>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Cycles · verified</div>
+      <div class="big">156<span class="slash">/</span><span class="denom">273</span></div>
+      <div class="note">57% pass rate across the fleet’s lifetime.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Cycles · failed</div>
+      <div class="big">117</div>
+      <div class="note"><span class="em">raybrain</span>carries the bulk of failures.</div>
+    </div>
+
+    <div class="cell attn">
+      <div class="lab">Bot-pickable</div>
+      <div class="big">1</div>
+      <div class="note"><span class="em">generalstaff</span>has one task ready for pickup.</div>
+    </div>
+
+    <div class="cell">
+      <div class="lab">Last fleet activity</div>
+      <div class="big" style="font-size:26px;padding-top:8px">1<span style="font-size:14px;color:var(--ink-faint);margin-left:4px">h</span> <span class="slash" style="font-size:14px">ago</span></div>
+      <div class="note">Most recent cycle closed on <span class="em">generalstaff</span>.</div>
+    </div>
+  </section>
+
+  <!-- ——— fleet table ——— -->
+  <section>
+    <div class="sec-head">
+      <h2>Fleet <span class="n">— 3 projects</span></h2>
+      <div class="legend">
+        <span><b>●</b> auto-merge on</span>
+        <span><b>○</b> auto-merge off</span>
+      </div>
+    </div>
+
+    <table class="fleet">
+      <colgroup>
+        <col style="width:22%">
+        <col style="width:11%">
+        <col style="width:10%">
+        <col style="width:10%">
+        <col style="width:9%">
+        <col style="width:11%">
+        <col style="width:11%">
+        <col style="width:16%">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="l">Project</th>
+          <th>Last cycle</th>
+          <th>Total <small>cycles</small></th>
+          <th>Verified</th>
+          <th>Failed</th>
+          <th>Bot-pickable</th>
+          <th>Auto-merge</th>
+          <th class="r">Branch</th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <tr>
+          <td class="l project"><span class="marker">→</span>generalstaff</td>
+          <td class="ago">1h ago</td>
+          <td class="count">162</td>
+          <td class="count verified">132</td>
+          <td class="count failed">30</td>
+          <td class="pickable hit">1</td>
+          <td class="am on">on</td>
+          <td class="r branch">bot<span class="slash">/</span>work</td>
+        </tr>
+
+        <tr>
+          <td class="l project"><span class="marker">&nbsp;</span>gamr</td>
+          <td class="ago">5h ago</td>
+          <td class="count">12</td>
+          <td class="count verified">12</td>
+          <td class="count failed">0</td>
+          <td class="pickable zero">0</td>
+          <td class="am off">off</td>
+          <td class="r branch">bot<span class="slash">/</span>work</td>
+        </tr>
+
+        <tr>
+          <td class="l project"><span class="marker">&nbsp;</span>raybrain</td>
+          <td class="ago">3h ago</td>
+          <td class="count">99</td>
+          <td class="count verified">12</td>
+          <td class="count failed hot">87</td>
+          <td class="pickable zero">0</td>
+          <td class="am on">on</td>
+          <td class="r branch">bot<span class="slash">/</span>work</td>
+        </tr>
+
+        <tr class="total">
+          <td class="l project">Total</td>
+          <td class="ago"><span class="dash">—</span></td>
+          <td class="count">273</td>
+          <td class="count verified">156</td>
+          <td class="count failed">117</td>
+          <td class="pickable hit">1</td>
+          <td class="am"><span class="dash">—</span></td>
+          <td class="r branch"><span class="dash">—</span></td>
+        </tr>
+
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ——— afterword notes ——— -->
+  <section class="afterword">
+    <div>
+      <h3>Reading the sheet</h3>
+      <p>A <span class="mono">cycle</span> is one bot run: pickup → edit → verify. <em>Verified</em> cycles closed cleanly; <em>failed</em> ones were rolled back or abandoned. Totals are lifetime, not windowed.</p>
+    </div>
+    <div>
+      <h3>Pickup queue</h3>
+      <p>The <span class="mono">bot-pickable</span> column counts open tasks the dispatcher has already triaged as ready for a Claude Code session. Zero means idle, not healthy.</p>
+    </div>
+    <div>
+      <h3>Auto-merge</h3>
+      <p>When <span class="mono">on</span>, verified cycles land on the branch without a human in the loop. When <span class="mono">off</span>, verified work waits for review. Read-only here — set it from the CLI.</p>
+    </div>
+  </section>
+
+  <!-- ——— colophon ——— -->
+  <div class="colophon">
+    <span>generalstaff · open-source autonomous-bot dispatcher</span>
+    <span class="run">rendered 14:02 · pid 48213 · sheet refreshed on load</span>
+    <span>page 1 of 1</span>
+  </div>
+
+</div>
+
+</body>
+</html>

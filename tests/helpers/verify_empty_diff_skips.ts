@@ -122,13 +122,14 @@ async function run() {
     mkdirSync(PROJ_DIR, { recursive: true });
 
     // Set up a real git repo
-    await $`git -C ${PROJ_DIR} init`.quiet();
+    await $`git -C ${PROJ_DIR} init -b master`.quiet();
     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
     writeFileSync(join(PROJ_DIR, "README.md"), "initial\n");
     await $`git -C ${PROJ_DIR} add .`.quiet();
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
     await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
+    await $`git -C ${PROJ_DIR} checkout master`.quiet();
 
     const project = makeProjectConfig({
       path: PROJ_DIR,

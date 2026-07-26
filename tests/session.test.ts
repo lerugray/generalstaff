@@ -2159,6 +2159,23 @@ describe("flushSessionEndMerges (gs-254)", () => {
     }
   });
 
+  it("never auto-merges a project blocked after safety recovery failure", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "rejected.txt", "unsafe", "rejected");
+      const results = await flushSessionEndMerges(
+        [project],
+        new Map([[project.id, 1]]),
+        new Set([project.id]),
+      );
+      expect(results[0].result).toBe("skipped");
+      expect(results[0].reason).toContain("blocked");
+      expect(await headSubject(repo)).toBe("initial");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   it("skips when bot/work has no unmerged commits", async () => {
     const { repo, project } = await makeRepo(true);
     try {

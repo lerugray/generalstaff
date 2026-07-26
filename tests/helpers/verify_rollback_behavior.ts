@@ -3,6 +3,8 @@
 //   "verified"             -> reviewer verified, engineer commits, no rollback
 //   "verified_weak"        -> reviewer verified_weak, engineer commits, no rollback
 //   "verification_failed"  -> reviewer verification_failed, engineer commits, rollback fires
+//   "rollback_failure"     -> rejected commit plus a ref lock makes rollback fail closed
+//   "main_branch_commit"   -> engineer ignores worktree and commits to main
 //   "empty_diff"           -> engineer makes no commits, outcome verified_weak, no rollback
 
 import { mock } from "bun:test";
@@ -32,7 +34,7 @@ let reviewerCalled = false;
 
 const engineerCommits = scenario !== "empty_diff";
 const reviewerVerdict: ReviewerVerdict =
-  scenario === "verification_failed"
+  scenario === "verification_failed" || scenario === "rollback_failure"
     ? "verification_failed"
     : scenario === "verified_weak"
       ? "verified_weak"
@@ -41,9 +43,17 @@ const reviewerVerdict: ReviewerVerdict =
 mock.module("../../src/engineer", () => ({
   runEngineer: async (project: ProjectConfig) => {
     if (engineerCommits) {
-      writeFileSync(join(project.path, "bot-output.txt"), "engineer output\n");
-      await $`git -C ${project.path} add bot-output.txt`.quiet();
-      await $`git -C ${project.path} commit -m "mock engineer commit"`.quiet();
+      const wt = join(project.path, ".bot-worktree");
+      const commitCwd = scenario === "main_branch_commit" ? project.path : wt;
+      writeFileSync(join(commitCwd, "bot-output.txt"), "engineer output\n");
+      await $`git -C ${commitCwd} add bot-output.txt`.quiet();
+      await $`git -C ${commitCwd} commit -m "mock engineer commit"`.quiet();
+      if (scenario === "rollback_failure") {
+        writeFileSync(
+          join(project.path, ".git", "refs", "heads", "bot", "work.lock"),
+          "held by test\n",
+        );
+      }
     }
     return {
       exitCode: 0,
@@ -142,7 +152,7 @@ async function run() {
     rmSync(TEST_DIR, { recursive: true, force: true });
     mkdirSync(PROJ_DIR, { recursive: true });
 
-    await $`git -C ${PROJ_DIR} init`.quiet();
+    await $`git -C ${PROJ_DIR} init -b master`.quiet();
     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
     await $`git -C ${PROJ_DIR} config commit.gpgsign false`.quiet();
@@ -150,6 +160,7 @@ async function run() {
     await $`git -C ${PROJ_DIR} add README.md`.quiet();
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
     await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
+    await $`git -C ${PROJ_DIR} checkout master`.quiet();
 
     const project = makeProjectConfig({ path: PROJ_DIR });
     const config = makeDispatcherConfig({
@@ -174,6 +185,9 @@ async function run() {
       rollback_event_count: rollbackEvents.length,
       rollback_before_sha: rollbackEvents[0]?.data?.before_sha ?? null,
       rollback_after_sha: rollbackEvents[0]?.data?.after_sha ?? null,
+      rollback_success: rollbackEvents[0]?.data?.success ?? null,
+      blocked_for_session: result.blocked_for_session ?? false,
+      reason: result.reason,
     };
 
     console.log(JSON.stringify(output));

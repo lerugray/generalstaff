@@ -15,7 +15,10 @@ import {
   decideBotBranchHandling,
   detectMalformedJsonFiles,
   detectStateFileDeletions,
+  parseGitNameStatusZ,
   peekNextBotPickableTask,
+  validateExpectedWorktree,
+  validateKnownGitSha,
 } from "../src/cycle";
 import { setRootDir } from "../src/state";
 import { readJsonl } from "../src/audit";
@@ -40,138 +43,57 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 }
 
 describe("extractChangedFiles", () => {
-  it("extracts file paths from a unified diff", () => {
-    const diff = [
-      "diff --git a/src/main.ts b/src/main.ts",
-      "index abc..def 100644",
-      "--- a/src/main.ts",
-      "+++ b/src/main.ts",
-      "@@ -1,3 +1,4 @@",
-      "+import { foo } from './foo';",
-      "diff --git a/README.md b/README.md",
-      "--- a/README.md",
-      "+++ b/README.md",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-    ].join("\n");
-
-    expect(extractChangedFiles(diff)).toEqual(["src/main.ts", "README.md"]);
+  it("extracts ordinary paths from name-status -z output", () => {
+    expect(extractChangedFiles("M\0src/main.ts\0A\0README.md\0")).toEqual([
+      "src/main.ts",
+      "README.md",
+    ]);
   });
 
   it("returns empty array for empty diff", () => {
     expect(extractChangedFiles("")).toEqual([]);
   });
 
-  it("handles renamed files (b/ path is the destination)", () => {
-    const diff = "diff --git a/old-name.ts b/new-name.ts\n";
-    expect(extractChangedFiles(diff)).toEqual(["new-name.ts"]);
+  it("returns both rename endpoints for hands-off matching", () => {
+    expect(extractChangedFiles(
+      "R100\0src/hands-off.ts\0src/renamed.ts\0",
+    )).toEqual(["src/hands-off.ts", "src/renamed.ts"]);
   });
 
-  it("handles renamed files across directories", () => {
-    const diff = [
-      "diff --git a/src/old/foo.ts b/src/new/foo.ts",
-      "similarity index 100%",
-      "rename from src/old/foo.ts",
-      "rename to src/new/foo.ts",
-    ].join("\n");
-    expect(extractChangedFiles(diff)).toEqual(["src/new/foo.ts"]);
-  });
-
-  it("handles binary files", () => {
-    const diff = [
-      "diff --git a/assets/image.png b/assets/image.png",
-      "index e69de29..d41d8cd 100644",
-      "Binary files a/assets/image.png and b/assets/image.png differ",
-    ].join("\n");
-    expect(extractChangedFiles(diff)).toEqual(["assets/image.png"]);
-  });
-
-  it("handles new binary files", () => {
-    const diff = [
-      "diff --git a/logo.png b/logo.png",
-      "new file mode 100644",
-      "index 0000000..d41d8cd",
-      "Binary files /dev/null and b/logo.png differ",
-    ].join("\n");
-    expect(extractChangedFiles(diff)).toEqual(["logo.png"]);
-  });
-
-  it("handles files with spaces in their names", () => {
-    const diff = [
-      "diff --git a/docs/my notes.md b/docs/my notes.md",
-      "index abc..def 100644",
-      "--- a/docs/my notes.md",
-      "+++ b/docs/my notes.md",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-    ].join("\n");
-    expect(extractChangedFiles(diff)).toEqual(["docs/my notes.md"]);
-  });
-
-  it("handles renames where both names contain spaces", () => {
-    const diff = "diff --git a/old name.ts b/new name.ts\n";
-    expect(extractChangedFiles(diff)).toEqual(["new name.ts"]);
-  });
-
-  it("handles an added-only diff (--diff-filter=A) with multiple new files", () => {
-    const diff = [
-      "diff --git a/src/new-module.ts b/src/new-module.ts",
-      "new file mode 100644",
-      "index 0000000..abc1234",
-      "--- /dev/null",
-      "+++ b/src/new-module.ts",
-      "@@ -0,0 +1,3 @@",
-      "+export function foo() {",
-      "+  return 42;",
-      "+}",
-      "diff --git a/docs/guide.md b/docs/guide.md",
-      "new file mode 100644",
-      "index 0000000..def5678",
-      "--- /dev/null",
-      "+++ b/docs/guide.md",
-      "@@ -0,0 +1,2 @@",
-      "+# Guide",
-      "+Hello.",
-      "diff --git a/tests/new.test.ts b/tests/new.test.ts",
-      "new file mode 100644",
-      "index 0000000..9876543",
-      "--- /dev/null",
-      "+++ b/tests/new.test.ts",
-      "@@ -0,0 +1,1 @@",
-      "+import { describe } from 'bun:test';",
-    ].join("\n");
-
-    expect(extractChangedFiles(diff)).toEqual([
-      "src/new-module.ts",
-      "docs/guide.md",
-      "tests/new.test.ts",
+  it("preserves raw C-quoted-problem paths, including slashes and newlines", () => {
+    const path = "docs/quote\"-backslash\\-line\n-é.md";
+    const output = `M\0${path}\0`;
+    expect(parseGitNameStatusZ(output)).toEqual([
+      { status: "M", newPath: path },
     ]);
+    expect(extractChangedFiles(output)).toEqual([path]);
   });
 
-  it("handles a mixed diff with text, binary, and spaced filenames", () => {
-    const diff = [
-      "diff --git a/src/main.ts b/src/main.ts",
-      "--- a/src/main.ts",
-      "+++ b/src/main.ts",
-      "@@ -1 +1 @@",
-      "-a",
-      "+b",
-      "diff --git a/assets/icon.png b/assets/icon.png",
-      "Binary files a/assets/icon.png and b/assets/icon.png differ",
-      "diff --git a/docs/release notes.md b/docs/release notes.md",
-      "--- a/docs/release notes.md",
-      "+++ b/docs/release notes.md",
-      "@@ -1 +1 @@",
-      "-x",
-      "+y",
-    ].join("\n");
-    expect(extractChangedFiles(diff)).toEqual([
-      "src/main.ts",
-      "assets/icon.png",
-      "docs/release notes.md",
-    ]);
+  it("rejects truncated records instead of guessing", () => {
+    expect(() => parseGitNameStatusZ("R100\0old.ts\0")).toThrow(
+      "malformed git --name-status -z",
+    );
+  });
+});
+
+describe("validateExpectedWorktree", () => {
+  it("accepts the expected branch and SHA with a .git marker", () => {
+    expect(validateExpectedWorktree("bot/work", "abc", "bot/work", "abc", true)).toBeNull();
+  });
+
+  it("rejects a missing marker, wrong branch, or wrong SHA", () => {
+    expect(validateExpectedWorktree("bot/work", "abc", "bot/work", "abc", false)).toContain(".git");
+    expect(validateExpectedWorktree("bot/work", "abc", "master", "abc", true)).toContain("expected bot/work");
+    expect(validateExpectedWorktree("bot/work", "abc", "bot/work", "def", true)).toContain("does not match");
+  });
+});
+
+describe("validateKnownGitSha", () => {
+  it("fails closed for the unknown sentinel instead of treating it as empty diff", () => {
+    expect(validateKnownGitSha("unknown", "cycle start SHA")).toBe(
+      "could not resolve cycle start SHA",
+    );
+    expect(validateKnownGitSha("abc123", "cycle start SHA")).toBeNull();
   });
 });
 
@@ -631,6 +553,26 @@ describe("cycle rollback on verification_failed (gs-132)", () => {
     expect(result.reviewer_called).toBe(false);
     expect(result.cycle_end_sha).toBe(result.cycle_start_sha);
     expect(result.rollback_event_count).toBe(0);
+  }, 30_000);
+
+  it("surfaces rollback failure and blocks the project for this session", async () => {
+    const result = await runRollbackHelper("rollback_failure");
+    expect(result.final_outcome).toBe("verification_failed");
+    expect(result.blocked_for_session).toBe(true);
+    expect(result.rollback_success).toBe(false);
+    expect(result.branch_sha_after).not.toBe(result.cycle_start_sha);
+    expect(result.reason).toContain("CRITICAL: rollback");
+    expect(result.reason).toContain("blocked for the rest of this session");
+  }, 30_000);
+
+  it("hard-fails when main HEAD moves while the bot-branch diff is empty", async () => {
+    const result = await runRollbackHelper("main_branch_commit");
+    expect(result.final_outcome).toBe("verification_failed");
+    expect(result.blocked_for_session).toBe(true);
+    expect(result.reviewer_called).toBe(false);
+    expect(result.cycle_end_sha).toBe(result.cycle_start_sha);
+    expect(result.reason).toContain("main HEAD moved");
+    expect(result.reason).toContain("unreviewed main-branch commit");
   }, 30_000);
 });
 
@@ -1115,143 +1057,42 @@ describe("detectMalformedJsonFiles (gs-280)", () => {
 });
 
 describe("detectStateFileDeletions (gs-318)", () => {
-  it("returns empty list for empty diff", () => {
+  it("returns empty list for empty name-status output", () => {
     expect(detectStateFileDeletions("")).toEqual([]);
   });
 
-  it("returns empty list for diff with no deletions", () => {
-    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
-index abc123..def456 100644
---- a/state/foo/tasks.json
-+++ b/state/foo/tasks.json
-@@ -1,3 +1,4 @@
- [
-   {"id": "foo-001"},
-+  {"id": "foo-002"},
-   {"id": "foo-003"}
- ]`;
-    expect(detectStateFileDeletions(diff)).toEqual([]);
-  });
-
-  it("returns empty list for non-state-file deletions", () => {
-    const diff = `diff --git a/scratch/junk.txt b/scratch/junk.txt
-deleted file mode 100644
-index abc123..0000000
---- a/scratch/junk.txt
-+++ /dev/null
-@@ -1,3 +0,0 @@
--line1
--line2
--line3`;
-    expect(detectStateFileDeletions(diff)).toEqual([]);
+  it("ignores modifications and non-state deletions", () => {
+    expect(detectStateFileDeletions(
+      "M\0state/foo/tasks.json\0D\0scratch/junk.txt\0",
+    )).toEqual([]);
   });
 
   it("flags a tasks.json deletion under state/<id>/", () => {
-    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
-deleted file mode 100644
-index abc123..0000000
---- a/state/foo/tasks.json
-+++ /dev/null
-@@ -1,3 +0,0 @@
--[
--  {"id": "foo-001"}
--]`;
-    expect(detectStateFileDeletions(diff)).toEqual(["state/foo/tasks.json"]);
-  });
-
-  it("flags MISSION.md, PROGRESS.jsonl, and STATE.json deletions", () => {
-    const diff = [
-      `diff --git a/state/foo/MISSION.md b/state/foo/MISSION.md`,
-      `deleted file mode 100644`,
-      `--- a/state/foo/MISSION.md`,
-      `+++ /dev/null`,
-      `@@ -1 +0,0 @@`,
-      `-mission text`,
-      `diff --git a/state/foo/PROGRESS.jsonl b/state/foo/PROGRESS.jsonl`,
-      `deleted file mode 100644`,
-      `--- a/state/foo/PROGRESS.jsonl`,
-      `+++ /dev/null`,
-      `@@ -1 +0,0 @@`,
-      `-{"event":"x"}`,
-      `diff --git a/state/foo/STATE.json b/state/foo/STATE.json`,
-      `deleted file mode 100644`,
-      `--- a/state/foo/STATE.json`,
-      `+++ /dev/null`,
-      `@@ -1 +0,0 @@`,
-      `-{}`,
-    ].join("\n");
-    const result = detectStateFileDeletions(diff);
-    expect(result).toContain("state/foo/MISSION.md");
-    expect(result).toContain("state/foo/PROGRESS.jsonl");
-    expect(result).toContain("state/foo/STATE.json");
-    expect(result).toHaveLength(3);
-  });
-
-  it("flags state/_fleet/PROGRESS.jsonl deletion specifically", () => {
-    const diff = `diff --git a/state/_fleet/PROGRESS.jsonl b/state/_fleet/PROGRESS.jsonl
-deleted file mode 100644
---- a/state/_fleet/PROGRESS.jsonl
-+++ /dev/null`;
-    expect(detectStateFileDeletions(diff)).toEqual([
-      "state/_fleet/PROGRESS.jsonl",
+    expect(detectStateFileDeletions("D\0state/foo/tasks.json\0")).toEqual([
+      "state/foo/tasks.json",
     ]);
   });
 
-  it("flags multi-project bulk wipe (the 2026-04-24 incident shape)", () => {
-    // Six public-state projects each losing tasks.json + MISSION.md +
-    // PROGRESS.jsonl + STATE.json plus _fleet/PROGRESS.jsonl = 25
-    // deletions. Reproduces the wipe-cycle pattern.
-    const ids = ["bookfinder-general", "catalogdna", "generalstaff", "personal-site", "wargame-design-book"];
-    const files = ["tasks.json", "MISSION.md", "PROGRESS.jsonl", "STATE.json"];
-    const chunks: string[] = [];
-    for (const id of ids) {
-      for (const f of files) {
-        chunks.push(
-          `diff --git a/state/${id}/${f} b/state/${id}/${f}\n` +
-          `deleted file mode 100644\n` +
-          `--- a/state/${id}/${f}\n` +
-          `+++ /dev/null\n` +
-          `@@ -1 +0,0 @@\n` +
-          `-content`
-        );
-      }
-    }
-    chunks.push(
-      `diff --git a/state/_fleet/PROGRESS.jsonl b/state/_fleet/PROGRESS.jsonl\n` +
-      `deleted file mode 100644\n` +
-      `--- a/state/_fleet/PROGRESS.jsonl\n` +
-      `+++ /dev/null\n` +
-      `@@ -1 +0,0 @@\n` +
-      `-{}`
-    );
-    const result = detectStateFileDeletions(chunks.join("\n"));
-    expect(result).toHaveLength(21);
-    expect(result).toContain("state/_fleet/PROGRESS.jsonl");
-    expect(result).toContain("state/generalstaff/tasks.json");
+  it("treats renaming a protected state file as deletion of the source", () => {
+    expect(detectStateFileDeletions(
+      "R100\0state/foo/STATE.json\0archive/STATE.json\0",
+    )).toEqual(["state/foo/STATE.json"]);
   });
 
-  it("does not flag deletions of non-tracked state files (e.g. cycles/)", () => {
-    // state/<id>/cycles/<timestamp>.json is gitignored audit data —
-    // not a state file the gate cares about.
-    const diff = `diff --git a/state/foo/cycles/202604241200.json b/state/foo/cycles/202604241200.json
-deleted file mode 100644
---- a/state/foo/cycles/202604241200.json
-+++ /dev/null`;
-    expect(detectStateFileDeletions(diff)).toEqual([]);
-  });
-
-  it("does not flag a state-file modification (only deletions)", () => {
-    // The gate only blocks deletions; modifications (including
-    // task status flips, PROGRESS.jsonl appends) are normal cycle
-    // outputs and must pass through.
-    const diff = `diff --git a/state/foo/tasks.json b/state/foo/tasks.json
-index abc123..def456 100644
---- a/state/foo/tasks.json
-+++ b/state/foo/tasks.json
-@@ -1 +1 @@
--{"status":"pending"}
-+{"status":"done"}`;
-    expect(detectStateFileDeletions(diff)).toEqual([]);
+  it("flags multiple project and fleet state deletions", () => {
+    const output = [
+      "D", "state/foo/MISSION.md",
+      "D", "state/foo/PROGRESS.jsonl",
+      "D", "state/foo/STATE.json",
+      "D", "state/_fleet/PROGRESS.jsonl",
+      "",
+    ].join("\0");
+    expect(detectStateFileDeletions(output)).toEqual([
+      "state/foo/MISSION.md",
+      "state/foo/PROGRESS.jsonl",
+      "state/foo/STATE.json",
+      "state/_fleet/PROGRESS.jsonl",
+    ]);
   });
 });
 

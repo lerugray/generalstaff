@@ -516,6 +516,7 @@ export async function runSession(options: SessionOptions) {
   const allResults: CycleResult[] = [];
   const cyclesPerProject = new Map<string, number>();
   const skippedProjects = new Set<string>(excludeSet);
+  const sessionBlockedProjects = new Set<string>();
   // gs-290: task ids excluded for the rest of this session after
   // verified_weak + empty diff (per project).
   const sessionEmptyDiffExcludedByProject = new Map<string, Set<string>>();
@@ -903,6 +904,15 @@ export async function runSession(options: SessionOptions) {
             `  [FAILED] ${project.id} cycle ${result.cycle_id.slice(0, 12)}: ${result.reason}`,
           );
         }
+        if (result.blocked_for_session) {
+          allEmptyThisRound = false;
+          sessionBlockedProjects.add(project.id);
+          skippedProjects.add(project.id);
+          console.error(
+            `  [BLOCKED] ${project.id}: safety recovery failed; no more cycles or auto-merges this session.`,
+          );
+          continue;
+        }
 
         // Empty-round tracking (mirrors sequential consecutiveEmptyCycles).
         // Only "verified_weak + empty diff" qualifies; cycle_skipped and
@@ -1203,6 +1213,15 @@ export async function runSession(options: SessionOptions) {
         `[FAILED] ${currentProject.id} cycle ${result.cycle_id.slice(0, 12)}: ${result.reason}`,
       );
     }
+    if (result.blocked_for_session) {
+      sessionBlockedProjects.add(currentProject.id);
+      skippedProjects.add(currentProject.id);
+      console.error(
+        `[BLOCKED] ${currentProject.id}: safety recovery failed; no more cycles or auto-merges this session.`,
+      );
+      currentProject = null;
+      continue;
+    }
 
     // Handle skipped cycles
     if (result.final_outcome === "cycle_skipped") {
@@ -1334,6 +1353,7 @@ export async function runSession(options: SessionOptions) {
   for (const p of projects) {
     if (!p.auto_merge) continue;
     if (!cyclesPerProject.has(p.id)) continue;
+    if (sessionBlockedProjects.has(p.id)) continue;
     try {
       const unmerged = await countCommitsAhead(p.path, p.branch, "HEAD");
       if (unmerged > 0) {
@@ -1361,7 +1381,11 @@ export async function runSession(options: SessionOptions) {
   // follow-up cycle ran to trigger the merge). Flushing here guarantees
   // "verified work that the user already saw in PROGRESS.jsonl is on
   // master before we close the session."
-  await flushSessionEndMerges(projects, cyclesPerProject);
+  await flushSessionEndMerges(
+    projects,
+    cyclesPerProject,
+    sessionBlockedProjects,
+  );
 
   console.log(`\n=== Session Complete ===`);
   console.log(`Duration: ${elapsed.toFixed(1)} min`);
@@ -2194,9 +2218,20 @@ export interface SessionEndMergeResult {
 export async function flushSessionEndMerges(
   projects: ProjectConfig[],
   cyclesPerProject: Map<string, number>,
+  blockedProjectIds: ReadonlySet<string> = new Set(),
 ): Promise<SessionEndMergeResult[]> {
   const results: SessionEndMergeResult[] = [];
   for (const p of projects) {
+    if (blockedProjectIds.has(p.id)) {
+      results.push({
+        project_id: p.id,
+        branch: p.branch,
+        merged_commits: 0,
+        result: "skipped",
+        reason: "project blocked after safety recovery failure",
+      });
+      continue;
+    }
     if (!p.auto_merge) {
       results.push({
         project_id: p.id,

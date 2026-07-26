@@ -5,6 +5,7 @@ import { spawn } from "child_process";
 import { writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
 import { buildReviewerPrompt, type ReviewerPromptParams } from "./prompts/reviewer";
+import { formatSecretRedactionWarning, redactSecrets } from "./secrets";
 import {
   isReviewerResponse,
   type ProjectConfig,
@@ -45,7 +46,15 @@ export async function runReviewer(
   cwdOverride?: string,
   providerOverride?: ReviewerProviderOverride,
 ): Promise<ReviewerResult> {
-  const prompt = buildReviewerPrompt(promptParams);
+  const promptScan = redactSecrets(buildReviewerPrompt(promptParams));
+  const prompt = promptScan.redacted;
+  if (promptScan.hits.length > 0) {
+    console.warn(formatSecretRedactionWarning("reviewer-prompt.txt", promptScan.hits));
+    await appendProgress(project.id, "secret_redaction", {
+      artifact: "reviewer-prompt.txt",
+      hits: promptScan.hits,
+    }, cycleId);
+  }
 
   // Write prompt to cycle directory for audit
   await writeCycleFile(
@@ -150,26 +159,29 @@ export async function runReviewer(
   return { verdict, response, rawResponse, parseError };
 }
 
+export function buildClaudeReviewerArgs(model?: string): string[] {
+  const args = [
+    "-p",
+    "--allowedTools", "Read,Grep,Glob",
+    "--output-format", "text",
+  ];
+  if (model) args.push("--model", model);
+  return args;
+}
+
 async function spawnClaude(prompt: string, cwd: string, model?: string): Promise<string> {
   return new Promise<string>((resolve) => {
-    const args = [
-      "-p", prompt,
-      "--allowedTools", "Read,Bash,Grep,Glob",
-      "--output-format", "text",
-    ];
-    // gs quorum-review: per-call model override (e.g. a specific Claude tier
-    // as one quorum voice). Threaded as an arg — process.env is never touched
-    // — so parallel voices don't race on a shared GENERALSTAFF_REVIEWER_MODEL.
-    if (model) args.push("--model", model);
+    const args = buildClaudeReviewerArgs(model);
     const child = spawn(
       "claude",
       args,
       {
         cwd,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env },
       },
     );
+    child.stdin?.end(prompt);
 
     let stdout = "";
     let stderr = "";
@@ -1093,8 +1105,17 @@ export async function runQuorumReview(
   const reviewers = reviewCfg.reviewers;
   const policy: QuorumPolicy = reviewCfg.quorum_policy ?? "conservative";
   const minReal = reviewCfg.min_real_reviews ?? 2;
-  const prompt = buildReviewerPrompt(promptParams);
+  const promptScan = redactSecrets(buildReviewerPrompt(promptParams));
+  const prompt = promptScan.redacted;
   const cwd = cwdOverride ?? project.path;
+
+  if (promptScan.hits.length > 0) {
+    console.warn(formatSecretRedactionWarning("reviewer-prompt.txt", promptScan.hits));
+    await appendProgress(project.id, "secret_redaction", {
+      artifact: "reviewer-prompt.txt",
+      hits: promptScan.hits,
+    }, cycleId);
+  }
 
   await writeCycleFile(project.id, cycleId, "reviewer-prompt.txt", prompt, config);
   await appendProgress(
@@ -1240,4 +1261,3 @@ export async function runQuorumReview(
 
   return { verdict: synth.verdict, response: synth.response, rawResponse: mergedRaw, parseError: null };
 }
-

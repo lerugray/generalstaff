@@ -25,9 +25,10 @@ const progressEvents: Array<{ event: string; data: Record<string, unknown> }> =
 
 mock.module("../../src/engineer", () => ({
   runEngineer: async (project: ProjectConfig) => {
-    writeFileSync(join(project.path, "bot-output.txt"), "engineer output\n");
-    await $`git -C ${project.path} add bot-output.txt`.quiet();
-    await $`git -C ${project.path} commit -m "mock engineer commit"`.quiet();
+    const wt = join(project.path, ".bot-worktree");
+    writeFileSync(join(wt, "bot-output.txt"), "engineer output\n");
+    await $`git -C ${wt} add bot-output.txt`.quiet();
+    await $`git -C ${wt} commit -m "mock engineer commit"`.quiet();
     if (mode === "mock-claim") {
       return {
         exitCode: 0,
@@ -159,7 +160,7 @@ async function run() {
       "utf8",
     );
 
-    await $`git -C ${PROJ_DIR} init`.quiet();
+    await $`git -C ${PROJ_DIR} init -b master`.quiet();
     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
     await $`git -C ${PROJ_DIR} config commit.gpgsign false`.quiet();
@@ -167,6 +168,7 @@ async function run() {
     await $`git -C ${PROJ_DIR} add README.md`.quiet();
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
     await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
+    await $`git -C ${PROJ_DIR} checkout master`.quiet();
 
     const project = makeProjectConfig({
       id: "testproj",

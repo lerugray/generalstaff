@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import {
   matchesHandsOff,
   matchesHandsOffSymlinkAware,
+  OUT_OF_TREE_SYMLINK_VIOLATION,
   isBotRunning,
   writeSessionPid,
   readSessionPid,
@@ -205,6 +206,25 @@ describe("matchesHandsOffSymlinkAware", () => {
       fixtureRoot,
     );
     expect(result).toBe("src/reviewer.ts");
+  });
+
+  it("fails closed when a symlink target escapes the project tree", async () => {
+    const { symlinkSync } = await import("fs");
+    const outside = join(FIXTURES, "outside-secret.txt");
+    writeFileSync(outside, "secret", "utf8");
+    try {
+      symlinkSync(outside, join(fixtureRoot, "external-alias.txt"), "file");
+    } catch (err) {
+      if (err instanceof Error && /EPERM|operation not permitted/i.test(err.message)) {
+        return;
+      }
+      throw err;
+    }
+    expect(matchesHandsOffSymlinkAware(
+      "external-alias.txt",
+      [],
+      fixtureRoot,
+    )).toBe(OUT_OF_TREE_SYMLINK_VIOLATION);
   });
 
   it("falls back silently when the path does not exist", () => {

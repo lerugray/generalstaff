@@ -3,6 +3,7 @@ import {
   invokeOllamaReviewer,
   invokeOpenRouterReviewer,
   invokeReviewerWithFallback,
+  buildClaudeReviewerArgs,
   parseReviewerResponse,
   reviewerConcurrencyLimit,
   withReviewerSemaphore,
@@ -19,6 +20,19 @@ const VALID_RESPONSE = {
   silent_failures: [],
   notes: "Clean cycle",
 };
+
+describe("buildClaudeReviewerArgs", () => {
+  it("keeps the prompt off argv and removes Bash from reviewer tools", () => {
+    const args = buildClaudeReviewerArgs("claude-test");
+    expect(args).toEqual([
+      "-p",
+      "--allowedTools", "Read,Grep,Glob",
+      "--output-format", "text",
+      "--model", "claude-test",
+    ]);
+    expect(args.join(" ")).not.toContain("Bash");
+  });
+});
 
 describe("parseReviewerResponse", () => {
   it("parses raw JSON", () => {
@@ -1055,4 +1069,3 @@ describe("validateOllamaHost (SSRF guard)", () => {
     );
   });
 });
-

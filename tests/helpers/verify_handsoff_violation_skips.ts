@@ -22,9 +22,10 @@ let reviewerCalled = false;
 mock.module("../../src/engineer", () => ({
   runEngineer: async (project: ProjectConfig) => {
     // Engineer modifies a hands-off file (CLAUDE.md)
-    writeFileSync(join(project.path, "CLAUDE.md"), "modified by bot\n");
-    await $`git -C ${project.path} add CLAUDE.md`.quiet();
-    await $`git -C ${project.path} commit -m "mock engineer touches hands-off file"`.quiet();
+    const wt = join(project.path, ".bot-worktree");
+    writeFileSync(join(wt, "CLAUDE.md"), "modified by bot\n");
+    await $`git -C ${wt} add CLAUDE.md`.quiet();
+    await $`git -C ${wt} commit -m "mock engineer touches hands-off file"`.quiet();
     return {
       exitCode: 0,
       durationSeconds: 2,
@@ -132,7 +133,7 @@ async function run() {
     mkdirSync(PROJ_DIR, { recursive: true });
 
     // Set up a real git repo
-    await $`git -C ${PROJ_DIR} init`.quiet();
+    await $`git -C ${PROJ_DIR} init -b master`.quiet();
     await $`git -C ${PROJ_DIR} config user.email "test@test.com"`.quiet();
     await $`git -C ${PROJ_DIR} config user.name "Test"`.quiet();
     writeFileSync(join(PROJ_DIR, "README.md"), "initial\n");
@@ -140,6 +141,7 @@ async function run() {
     await $`git -C ${PROJ_DIR} add .`.quiet();
     await $`git -C ${PROJ_DIR} commit -m "initial commit"`.quiet();
     await $`git -C ${PROJ_DIR} checkout -b bot/work`.quiet();
+    await $`git -C ${PROJ_DIR} checkout master`.quiet();
 
     const project = makeProjectConfig({
       path: PROJ_DIR,

@@ -618,6 +618,8 @@ export interface CycleResult {
   diff_stats?: DiffStats;
   /** gs-291 / gs-290: task id the engineer claimed (or peeked); set on full cycle_end paths. */
   attempted_task_id?: string;
+  /** Safety-critical failure requires the dispatcher to exclude this project for the session. */
+  blocked_for_session?: boolean;
 }
 
 // --- PROGRESS.jsonl entry types ---
@@ -639,6 +641,7 @@ export type ProgressEventType =
   | "reviewer_hallucination"
   | "worktree_preflight"
   | "cycle_rollback"
+  | "secret_redaction"
   | "provider_invoked"
   | "provider_fallback"
   | "cycle_end"
@@ -928,7 +931,7 @@ const VALID_EVENTS: readonly string[] = [
   "diff_summary",
   "reviewer_invoked", "reviewer_response", "reviewer_verdict",
   "reviewer_fallback", "reviewer_hallucination",
-  "worktree_preflight", "cycle_rollback",
+  "worktree_preflight", "cycle_rollback", "secret_redaction",
   "provider_invoked", "provider_fallback",
   "cycle_end", "cycle_watchdog", "project_soft_skipped",
   "session_start", "session_end", "session_complete",
