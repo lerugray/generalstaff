@@ -192,6 +192,7 @@ describe("runDoctor --fix", () => {
   it("removes orphaned STOP file with --fix --yes", async () => {
     writeFileSync(join(FIXTURE, "STOP"), "STOP\n");
     await runDoctor({
+      exitOnFailure: false,
       fix: true,
       assumeYes: true,
       loadProjects: async () => [],
@@ -201,6 +202,7 @@ describe("runDoctor --fix", () => {
 
   it("does not error when no issues are found", async () => {
     await runDoctor({
+      exitOnFailure: false,
       fix: true,
       assumeYes: true,
       loadProjects: async () => [],
@@ -294,7 +296,9 @@ describe("runDoctor --json", () => {
       buf += parts.map(String).join(" ") + "\n";
     };
     try {
-      await runDoctor(args);
+      // exitOnFailure: false — in-process invocation; a missing prerequisite
+      // (e.g. no `claude` CLI on a CI runner) must not process.exit the suite.
+      await runDoctor({ ...args, exitOnFailure: false });
     } finally {
       console.log = originalLog;
     }
@@ -344,10 +348,18 @@ describe("runDoctor --json", () => {
       loadProjects: async () => [p],
       exitOnFailure: false,
     });
-    expect(report.ok).toBe(true);
-    for (const c of report.checks as Array<{ status: string }>) {
-      expect(c.status).not.toBe("fail");
+    // Prereq rows (`prereq: claude` etc.) reflect the RUNNER's environment,
+    // not fixture state — a CI box without the claude CLI must not fail this
+    // test. Assert everything doctor controls passes, and that `ok` is
+    // truthful about whatever the environment actually is.
+    const checks = report.checks as Array<{ name: string; status: string }>;
+    for (const c of checks) {
+      if (!c.name.startsWith("prereq:")) {
+        expect(c.status).not.toBe("fail");
+      }
     }
+    const anyFail = checks.some((c) => c.status === "fail");
+    expect(report.ok).toBe(!anyFail);
   });
 
   it("exits 1 with ok:false when any check fails", async () => {
