@@ -301,7 +301,7 @@ The hook reads the status.json path from `SPAWN_STATUS_FILE` env var (also
 set in spawn-local settings.json's `env` block). If unset (e.g. invoked
 outside a spawn), the hook silently no-ops.
 
-Lean-ctx and other user-global hooks continue to fire in spawned sessions
+User-global hooks continue to fire in spawned sessions
 because Claude Code merges --settings additively with user settings.
 
 ## State directory (per-machine)

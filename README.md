@@ -191,7 +191,6 @@ views from local state; it is not a hosted service and does not add telemetry.
 Runtime enforcement at cycle boundaries. Stacks with instruction-layer tools:
 
 - **[AGENTS.md / agents-md](https://github.com/TheRealSeanDonahoe/agents-md)** — drop-in rules file teaching coding agents to push back on bad requests and verify before claiming done.
-- **[lean-ctx](https://github.com/tzervas/lean-ctx)** — context runtime compressing file reads and search results into compact wire format.
 - **[aider](https://aider.chat) + OpenRouter** — set `engineer_provider: aider` to route cycles through Qwen3 Coder (~40× cheaper than Claude Sonnet). Bulk scaffolding; complex work stays on `claude`.
 - **[Grok CLI](https://x.ai/cli)** — set `engineer_provider: grok` to run cycles on xAI's Grok CLI, billed to your flat-rate grok.com subscription (no per-token cost). Sign in with `grok login`; no API key. Bulk scaffolding; complex work stays on `claude`. (v0.7.1+)
 

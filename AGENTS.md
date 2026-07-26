@@ -111,10 +111,3 @@ fleet review found these three clauses missing from the house files.
 <!-- Update mode appends dated sections below. -->
 
 ---
-
-<!-- lean-ctx -->
-## lean-ctx
-
-Prefer lean-ctx MCP tools over native equivalents for token savings.
-Full rules: @LEAN-CTX.md
-<!-- /lean-ctx -->
