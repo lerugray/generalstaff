@@ -2,7 +2,7 @@
 
 [![Test](https://github.com/lerugray/generalstaff/actions/workflows/test.yml/badge.svg)](https://github.com/lerugray/generalstaff/actions/workflows/test.yml)
 
-![GeneralStaff — the local-first alternative to Polsia. Open Source · BYOK · No SaaS Tax](docs/images/banner.png)
+![GeneralStaff — a verification gate for autonomous coding agents. Your agent says the work is done; it doesn't get the last word. Open source, bring your own keys, full audit log.](docs/images/banner.png)
 
 ## In plain English
 

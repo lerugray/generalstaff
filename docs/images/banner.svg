@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 592" width="1536" height="592" role="img" aria-label="GeneralStaff. A verification gate for autonomous coding agents. Your agent says the work is done; it doesn't get the last word. Open source, bring your own keys, full audit log.">
+  <rect width="1536" height="592" fill="#0c0c0c"></rect>
+
+  <!-- eyebrow: what it is, no competitor -->
+  <text x="768" y="151" text-anchor="middle" font-family="'IBM Plex Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="19" letter-spacing="4.6" fill="#8d8474">A VERIFICATION GATE FOR AUTONOMOUS CODING AGENTS</text>
+
+  <!-- wordmark -->
+  <text x="768" y="319" text-anchor="middle" font-family="'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif" font-size="168" fill="#e8b23a">GeneralStaff</text>
+
+  <!-- the proposition, plainly -->
+  <text x="768" y="383" text-anchor="middle" font-family="'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif" font-size="26" fill="#f1ebdd">Your agent says the work is done. It doesn&#8217;t get the last word.</text>
+
+  <line x1="618" y1="421" x2="918" y2="421" stroke="#e8b23a" stroke-width="1.4" opacity="0.75"></line>
+
+  <!-- markers -->
+  <text x="768" y="453" text-anchor="middle" font-family="'IBM Plex Mono','JetBrains Mono',Menlo,Consolas,monospace" font-size="18" letter-spacing="4.2" fill="#8d8474">OPEN SOURCE &#183; BRING YOUR OWN KEYS &#183; FULL AUDIT LOG</text>
+</svg>
