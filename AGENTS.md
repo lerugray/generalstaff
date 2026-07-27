@@ -1,7 +1,10 @@
 # AGENTS.md — generalstaff
 
 > Generated 2026-04-25 via the agents-md-wizard skill (type: infra).
-> Update with: `/agents-md-wizard /path/to/generalstaff --update`
+> Update with: `/agents-md-wizard /path/to/generalstaff --update` — the
+> skill is project-scoped at `.claude/skills/agents-md-wizard/`, so it is
+> invocable from a Claude Code session opened in THIS repo.
+> Staleness-checked 2026-07-27 (see §Revisions).
 > Spec: https://agents.md
 
 ## 1. What this is
@@ -103,11 +106,38 @@ fleet review found these three clauses missing from the house files.
    correction, newest first; distinct from the dated narrative in
    Revisions):
    <!-- Append one-liners here as corrections land. -->
+   - 2026-07-27: The recurring failure here is **doc drift, not code rot**
+     — this project moves faster than its own maps. When you learn
+     something that invalidates a doc, fix the doc in the same turn, and
+     edit the wrong claim itself rather than stapling a correction on top
+     of it. A "superseded" banner above a sentence that still asserts the
+     old thing leaves two live instructions, and the next reader picks
+     whichever one they hit first.
 
 ---
 
 ## Revisions
 
 <!-- Update mode appends dated sections below. -->
+
+### 2026-07-27 — staleness check (no rewrite needed)
+
+Checked end-to-end after the private overlay (`generalstaff-private/AGENTS.md`)
+was found to be describing an April state months out of date. **This file
+held up.** Recorded here so the next session does not re-audit it:
+
+- §3's v1.0 bar (5 external users completing a full bot session against
+  their own project) is a stable criterion, not a status claim — kept.
+- §6's constraints are current: the cross-platform amendment landed
+  2026-05-01, and the Max-20x/BYOK cost ceiling still describes what this
+  framework may assume of a user.
+- §8 is an append-only dated log and is working as designed.
+- Header updated to say where the wizard skill actually lives — it is
+  project-scoped to this repo, so it does not appear in the skill list of
+  a session opened in the sibling private repo, which reads exactly like
+  the skill having been deleted.
+
+The private overlay took the real work; its own §Revisions carries that
+detail.
 
 ---
