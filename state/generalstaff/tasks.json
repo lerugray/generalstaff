@@ -2603,5 +2603,11 @@
   "status": "pending",
   "title": "Structural paydown (K3 finding 6): extract post-cycle pipeline, unify session loops, dedupe auto-merge",
   "description": "executeCycle ~820 lines w/ labeled-break goto; runSession ~1150 w/ two near-identical 300-line loops; session-end auto-merge implemented twice AND BOTH RUN (different audit behavior \u2014 check for real double-merge bugs while unifying); autoCommitState x3; cli.ts 4.6k lines; test-mock-driven dynamic imports. Pure structural, no behavior change; separate from safety batch by design. Needs a careful lane + strong verify (full suite before/after)."
+ },
+ {
+  "id": "gs-338",
+  "title": "Refresh AGENTS.md in both repos \u2014 private overlay is April-era, public spec unverified",
+  "status": "pending",
+  "description": "Flagged 2026-07-27 by an outside fresh-eyes pass (Kimi Work desktop agent, read-only orientation in generalstaff-private; note at docs/internal/KIMI-SEAT-NOTE-2026-07-27.md). Ray confirmed on sight: 'the agents file here is old.' VERIFIED: the private overlay AGENTS.md was generated 2026-04-25 and last touched 2026-06-12 (d69e36a, agent-conduct section only) \u2014 its body still describes a Phase-1 pre-launch framework being polished for first contact, with 2-week / 1-3-month milestone horizons and a Tier 0-4 soak plan. Reality is well past that. Fresh agent sessions read this file and calibrate to the April map. SCOPE: (1) re-run /agents-md-wizard --update on the private overlay per its own header; (2) check the Phase-1 milestone list (gs-320 Telegram, gs-321 README tightening, the soak tiers) against actual state and either close or carry each; (3) same staleness check on this repo's public AGENTS.md \u2014 touched 2026-07-27 for the lean-ctx removal, but its framing has not been reviewed as a whole. Not urgent; wants a real pass rather than a patch. _seeded_decision: filed as a task rather than fixed inline because a wizard re-run plus a milestone reconciliation is a session's work, not a doc edit."
  }
 ]
