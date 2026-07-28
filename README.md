@@ -21,7 +21,7 @@ GeneralStaff treats agentic AI as an adversarial input to your codebase. Every c
 
 Autonomous coding agents fail in one predictable way: industrious without judgment. They mark tasks done when tests fail. They produce empty diffs and call them complete. They edit files you told them not to touch. They write confident summaries of work they didn't do.
 
-These aren't edge cases. They're the equilibrium when agent loops rely on instructions the model can drift from instead of locks the model can't bypass. Closed SaaS platforms charge per credit whether the project ships or not. Polsia's top Trustpilot complaint is false task completions. Nobody checks the bot's work against reality, so the damage compounds where you won't see it until next week.
+These aren't edge cases. They're the equilibrium when agent loops rely on instructions the model can drift from instead of locks the model can't bypass. Closed SaaS platforms charge per credit whether the project ships or not. Nobody checks the bot's work against reality, so the damage compounds where you won't see it until next week.
 
 Better prompts won't fix this. Structure will.
 
@@ -106,7 +106,7 @@ The architecture is the philosophy: gate, hands-off lists, default-off creative 
 
 GeneralStaff started as the dispatcher this README documents. Daily use produced a second thing: a written operating discipline for directing AI at all. The operator keeps rules files that record each hard-won lesson once so no future session repeats it, ledgers that carry open decisions until someone resolves them, and verification conventions that treat a model's "done" as a claim to check. The dispatcher enforces that discipline at cycle boundaries. The discipline itself now runs the operator's whole portfolio, on any machine and any model, and a session started tomorrow picks up tonight's open decisions from the ledger.
 
-The clearest proof is [SNESOS](https://snes-os.com), a boot-to-shell operating system for the Super Nintendo: 65816 assembly, a working mouse driver, a windowed GUI in progress, boots verified on real hardware. The operator wrote none of the code. The code holds up because the discipline reads every specification against its sources through an adversarial critic before it becomes canon, gates every build stage behind an emulator probe, and re-verifies each worker's output with an independent check before any human relies on it.
+The clearest proof is [SuperOS](https://super-os.net), a boot-to-shell operating system for the Super Nintendo: 65816 assembly, a working mouse driver, a windowed GUI in progress, boots verified on real hardware. The operator wrote none of the code. The code holds up because the discipline reads every specification against its sources through an adversarial critic before it becomes canon, gates every build stage behind an emulator probe, and re-verifies each worker's output with an independent check before any human relies on it.
 
 The dispatcher in this repo is the runnable, open-source piece of that discipline: the verification gate, the hands-off lists, the audit log.
 
@@ -253,7 +253,7 @@ Hard Rules hold regardless of knob state. Every cycle still lands in `PROGRESS.j
 
 Any project you point it at: a SaaS, a research tool, an art piece, a satirical anti-startup, a blog. The dispatcher doesn't care what the project is. It runs correctness work on what you tell it.
 
-Polsia assumes you want to build a profitable SaaS. GeneralStaff doesn't. **Bring your own imagination; the tool runs the execution.** LLMs asked for "a startup idea" return the mode of their training distribution — generic SaaS. The tool is a GM, not a writer. GMs run the rules; players write the characters.
+Most agent platforms assume you want to build a profitable SaaS. GeneralStaff doesn't. **Bring your own imagination; the tool runs the execution.** LLMs asked for "a startup idea" return the mode of their training distribution — generic SaaS. The tool is a GM, not a writer. GMs run the rules; players write the characters.
 
 Hard Rule 1 still holds: the bot does correctness work (tests, infra, pipelines, bug grinding); you do the creative part.
 
