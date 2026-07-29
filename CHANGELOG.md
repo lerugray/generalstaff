@@ -12,7 +12,7 @@ in practice, entries are written in Ray's voice and prioritize
 Current test baseline: 2,203 passing + 4 skipped across 2,207 tests in
 80 files. CI is the source of truth as the suite changes.
 
-## [0.9.0] — 2026-07-29
+## [0.10.0] — 2026-07-29
 
 Two new engineer providers, both subscription CLIs you authenticate yourself:
 `engineer_provider: codex` runs cycles on the OpenAI Codex CLI (`codex exec`,
@@ -29,6 +29,15 @@ notes the 30+ project fleet the same discipline runs beyond this repo.
 
 13 new provider tests; suite verified locally at 2,207 across 80 files, 0
 failing.
+
+## [0.9.0] — 2026-07-26
+
+The gate fails closed. Worktree/SHA preflight failures and rollback failures
+now block the project for the session instead of continuing. Diff checks
+handle C-quoted and renamed paths without quote/rename gaps, Bash is removed
+from the reviewer, and likely secrets are masked in persisted artifacts and
+reviewer egress. (Backfilled entry: this release shipped 2026-07-26 without a
+changelog entry or manifest bump; recorded 2026-07-29.)
 
 ## [0.8.0] — 2026-06-22
 
