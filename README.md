@@ -8,7 +8,7 @@
 
 GeneralStaff lets you describe, in plain words, the software you want, then puts AI to work building it while you stay in charge. The catch with letting AI write code on its own is that it tends to report a job as finished when it isn't. GeneralStaff stops that. Before any work is accepted it has to pass a check: the tests must pass, real changes must exist, and a second AI has to confirm the work matches what was asked. If it fails, the work is thrown out instead of kept, and you can read a full record of everything the AI did.
 
-GeneralStaff was built and is run by a non-programmer, directing AI in plain English instead of writing the code by hand. The skill is in structuring the work so the AI produces something you can trust, and GeneralStaff itself was built that way.
+The maintainer builds and runs GeneralStaff by directing AI in plain English instead of writing the code by hand. The craft is structuring and verifying the work until you can trust it. GeneralStaff itself was built that way.
 
 **Verification-gate discipline for autonomous coding agents.**
 **Your code. Your keys. Your audit log.**
@@ -68,6 +68,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 - 2,190 passing + 4 skipped across 2,194 tests in 80 files; the CI badge above is the source of truth as the suite moves.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
+- The same gate-and-ledger discipline runs the maintainer's 30+ project portfolio beyond this repo: Next.js web apps, Rust and Godot games, a publishing pipeline, and a Super Nintendo operating system.
 
 `grep '"verdict":"verification_failed"' state/generalstaff/PROGRESS.jsonl` and verify the count. The gate makes the velocity trustworthy.
 
@@ -85,7 +86,7 @@ File counterexamples on the [issue tracker](https://github.com/lerugray/generals
 
 ## What GeneralStaff is not
 
-- **Not a Claude wrapper.** Multi-provider: `claude -p`, `aider + OpenRouter`, Ollama for unattended runs.
+- **Not a Claude wrapper.** Three engineer providers today: `claude -p`, `aider` against any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Ollama local or cloud), and the Grok CLI. Reviewers can run on a different provider than the engineer. All on your own keys.
 - **Not an alignment tool.** It does not make the agent smarter. It catches the agent at cycle boundaries.
 - **Not a SaaS.** No hosted offering, no credits, no telemetry. The optional dashboard is a local server on your machine. Export = `git clone`.
 - **Not a chat UI.** Dispatched labor: you write work orders, the dispatcher runs cycles, you read SITREPs.
@@ -174,7 +175,7 @@ Bot pushes to `bot/work` on your remote only. Full config: [`projects.yaml.examp
 
 ### Tested configurations
 
-Primary dogfood trail (223 verified cycles) on **Windows 11 + Claude Code**. macOS bootstrap validated end-to-end 2026-05-01. Real-cycle mileage on macOS/Linux is lighter than Windows; rougher edges in less-trodden paths.
+Daily dogfood runs on **macOS + Claude Code**, the maintainer's primary machine since June 2026. Windows 11 carried the first ~220 verified cycles and remains a supported, tested path. Linux gets the lightest real-cycle mileage; expect rougher edges there.
 
 ## Observability
 
