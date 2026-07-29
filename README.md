@@ -15,7 +15,7 @@ The maintainer builds and runs GeneralStaff by directing AI in plain English ins
 
 GeneralStaff treats agentic AI as an adversarial input to your codebase. Every cycle runs through a Boolean verification gate before producing a commit: tests must pass, the diff must be non-empty, a separate reviewer must confirm scope match. Hands-off file lists are enforced by the dispatcher. Every prompt, response, tool call, and diff lands in `PROGRESS.jsonl`. Open source, BYOK, no SaaS layer.
 
-> **Status:** v0.8.0, 2,190 passing + 4 skipped across 2,194 tests in 80 files, and 30+ managed projects. CI is the source of truth for the test count. Cross-platform (Windows, macOS, Linux). Current `master` fails closed on worktree/SHA preflight and rollback failure (blocking the project for the session), checks C-quoted and renamed paths without quote/rename gaps, removes Bash from the reviewer, and masks likely secrets in persisted artifacts and reviewer egress. Autonomous mode remains opt-in, default-off, and never auto-pushes. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
+> **Status:** v0.9.0, 2,203 passing + 4 skipped across 2,207 tests in 80 files, and 30+ managed projects. CI is the source of truth for the test count. Cross-platform (Windows, macOS, Linux). Current `master` fails closed on worktree/SHA preflight and rollback failure (blocking the project for the session), checks C-quoted and renamed paths without quote/rename gaps, removes Bash from the reviewer, and masks likely secrets in persisted artifacts and reviewer egress. Autonomous mode remains opt-in, default-off, and never auto-pushes. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## The problem
 
@@ -65,7 +65,7 @@ The bot tried to edit three safety-critical files. The reviewer caught all three
 **Dogfooding numbers since 2026-04-15:**
 
 - 223 verified + 27 rejected reviewer verdicts — the gate caught ~10.8% of what the engineer proposed.
-- 2,190 passing + 4 skipped across 2,194 tests in 80 files; the CI badge above is the source of truth as the suite moves.
+- 2,203 passing + 4 skipped across 2,207 tests in 80 files; the CI badge above is the source of truth as the suite moves.
 - Two pre-launch security audits. First fixed five HIGH/MEDIUM findings. Second caught a symlink bypass on the hands-off check.
 - Every verified commit in this repo passed the same gate the tool ships with.
 - The same gate-and-ledger discipline runs the maintainer's 30+ project portfolio beyond this repo: Next.js web apps, Rust and Godot games, a publishing pipeline, and a Super Nintendo operating system.

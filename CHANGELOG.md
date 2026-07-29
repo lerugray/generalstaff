@@ -9,8 +9,26 @@ in practice, entries are written in Ray's voice and prioritize
 
 ## [Unreleased]
 
-Current test baseline: 2,190 passing + 4 skipped across 2,194 tests in
+Current test baseline: 2,203 passing + 4 skipped across 2,207 tests in
 80 files. CI is the source of truth as the suite changes.
+
+## [0.9.0] — 2026-07-29
+
+Two new engineer providers, both subscription CLIs you authenticate yourself:
+`engineer_provider: codex` runs cycles on the OpenAI Codex CLI (`codex exec`,
+workspace-write sandbox), and `engineer_provider: kimi` runs them on Moonshot's
+kimi-code CLI (`kimi -p`). Both follow the grok pattern — your own login, no
+API keys passing through GS, commit handling stays on the GS side. Marked
+experimental until they accumulate real-cycle mileage.
+
+Also in this release: a README freshness pass. The tested-configurations
+section now reflects reality (daily dogfood on macOS since June; Windows
+carried the first ~220 verified cycles and remains supported), the
+multi-provider and BYOK claims are stated plainly, and the dogfooding section
+notes the 30+ project fleet the same discipline runs beyond this repo.
+
+13 new provider tests; suite verified locally at 2,207 across 80 files, 0
+failing.
 
 ## [0.8.0] — 2026-06-22
 
