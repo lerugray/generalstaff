@@ -959,6 +959,29 @@ projects:
     cleanup();
   });
 
+  it("parses engineer_provider: codex and kimi (experimental, 2026-07-29)", async () => {
+    for (const provider of ["codex", "kimi"] as const) {
+      const path = writeYaml(
+        `${provider}.yaml`,
+        `
+projects:
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    engineer_provider: ${provider}
+    hands_off:
+      - secret/
+`,
+      );
+      const yaml = await loadProjectsYaml(path);
+      expect(yaml.projects[0].engineer_provider).toBe(provider);
+      cleanup();
+    }
+  });
+
   it("rejects unknown engineer_provider values", async () => {
     const path = writeYaml(
       "bad-provider.yaml",

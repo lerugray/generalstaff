@@ -873,12 +873,17 @@ export async function stepCycle(
       }
     });
   if (!cliAvailable(engineerCli)) {
-    const installHint =
-      engineerProvider === "claude"
-        ? "Install Claude Code and authenticate it, then run `gs welcome` again."
-        : engineerProvider === "aider"
-          ? "Install aider (`aider-install`), then run `gs welcome` again."
-          : "Install the Grok CLI and run `grok login`, then run `gs welcome` again.";
+    const installHints: Record<EngineerProvider, string> = {
+      claude:
+        "Install Claude Code and authenticate it, then run `gs welcome` again.",
+      aider: "Install aider (`aider-install`), then run `gs welcome` again.",
+      grok: "Install the Grok CLI and run `grok login`, then run `gs welcome` again.",
+      codex:
+        "Install the Codex CLI (`npm install -g @openai/codex`) and run `codex login`, then run `gs welcome` again.",
+      kimi:
+        "Install the kimi-code CLI and run `kimi login`, then run `gs welcome` again.",
+    };
+    const installHint = installHints[engineerProvider];
     return {
       ok: false,
       cycleRan: false,

@@ -478,6 +478,152 @@ describe("resolveEngineerCommand (gs-270, Phase 7)", () => {
     const { command } = resolveEngineerCommand(project);
     expect(command).toContain("path/with'\\''quote");
   });
+
+  // 2026-07-29 (experimental): codex engineer provider — OpenAI Codex CLI.
+  it("generates a codex bash command when engineer_provider: codex", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "ignored-when-codex",
+      cycle_budget_minutes: 30,
+      engineer_provider: "codex",
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("codex");
+    expect(command).toContain("codex exec");
+    expect(command).toContain("--cd");
+    expect(command).toContain("-s workspace-write");
+    expect(command).toContain("worktree");
+    expect(command).toContain(project.verification_command);
+    expect(command).not.toContain("ignored-when-codex");
+    // Sub-backed auth, NOT OpenRouter per-token. Omit model flag by default.
+    expect(command).not.toContain("OPENROUTER_API_KEY");
+    expect(command).not.toContain("\n  -m ");
+  });
+
+  it("includes engineer_model override in the generated codex command", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "codex",
+      engineer_model: "gpt-5.6-sol-high",
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("gpt-5.6-sol-high");
+    expect(command).toContain("\n  -m ");
+  });
+
+  it("omits -m from the codex command when engineer_model is unset", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_provider: "codex" });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("codex exec");
+    expect(command).not.toContain("\n  -m ");
+  });
+
+  it("honors a task-level engineer_provider: codex override (source=task)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "claude",
+      engineer_command: "echo claude",
+    });
+    const task = {
+      id: "t-1",
+      title: "do it",
+      status: "pending",
+      priority: 1,
+      engineer_provider: "codex",
+    } as const;
+    const { provider, source, command } = resolveEngineerCommand(
+      project,
+      task as never,
+    );
+    expect(provider).toBe("codex");
+    expect(source).toBe("task");
+    expect(command).toContain("codex exec");
+  });
+
+  it("shell-quotes hands_off single quotes safely on the codex path too", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "codex",
+      hands_off: ["path/with'quote"],
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("path/with'\\''quote");
+  });
+
+  // 2026-07-29 (experimental): kimi engineer provider — Moonshot kimi-code CLI.
+  it("generates a kimi bash command when engineer_provider: kimi", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_command: "ignored-when-kimi",
+      cycle_budget_minutes: 30,
+      engineer_provider: "kimi",
+    });
+    const { provider, command } = resolveEngineerCommand(project);
+    expect(provider).toBe("kimi");
+    expect(command).toContain("kimi \\");
+    expect(command).toContain("-p ");
+    expect(command).toContain(".kimi-code/bin");
+    expect(command).toContain("worktree");
+    expect(command).toContain(project.verification_command);
+    expect(command).not.toContain("ignored-when-kimi");
+    // -p already auto-approves; must not combine with --yolo/--auto.
+    expect(command).not.toContain("--yolo");
+    expect(command).not.toContain("--auto");
+    expect(command).not.toContain("OPENROUTER_API_KEY");
+    expect(command).not.toContain("\n  -m ");
+  });
+
+  it("includes engineer_model override in the generated kimi command", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "kimi",
+      engineer_model: "kimi-for-coding",
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("kimi-for-coding");
+    expect(command).toContain("\n  -m ");
+  });
+
+  it("omits -m from the kimi command when engineer_model is unset", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({ engineer_provider: "kimi" });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("kimi \\");
+    expect(command).not.toContain("\n  -m ");
+  });
+
+  it("honors a task-level engineer_provider: kimi override (source=task)", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "claude",
+      engineer_command: "echo claude",
+    });
+    const task = {
+      id: "t-1",
+      title: "do it",
+      status: "pending",
+      priority: 1,
+      engineer_provider: "kimi",
+    } as const;
+    const { provider, source, command } = resolveEngineerCommand(
+      project,
+      task as never,
+    );
+    expect(provider).toBe("kimi");
+    expect(source).toBe("task");
+    expect(command).toContain("kimi \\");
+  });
+
+  it("shell-quotes hands_off single quotes safely on the kimi path too", async () => {
+    const { resolveEngineerCommand } = await import("../src/engineer");
+    const project = makeProject({
+      engineer_provider: "kimi",
+      hands_off: ["path/with'quote"],
+    });
+    const { command } = resolveEngineerCommand(project);
+    expect(command).toContain("path/with'\\''quote");
+  });
 });
 
 describe("runEngineer dry-run with alternative provider (gs-270)", () => {
@@ -511,6 +657,38 @@ describe("runEngineer dry-run with alternative provider (gs-270)", () => {
     expect(logContent!).toContain("provider=grok");
     expect(logContent!).toContain("grok");
     expect(logContent!).not.toContain("this-is-ignored-for-grok");
+  });
+
+  it("logs provider=codex in dry-run output", async () => {
+    const project = makeProject({
+      engineer_provider: "codex",
+      engineer_command: "this-is-ignored-for-codex",
+    });
+    const result = await runEngineer(project, "cycle-codex-dry", undefined, true);
+    expect(result.exitCode).toBe(0);
+
+    const logContent = await readCycleFile("test-proj", "cycle-codex-dry", "engineer.log");
+    expect(logContent).not.toBeNull();
+    expect(logContent!).toContain("[DRY RUN]");
+    expect(logContent!).toContain("provider=codex");
+    expect(logContent!).toContain("codex");
+    expect(logContent!).not.toContain("this-is-ignored-for-codex");
+  });
+
+  it("logs provider=kimi in dry-run output", async () => {
+    const project = makeProject({
+      engineer_provider: "kimi",
+      engineer_command: "this-is-ignored-for-kimi",
+    });
+    const result = await runEngineer(project, "cycle-kimi-dry", undefined, true);
+    expect(result.exitCode).toBe(0);
+
+    const logContent = await readCycleFile("test-proj", "cycle-kimi-dry", "engineer.log");
+    expect(logContent).not.toBeNull();
+    expect(logContent!).toContain("[DRY RUN]");
+    expect(logContent!).toContain("provider=kimi");
+    expect(logContent!).toContain("kimi");
+    expect(logContent!).not.toContain("this-is-ignored-for-kimi");
   });
 
   it("logs provider=claude in dry-run for default path", async () => {

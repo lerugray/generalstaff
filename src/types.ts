@@ -324,11 +324,16 @@ export type ConcurrencyDetectionMode = "catalogdna" | "worktree" | "none";
 // setup, deps, provider CLI, prompt — so projects don't need a per-provider
 // wrapper. gs-331 (v0.7.1): "grok" runs xAI's Grok CLI headlessly, auth'd by
 // the operator's flat-rate grok.com sub login (no per-token key).
-export type EngineerProvider = "claude" | "aider" | "grok";
+// 2026-07-29 (experimental): "codex" (OpenAI Codex CLI via `codex login`) and
+// "kimi" (Moonshot kimi-code CLI via `kimi login`) — both subscription/OAuth
+// CLIs the end user installs and authenticates themselves.
+export type EngineerProvider = "claude" | "aider" | "grok" | "codex" | "kimi";
 export const VALID_ENGINEER_PROVIDERS: readonly EngineerProvider[] = [
   "claude",
   "aider",
   "grok",
+  "codex",
+  "kimi",
 ];
 
 // gs-297: Session usage budget. Caps how much of the user's LLM

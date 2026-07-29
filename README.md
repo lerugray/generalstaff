@@ -86,7 +86,7 @@ File counterexamples on the [issue tracker](https://github.com/lerugray/generals
 
 ## What GeneralStaff is not
 
-- **Not a Claude wrapper.** Three engineer providers today: `claude -p`, `aider` against any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Ollama local or cloud), and the Grok CLI. Reviewers can run on a different provider than the engineer. All on your own keys.
+- **Not a Claude wrapper.** Five engineer providers today: `claude -p`, `aider` against any OpenAI-compatible endpoint (OpenRouter, DeepSeek, Ollama local or cloud), the Grok CLI, plus experimental OpenAI Codex CLI and Moonshot kimi-code CLI. Reviewers can run on a different provider than the engineer. All on your own keys / subscriptions.
 - **Not an alignment tool.** It does not make the agent smarter. It catches the agent at cycle boundaries.
 - **Not a SaaS.** No hosted offering, no credits, no telemetry. The optional dashboard is a local server on your machine. Export = `git clone`.
 - **Not a chat UI.** Dispatched labor: you write work orders, the dispatcher runs cycles, you read SITREPs.
@@ -159,8 +159,8 @@ Guided setup: provider config, register your first project, run one verified cyc
 ### Manual flow
 
 Requires `git`, `bash` (Git Bash works on Windows), and `bun` 1.3.0+.
-The selected engineer also needs its CLI on PATH (`claude`, `aider`, or
-`grok`); `gs welcome` checks before launching the first cycle.
+The selected engineer also needs its CLI on PATH (`claude`, `aider`,
+`grok`, `codex`, or `kimi`); `gs welcome` checks before launching the first cycle.
 
 ```bash
 gs bootstrap /path/to/project "what this project is" --id=myproject
@@ -194,6 +194,8 @@ Runtime enforcement at cycle boundaries. Stacks with instruction-layer tools:
 - **[AGENTS.md / agents-md](https://github.com/TheRealSeanDonahoe/agents-md)** — drop-in rules file teaching coding agents to push back on bad requests and verify before claiming done.
 - **[aider](https://aider.chat) + OpenRouter** — set `engineer_provider: aider` to route cycles through Qwen3 Coder (~40× cheaper than Claude Sonnet). Bulk scaffolding; complex work stays on `claude`.
 - **[Grok CLI](https://x.ai/cli)** — set `engineer_provider: grok` to run cycles on xAI's Grok CLI, billed to your flat-rate grok.com subscription (no per-token cost). Sign in with `grok login`; no API key. Bulk scaffolding; complex work stays on `claude`. (v0.7.1+)
+- **[OpenAI Codex CLI](https://github.com/openai/codex)** — set `engineer_provider: codex` to run cycles on Codex (`codex login`; your ChatGPT/Codex sub). Experimental. Bulk scaffolding; complex work stays on `claude`.
+- **[kimi-code CLI](https://www.kimi.com/code)** — set `engineer_provider: kimi` to run cycles on Moonshot's kimi-code CLI (`kimi login`; your Kimi Code sub). Experimental. Bulk scaffolding; complex work stays on `claude`.
 
 ## Strategic-reasoning companion
 
@@ -236,6 +238,8 @@ Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in 
 
 - `engineer_provider: aider` — route to OpenRouter Qwen3 Coder (~$0.05-0.10/cycle).
 - `engineer_provider: grok` — route to xAI's Grok CLI on your flat-rate grok.com sub, no per-token cost (`grok login`; no API key). (v0.7.1+)
+- `engineer_provider: codex` — route to OpenAI Codex CLI on your ChatGPT/Codex sub (`codex login`). Experimental.
+- `engineer_provider: kimi` — route to Moonshot kimi-code CLI on your Kimi Code sub (`kimi login`). Experimental.
 - `creative_work_allowed: true` — Hard Rule 1 carve-out for creative-draft cycles.
 - `auto_merge: true` — auto-merge `bot/work` after clean cycles. Opt in after 5.
 - `dispatcher.session_budget` — cap on USD, tokens, or cycles.

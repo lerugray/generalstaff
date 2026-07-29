@@ -24,6 +24,8 @@ import type {
 } from "./types";
 import { buildAiderCommand } from "./engineer_providers/aider";
 import { buildGrokCommand } from "./engineer_providers/grok";
+import { buildCodexCommand } from "./engineer_providers/codex";
+import { buildKimiCommand } from "./engineer_providers/kimi";
 import { ENGINEER_DISCIPLINE } from "./prompts/engineer_discipline";
 import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
 
@@ -131,6 +133,18 @@ export function resolveEngineerCommand(
         provider,
         source,
         command: buildGrokCommand(effectiveProject, context, nextTask),
+      };
+    case "codex":
+      return {
+        provider,
+        source,
+        command: buildCodexCommand(effectiveProject, context, nextTask),
+      };
+    case "kimi":
+      return {
+        provider,
+        source,
+        command: buildKimiCommand(effectiveProject, context, nextTask),
       };
   }
 }
