@@ -247,9 +247,9 @@ Hard Rule 1 still holds: the bot does correctness work (tests, infra, pipelines,
 
 Other work from the same fleet:
 
-- **[Hammerstein](https://github.com/lerugray/hammerstein)** ([hammerstein.ai](https://hammerstein.ai)). The strategic-reasoning CLI described above, open source and MIT-licensed. GeneralStaff gates execution; Hammerstein audits the plan before it reaches the queue.
+- **[Hammerstein](https://github.com/lerugray/hammerstein)** ([hammerstein.ai](https://hammerstein.ai)). The strategic-reasoning CLI described above, open source and MIT-licensed, with paying subscribers on the hosted service. GeneralStaff gates execution; Hammerstein audits the plan before it reaches the queue.
 - **[SuperOS](https://super-os.net)**. A boot-to-shell operating system for the Super Nintendo, written in 65816 assembly and verified on real hardware.
-- **[Retrogaze](https://retrogazeai.com)**. A commercial product with real users, live in production. The maintainer built it the way he builds everything here: by directing AI, with no coding background of his own.
+- **[Retrogaze](https://retrogazeai.com)**. A commercial product live in production. The maintainer built it the way he builds everything here: by directing AI, with no coding background of his own.
 
 ## Documentation
 
