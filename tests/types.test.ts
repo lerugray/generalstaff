@@ -66,6 +66,8 @@ describe("isProgressEntry", () => {
     const events = [
       "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
       "verification_run", "verification_outcome", "diff_summary",
+      "player_path_run", "player_path_outcome",
+      "customer_facing_smoke_run", "customer_facing_smoke_outcome",
       "reviewer_invoked", "reviewer_response", "reviewer_verdict",
       "reviewer_fallback", "reviewer_hallucination",
       "worktree_preflight", "cycle_rollback",

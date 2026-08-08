@@ -310,6 +310,95 @@ describe("verification gate", () => {
     });
   });
 
+  describe("player_path_command", () => {
+    it("runs after main verification and keeps passed when the probe exits 0", async () => {
+      const project = makeProject({
+        verification_command: "printf 'unit\\n'",
+        player_path_command: "printf 'player-path\\n'",
+      });
+      const result = await runVerification(project, "cycle-player-pass");
+
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("=== Player-path verification ===");
+      expect(log.indexOf("unit")).toBeLessThan(log.indexOf("player-path"));
+    });
+
+    it("fails the cycle when the player-path probe exits non-zero", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        player_path_command: "exit 7",
+      });
+      const result = await runVerification(project, "cycle-player-fail");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(7);
+    });
+
+    it("does not run the player-path probe when main verification fails", async () => {
+      const marker = join(TEST_DIR, "player-path-ran");
+      const project = makeProject({
+        verification_command: "exit 1",
+        player_path_command: `touch '${marker}'`,
+      });
+      const result = await runVerification(project, "cycle-player-skip");
+
+      expect(result.outcome).toBe("failed");
+      expect(existsSync(marker)).toBe(false);
+      expect(readFileSync(result.logPath, "utf8")).not.toContain(
+        "Player-path verification",
+      );
+    });
+
+    it("records the optional probe in dry-run output without executing it", async () => {
+      const marker = join(TEST_DIR, "player-path-dry-ran");
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        player_path_command: `touch '${marker}'`,
+      });
+      const result = await runVerification(
+        project,
+        "cycle-player-dry",
+        undefined,
+        true,
+      );
+
+      expect(result.outcome).toBe("passed");
+      expect(existsSync(marker)).toBe(false);
+      const log = await readCycleFile(
+        "test-proj",
+        "cycle-player-dry",
+        "verification.log",
+      );
+      expect(log).toContain("Would execute player-path verification");
+    });
+
+    it("writes player-path run and outcome events", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        player_path_command: "test 2 -eq 2",
+      });
+      await runVerification(project, "cycle-player-audit");
+
+      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+      const events = readFileSync(progressPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const runEvent = events.find(
+        (event: { event: string }) => event.event === "player_path_run",
+      );
+      const outcomeEvent = events.find(
+        (event: { event: string }) => event.event === "player_path_outcome",
+      );
+
+      expect(runEvent.data.command).toBe("test 2 -eq 2");
+      expect(outcomeEvent.data.outcome).toBe("passed");
+      expect(outcomeEvent.data.exit_code).toBe(0);
+    });
+  });
+
   describe("audit trail", () => {
     it("writes progress entries for verification", async () => {
       const project = makeProject({ verification_command: "test 1 -eq 1" });

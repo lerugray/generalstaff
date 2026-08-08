@@ -19,6 +19,9 @@ const NOOP_COMMANDS = ["true", ":", "echo", "exit 0"];
 // gs-316: customer-facing smoke runs after main verification; shorter
 // timeout than the full test suite (browser probes, not 1k+ unit tests).
 const CUSTOMER_FACING_SMOKE_TIMEOUT_MS = 5 * 60 * 1000;
+// Player-path probes can include endurance loops and heap sampling. Give the
+// shipped-artifact gate the same ceiling as the primary verification suite.
+const PLAYER_PATH_TIMEOUT_MS = 20 * 60 * 1000;
 
 export function isNoopCommand(command: string): boolean {
   const trimmed = command.trim();
@@ -32,6 +35,13 @@ function shouldRunCustomerFacingSmoke(project: ProjectConfig): boolean {
     project.public_facing === true &&
     typeof project.customer_facing_smoke === "string" &&
     project.customer_facing_smoke.trim() !== ""
+  );
+}
+
+function shouldRunPlayerPath(project: ProjectConfig): boolean {
+  return (
+    typeof project.player_path_command === "string" &&
+    project.player_path_command.trim() !== ""
   );
 }
 
@@ -210,6 +220,51 @@ async function runCustomerFacingSmoke(
   };
 }
 
+async function runPlayerPath(
+  project: ProjectConfig,
+  cycleId: string,
+  logPath: string,
+  cwd: string,
+): Promise<{
+  outcome: VerificationOutcome;
+  exitCode: number | null;
+  durationSeconds: number;
+}> {
+  const command = project.player_path_command!.trim();
+
+  await appendProgress(project.id, "player_path_run", {
+    command,
+    dry_run: false,
+  }, cycleId);
+
+  const run = await appendShellCommandToLog(
+    logPath,
+    "=== Player-path verification ===",
+    command,
+    cwd,
+    PLAYER_PATH_TIMEOUT_MS,
+  );
+
+  const outcome: VerificationOutcome =
+    run.timedOut || run.spawnError !== undefined || run.exitCode !== 0
+      ? "failed"
+      : "passed";
+
+  await appendProgress(project.id, "player_path_outcome", {
+    outcome,
+    exit_code: run.exitCode,
+    duration_seconds: Math.round(run.durationSeconds),
+    timed_out: run.timedOut,
+    ...(run.spawnError ? { error: run.spawnError } : {}),
+  }, cycleId);
+
+  return {
+    outcome,
+    exitCode: run.exitCode,
+    durationSeconds: run.durationSeconds,
+  };
+}
+
 export async function runVerification(
   project: ProjectConfig,
   cycleId: string,
@@ -236,6 +291,12 @@ export async function runVerification(
     )
       ? "weak"
       : "passed";
+    if (outcome === "passed" && shouldRunPlayerPath(project)) {
+      logBody +=
+        "\n[DRY RUN] Would execute player-path verification: " +
+        project.player_path_command +
+        "\n";
+    }
     if (outcome === "passed" && shouldRunCustomerFacingSmoke(project)) {
       logBody +=
         "\n[DRY RUN] Would execute customer-facing smoke: " +
@@ -346,12 +407,24 @@ export async function runVerification(
           `\n${formatCommandNotFoundHint(project.verification_command, project.path)}\n`,
         );
       }
-      logStream.end();
+      await new Promise<void>((finish) => logStream.end(finish));
 
       let outcome: VerificationOutcome =
         timedOut || code !== 0 ? "failed" : "passed";
       let exitCode: number | null = code;
       let totalDurationSeconds = durationSeconds;
+
+      if (outcome === "passed" && shouldRunPlayerPath(project)) {
+        const playerPath = await runPlayerPath(
+          project,
+          cycleId,
+          logPath,
+          cwd,
+        );
+        outcome = playerPath.outcome;
+        exitCode = playerPath.exitCode;
+        totalDurationSeconds += playerPath.durationSeconds;
+      }
 
       if (outcome === "passed" && shouldRunCustomerFacingSmoke(project)) {
         const smoke = await runCustomerFacingSmoke(

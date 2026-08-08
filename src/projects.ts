@@ -371,6 +371,27 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     "verification_command",
     raw.verification_command,
   );
+  let playerPathCommand: string | undefined;
+  if (
+    raw.player_path_command !== undefined &&
+    raw.player_path_command !== null
+  ) {
+    if (typeof raw.player_path_command !== "string") {
+      throw new ProjectValidationError(
+        id,
+        "player_path_command",
+        `must be a string, got ${typeof raw.player_path_command}`,
+      );
+    }
+    if (raw.player_path_command === "") {
+      throw new ProjectValidationError(
+        id,
+        "player_path_command",
+        "must not be empty if specified — omit the field to skip the player-path gate",
+      );
+    }
+    playerPathCommand = raw.player_path_command;
+  }
   const cycleBudget = requirePositiveInt(
     id,
     "cycle_budget_minutes",
@@ -1002,6 +1023,7 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     priority,
     engineer_command: engineerCommand,
     verification_command: verificationCommand,
+    player_path_command: playerPathCommand,
     cycle_budget_minutes: cycleBudget,
     engineer_claim_timeout_minutes: engineerClaimTimeoutMinutes,
     work_detection: workDetection,
@@ -1300,6 +1322,33 @@ export function validateConfig(
           "supply the command that runs the test suite and typechecker",
         ),
       );
+    }
+
+    const playerPathLine =
+      locateFieldLine(source, i, "player_path_command") ?? projectLine;
+    if (
+      pr.player_path_command !== undefined &&
+      pr.player_path_command !== null
+    ) {
+      if (typeof pr.player_path_command !== "string") {
+        errors.push(
+          formatLine(
+            playerPathLine,
+            `${prefix}: player_path_command — must be a string, got ${typeof pr.player_path_command}`,
+            "player_path_command was given as a list/map",
+            "replace with a single-line quoted shell command",
+          ),
+        );
+      } else if (pr.player_path_command === "") {
+        errors.push(
+          formatLine(
+            playerPathLine,
+            `${prefix}: player_path_command — must not be empty`,
+            "player_path_command: is blank",
+            "supply a shipped-artifact probe command or omit the field",
+          ),
+        );
+      }
     }
 
     const cfsLine =

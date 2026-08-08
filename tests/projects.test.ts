@@ -1939,6 +1939,72 @@ projects:${BASE}
   });
 });
 
+describe("player_path_command", () => {
+  const BASE = `
+  - id: test
+    path: /tmp/test
+    priority: 1
+    engineer_command: "echo"
+    verification_command: "echo"
+    cycle_budget_minutes: 30
+    hands_off:
+      - secret/`;
+
+  it("is optional and defaults to undefined", async () => {
+    const path = writeYaml("player-path-unset.yaml", `projects:${BASE}\n`);
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].player_path_command).toBeUndefined();
+    cleanup();
+  });
+
+  it("loads a player-path probe command", async () => {
+    const path = writeYaml(
+      "player-path-set.yaml",
+      `projects:${BASE}\n    player_path_command: "node scripts/player-path.mjs"\n`,
+    );
+    const yaml = await loadProjectsYaml(path);
+    expect(yaml.projects[0].player_path_command).toBe(
+      "node scripts/player-path.mjs",
+    );
+    cleanup();
+  });
+
+  it("rejects a non-string player-path command", async () => {
+    const path = writeYaml(
+      "player-path-type.yaml",
+      `projects:${BASE}\n    player_path_command: [node, probe.mjs]\n`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/player_path_command/);
+    cleanup();
+  });
+
+  it("rejects an empty player-path command", async () => {
+    const path = writeYaml(
+      "player-path-empty.yaml",
+      `projects:${BASE}\n    player_path_command: ""\n`,
+    );
+    await expect(loadProjectsYaml(path)).rejects.toThrow(/must not be empty/);
+    cleanup();
+  });
+
+  it("reports player-path schema errors in aggregate validation", () => {
+    const raw = {
+      id: "test",
+      path: "/tmp/test",
+      priority: 1,
+      engineer_command: "echo",
+      verification_command: "echo",
+      player_path_command: [],
+      cycle_budget_minutes: 30,
+      hands_off: ["secret/"],
+    };
+    const { errors } = validateConfig({ projects: [raw] });
+    expect(errors.some((error) => error.includes("player_path_command"))).toBe(
+      true,
+    );
+  });
+});
+
 // Phase B+ followup: lifecycle field on ProjectConfig drives the
 // lifecycle_transition phase-completion criterion.
 describe("lifecycle field", () => {
@@ -2002,4 +2068,3 @@ projects:${BASE}
     cleanup();
   });
 });
-
