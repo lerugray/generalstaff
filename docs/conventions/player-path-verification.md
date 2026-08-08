@@ -1,7 +1,7 @@
 # Player-path verification
 
 A green unit suite proves that an engine is correct in isolation. It proves
-nothing about the path a user actually walks through the shipped artifact.
+nothing about the path a user walks through the shipped artifact.
 Only a player-path (or user-path) probe against the **shipped artifact**, run
 from an out-of-tree location, verifies what ships.
 
@@ -87,11 +87,11 @@ chain and fails verification. Non-interactive deliverables need no player-path
 gate; an intentionally raw or broken artifact may be shown only by an explicit
 operator decision, never because the unit suite is green. During unstable
 art/physics/fix rounds, bootstrap the harness and run one smoke traversal;
-reserve the endurance run for the actual release candidate.
+reserve the endurance run for the release candidate.
 
 ## Cost and enforcement
 
-Probe authoring is real, per-project, front-loaded work. Its value compounds:
+Probe authoring is per-project, front-loaded work. Its value compounds:
 every later build reuses and extends the same executable path. Conventions only
 reliably catch what becomes code, so prefer mechanized gates and machine-checked
 evidence contracts over prose checklists.

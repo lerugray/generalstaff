@@ -23,8 +23,8 @@ green:
   silently did nothing. The build had only been boot-verified, so nobody had
   played as far as the first enemy movement.
 - An arcade game advertised a single-file build but fetched sibling asset
-  directories through relative paths. The staged copy played completely
-  silent and showed no visible error.
+  directories through relative paths. The staged copy played silent and
+  showed no visible error.
 
 These were not obscure engine assertions. They lived on the path a user walks:
 the packaged load path, real UI events, accumulated state, enemy behavior, and
@@ -45,8 +45,6 @@ growth, and emit PASS only when the required evidence is attached. It also
 makes silent failure a release blocker: shipped products should expose a
 visible error and an exportable flight-recorder log.
 
-Probe authoring is real, per-project, front-loaded effort. It is also
-compounding infrastructure: every later build reuses the path, and each newly
-mechanized failure surface strengthens every later release. GeneralStaff
-provides the gate and the evidence convention; the project supplies the honest
-user-path knowledge.
+Probe authoring is per-project, front-loaded effort. It also compounds: every
+later build reuses the path, and each newly mechanized failure surface
+strengthens every later release.
