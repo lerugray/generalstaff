@@ -4,13 +4,25 @@ All notable changes to GeneralStaff are documented here.
 
 This project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
-in practice, entries are written in Ray's voice and prioritize
+in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
 ## [Unreleased]
 
-Current test baseline: 2,203 passing + 4 skipped across 2,207 tests in
-80 files. CI is the source of truth as the suite changes.
+### DRAFT — v0.11.0 (unreleased)
+
+- Added optional `player_path_command`, a second verification stage that runs
+  after `verification_command` and fails the cycle on a non-zero exit. It lets
+  a project put a project-authored shipped-artifact user-path probe under
+  GeneralStaff management; GeneralStaff does not claim to supply the probe.
+- Added the player-path verification convention and a fail-loud reference
+  skeleton that stages outside the repository, hashes the exercised copy,
+  drives adapter-provided real input, and emits evidence-gated JSON.
+- Documented ordering with `customer_facing_smoke`: unit verification first,
+  player path second, and the optional public-facing smoke last.
+
+Verified locally at 2,214 passing + 4 skipped across 2,218 tests, 0 failing.
+CI is the source of truth as the suite changes.
 
 ## [0.10.0] — 2026-07-29
 
@@ -572,7 +584,7 @@ a pre-PR checklist). 44 commits since v0.2.0, no breaking changes.
   enforce (semantic correctness, design quality, security review).
   Pre-empts the obvious HN comment.
 - **Sister projects section** reframed as registered fleet members
-  rather than "things Ray also works on" — the reader sees the
+  rather than "things the operator also works on" — the reader sees the
   dispatcher dogfooding itself across a real portfolio.
 - **README Hammerstein companion section** (gs-325) — surfaces the
   Hammerstein strategic-reasoning framework + CLI as the optional
@@ -630,8 +642,8 @@ minor-version bump rather than continuing to drift the v0.1 line.
   depend on Basecamp. A GS-managed project can pull Basecamp state
   into its own cycle prompts. Docs in
   [`docs/integrations/basecamp.md`](docs/integrations/basecamp.md).
-  *Why:* CSL ops + AMFIOG playtester feedback are real Basecamp
-  state Ray wanted GS-managed projects to be able to read.
+  *Why:* Operational notes and playtester feedback are real Basecamp
+  state that GS-managed projects may need to read.
 - **AGENTS.md wizard, Phase A** (closed 2026-04-25). Conversational
   discovery wizard at `.claude/skills/agents-md-wizard/` producing
   an `AGENTS.md` at project root. Type-branched question sets
@@ -702,9 +714,9 @@ minor-version bump rather than continuing to drift the v0.1 line.
 ### Fixed
 
 - Self-contained test fixture for `fleet-overview` test removes the
-  hidden coupling on Ray's machine state that was making the test
+  hidden coupling on one machine's state that was making the test
   pass locally and fail in CI-equivalent contexts.
-- `state/{catalogdna,personal-site}/` migrated to private GS
+- Project-specific state migrated to the private GS overlay
   (gitignored from public repo) — both projects carry IP-sensitive
   state that should not ship in public clones.
 - `state/{mission-employment,mission-housing}/` excluded via

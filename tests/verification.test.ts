@@ -219,11 +219,11 @@ describe("verification gate", () => {
     it("hint message includes project path and command head", async () => {
       const hint = formatCommandNotFoundHint(
         "bun test --coverage",
-        "/home/ray/proj",
+        "/home/operator/proj",
       );
       expect(hint).toContain("bun");
-      expect(hint).toContain("/home/ray/proj");
-      expect(hint).toContain("(Try: cd /home/ray/proj && bun)");
+      expect(hint).toContain("/home/operator/proj");
+      expect(hint).toContain("(Try: cd /home/operator/proj && bun)");
       expect(hint.startsWith("Verification command 'bun' not found")).toBe(true);
     });
 
@@ -397,6 +397,26 @@ describe("verification gate", () => {
       expect(outcomeEvent.data.outcome).toBe("passed");
       expect(outcomeEvent.data.exit_code).toBe(0);
     });
+
+    it("runs before the additional customer-facing smoke", async () => {
+      const project = makeProject({
+        verification_command: "printf 'unit-stage\\n'",
+        player_path_command: "printf 'player-stage\\n'",
+        public_facing: true,
+        customer_facing_smoke: "printf 'smoke-stage\\n'",
+      });
+      const result = await runVerification(project, "cycle-player-order");
+
+      expect(result.outcome).toBe("passed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log.indexOf("unit-stage")).toBeLessThan(
+        log.indexOf("player-stage"),
+      );
+      expect(log.indexOf("player-stage")).toBeLessThan(
+        log.indexOf("smoke-stage"),
+      );
+    });
+
   });
 
   describe("audit trail", () => {

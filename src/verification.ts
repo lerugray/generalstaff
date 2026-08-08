@@ -184,6 +184,7 @@ async function runCustomerFacingSmoke(
   outcome: VerificationOutcome;
   exitCode: number | null;
   durationSeconds: number;
+  timedOut: boolean;
 }> {
   const command = project.customer_facing_smoke!.trim();
 
@@ -217,6 +218,7 @@ async function runCustomerFacingSmoke(
     outcome,
     exitCode: run.exitCode,
     durationSeconds: run.durationSeconds,
+    timedOut: run.timedOut,
   };
 }
 
@@ -229,6 +231,7 @@ async function runPlayerPath(
   outcome: VerificationOutcome;
   exitCode: number | null;
   durationSeconds: number;
+  timedOut: boolean;
 }> {
   const command = project.player_path_command!.trim();
 
@@ -262,6 +265,7 @@ async function runPlayerPath(
     outcome,
     exitCode: run.exitCode,
     durationSeconds: run.durationSeconds,
+    timedOut: run.timedOut,
   };
 }
 
@@ -341,7 +345,7 @@ export async function runVerification(
   // written when "it should be fast" — generalstaff's own suite has
   // since grown to 1,579 tests / 47 files and runs in ~6 min on
   // Windows, which SIGKILL'd verification subprocesses mid-run
-  // despite tests passing (observed 2026-04-20 work-PC session: all
+  // despite tests passing (observed 2026-04-20 session: all
   // three cycles on gs-276 produced clean diffs + reviewer verdict
   // "verified", rolled back because of exit null). 20 min is ~3x
   // headroom over the current worst case; matches the reviewer's
@@ -413,6 +417,7 @@ export async function runVerification(
         timedOut || code !== 0 ? "failed" : "passed";
       let exitCode: number | null = code;
       let totalDurationSeconds = durationSeconds;
+      let anyStageTimedOut = timedOut;
 
       if (outcome === "passed" && shouldRunPlayerPath(project)) {
         const playerPath = await runPlayerPath(
@@ -424,6 +429,7 @@ export async function runVerification(
         outcome = playerPath.outcome;
         exitCode = playerPath.exitCode;
         totalDurationSeconds += playerPath.durationSeconds;
+        anyStageTimedOut ||= playerPath.timedOut;
       }
 
       if (outcome === "passed" && shouldRunCustomerFacingSmoke(project)) {
@@ -437,13 +443,14 @@ export async function runVerification(
         outcome = smoke.outcome;
         exitCode = smoke.exitCode;
         totalDurationSeconds += smoke.durationSeconds;
+        anyStageTimedOut ||= smoke.timedOut;
       }
 
       await appendProgress(project.id, "verification_outcome", {
         outcome,
         exit_code: exitCode,
         duration_seconds: Math.round(totalDurationSeconds),
-        timed_out: timedOut,
+        timed_out: anyStageTimedOut,
       }, cycleId);
 
       resolve({

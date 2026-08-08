@@ -7,9 +7,10 @@
 #   1. Create state/<project_id>/MISSION.md in GeneralStaff
 #   2. Define engineer_command (what launches the bot)
 #   3. Define verification_command (independent test gate)
-#   4. Define hands_off list (mandatory, non-empty)
+#   4. For user-facing work, define player_path_command (shipped-artifact gate)
+#   5. Define hands_off list (mandatory, non-empty)
 #
-# A project without all 4 is a slop machine. Don't register it.
+# A project without the required fields is a slop machine. Don't register it.
 #
 # NOTE: GeneralStaff state lives in GeneralStaff's own directory
 # under state/<project_id>/. Nothing is written to the managed
@@ -330,38 +331,33 @@
 # behavior bit-for-bit.
 
 projects:
-  - id: catalogdna
-    path: C:/Users/rweis/OneDrive/Documents/catalogdna
+  - id: example-service
+    path: /path/to/example-service
     priority: 1                              # 1 = highest, 5 = lowest
     engineer_command: "bash run_bot.sh ${cycle_budget_minutes}"
     verification_command: >-
-      PYTHONPATH=src .venv/Scripts/python -m pytest tests/ -q
-      --ignore=tests/test_property.py --ignore=tests/test_tui.py
-      && PYTHONPATH=src .venv/Scripts/python -m ruff check src/ tests/
+      npm test
+    # Optional second gate for user-facing work. It runs after the unit gate
+    # against the shipped artifact. Unit green != player-path green; for
+    # user-facing work only player-path green counts as done.
+    # See docs/conventions/player-path-verification.md and the example probe.
+    player_path_command: >-
+      node scripts/player-path-probe.mjs dist/app.html
+      artifacts/player-path.json
     cycle_budget_minutes: 60                 # hard timeout per cycle
-    work_detection: catalogdna_bot_tasks     # parse bot_tasks.md P0-P3
-    concurrency_detection: catalogdna        # 3-signal check (worktree, status, heartbeat)
+    work_detection: tasks_json
+    concurrency_detection: none
     branch: bot/work
     auto_merge: false                        # MUST be false until 5 clean cycles
     hands_off:
-      - src/catalogdna/interpret/            # IP boundary — proprietary
-      - CLAUDE.md                            # project conventions
-      - CLAUDE-AUTONOMOUS.md                 # bot instructions
-      - .claude/                             # claude code config
-      - run_bot*.sh                          # bot launcher scripts
-      - run_bot*.bat                         # bot launcher scripts
-      - bot_tasks.md                         # bot task list (read+mark only)
-      - scripts/bot_heartbeat.sh             # infra script
-      - scripts/chrome_review*.sh            # chrome review loop
-      - scripts/worktree_venv.py             # worktree bootstrap
+      - secrets/                             # credentials and local secrets
+      - product-rules/                       # operator-owned policy
     notes: |
-      Cornerstone project. Has the most mature bot infra.
-      GeneralStaff wraps catalogdna's existing run_bot.sh — it
-      does NOT replace it. State lives in state/catalogdna/
-      inside GeneralStaff's repo.
+      Generic user-facing example. The project owns its browser adapter and
+      coverage map; GeneralStaff runs the authored probe as a gate.
 
-  - id: retrogaze-experimental
-    path: C:/Users/rweis/OneDrive/Documents/Retrogaze-experimental
+  - id: example-library
+    path: /path/to/example-library
     priority: 2
     engineer_command: "<TBD — Phase 3>"
     verification_command: "<TBD — needs test suite before registering>"
@@ -374,11 +370,11 @@ projects:
       - "<TBD — needs hands_off list before registering>"
     notes: |
       PLACEHOLDER — not registered yet. Pipeline work and sprite
-      generation tests are bot-friendly. Marketing / ideation is
+      tests are bot-friendly. Marketing / ideation is
       OFF LIMITS per Hard Rule #1.
 
-  - id: sandkasten
-    path: C:/Users/rweis/OneDrive/Documents/Sandkasten
+  - id: example-prototype
+    path: /path/to/example-prototype
     priority: 3
     engineer_command: "<TBD>"
     verification_command: "<TBD>"
