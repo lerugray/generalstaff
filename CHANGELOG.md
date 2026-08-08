@@ -7,9 +7,7 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
-## [Unreleased]
-
-### DRAFT — v0.11.0 (unreleased)
+## [0.11.0] — 2026-08-09
 
 - Added optional `player_path_command`, a second verification stage that runs
   after `verification_command` and fails the cycle on a non-zero exit. It lets

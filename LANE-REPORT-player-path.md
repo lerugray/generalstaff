@@ -26,7 +26,7 @@ one minimal runtime observability correction.
   existing example path in this edited public file.
 - `CHANGELOG.md` — v0.11.0 unreleased entry and privacy cleanup in this edited
   public file.
-- `docs/release-notes-v0.11.0-DRAFT.md` — explicitly DRAFT release copy with
+- `docs/release-notes-v0.11.0.md` — release copy (finalized) with
   the three required anonymized cases.
 - `LANE-REPORT-player-path.md` — this report.
 
