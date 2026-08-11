@@ -8,7 +8,8 @@
 #   2. Define engineer_command (what launches the bot)
 #   3. Define verification_command (independent test gate)
 #   4. For user-facing work, define player_path_command (shipped-artifact gate)
-#   5. Define hands_off list (mandatory, non-empty)
+#   5. Optionally define claim_battery_command (claim-vs-screen battery)
+#   6. Define hands_off list (mandatory, non-empty)
 #
 # A project without the required fields is a slop machine. Don't register it.
 #
@@ -344,6 +345,13 @@ projects:
     player_path_command: >-
       node scripts/player-path-probe.mjs dist/app.html
       artifacts/player-path.json
+    # Optional third gate: claim-vs-screen battery. Runs after player_path
+    # (or after unit when player_path is unset). Exit 0 = every enumerated
+    # claim judged TRUE against screenshots of the shipped artifact.
+    # See docs/conventions/claim-battery.md.
+    # claim_battery_command: >-
+    #   node scripts/claim-battery.mjs dist/app.html
+    #   claims/manifest.json artifacts/claim-battery.json
     cycle_budget_minutes: 60                 # hard timeout per cycle
     work_detection: tasks_json
     concurrency_detection: none

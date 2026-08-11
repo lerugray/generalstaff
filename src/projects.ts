@@ -392,6 +392,27 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     }
     playerPathCommand = raw.player_path_command;
   }
+  let claimBatteryCommand: string | undefined;
+  if (
+    raw.claim_battery_command !== undefined &&
+    raw.claim_battery_command !== null
+  ) {
+    if (typeof raw.claim_battery_command !== "string") {
+      throw new ProjectValidationError(
+        id,
+        "claim_battery_command",
+        `must be a string, got ${typeof raw.claim_battery_command}`,
+      );
+    }
+    if (raw.claim_battery_command === "") {
+      throw new ProjectValidationError(
+        id,
+        "claim_battery_command",
+        "must not be empty if specified — omit the field to skip the claim-battery gate",
+      );
+    }
+    claimBatteryCommand = raw.claim_battery_command;
+  }
   const cycleBudget = requirePositiveInt(
     id,
     "cycle_budget_minutes",
@@ -1024,6 +1045,7 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     engineer_command: engineerCommand,
     verification_command: verificationCommand,
     player_path_command: playerPathCommand,
+    claim_battery_command: claimBatteryCommand,
     cycle_budget_minutes: cycleBudget,
     engineer_claim_timeout_minutes: engineerClaimTimeoutMinutes,
     work_detection: workDetection,
@@ -1346,6 +1368,33 @@ export function validateConfig(
             `${prefix}: player_path_command — must not be empty`,
             "player_path_command: is blank",
             "supply a shipped-artifact probe command or omit the field",
+          ),
+        );
+      }
+    }
+
+    const claimBatteryLine =
+      locateFieldLine(source, i, "claim_battery_command") ?? projectLine;
+    if (
+      pr.claim_battery_command !== undefined &&
+      pr.claim_battery_command !== null
+    ) {
+      if (typeof pr.claim_battery_command !== "string") {
+        errors.push(
+          formatLine(
+            claimBatteryLine,
+            `${prefix}: claim_battery_command — must be a string, got ${typeof pr.claim_battery_command}`,
+            "claim_battery_command was given as a list/map",
+            "replace with a single-line quoted shell command",
+          ),
+        );
+      } else if (pr.claim_battery_command === "") {
+        errors.push(
+          formatLine(
+            claimBatteryLine,
+            `${prefix}: claim_battery_command — must not be empty`,
+            "claim_battery_command: is blank",
+            "supply a claim-vs-screen battery command or omit the field",
           ),
         );
       }

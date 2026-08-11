@@ -419,6 +419,143 @@ describe("verification gate", () => {
 
   });
 
+  describe("claim_battery_command", () => {
+    it("runs after main verification (and after player_path when both set) and keeps passed on exit 0", async () => {
+      const project = makeProject({
+        verification_command: "printf 'unit\\n'",
+        player_path_command: "printf 'player-path\\n'",
+        claim_battery_command: "printf 'claim-battery\\n'",
+      });
+      const result = await runVerification(project, "cycle-claim-pass");
+
+      expect(result.outcome).toBe("passed");
+      expect(result.exitCode).toBe(0);
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("=== Claim-battery verification ===");
+      expect(log.indexOf("unit")).toBeLessThan(log.indexOf("player-path"));
+      expect(log.indexOf("player-path")).toBeLessThan(
+        log.indexOf("claim-battery"),
+      );
+    });
+
+    it("fails the cycle when the claim-battery exits non-zero", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        claim_battery_command: "exit 7",
+      });
+      const result = await runVerification(project, "cycle-claim-fail");
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(7);
+    });
+
+    it("does not run the claim-battery when main verification fails", async () => {
+      const marker = join(TEST_DIR, "claim-battery-ran");
+      const project = makeProject({
+        verification_command: "exit 1",
+        claim_battery_command: `touch '${marker}'`,
+      });
+      const result = await runVerification(project, "cycle-claim-skip");
+
+      expect(result.outcome).toBe("failed");
+      expect(existsSync(marker)).toBe(false);
+      expect(readFileSync(result.logPath, "utf8")).not.toContain(
+        "Claim-battery verification",
+      );
+    });
+
+    it("does not run the claim-battery when player_path fails", async () => {
+      const marker = join(TEST_DIR, "claim-battery-after-player-fail");
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        player_path_command: "exit 3",
+        claim_battery_command: `touch '${marker}'`,
+      });
+      const result = await runVerification(
+        project,
+        "cycle-claim-skip-player-fail",
+      );
+
+      expect(result.outcome).toBe("failed");
+      expect(result.exitCode).toBe(3);
+      expect(existsSync(marker)).toBe(false);
+      expect(readFileSync(result.logPath, "utf8")).not.toContain(
+        "Claim-battery verification",
+      );
+    });
+
+    it("records the optional battery in dry-run output without executing it", async () => {
+      const marker = join(TEST_DIR, "claim-battery-dry-ran");
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        claim_battery_command: `touch '${marker}'`,
+      });
+      const result = await runVerification(
+        project,
+        "cycle-claim-dry",
+        undefined,
+        true,
+      );
+
+      expect(result.outcome).toBe("passed");
+      expect(existsSync(marker)).toBe(false);
+      const log = await readCycleFile(
+        "test-proj",
+        "cycle-claim-dry",
+        "verification.log",
+      );
+      expect(log).toContain("Would execute claim-battery verification");
+    });
+
+    it("writes claim-battery run and outcome events", async () => {
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        claim_battery_command: "test 2 -eq 2",
+      });
+      await runVerification(project, "cycle-claim-audit");
+
+      const progressPath = join(TEST_DIR, "state", "test-proj", "PROGRESS.jsonl");
+      const events = readFileSync(progressPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      const runEvent = events.find(
+        (event: { event: string }) => event.event === "claim_battery_run",
+      );
+      const outcomeEvent = events.find(
+        (event: { event: string }) => event.event === "claim_battery_outcome",
+      );
+
+      expect(runEvent.data.command).toBe("test 2 -eq 2");
+      expect(outcomeEvent.data.outcome).toBe("passed");
+      expect(outcomeEvent.data.exit_code).toBe(0);
+    });
+
+    it("runs unit → player → claim → smoke when all configured", async () => {
+      const project = makeProject({
+        verification_command: "printf 'unit-stage\\n'",
+        player_path_command: "printf 'player-stage\\n'",
+        claim_battery_command: "printf 'claim-stage\\n'",
+        public_facing: true,
+        customer_facing_smoke: "printf 'smoke-stage\\n'",
+      });
+      const result = await runVerification(project, "cycle-claim-order");
+
+      expect(result.outcome).toBe("passed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log.indexOf("unit-stage")).toBeLessThan(
+        log.indexOf("player-stage"),
+      );
+      expect(log.indexOf("player-stage")).toBeLessThan(
+        log.indexOf("claim-stage"),
+      );
+      expect(log.indexOf("claim-stage")).toBeLessThan(
+        log.indexOf("smoke-stage"),
+      );
+    });
+
+  });
+
   describe("audit trail", () => {
     it("writes progress entries for verification", async () => {
       const project = makeProject({ verification_command: "test 1 -eq 1" });

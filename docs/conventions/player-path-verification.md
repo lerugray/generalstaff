@@ -77,11 +77,13 @@ checks.
 
 The verification chain is:
 
-`verification_command` → `player_path_command` → `customer_facing_smoke`
+`verification_command` → `player_path_command` → `claim_battery_command` → `customer_facing_smoke`
 
 `player_path_command` is the automated shipped-artifact floor for user-facing
-work. `customer_facing_smoke` is an optional, additional check for projects
-marked `public_facing`; it can cover naive-open and other human-shaped delivery
+work. `claim_battery_command` is an optional claim-vs-screen battery (see
+[`claim-battery.md`](claim-battery.md)); it does not replace the player path.
+`customer_facing_smoke` is an optional, additional check for projects marked
+`public_facing`; it can cover naive-open and other human-shaped delivery
 concerns. It does not replace the player path. Any non-zero stage stops the
 chain and fails verification. Non-interactive deliverables need no player-path
 gate; an intentionally raw or broken artifact may be shown only by an explicit

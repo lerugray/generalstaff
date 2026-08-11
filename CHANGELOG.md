@@ -7,6 +7,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## [0.12.0] — 2026-08-10
+
+- Added optional `claim_battery_command`, a third verification stage that runs
+  after `player_path_command` (or after `verification_command` when player
+  path is unset) and fails the cycle on a non-zero exit. Exit 0 means every
+  enumerated claim-vs-screen verdict is TRUE; GeneralStaff does not author
+  the battery — the project does.
+- Added the claim-vs-screen battery convention: enumerate claims from
+  changelogs / defect-fix lists / send-gate features, drive real input to
+  the claimed moment, require before/after delta pairs, hash-guard identical
+  frames as auto-FALSE, refute-first judges that look at the images, and
+  dual-assert option lists in DOM and pixels.
+- Documented ordering with `customer_facing_smoke`: unit verification first,
+  player path second, claim battery third, and the optional public-facing
+  smoke last. Absent `claim_battery_command` remains a clean no-op.
+
+Verified locally at 2,226 passing + 4 skipped across 2,230 tests, 0 failing.
+CI is the source of truth as the suite changes.
+
 ## [0.11.0] — 2026-08-09
 
 - Added optional `player_path_command`, a second verification stage that runs

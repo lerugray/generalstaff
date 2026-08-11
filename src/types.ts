@@ -398,6 +398,11 @@ export interface ProjectConfig {
   // verification_command against the shipped artifact; non-zero blocks the
   // cycle. Unset preserves the existing verification path.
   player_path_command?: string;
+  // Optional third verification stage: claim-vs-screen battery. Runs after
+  // player_path_command (or after verification_command when player path is
+  // unset). Exit 0 = all enumerated claims TRUE; non-zero fails the cycle.
+  // Unset skips the stage.
+  claim_battery_command?: string;
   cycle_budget_minutes: number;
   work_detection: WorkDetectionMode;
   concurrency_detection: ConcurrencyDetectionMode;
@@ -642,6 +647,8 @@ export type ProgressEventType =
   | "verification_outcome"
   | "player_path_run"
   | "player_path_outcome"
+  | "claim_battery_run"
+  | "claim_battery_outcome"
   | "customer_facing_smoke_run"
   | "customer_facing_smoke_outcome"
   | "diff_summary"
@@ -939,6 +946,7 @@ const VALID_EVENTS: readonly string[] = [
   "cycle_start", "cycle_skipped", "engineer_invoked", "engineer_completed",
   "verification_run", "verification_outcome",
   "player_path_run", "player_path_outcome",
+  "claim_battery_run", "claim_battery_outcome",
   "customer_facing_smoke_run", "customer_facing_smoke_outcome",
   "diff_summary",
   "reviewer_invoked", "reviewer_response", "reviewer_verdict",

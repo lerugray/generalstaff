@@ -230,6 +230,7 @@ Defaults stay conservative. Flip per-project in `projects.yaml`; full schema in 
 - `engineer_claim_timeout_minutes: N`. Kill a stuck engineer early if it emits no task-claim signal within N minutes (v0.5.0+).
 - `customer_facing_smoke`. Shell probe run after verification on `public_facing` projects; a non-zero exit fails the cycle (v0.5.0+).
 - `player_path_command`. Optional shipped-artifact user-path probe run after `verification_command`; a non-zero exit fails the cycle. See [`docs/conventions/player-path-verification.md`](docs/conventions/player-path-verification.md).
+- `claim_battery_command`. Optional claim-vs-screen battery run after `player_path_command`; exit 0 = all enumerated claims TRUE, non-zero fails the cycle. See [`docs/conventions/claim-battery.md`](docs/conventions/claim-battery.md).
 - `review.reviewers`. List of independent reviewer voices (each with `provider`, optional `model`, `fallback`, `label`); synthesized into one verdict with quorum policy (v0.6.0+).
 - `review.quorum_policy`. `conservative` (any blocker holds the merge) or `majority` (majority-pass sufficient). Default `conservative` (v0.6.0+).
 - `review.min_real_reviews`. Minimum non-errored reviews for a genuine quorum; below this, transparently falls back to single-reviewer (v0.6.0+).

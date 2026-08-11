@@ -16,12 +16,16 @@ import type {
 // Commands that are effectively no-ops — flag as verified_weak
 const NOOP_COMMANDS = ["true", ":", "echo", "exit 0"];
 
-// gs-316: customer-facing smoke runs after main verification; shorter
+// gs-316: customer-facing smoke runs last in the verification chain
+// (after unit, optional player-path, and optional claim-battery); shorter
 // timeout than the full test suite (browser probes, not 1k+ unit tests).
 const CUSTOMER_FACING_SMOKE_TIMEOUT_MS = 5 * 60 * 1000;
 // Player-path probes can include endurance loops and heap sampling. Give the
 // shipped-artifact gate the same ceiling as the primary verification suite.
 const PLAYER_PATH_TIMEOUT_MS = 20 * 60 * 1000;
+// Claim-vs-screen batteries drive real input and judge screenshots per claim;
+// same ceiling as player-path / primary verification.
+const CLAIM_BATTERY_TIMEOUT_MS = 20 * 60 * 1000;
 
 export function isNoopCommand(command: string): boolean {
   const trimmed = command.trim();
@@ -42,6 +46,13 @@ function shouldRunPlayerPath(project: ProjectConfig): boolean {
   return (
     typeof project.player_path_command === "string" &&
     project.player_path_command.trim() !== ""
+  );
+}
+
+function shouldRunClaimBattery(project: ProjectConfig): boolean {
+  return (
+    typeof project.claim_battery_command === "string" &&
+    project.claim_battery_command.trim() !== ""
   );
 }
 
@@ -269,6 +280,53 @@ async function runPlayerPath(
   };
 }
 
+async function runClaimBattery(
+  project: ProjectConfig,
+  cycleId: string,
+  logPath: string,
+  cwd: string,
+): Promise<{
+  outcome: VerificationOutcome;
+  exitCode: number | null;
+  durationSeconds: number;
+  timedOut: boolean;
+}> {
+  const command = project.claim_battery_command!.trim();
+
+  await appendProgress(project.id, "claim_battery_run", {
+    command,
+    dry_run: false,
+  }, cycleId);
+
+  const run = await appendShellCommandToLog(
+    logPath,
+    "=== Claim-battery verification ===",
+    command,
+    cwd,
+    CLAIM_BATTERY_TIMEOUT_MS,
+  );
+
+  const outcome: VerificationOutcome =
+    run.timedOut || run.spawnError !== undefined || run.exitCode !== 0
+      ? "failed"
+      : "passed";
+
+  await appendProgress(project.id, "claim_battery_outcome", {
+    outcome,
+    exit_code: run.exitCode,
+    duration_seconds: Math.round(run.durationSeconds),
+    timed_out: run.timedOut,
+    ...(run.spawnError ? { error: run.spawnError } : {}),
+  }, cycleId);
+
+  return {
+    outcome,
+    exitCode: run.exitCode,
+    durationSeconds: run.durationSeconds,
+    timedOut: run.timedOut,
+  };
+}
+
 export async function runVerification(
   project: ProjectConfig,
   cycleId: string,
@@ -299,6 +357,12 @@ export async function runVerification(
       logBody +=
         "\n[DRY RUN] Would execute player-path verification: " +
         project.player_path_command +
+        "\n";
+    }
+    if (outcome === "passed" && shouldRunClaimBattery(project)) {
+      logBody +=
+        "\n[DRY RUN] Would execute claim-battery verification: " +
+        project.claim_battery_command +
         "\n";
     }
     if (outcome === "passed" && shouldRunCustomerFacingSmoke(project)) {
@@ -430,6 +494,21 @@ export async function runVerification(
         exitCode = playerPath.exitCode;
         totalDurationSeconds += playerPath.durationSeconds;
         anyStageTimedOut ||= playerPath.timedOut;
+      }
+
+      // Gate order: verification → player_path → claim_battery →
+      // customer_facing_smoke. Each stage runs only when prior stages passed.
+      if (outcome === "passed" && shouldRunClaimBattery(project)) {
+        const claimBattery = await runClaimBattery(
+          project,
+          cycleId,
+          logPath,
+          cwd,
+        );
+        outcome = claimBattery.outcome;
+        exitCode = claimBattery.exitCode;
+        totalDurationSeconds += claimBattery.durationSeconds;
+        anyStageTimedOut ||= claimBattery.timedOut;
       }
 
       if (outcome === "passed" && shouldRunCustomerFacingSmoke(project)) {
