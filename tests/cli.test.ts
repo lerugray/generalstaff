@@ -1411,12 +1411,28 @@ routes:
       expect(result.stdout).toContain("No providers configured");
     });
 
-    it("reports unreachable for non-ollama provider kinds (Phase 2 stub)", async () => {
+    it("reports unreachable for an openrouter provider with no key in the environment", async () => {
+      // Names an env var that is guaranteed unset, so this stays hermetic —
+      // pointing it at OPENROUTER_API_KEY would make the result depend on
+      // whether the developer running the suite happens to have a key, and
+      // would put a live network call in the unit suite.
       writeConfig(
-        `  - id: or_flagship\n    kind: openrouter\n    model: qwen/qwen3-coder-plus\n    api_key_env: OPENROUTER_API_KEY\n`,
+        `  - id: or_flagship\n    kind: openrouter\n    model: qwen/qwen3-coder-plus\n    api_key_env: GS_TEST_ABSENT_OPENROUTER_KEY\n`,
       );
       const result = await runCli(
         ["providers", "ping", "or_flagship"],
+        PING_TEST_DIR,
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("GS_TEST_ABSENT_OPENROUTER_KEY");
+    });
+
+    it("reports unreachable for the still-unimplemented claude kind", async () => {
+      writeConfig(
+        `  - id: claude_sonnet\n    kind: claude\n    model: claude-sonnet-4-6\n`,
+      );
+      const result = await runCli(
+        ["providers", "ping", "claude_sonnet"],
         PING_TEST_DIR,
       );
       expect(result.exitCode).toBe(1);

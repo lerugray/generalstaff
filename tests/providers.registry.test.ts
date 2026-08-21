@@ -412,7 +412,11 @@ routes:
     );
   });
 
-  it("getProviderForRole throws 'not implemented in Phase 2' for openrouter", async () => {
+  it("getProviderForRole instantiates an openrouter descriptor", async () => {
+    // Was asserted to throw 'not implemented in Phase 2' until
+    // src/providers/openrouter.ts filled the hook the example config always
+    // documented. Instantiation must not need a key present — an absent key
+    // surfaces as an invoke() error, not a config error at wiring time.
     const path = writeCfg(
       dir,
       `
@@ -426,9 +430,9 @@ routes:
 `,
     );
     const registry = await loadProviderRegistry(path);
-    expect(() => getProviderForRole(registry, "digest")).toThrow(
-      /not implemented in Phase 2/,
-    );
+    const provider = getProviderForRole(registry, "digest");
+    expect(provider.name).toBe("or_qwen");
+    expect(typeof provider.invoke).toBe("function");
   });
 
   it("getProviderForRole throws 'not implemented in Phase 2' for claude", async () => {
