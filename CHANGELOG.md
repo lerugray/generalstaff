@@ -7,6 +7,25 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## v0.13.0 — 2026-08-23
+
+Trust-surface release, driven by an external cold read of the repo. No gate-behavior changes.
+
+- **Subprocess logs are now secret-redacted.** Engineer and verification subprocess output
+  passes through the same secret scanner used for diffs before anything is persisted
+  (`[REDACTED:<kind>]` markers); a scanner failure warns loudly instead of failing the cycle.
+  SECURITY.md's absolute "never logs" claim narrowed to what the code actually guarantees.
+- **Site copy corrected.** "Source never leaves your machine" and "stop reading diffs"
+  replaced with claims that are literally true; site version references un-stuck from v0.8.0.
+- **CI now proves the cross-platform claim.** Three-OS matrix (Ubuntu/macOS/Windows) plus
+  installer smoke jobs on Ubuntu and macOS.
+- **Installer pinned.** install.sh defaults to the latest release tag (not mutable master)
+  with a frozen lockfile; branch override remains explicit.
+- **docs/COMPATIBILITY.md.** One page for the CLI / Desktop / dashboard / Hammerstein
+  relationship, plus a mode-by-mode push-guarantees table — including one honestly
+  UNRESOLVED row where README and DESIGN disagree about autonomous-mode remote pushes.
+- Workshop residue (lane reports) moved out of the repo root to docs/internal/.
+
 ## [0.12.0] — 2026-08-10
 
 - Added optional `claim_battery_command`, a third verification stage that runs
