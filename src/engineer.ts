@@ -28,6 +28,7 @@ import { buildCodexCommand } from "./engineer_providers/codex";
 import { buildKimiCommand } from "./engineer_providers/kimi";
 import { ENGINEER_DISCIPLINE } from "./prompts/engineer_discipline";
 import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
+import { redactSecretsSafe } from "./secrets";
 
 export type { CycleCreativeContext };
 
@@ -267,6 +268,38 @@ export async function runEngineer(
     let stdoutBytes = 0;
     let stdoutCapture = "";
 
+    // gs-secfix: run subprocess output through the same secret scanner used
+    // for diffs and reviewer prompts before persisting it. If the scanner
+    // throws, we emit a single warning and continue writing raw output rather
+    // than failing the cycle.
+    let redactionWarningEmitted = false;
+    function emitRedactionWarning(warning: string): void {
+      if (redactionWarningEmitted) return;
+      redactionWarningEmitted = true;
+      logStream.write(`\n${warning}\n`);
+      process.stderr.write(`${warning}\n`);
+    }
+    function writeRedactedStream(
+      chunk: Buffer,
+      writeToConsole: (s: string) => void,
+    ): void {
+      const text = chunk.toString("utf8");
+      let output = text;
+      try {
+        const scan = redactSecretsSafe(text);
+        if (scan.warning) emitRedactionWarning(scan.warning);
+        output = scan.redacted;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emitRedactionWarning(
+          `[generalstaff] WARNING: secret redaction failed (${message}); ` +
+            `output is being persisted unredacted`,
+        );
+      }
+      logStream.write(output);
+      writeToConsole(output);
+    }
+
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
@@ -275,8 +308,7 @@ export async function runEngineer(
     setActiveEngineerChild(child);
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      logStream.write(chunk);
-      process.stdout.write(chunk); // stream to console too
+      writeRedactedStream(chunk, (s) => process.stdout.write(s));
       if (stdoutBytes < stdoutCapBytes) {
         const s = chunk.toString("utf8");
         const room = stdoutCapBytes - stdoutBytes;
@@ -286,8 +318,7 @@ export async function runEngineer(
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
-      logStream.write(chunk);
-      process.stderr.write(chunk);
+      writeRedactedStream(chunk, (s) => process.stderr.write(s));
     });
 
     let timedOut = false;
@@ -327,7 +358,7 @@ export async function runEngineer(
           `Duration: ${durationSeconds.toFixed(1)}s\n` +
           `Ended: ${new Date().toISOString()}\n`,
       );
-      logStream.end();
+      await new Promise<void>((finish) => logStream.end(finish));
 
       const parsedClaim = parseTaskClaimFromEngineerStdout(stdoutCapture);
       const attempted_task_id = parsedClaim ?? nextTask?.id;
@@ -376,7 +407,7 @@ export async function runEngineer(
           `  - Check file ownership and permissions in ${project.path}\n`,
         );
       }
-      logStream.end();
+      await new Promise<void>((finish) => logStream.end(finish));
 
       console.error(
         `[generalstaff] engineer spawn failed for ${project.id}: ${err.message}` +

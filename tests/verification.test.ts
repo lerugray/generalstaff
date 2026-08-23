@@ -7,7 +7,7 @@ import {
 } from "../src/verification";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
 import type { ProjectConfig } from "../src/types";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "verification_test");
@@ -576,6 +576,43 @@ describe("verification gate", () => {
       expect(outcomeEvent).toBeDefined();
       expect(outcomeEvent.data.outcome).toBe("passed");
       expect(outcomeEvent.data.exit_code).toBe(0);
+    });
+  });
+
+  describe("subprocess secret redaction", () => {
+    it("redacts known secret patterns from verification output before persisting the log", async () => {
+      const openaiValue = ["sk-proj-", "abcdefghijklmnopqrstuvwxyz123456"].join("");
+      const awsValue = ["AKIA", "ABCDEFGHIJKLMNOP"].join("");
+      const secretFile = join(TEST_DIR, "secret.txt");
+      writeFileSync(
+        secretFile,
+        `unit ok\nkey=${openaiValue}\naws=${awsValue}\n`,
+      );
+      const project = makeProject({ verification_command: "cat secret.txt" });
+      const result = await runVerification(project, "cycle-redact-main");
+
+      expect(result.outcome).toBe("passed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("[REDACTED:openai_token]");
+      expect(log).toContain("[REDACTED:aws_access_key]");
+      expect(log).not.toContain(openaiValue);
+      expect(log).not.toContain(awsValue);
+    });
+
+    it("redacts known secret patterns from optional verification stages", async () => {
+      const openaiValue = ["sk-proj-", "abcdefghijklmnopqrstuvwxyz123456"].join("");
+      const secretFile = join(TEST_DIR, "secret.txt");
+      writeFileSync(secretFile, `player-path leaked: ${openaiValue}\n`);
+      const project = makeProject({
+        verification_command: "test 1 -eq 1",
+        player_path_command: "cat secret.txt",
+      });
+      const result = await runVerification(project, "cycle-redact-stage");
+
+      expect(result.outcome).toBe("passed");
+      const log = readFileSync(result.logPath, "utf8");
+      expect(log).toContain("[REDACTED:openai_token]");
+      expect(log).not.toContain(openaiValue);
     });
   });
 });
