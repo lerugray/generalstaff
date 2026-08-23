@@ -29,7 +29,7 @@ describe("redactSecrets", () => {
       "-----END PRIVATE KEY-----",
     ].join("\n");
     const result = redactSecrets(`before\n${pem}\nafter`);
-    expect(result.redacted).toBe(`before\n[REDACTED]\nafter`);
+    expect(result.redacted).toBe(`before\n[REDACTED:pem_private_key]\nafter`);
     expect(result.hits).toEqual([{ kind: "pem_private_key", count: 1 }]);
   });
 
@@ -37,8 +37,8 @@ describe("redactSecrets", () => {
     const exported = "export SESSION_BLOB=AbCdEf0123456789+/AbCdEf";
     const assigned = '+api_key="AbCdEf0123456789AbCdEf"';
     const result = redactSecrets(`${exported}\n${assigned}\nexport MODE=development`);
-    expect(result.redacted).toContain("export SESSION_BLOB=[REDACTED]");
-    expect(result.redacted).toContain('+api_key="[REDACTED]"');
+    expect(result.redacted).toContain("export SESSION_BLOB=[REDACTED:exported_high_entropy_value]");
+    expect(result.redacted).toContain('+api_key="[REDACTED:secret_assignment]"');
     expect(result.redacted).toContain("export MODE=development");
     expect(result.redacted).not.toContain("AbCdEf0123456789");
   });

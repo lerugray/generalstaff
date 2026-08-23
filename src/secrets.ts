@@ -16,7 +16,9 @@ export interface SecretRedaction {
   hits: Array<{ kind: SecretKind; count: number }>;
 }
 
-const MASK = "[REDACTED]";
+function maskFor(kind: SecretKind): string {
+  return `[REDACTED:${kind}]`;
+}
 
 function highEntropyValue(raw: string): boolean {
   const value = raw.trim().replace(/^(['"])(.*)\1$/, "$2");
@@ -42,7 +44,7 @@ function replaceWhole(
 ): string {
   return input.replace(regex, () => {
     addHit(counts, kind);
-    return MASK;
+    return maskFor(kind);
   });
 }
 
@@ -108,7 +110,7 @@ export function redactSecrets(input: string): SecretRedaction {
     /(\bBearer\s+)([A-Za-z0-9._~+/-]{20,}={0,2})/gi,
     (_match, prefix: string) => {
       addHit(counts, "bearer_token");
-      return `${prefix}${MASK}`;
+      return `${prefix}${maskFor("bearer_token")}`;
     },
   );
 
@@ -124,11 +126,11 @@ export function redactSecrets(input: string): SecretRedaction {
       const secretNamed =
         /(?:api[_-]?key|token|secret|password|passwd|credential|private[_-]?key)/.test(name);
       if (!secretNamed && !match[2]) return line;
-      addHit(
-        counts,
-        secretNamed ? "secret_assignment" : "exported_high_entropy_value",
-      );
-      return `${match[1]}${match[4]}${MASK}${match[4]}${match[6]}`;
+      const kind: SecretKind = secretNamed
+        ? "secret_assignment"
+        : "exported_high_entropy_value";
+      addHit(counts, kind);
+      return `${match[1]}${match[4]}${maskFor(kind)}${match[4]}${match[6]}`;
     })
     .join("");
 
@@ -145,4 +147,26 @@ export function formatSecretRedactionWarning(
   const total = hits.reduce((sum, hit) => sum + hit.count, 0);
   const kinds = hits.map((hit) => `${hit.kind}:${hit.count}`).join(", ");
   return `[generalstaff] warning: redacted ${total} potential secret(s) from ${artifact} (${kinds})`;
+}
+
+/**
+ * Same scanner as `redactSecrets`, but never throws. If the scanner fails,
+ * the raw input is returned untouched and a warning string is returned so
+ * the caller can surface it without failing the cycle.
+ */
+export function redactSecretsSafe(
+  input: string,
+): SecretRedaction & { warning?: string } {
+  try {
+    return redactSecrets(input);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      redacted: input,
+      hits: [],
+      warning:
+        `[generalstaff] WARNING: secret redaction failed (${message}); ` +
+        `output is being persisted unredacted`,
+    };
+  }
 }

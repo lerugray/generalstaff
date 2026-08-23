@@ -7,6 +7,7 @@ import { appendFile } from "fs/promises";
 import { join } from "path";
 import { ensureCycleDir, writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
+import { redactSecretsSafe } from "./secrets";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -114,6 +115,9 @@ async function appendShellCommandToLog(
   section += `${"=".repeat(40)}\n\n`;
   await appendFile(logPath, section);
 
+  // gs-secfix: redact optional verification-stage output before persistence.
+  let redactionWarningEmitted = false;
+
   return new Promise<ShellRunResult>((resolve) => {
     const child = spawn("bash", ["-c", command], {
       cwd,
@@ -150,7 +154,25 @@ async function appendShellCommandToLog(
       const durationSeconds = (Date.now() - startTime) / 1000;
       const output = stdoutBuf + stderrBuf;
       if (output.length > 0) {
-        await appendFile(logPath, output);
+        let redactedOutput = output;
+        try {
+          const scan = redactSecretsSafe(output);
+          if (scan.warning && !redactionWarningEmitted) {
+            redactionWarningEmitted = true;
+            redactedOutput = `\n${scan.warning}\n${scan.redacted}`;
+          } else {
+            redactedOutput = scan.redacted;
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          if (!redactionWarningEmitted) {
+            redactionWarningEmitted = true;
+            redactedOutput =
+              `\n[generalstaff] WARNING: secret redaction failed (${message}); ` +
+              `output is being persisted unredacted\n${output}`;
+          }
+        }
+        await appendFile(logPath, redactedOutput);
       }
       let footer =
         `\n${"=".repeat(40)}\n` +
@@ -426,6 +448,32 @@ export async function runVerification(
     logStream.write(`Started: ${new Date().toISOString()}\n`);
     logStream.write(`${"=".repeat(40)}\n\n`);
 
+    // gs-secfix: run subprocess output through the same secret scanner used
+    // for diffs before persisting it. If the scanner throws, emit a warning
+    // once and continue writing raw output rather than failing the cycle.
+    let redactionWarningEmitted = false;
+    function emitRedactionWarning(warning: string): void {
+      if (redactionWarningEmitted) return;
+      redactionWarningEmitted = true;
+      logStream.write(`\n${warning}\n`);
+    }
+    function writeRedactedStream(chunk: Buffer): void {
+      const text = chunk.toString("utf8");
+      let output = text;
+      try {
+        const scan = redactSecretsSafe(text);
+        if (scan.warning) emitRedactionWarning(scan.warning);
+        output = scan.redacted;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        emitRedactionWarning(
+          `[generalstaff] WARNING: secret redaction failed (${message}); ` +
+            `output is being persisted unredacted`,
+        );
+      }
+      logStream.write(output);
+    }
+
     const child = spawn("bash", ["-c", project.verification_command], {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -435,11 +483,11 @@ export async function runVerification(
     let stderrBuf = "";
 
     child.stdout?.on("data", (chunk: Buffer) => {
-      logStream.write(chunk);
+      writeRedactedStream(chunk);
     });
 
     child.stderr?.on("data", (chunk: Buffer) => {
-      logStream.write(chunk);
+      writeRedactedStream(chunk);
       stderrBuf += chunk.toString("utf8");
     });
 
@@ -544,7 +592,7 @@ export async function runVerification(
       clearTimeout(timer);
       const durationSeconds = (Date.now() - startTime) / 1000;
       logStream.write(`\n=== SPAWN ERROR: ${err.message} ===\n`);
-      logStream.end();
+      await new Promise<void>((finish) => logStream.end(finish));
 
       await appendProgress(project.id, "verification_outcome", {
         outcome: "failed",

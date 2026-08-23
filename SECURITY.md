@@ -36,9 +36,12 @@ OpenRouter, etc.) are read from one of:
    own auth token (no separate API key needed if you have a Pro / Max
    subscription). The `aider` provider reads aider's own config.
 
-GeneralStaff never writes secrets to disk, never logs them in
-`PROGRESS.jsonl`, and never transmits them anywhere except to the
-provider you configured.
+GeneralStaff does not intentionally record credentials. Subprocess
+output (engineer and verification logs) is run through the same secret
+scanner used for diffs before it is written to disk. A subprocess that
+prints a secret in a novel format the patterns do not recognize could
+still be persisted, so treat those logs with the same care as the
+project source.
 
 ## Recommended file-system protections
 

@@ -7,7 +7,7 @@ import {
 } from "../src/engineer";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
 import type { ProjectConfig } from "../src/types";
 import { GENERALSTAFF_TASK_CLAIM_PREFIX } from "../src/prompts/engineer_claim";
 
@@ -1044,5 +1044,39 @@ describe("runEngineer — creative audit trail (gs-279)", () => {
       .map((l) => JSON.parse(l))
       .find((e: { event: string }) => e.event === "engineer_invoked");
     expect(invoked.data.creative).toBeUndefined();
+  });
+});
+
+describe("engineer subprocess secret redaction", () => {
+  it("redacts known secret patterns from stdout before persisting the log", async () => {
+    const openaiValue = ["sk-proj-", "abcdefghijklmnopqrstuvwxyz123456"].join("");
+    const awsValue = ["AKIA", "ABCDEFGHIJKLMNOP"].join("");
+    const secretFile = join(TEST_DIR, "secret.txt");
+    writeFileSync(
+      secretFile,
+      `stdout: ${openaiValue}\nstderr: ${awsValue}\n`,
+    );
+    const project = makeProject({ engineer_command: "cat secret.txt" });
+    const result = await runEngineer(project, "cycle-redact-stdout");
+
+    expect(result.exitCode).toBe(0);
+    const log = readFileSync(result.logPath, "utf8");
+    expect(log).toContain("[REDACTED:openai_token]");
+    expect(log).toContain("[REDACTED:aws_access_key]");
+    expect(log).not.toContain(openaiValue);
+    expect(log).not.toContain(awsValue);
+  });
+
+  it("redacts known secret patterns from stderr before persisting the log", async () => {
+    const openaiValue = ["sk-proj-", "abcdefghijklmnopqrstuvwxyz123456"].join("");
+    const secretFile = join(TEST_DIR, "secret.txt");
+    writeFileSync(secretFile, `leaked: ${openaiValue}\n`);
+    const project = makeProject({ engineer_command: "cat secret.txt >&2" });
+    const result = await runEngineer(project, "cycle-redact-stderr");
+
+    expect(result.exitCode).toBe(0);
+    const log = readFileSync(result.logPath, "utf8");
+    expect(log).toContain("[REDACTED:openai_token]");
+    expect(log).not.toContain(openaiValue);
   });
 });
