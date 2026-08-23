@@ -187,6 +187,8 @@ Run `generalstaff serve --open` for the local fleet dashboard (default
 `127.0.0.1:3737`). It exposes fleet, project, cycle, inbox, and session-tail
 views from local state; it is not a hosted service and does not add telemetry.
 
+CLI vs Desktop vs local dashboard vs Hammerstein: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+
 ## Works alongside
 
 Runtime enforcement at cycle boundaries. Stacks with instruction-layer tools:
