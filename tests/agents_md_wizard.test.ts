@@ -41,7 +41,7 @@ describe("agents-md-wizard skill structure", () => {
     const skillMdPath = join(SKILL_DIR, "SKILL.md");
     expect(existsSync(skillMdPath)).toBe(true);
     const content = readFileSync(skillMdPath, "utf8");
-    expect(content.startsWith("---\n")).toBe(true);
+    expect(/^---\r?\n/.test(content)).toBe(true);
     expect(content).toContain("name: agents-md-wizard");
     expect(content).toContain("description:");
   });
