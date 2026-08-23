@@ -3,12 +3,17 @@
 #
 # Usage:
 #
-#   # Fresh install from scratch (clones into ./GeneralStaff/):
+#   # Fresh install from scratch (clones into ./GeneralStaff/,
+#   # checks out the latest release tag by default):
 #   curl -fsSL https://raw.githubusercontent.com/lerugray/generalstaff/master/install.sh | bash
 #
 #   # Install into a specific directory:
 #   GENERALSTAFF_DIR=/opt/generalstaff \
 #     curl -fsSL https://raw.githubusercontent.com/lerugray/generalstaff/master/install.sh | bash
+#
+#   # Pin (or override) the git ref — use master for tip-of-tree:
+#   GENERALSTAFF_BRANCH=master bash install.sh
+#   GENERALSTAFF_BRANCH=v0.12.0 bash install.sh
 #
 #   # Skip bun auto-install if you want to install it yourself:
 #   GENERALSTAFF_NO_BUN_INSTALL=1 bash install.sh
@@ -19,12 +24,14 @@
 # What this does, in order:
 #   1. Verifies git is on PATH (fails clearly if not — git is not auto-installed)
 #   2. Checks for bun; installs it via bun.sh/install if missing (opt out via env)
-#   3. Clones the GeneralStaff repo to $GENERALSTAFF_DIR (default: ./GeneralStaff)
-#      — or, if already cloned there, updates it with `git pull --ff-only`
-#   4. Runs `bun install` inside the clone
-#   5. Writes `gs` and `generalstaff` shims to ~/.local/bin (or ~/bin)
+#   3. Resolves the install ref: GENERALSTAFF_BRANCH if set, else the newest
+#      v* release tag from the remote (via `git ls-remote --tags`)
+#   4. Clones the GeneralStaff repo to $GENERALSTAFF_DIR (default: ./GeneralStaff)
+#      — or, if already cloned there, fetches and checks out that ref
+#   5. Runs `bun install --frozen-lockfile` inside the clone
+#   6. Writes `gs` and `generalstaff` shims to ~/.local/bin (or ~/bin)
 #      and, with confirmation, adds that directory to your shell PATH.
-#   6. Prints next steps — `gs welcome` for the first-run wizard.
+#   7. Prints next steps — `gs welcome` for the first-run wizard.
 #
 # What this does NOT do:
 #   - No sudo. Installs only into directories the user owns.
@@ -44,7 +51,8 @@ set -euo pipefail
 
 : "${GENERALSTAFF_DIR:=$(pwd)/GeneralStaff}"
 : "${GENERALSTAFF_REPO:=https://github.com/lerugray/generalstaff.git}"
-: "${GENERALSTAFF_BRANCH:=master}"
+# GENERALSTAFF_BRANCH: optional explicit override (e.g. master, v0.12.0).
+# When unset, the installer resolves the newest v* release tag below.
 : "${GENERALSTAFF_NO_BUN_INSTALL:=}"
 : "${GENERALSTAFF_UPDATE_PATH:=}"
 
@@ -109,20 +117,52 @@ fi
 ok "bun: $(bun --version)"
 
 # ------------------------------------------------------------
-# Step 3 — clone or update the repo
+# Step 3 — resolve install ref (latest release tag by default)
+# ------------------------------------------------------------
+
+section "Resolving install ref"
+
+resolve_latest_release_tag() {
+  # Newest v* tag from the remote. Uses git only (no gh / API dependency).
+  # --refs skips peel refs (^{}) that annotated tags produce.
+  git ls-remote --tags --refs "${GENERALSTAFF_REPO}" \
+    | awk '{print $2}' \
+    | sed 's#^refs/tags/##' \
+    | grep -E '^v[0-9]' \
+    | sort -V \
+    | tail -n1
+}
+
+if [[ -n "${GENERALSTAFF_BRANCH:-}" ]]; then
+  info "Using explicit GENERALSTAFF_BRANCH=${GENERALSTAFF_BRANCH}"
+else
+  info "GENERALSTAFF_BRANCH unset; resolving newest v* release tag from ${GENERALSTAFF_REPO}"
+  GENERALSTAFF_BRANCH="$(resolve_latest_release_tag || true)"
+  if [[ -z "${GENERALSTAFF_BRANCH}" ]]; then
+    fail "Could not resolve a v* release tag from ${GENERALSTAFF_REPO}. Set GENERALSTAFF_BRANCH explicitly (e.g. GENERALSTAFF_BRANCH=master) and re-run."
+  fi
+  ok "Latest release tag: ${GENERALSTAFF_BRANCH}"
+fi
+
+# ------------------------------------------------------------
+# Step 4 — clone or update the repo
 # ------------------------------------------------------------
 
 section "Preparing ${GENERALSTAFF_DIR}"
 
 if [[ -d "${GENERALSTAFF_DIR}/.git" ]]; then
-  info "Existing clone detected; running 'git pull --ff-only' to update."
-  git -C "${GENERALSTAFF_DIR}" fetch --all --quiet
-  git -C "${GENERALSTAFF_DIR}" pull --ff-only --quiet
-  ok "Updated existing clone."
+  info "Existing clone detected; fetching and checking out ${GENERALSTAFF_BRANCH}."
+  git -C "${GENERALSTAFF_DIR}" fetch --all --tags --quiet
+  git -C "${GENERALSTAFF_DIR}" checkout --quiet "${GENERALSTAFF_BRANCH}"
+  # Branches stay tip-tracking; tags leave a detached HEAD at that release.
+  if git -C "${GENERALSTAFF_DIR}" symbolic-ref -q HEAD >/dev/null 2>&1; then
+    git -C "${GENERALSTAFF_DIR}" pull --ff-only --quiet
+  fi
+  ok "Updated existing clone to ${GENERALSTAFF_BRANCH}."
 elif [[ -e "${GENERALSTAFF_DIR}" ]]; then
   fail "${GENERALSTAFF_DIR} exists but is not a git repo. Pick a different GENERALSTAFF_DIR or remove it first."
 else
-  info "Cloning ${GENERALSTAFF_REPO} → ${GENERALSTAFF_DIR}"
+  info "Cloning ${GENERALSTAFF_REPO} @ ${GENERALSTAFF_BRANCH} → ${GENERALSTAFF_DIR}"
   git clone --branch "${GENERALSTAFF_BRANCH}" --quiet "${GENERALSTAFF_REPO}" "${GENERALSTAFF_DIR}"
   ok "Cloned."
 fi
@@ -130,15 +170,17 @@ fi
 cd "${GENERALSTAFF_DIR}"
 
 # ------------------------------------------------------------
-# Step 4 — bun install
+# Step 5 — bun install (pinned lockfile)
 # ------------------------------------------------------------
 
 section "Installing dependencies"
-bun install --silent
+if ! bun install --frozen-lockfile --silent; then
+  fail "bun install --frozen-lockfile failed — the lockfile is out of sync with package.json at ref ${GENERALSTAFF_BRANCH}. Re-run with GENERALSTAFF_BRANCH=master to install from tip-of-tree, or wait for a release whose lockfile matches."
+fi
 ok "Dependencies installed."
 
 # ------------------------------------------------------------
-# Step 5 — install CLI shims
+# Step 6 — install CLI shims
 # ------------------------------------------------------------
 
 section "Installing CLI shims"
@@ -235,7 +277,7 @@ if [[ ":$PATH:" != *":$SHIM_BIN_DIR:"* ]]; then
 fi
 
 # ------------------------------------------------------------
-# Step 6 — next steps
+# Step 7 — next steps
 # ------------------------------------------------------------
 
 section "Install complete"
