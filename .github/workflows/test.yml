@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -24,3 +28,31 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
       - run: bun run typecheck
+
+  # install.sh smoke (unix only). Windows has install.ps1 but this job
+  # only covers the shell installer; the matrix above still runs the
+  # full suite on windows-latest.
+  installer-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+      - name: Run install.sh in a temp HOME
+        run: |
+          set -euo pipefail
+          TMP_HOME="$(mktemp -d)"
+          export HOME="$TMP_HOME"
+          # setup-bun already put bun on PATH; don't re-install it.
+          GENERALSTAFF_DIR="${TMP_HOME}/GeneralStaff" \
+          GENERALSTAFF_NO_BUN_INSTALL=1 \
+          GENERALSTAFF_UPDATE_PATH=yes \
+            bash "${GITHUB_WORKSPACE}/install.sh"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          generalstaff --version
+          generalstaff --help >/dev/null
