@@ -17,6 +17,7 @@ import { join } from "path";
 import { parse as parseYaml } from "yaml";
 import { getRootDir } from "../state";
 import { createOllamaProvider } from "./ollama";
+import { createOpenRouterProvider } from "./openrouter";
 import type {
   LLMProvider,
   ProviderDescriptor,
@@ -231,6 +232,7 @@ function instantiateProvider(
     case "ollama":
       return createOllamaProvider(descriptor);
     case "openrouter":
+      return createOpenRouterProvider(descriptor);
     case "claude":
       throw new ProviderConfigError(
         `Provider kind '${descriptor.kind}' not implemented in Phase 2 — see src/reviewer.ts for inline dispatch`,
