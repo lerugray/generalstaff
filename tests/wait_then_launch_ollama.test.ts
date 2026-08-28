@@ -5,7 +5,12 @@
 // green for any future cross-platform CI without losing the coverage
 // on Ray's actual target environment.
 
-import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { describe, expect, it, beforeEach, afterEach, setDefaultTimeout } from "bun:test";
+
+// pwsh cold-start on a loaded windows-latest runner can exceed the 5s default test
+// timeout (observed 7.7s, CI run 33181067403) while the spawn itself already allows
+// 20s — give every test in this file the same headroom as the spawn.
+setDefaultTimeout(30_000);
 import { spawnSync } from "child_process";
 import { mkdirSync, rmSync, writeFileSync, utimesSync, readFileSync } from "fs";
 import { join } from "path";
