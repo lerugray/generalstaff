@@ -61,7 +61,7 @@ The bot works in `.bot-worktree/` on a `bot/work` branch. Your `master` branch i
 These sit on top of the same gate. None are required to start.
 
 - **Autonomous mode.** `gs autonomous` scopes and queues its own work, then routes it through the same verification gate. Default-off; the merge always stays your call. Exact per-mode push guarantees: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). Config: `projects.yaml.example`.
-- **GeneralStaff Desktop.** A native viewer/controller that wraps the dispatcher. See [releases](https://github.com/lerugray/generalstaff-desktop/releases) and [source](https://github.com/lerugray/generalstaff-desktop).
+- **GeneralStaff Workbench.** The desktop surface for directing a GeneralStaff fleet in plain English. Choose a project and which AI should do the job, direct the work through conversation, answer decisions, and inspect the result. The GeneralStaff CLI remains the verification gate; Workbench does not accept work just because an agent says it is finished. It ships from the GeneralStaff Desktop repository as a thin Visual Studio Code extension and isolated profile, with code, diffs, previews, and a terminal available when needed. See [releases](https://github.com/lerugray/generalstaff-desktop/releases) and [source](https://github.com/lerugray/generalstaff-desktop).
 - **Local dashboard.** `generalstaff serve --open` opens a fleet view at `127.0.0.1:3737`. No telemetry, no hosted tier.
 - **Hammerstein.** A separate strategic-audit CLI for plans before they reach the queue. See [`docs/ADVISOR.md`](docs/ADVISOR.md) and [`docs/JUDGMENT-GATE.md`](docs/JUDGMENT-GATE.md). Compatibility notes for all layers: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 
