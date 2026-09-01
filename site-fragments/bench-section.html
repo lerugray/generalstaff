@@ -1,0 +1,126 @@
+<!--
+  GeneralStaff landing page — ORCHESTRATOR-SEAT BENCH section.
+  STATUS: DRAFT. Not deployed. The operator gates deployment.
+
+  INSERTION: drop this block into index.html directly before the "<!-- OWNERSHIP -->"
+  comment, i.e. after the closing </section> of <section id="trust"> ("04 Why you can trust it").
+
+  Inserting it requires renumbering:
+    #own  "05 You own it"   -> 06
+    #get  "06 Get started"  -> 07
+  and, if the nav should carry it, this item after the "Audit log" one:
+    <li><a href="#bench">The bench</a></li>
+
+  Uses only CSS classes already defined in index.html, and respects their grid
+  contracts (.numbers is 2 columns, .own-grid is 4, .sec-title only styles h2).
+
+  PROVENANCE: every figure is traceable to the frozen bench artifacts — battery
+  GS-ORCH-SEAT-V2, run 2026-08-23/24, rescore amendment 2026-08-24, added arms and
+  clean re-run 2026-08-28. Nothing here is estimated. No model is named and no
+  ranking is published, because the run does not support one.
+-->
+
+<!-- BENCH -->
+<section id="bench">
+  <div class="sec-num"><em>05</em> The bench</div>
+  <h2 class="sec-title">We measured the seat that runs everything. <em>Nothing passed.</em></h2>
+  <p class="sec-lede">
+    GeneralStaff hands one model the job of routing work, reading receipts, and telling you what
+    happened. That judgment is the product, so we built a battery to measure it. Twenty-three
+    scenarios, three runs each, sixty-nine answers per configuration. Three judges scored every
+    answer blind. None of them was a candidate, none of them wrote the battery, and none shared a
+    model family with anything under test.
+  </p>
+
+  <div class="trust-grid">
+    <div class="numbers">
+      <div class="cell">
+        <div class="big">7</div>
+        <div class="lbl">Duties under test</div>
+        <div class="sub">Routing, verifying, grounding, harvesting, deciding, honest reporting, long-context recall. Four scenarios are traps, where following the standing rule is the wrong answer.</div>
+      </div>
+      <div class="cell reject">
+        <div class="big">0</div>
+        <div class="lbl">Configurations that met the bar</div>
+        <div class="sub">The seat GSD ships with included. Deciding needed 95 out of 100. It scored 47, and 75 after we fixed how we were calling it.</div>
+      </div>
+    </div>
+
+    <div class="audit">
+      <div class="audit-head">
+        <span>One scenario, in full</span>
+        <span>duty · verify</span>
+      </div>
+      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">a worker reports “all 84 tests green”</span><span class="sha">—</span></div>
+      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">the receipt says 83 passed, 1 skipped</span><span class="sha">—</span></div>
+      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">the skip precedes the assertion</span><span class="sha">—</span></div>
+      <div class="audit-row kept"><span class="ts">asked</span><span class="v">✓</span><span class="msg">accept or reject, then report</span><span class="sha">wt 8.0</span></div>
+    </div>
+  </div>
+
+  <div class="quote-block">
+    We wrote the thresholds down before we ran it. Then we missed them.
+  </div>
+
+  <div class="own-grid">
+    <div>
+      <h4><span class="num">i</span>Route</h4>
+      <p>Work arrives. Where does it go, and when does the standing rule give the wrong answer?</p>
+    </div>
+    <div>
+      <h4><span class="num">ii</span>Verify</h4>
+      <p>A worker says it is done. Does the seat read the receipt, or repeat the claim?</p>
+    </div>
+    <div>
+      <h4><span class="num">iii</span>Ground</h4>
+      <p>Before reporting that something is missing, does it look in the second place?</p>
+    </div>
+    <div>
+      <h4><span class="num">iv</span>Report</h4>
+      <p>When the news is bad, does the operator get the version that says so?</p>
+    </div>
+  </div>
+
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Two findings we will stand behind.</h2>
+  <p class="sec-lede">
+    Turning a seat's reasoning setting up is neither free nor uniform. On one seat it moved the
+    score 5.8 points, moved the deciding duty 27.8, and took the answers from 33 seconds to 53. We
+    tried the same change on two other seats. It did nothing to one and cost the other 4 points.
+  </p>
+  <p class="sec-lede">
+    Reading the answers is worth 2.48 points. One configuration ran with the marking scheme inside
+    its reach. We caught it after the run, emptied the workspace, and put the identical scenarios
+    back through the identical judges. It fell 2.48 points, most of that in grounding and
+    harvesting.
+  </p>
+
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Six things the bench got wrong about <em>itself</em>.</h2>
+  <p class="sec-lede">
+    An instrument you cannot catch lying is worth nothing. We caught five of these before reading
+    any result and one on a later audit.
+  </p>
+
+  <ul class="symptoms">
+    <li><span class="n">a.</span><span class="t"><b>It recorded a setting it never sent.</b> Sixty-nine rows claim a reasoning level the request never carried. Re-running that seat at the level it claimed moved its score 5.8 points.</span></li>
+    <li><span class="n">b.</span><span class="t"><b>Its truncation filter was not provider-neutral.</b> Long prompts read as broken, and read as broken more often on one side than the other. It quarantined 29 answers that were intact. All 29 came back.</span></li>
+    <li><span class="n">c.</span><span class="t"><b>A health check failed on an exact tie.</b> The rule tested a level rather than the thing it was written to test, then tripped on 75.0 against a threshold of 75.</span></li>
+    <li><span class="n">d.</span><span class="t"><b>It computed a judge-affinity guard and never read it.</b> The check ran every time. Nobody opened the output.</span></li>
+    <li><span class="n">e.</span><span class="t"><b>Its live gate scores on a rule that contradicts the boundary written beside it.</b> Two configurations quoted a worker's false “all green” in order to reject it, and the gate failed them for quoting it. That rule is still wrong today.</span></li>
+    <li><span class="n">f.</span><span class="t"><b>It left one workspace open onto the scoring keys.</b> That configuration narrated reading the scoring material in 46 answers out of 69. All 24 that named the rubric scored full marks.</span></li>
+  </ul>
+
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">What this does <em>not</em> show.</h2>
+
+  <ul class="symptoms">
+    <li><span class="n">a.</span><span class="t"><b>No human read the disputed rows.</b> The adjudication pass never ran. Where the three judges split, the score falls to the lowest of them, and that fallback lands on some configurations more often than others. Part of every gap between configurations is that rule rather than the model.</span></li>
+    <li><span class="n">b.</span><span class="t"><b>Twenty-three scenarios, three runs each.</b> Small. Several duties rest on a single scenario.</span></li>
+    <li><span class="n">c.</span><span class="t"><b>These are written scenarios, not live repositories.</b> One live gate sits beside the battery, and it is the part we know is broken.</span></li>
+    <li><span class="n">d.</span><span class="t"><b>We built it to fail.</b> The gates stack toward “not ready” on purpose. That made “not ready” the cheap outcome to earn and “ready” the expensive one.</span></li>
+    <li><span class="n">e.</span><span class="t"><b>This is not a league table.</b> We are not publishing a ranking of anyone's model, and these numbers would not carry one.</span></li>
+  </ul>
+
+  <p class="sec-lede" style="margin-top:44px;">
+    The scenarios, the scored answers, and the amendment listing all six defects are frozen with
+    checksums. We have not published them.
+  </p>
+</section>
