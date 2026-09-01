@@ -2,8 +2,15 @@
   GeneralStaff landing page — ORCHESTRATOR-SEAT BENCH section.
   STATUS: DRAFT. Not deployed. The operator gates deployment.
 
-  INSERTION: drop this block into index.html directly before the "<!-- OWNERSHIP -->"
-  comment, i.e. after the closing </section> of <section id="trust"> ("04 Why you can trust it").
+  INSERTION TARGET: site/index.html on the MASTER branch — NOT the gh-pages copy.
+  The live site is deployed by .github/workflows/deploy-pages.yml, which uploads ./site
+  from master on every master push. The gh-pages branch is a stale parallel copy that
+  nothing serves. (Verified 2026-09-01: the live page carries site/index.html's v0.13.0
+  and its May-era screenshots, while gh-pages carries v0.5.0 and the never-deployed
+  2026-08-28 screenshot refresh.)
+
+  Drop this block directly before the "<!-- OWNERSHIP -->" comment, i.e. after the
+  closing </section> of <section id="trust"> ("04 Why you can trust it").
 
   Inserting it requires renumbering:
     #own  "05 You own it"   -> 06
