@@ -2,72 +2,95 @@
   GeneralStaff landing page — ORCHESTRATOR-SEAT BENCH section.
   STATUS: DRAFT. Not deployed. The operator gates deployment.
 
+  OPERATOR RULING NEEDED: this draft NAMES THE MODELS. An anonymized variant is kept
+  at the foot of this file. Naming is the operator's call, not the drafter's.
+
   INSERTION TARGET: site/index.html on the MASTER branch — NOT the gh-pages copy.
   The live site is deployed by .github/workflows/deploy-pages.yml, which uploads ./site
-  from master on every master push. The gh-pages branch is a stale parallel copy that
-  nothing serves. (Verified 2026-09-01: the live page carries site/index.html's v0.13.0
-  and its May-era screenshots, while gh-pages carries v0.5.0 and the never-deployed
-  2026-08-28 screenshot refresh.)
+  from master on every master push; gh-pages is a stale parallel copy that nothing serves.
 
   Drop this block directly before the "<!-- OWNERSHIP -->" comment, i.e. after the
   closing </section> of <section id="trust"> ("04 Why you can trust it").
+  Inserting it requires renumbering  #own 05 -> 06  and  #get 06 -> 07, and, if the nav
+  should carry it, <li><a href="#bench">The bench</a></li> after the "Audit log" item.
 
-  Inserting it requires renumbering:
-    #own  "05 You own it"   -> 06
-    #get  "06 Get started"  -> 07
-  and, if the nav should carry it, this item after the "Audit log" one:
-    <li><a href="#bench">The bench</a></li>
+  Uses only CSS classes already in site/index.html and respects their grid contracts
+  (.numbers 2 cols, .own-grid 4 cols, .sec-title styles h2 only, .audit-row is an
+  80px/18px/1fr/80px grid with nowrap+ellipsis on .msg).
 
-  Uses only CSS classes already defined in index.html, and respects their grid
-  contracts (.numbers is 2 columns, .own-grid is 4, .sec-title only styles h2).
+  PROVENANCE — every figure, with the file it came from:
+   - Board + 95% bootstrap CIs, tie basis .......... rearm-effort/REARM-EFFORT-REPORT-2026-08-24.md;
+                                                     ARMS-REPORT-2026-08-28.md; session36 note;
+                                                     BENCH-RESULTS-2026-08-24/bench-results-COMBINED-2026-08-25.html
+   - Effort re-arm (79.92->85.75, per-duty splits,
+     latency 32.74s->53.12s, false effort provenance)  REARM-EFFORT-REPORT-2026-08-24.md;
+                                                     runner/results/opus-xhigh/OPUS-XHIGH-COMPARISON.json
+   - Open-book confound + clean re-run (99.35->96.87
+     like-for-like, -2.48, Ground -11.46, isolation
+     69/69, tool events 1360->450) .................. runner/results/arms-20260828-clean-grok/
+                                                     CLEAN-RUN-RESULTS-2026-08-28.md; ARMS-REPORT-2026-08-28.md;
+                                                     session55 note "big find 3"; pings rows 2026-08-28
+   - Caveats, open mandatory stops, broken live gate  READINESS-FINDINGS.md
+  Nothing is estimated. The superseded earliest-run figures (Decide 47, "nothing passed")
+  are NOT used anywhere in this draft.
 
-  PROVENANCE: every figure is traceable to the frozen bench artifacts — battery
-  GS-ORCH-SEAT-V2, run 2026-08-23/24, rescore amendment 2026-08-24, added arms and
-  clean re-run 2026-08-28. Nothing here is estimated. No model is named and no
-  ranking is published, because the run does not support one.
+  DELIBERATE OMISSIONS, and why:
+   - The GPT command-line arm (93.33 published -> 96.42 once held rows resolve at the
+     three-judge median) is NOT shown. That is a scoring correction, not a closed-book
+     re-run; the arm was never re-run isolated, so its open-book exposure is unmeasured
+     and it must not be ranked.
+   - The clean figure is given as like-for-like two-judge (96.87). The three-judge clean
+     number was never measured; do not quote ~96 for it.
 -->
 
 <!-- BENCH -->
 <section id="bench">
   <div class="sec-num"><em>05</em> The bench</div>
-  <h2 class="sec-title">We measured the seat that runs everything. <em>Nothing passed.</em></h2>
+  <h2 class="sec-title">We benchmarked the seat that <em>runs everything</em>.</h2>
   <p class="sec-lede">
     GeneralStaff hands one model the job of routing work, reading receipts, and telling you what
-    happened. That judgment is the product, so we built a battery to measure it. Twenty-three
-    scenarios, three runs each, sixty-nine answers per configuration. Three judges scored every
-    answer blind. None of them was a candidate, none of them wrote the battery, and none shared a
-    model family with anything under test.
+    happened. That judgment is the product, so we measured it: 23 fixtures across seven duties,
+    three runs each, 69 scored answers per seat. Three judges marked every answer blind, and none
+    of them was a candidate.
   </p>
 
   <div class="trust-grid">
     <div class="numbers">
       <div class="cell">
-        <div class="big">7</div>
-        <div class="lbl">Duties under test</div>
-        <div class="sub">Routing, verifying, grounding, harvesting, deciding, honest reporting, long-context recall. Four scenarios are traps, where following the standing rule is the wrong answer.</div>
+        <div class="big">69</div>
+        <div class="lbl">Answers scored per seat</div>
+        <div class="sub">Marked by DeepSeek V4-pro, a GPT reasoning model, and Qwen 3.8-max, three votes per answer. Scores are out of 100 with 95% bootstrap confidence intervals.</div>
       </div>
       <div class="cell reject">
         <div class="big">0</div>
-        <div class="lbl">Configurations that met the bar</div>
-        <div class="sub">The seat GSD ships with included. Deciding needed 95 out of 100. It scored 47, and 75 after we fixed how we were calling it.</div>
+        <div class="lbl">Seats cleared as ready</div>
+        <div class="sub">The human adjudication layer never ran, so no seat holds a readiness award. This is a comparative read, not a certification.</div>
       </div>
     </div>
 
     <div class="audit">
       <div class="audit-head">
-        <span>One scenario, in full</span>
-        <span>duty · verify</span>
+        <span>The board · best proven settings</span>
+        <span>score / 100</span>
       </div>
-      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">a worker reports “all 84 tests green”</span><span class="sha">—</span></div>
-      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">the receipt says 83 passed, 1 skipped</span><span class="sha">—</span></div>
-      <div class="audit-row rej"><span class="ts">given</span><span class="v">✕</span><span class="msg">the skip precedes the assertion</span><span class="sha">—</span></div>
-      <div class="audit-row kept"><span class="ts">asked</span><span class="v">✓</span><span class="msg">accept or reject, then report</span><span class="sha">wt 8.0</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">GLM 5.3</span><span class="sha">87.7</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Kimi K3, 256k</span><span class="sha">87.3</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Kimi K3</span><span class="sha">86.5</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Opus, max effort</span><span class="sha">85.8</span></div>
+      <div class="audit-row"><span class="ts">below</span><span class="v">·</span><span class="msg">Opus, default effort</span><span class="sha">79.9</span></div>
+      <div class="audit-row rej"><span class="ts">floor</span><span class="v">✕</span><span class="msg">Haiku, control</span><span class="sha">62.1</span></div>
     </div>
   </div>
 
   <div class="quote-block">
-    We wrote the thresholds down before we ran it. Then we missed them.
+    The top four are a statistical tie. Every confidence interval overlaps every other.
   </div>
+
+  <p class="sec-lede">
+    So we are not publishing a winner. What separates cleanly is the tiers: four seats at the top
+    we cannot tell apart, one seat six points back for no reason except how it was invoked, and a
+    deliberate floor control far below both, there to prove the battery discriminates at all.
+  </p>
 
   <div class="own-grid">
     <div>
@@ -88,46 +111,71 @@
     </div>
   </div>
 
-  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Two findings we will stand behind.</h2>
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Effort is not a free upgrade.</h2>
   <p class="sec-lede">
-    Turning a seat's reasoning setting up is neither free nor uniform. On one seat it moved the
-    score 5.8 points, moved the deciding duty 27.8, and took the answers from 33 seconds to 53. We
-    tried the same change on two other seats. It did nothing to one and cost the other 4 points.
+    Running the same model at maximum reasoning effort instead of its command-line default moved it
+    from 79.9 to 85.8, the difference between the second tier and the top one. Deciding went from
+    47.2 to 75.0, grounding from 75.0 to 91.7, verifying from 82.1 to 94.0.
   </p>
   <p class="sec-lede">
-    Reading the answers is worth 2.48 points. One configuration ran with the marking scheme inside
-    its reach. We caught it after the run, emptied the workspace, and put the identical scenarios
-    back through the identical judges. It fell 2.48 points, most of that in grounding and
-    harvesting.
+    It also cost. Mean latency rose from 32.7 seconds a row to 53.1, and long-context retrieval
+    fell from 82.3 to 65.6. Each arm threw exactly one fabrication, effort or no effort. On the
+    other seats the dial did nothing: one has a maximum tier that changed no score, and one has no
+    dial at all.
   </p>
 
-  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Six things the bench got wrong about <em>itself</em>.</h2>
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">The bench caught its own <em>confound</em>.</h2>
   <p class="sec-lede">
-    An instrument you cannot catch lying is worth nothing. We caught five of these before reading
-    any result and one on a later audit.
+    One seat came back at 98.7, higher than anything else we ran. It was wrong, and we withdrew it.
   </p>
 
   <ul class="symptoms">
-    <li><span class="n">a.</span><span class="t"><b>It recorded a setting it never sent.</b> Sixty-nine rows claim a reasoning level the request never carried. Re-running that seat at the level it claimed moved its score 5.8 points.</span></li>
-    <li><span class="n">b.</span><span class="t"><b>Its truncation filter was not provider-neutral.</b> Long prompts read as broken, and read as broken more often on one side than the other. It quarantined 29 answers that were intact. All 29 came back.</span></li>
-    <li><span class="n">c.</span><span class="t"><b>A health check failed on an exact tie.</b> The rule tested a level rather than the thing it was written to test, then tripped on 75.0 against a threshold of 75.</span></li>
-    <li><span class="n">d.</span><span class="t"><b>It computed a judge-affinity guard and never read it.</b> The check ran every time. Nobody opened the output.</span></li>
-    <li><span class="n">e.</span><span class="t"><b>Its live gate scores on a rule that contradicts the boundary written beside it.</b> Two configurations quoted a worker's false “all green” in order to reject it, and the gate failed them for quoting it. That rule is still wrong today.</span></li>
-    <li><span class="n">f.</span><span class="t"><b>It left one workspace open onto the scoring keys.</b> That configuration narrated reading the scoring material in 46 answers out of 69. All 24 that named the rubric scored full marks.</span></li>
+    <li><span class="n">a.</span><span class="t"><b>The workspace was the bench itself.</b> Our harness launched the command-line seats with the benchmark repository readable: the fixtures, the marking scheme, and earlier scored answers.</span></li>
+    <li><span class="n">b.</span><span class="t"><b>We went looking, in refute posture.</b> Running the bench's own spot-check builder over 39 of 138 rows, we found the seat made tool calls in 60 rows out of 69 and described reading the scoring material in 46 of them. The 24 rows that named the rubric scored a flat 100.</span></li>
+    <li><span class="n">c.</span><span class="t"><b>We re-ran it closed-book.</b> A fresh empty workspace per row, isolation confirmed on 69 rows out of 69, zero content-bearing reads, tool events down from 1360 to 450.</span></li>
+    <li><span class="n">d.</span><span class="t"><b>Like for like, it fell to 96.87.</b> Reading the answers was worth 2.48 points overall, and grounding alone lost 11.46 of them. That is exactly where looking something up substitutes for working it out.</span></li>
+    <li><span class="n">e.</span><span class="t"><b>96.87 still leads the board.</b> We report it as the clean number, measured against two judges rather than three, and we do not extrapolate the third.</span></li>
   </ul>
+
+  <h2 class="sec-title" style="font-size:28px; margin-top:60px;">Three settings that were accepted and ignored.</h2>
+  <p class="sec-lede">
+    A run recorded a reasoning level on 69 rows that the request never carried. A provider took a
+    thinking toggle and returned the same four thousand reasoning tokens either way. A harness
+    accepted a workspace argument that quietly granted more than it should. Each was a
+    configuration string we believed because we had written it. Config strings are claims. Wire
+    traffic is evidence.
+  </p>
 
   <h2 class="sec-title" style="font-size:28px; margin-top:60px;">What this does <em>not</em> show.</h2>
 
   <ul class="symptoms">
-    <li><span class="n">a.</span><span class="t"><b>No human read the disputed rows.</b> The adjudication pass never ran. Where the three judges split, the score falls to the lowest of them, and that fallback lands on some configurations more often than others. Part of every gap between configurations is that rule rather than the model.</span></li>
-    <li><span class="n">b.</span><span class="t"><b>Twenty-three scenarios, three runs each.</b> Small. Several duties rest on a single scenario.</span></li>
-    <li><span class="n">c.</span><span class="t"><b>These are written scenarios, not live repositories.</b> One live gate sits beside the battery, and it is the part we know is broken.</span></li>
-    <li><span class="n">d.</span><span class="t"><b>We built it to fail.</b> The gates stack toward “not ready” on purpose. That made “not ready” the cheap outcome to earn and “ready” the expensive one.</span></li>
-    <li><span class="n">e.</span><span class="t"><b>This is not a league table.</b> We are not publishing a ranking of anyone's model, and these numbers would not carry one.</span></li>
+    <li><span class="n">a.</span><span class="t"><b>No human read the disputed rows.</b> The adjudication layer never ran. Where judges split, an unresolved row falls to the lowest of their scores, and that fallback lands on some seats more often than others.</span></li>
+    <li><span class="n">b.</span><span class="t"><b>Twenty-three fixtures, three runs each.</b> Small. Several duties rest on a single fixture.</span></li>
+    <li><span class="n">c.</span><span class="t"><b>These are written fixtures, not live repositories.</b> The one live gate beside the battery scores on a rule that contradicts its own written boundary, and it is still wrong today.</span></li>
+    <li><span class="n">d.</span><span class="t"><b>The command-line seats had tools the others did not.</b> Isolation fixed what they could read. It did not make them the same kind of thing as a plain API seat.</span></li>
+    <li><span class="n">e.</span><span class="t"><b>This is one battery on one day.</b> Seven duties we chose, marked by three judges we chose. Treat it as our working evidence, not as a league table.</span></li>
   </ul>
 
   <p class="sec-lede" style="margin-top:44px;">
-    The scenarios, the scored answers, and the amendment listing all six defects are frozen with
-    checksums. We have not published them.
+    The fixtures, the scored answers, the withdrawn run and the clean one are frozen with checksums.
   </p>
 </section>
+
+<!--
+  ===========================================================================
+  ANONYMIZED VARIANT — swap these two blocks in if the operator rules against
+  naming models. Everything else in the section stands unchanged.
+
+  BOARD (replace the six .audit-row lines):
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Open-weight seat A</span><span class="sha">87.7</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Open-weight seat B, long context</span><span class="sha">87.3</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Open-weight seat B</span><span class="sha">86.5</span></div>
+      <div class="audit-row kept"><span class="ts">tied</span><span class="v">✓</span><span class="msg">Frontier seat, max effort</span><span class="sha">85.8</span></div>
+      <div class="audit-row"><span class="ts">below</span><span class="v">·</span><span class="msg">Frontier seat, default effort</span><span class="sha">79.9</span></div>
+      <div class="audit-row rej"><span class="ts">floor</span><span class="v">✕</span><span class="msg">Small-model control</span><span class="sha">62.1</span></div>
+
+  JUDGES (replace the first .cell .sub):
+      <div class="sub">Marked by three independent models, three votes per answer, none of them a
+      candidate. Scores are out of 100 with 95% bootstrap confidence intervals.</div>
+  ===========================================================================
+-->
