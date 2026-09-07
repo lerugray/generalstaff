@@ -61,15 +61,15 @@ providers:
     model: llama3:8b                        # model name as Ollama sees it
     host: http://localhost:11434            # optional; default is localhost:11434
 
-  - id: openrouter_ox
+  - id: openrouter_remote
     kind: openrouter
-    model: stealth/ox-alpha                 # free tier, 1M context, tool calling
+    model: provider/model-id                # placeholder: choose a current OpenRouter model
     api_key_env: OPENROUTER_API_KEY         # optional; this is the default
     # host: https://openrouter.ai/api/v1    # optional; this is the default
     #
-    # stealth/* slugs are provider-cloaked and get retired without notice.
-    # If routes start erroring with a 404 from OpenRouter, the model is gone —
-    # swap the slug, the adapter needs no change.
+    # Replace the placeholder before assigning a route to this provider.
+    # Choose a model and check its current pricing at https://openrouter.ai/models.
+    # Model availability/pricing belongs to the provider; this example promises neither.
 
 # ----------------------------------------------------------------------
 # Routes — which provider handles which role
@@ -85,4 +85,4 @@ routes:
   classifier: ollama_llama3
   # Or route the judgement-shaped role off the box and leave the narrative
   # ones local:
-  #   classifier: openrouter_ox
+  #   classifier: openrouter_remote

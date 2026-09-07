@@ -10,6 +10,9 @@ import {
   setActiveEngineerChild,
   clearActiveEngineerChild,
   killChildTree,
+  markOwnedUnixProcessGroup,
+  settleOwnedUnixProcessGroup,
+  waitForOwnedUnixProcessGroup,
 } from "./active_engineer";
 import type {
   KillableChild,
@@ -29,8 +32,21 @@ import { buildKimiCommand } from "./engineer_providers/kimi";
 import { ENGINEER_DISCIPLINE } from "./prompts/engineer_discipline";
 import { parseTaskClaimFromEngineerStdout } from "./prompts/engineer_claim";
 import { redactSecretsSafe } from "./secrets";
+import { isStopFilePresent } from "./safety";
 
 export type { CycleCreativeContext };
+
+/**
+ * Narrow per-call overrides for the engineer lifecycle. Production callers
+ * pass nothing; tests use these to exercise the real timeout / escalation
+ * paths on a short clock without touching process-wide timers.
+ */
+export interface RunEngineerOptions {
+  /** Hard engineer timeout in ms. Default: (cycle_budget_minutes + 2) minutes. */
+  timeoutMs?: number;
+  /** SIGKILL escalation delay after SIGTERM, in ms. Default 10s. */
+  escalationMs?: number;
+}
 
 export interface EngineerResult {
   exitCode: number | null;
@@ -41,13 +57,15 @@ export interface EngineerResult {
   killedNoClaim?: boolean;
   /** gs-291: parsed from engineer stdout claim line, else peeked task id when set. */
   attempted_task_id?: string;
+  /** STOP was already present when the engineer was about to spawn; nothing ran. */
+  stoppedBeforeSpawn?: boolean;
 }
 
 // Re-exports preserve the public surface for callers (and tests) that
 // import these directly from "./engineer". The live registry now lives
 // in ./active_engineer so session.ts can reach it without transitively
 // importing state.ts / audit.ts (gs-131).
-export { killChildTree, getActiveEngineerChild, killActiveEngineer } from "./active_engineer";
+export { killChildTree, getActiveEngineerChild, killActiveEngineer, markOwnedUnixProcessGroup } from "./active_engineer";
 export type { KillableChild, KillChildTreeOptions } from "./active_engineer";
 
 // Resolve the final bash command string for a cycle.
@@ -157,6 +175,7 @@ export async function runEngineer(
   dryRun: boolean = false,
   nextTask?: GreenfieldTask,
   context?: CycleCreativeContext,
+  runOpts: RunEngineerOptions = {},
 ): Promise<EngineerResult> {
   const cycDir = ensureCycleDir(project.id, cycleId, config);
   const logPath = join(cycDir, "engineer.log");
@@ -210,7 +229,43 @@ export async function runEngineer(
   // +5 was "polite grace for wrap-up"; +2 trims the worst-case wasted
   // Claude burn when claude -p gets stuck without committing. Revisit
   // once the structural early-kill (no-claim-signal-by-N-min) lands.
-  const timeoutMs = (project.cycle_budget_minutes + 2) * 60 * 1000;
+  const timeoutMs =
+    runOpts.timeoutMs ?? (project.cycle_budget_minutes + 2) * 60 * 1000;
+  const killOpts =
+    runOpts.escalationMs !== undefined
+      ? { escalationMs: runOpts.escalationMs }
+      : {};
+
+  // Fresh STOP check immediately before spawn. The session watcher fires
+  // once and only reaches engineers registered at that moment; a parallel
+  // sibling that passed executeCycle's early check and then spent time
+  // preparing its worktree would otherwise start a brand-new engineer
+  // after the operator asked for a stop. Reading the STOP file here (no
+  // sticky in-process flag) keeps later sessions unaffected.
+  if (await isStopFilePresent()) {
+    await writeCycleFile(
+      project.id,
+      cycleId,
+      "engineer.log",
+      `=== GeneralStaff Engineer ===\nCommand: ${command}\n` +
+        `=== STOP file present before spawn — engineer not started ===\n`,
+      config,
+    );
+    await appendProgress(project.id, "engineer_completed", {
+      exit_code: null,
+      duration_seconds: 0,
+      timed_out: false,
+      stopped_before_spawn: true,
+    }, cycleId);
+    return {
+      exitCode: null,
+      durationSeconds: 0,
+      timedOut: false,
+      logPath,
+      stoppedBeforeSpawn: true,
+    };
+  }
+
   const startTime = Date.now();
 
   return new Promise<EngineerResult>((resolve) => {
@@ -300,11 +355,20 @@ export async function runEngineer(
       writeToConsole(output);
     }
 
+    // Unix: detach into a new process group so STOP/timeout can signal the
+    // whole tree (-pid) without orphans retaining stdio. Ownership is
+    // recorded so killChildTree never negative-signals arbitrary callers.
+    // Windows keeps the existing taskkill /T /F path (detached not used).
+    const isolateUnixGroup = process.platform !== "win32";
     const child = spawn("bash", ["-c", command], {
       cwd: project.path,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, ...rootEnv, ...creativeEnv, ...disciplineEnv, ...peekedTaskEnv },
+      detached: isolateUnixGroup,
     });
+    if (isolateUnixGroup) {
+      markOwnedUnixProcessGroup(child);
+    }
     setActiveEngineerChild(child);
 
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -326,9 +390,9 @@ export async function runEngineer(
     const timer = setTimeout(() => {
       timedOut = true;
       logStream.write(
-        `\n\n=== TIMED OUT after ${project.cycle_budget_minutes + 2} min ===\n`,
+        `\n\n=== TIMED OUT after ${(timeoutMs / 60_000).toFixed(2)} min ===\n`,
       );
-      killChildTree(child);
+      killChildTree(child, killOpts);
     }, timeoutMs);
 
     let claimTimer: ReturnType<typeof setTimeout> | undefined;
@@ -341,7 +405,7 @@ export async function runEngineer(
           logStream.write(
             `\n\n=== NO TASK CLAIM within ${project.engineer_claim_timeout_minutes} min ===\n`,
           );
-          killChildTree(child);
+          killChildTree(child, killOpts);
         }
       }, claimTimeoutMs);
     }
@@ -349,9 +413,20 @@ export async function runEngineer(
     child.on("close", async (code) => {
       clearTimeout(timer);
       if (claimTimer !== undefined) clearTimeout(claimTimer);
+      // The leader closing is not group termination: members that
+      // redirected their stdio may still be running. Settlement keeps (or
+      // arms) the group escalation until the group is observed gone.
+      const settlement = settleOwnedUnixProcessGroup(child, killOpts);
+      await waitForOwnedUnixProcessGroup(child);
       clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 
+      if (settlement.lingering) {
+        logStream.write(
+          `\n=== owned process group ${child.pid} still has members after the leader exited ` +
+            `(live or not yet reaped); terminating (SIGTERM, then SIGKILL) ===\n`,
+        );
+      }
       logStream.write(
         `\n${"=".repeat(40)}\n` +
           `Exit code: ${code}\n` +
@@ -383,6 +458,8 @@ export async function runEngineer(
     child.on("error", async (err) => {
       clearTimeout(timer);
       if (claimTimer !== undefined) clearTimeout(claimTimer);
+      settleOwnedUnixProcessGroup(child, killOpts);
+      await waitForOwnedUnixProcessGroup(child);
       clearActiveEngineerChild(child);
       const durationSeconds = (Date.now() - startTime) / 1000;
 

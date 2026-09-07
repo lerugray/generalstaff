@@ -156,7 +156,7 @@ fi
 # exec : non-interactive one-shot.
 # --cd / -C : pin the agent to the worktree (GS manages its own worktree).
 # -s workspace-write : allow file edits; Codex cannot write .git under this
-#   sandbox — GS owns commit / push after verification.
+#   sandbox. GS has no built-in remote-push stage; provider setup governs Git access.
 # --ignore-user-config / --skip-git-repo-check : keep headless runs clean.
 # Model flag only when engineer_model is set (omit = Codex CLI default).
 codex exec \\

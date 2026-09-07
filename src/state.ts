@@ -3,8 +3,9 @@
 // All paths resolve under state/${project_id}/.
 
 import { existsSync, mkdirSync } from "fs";
-import { readFile, writeFile, rename, unlink } from "fs/promises";
-import { join, dirname } from "path";
+import { readFile, writeFile, rename, unlink, open } from "fs/promises";
+import { randomUUID } from "crypto";
+import { join, dirname, resolve } from "path";
 import { countRemainingWork } from "./work_detection";
 import { isProgressEntry } from "./types";
 import type {
@@ -82,49 +83,134 @@ function ensureDir(dir: string) {
   }
 }
 
-// --- Atomic write: write to tmp + rename ---
+// --- Atomic write: write to collision-free tmp + rename ---
+
+// The temp file lives in the destination directory (same filesystem, so
+// the final rename is atomic) and is created with O_EXCL (`wx`) under a
+// randomUUID name: creation is exclusive, not merely improbable to
+// collide, and an EEXIST simply picks a new name. The temp is unlinked
+// on any failure so a failed write leaves nothing behind.
+const ATOMIC_WRITE_NAME_ATTEMPTS = 8;
 
 async function atomicWrite(filePath: string, data: string) {
+  filePath = resolve(filePath);
   ensureDir(dirname(filePath));
-  const tmpPath = filePath + ".tmp";
-  await writeFile(tmpPath, data, "utf8");
-  await rename(tmpPath, filePath);
+  let tmpPath: string | null = null;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    for (let attempt = 1; ; attempt++) {
+      const candidate = `${filePath}.${randomUUID()}.tmp`;
+      try {
+        handle = await open(candidate, "wx");
+        tmpPath = candidate;
+        break;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "EEXIST" && attempt < ATOMIC_WRITE_NAME_ATTEMPTS) continue;
+        throw err;
+      }
+    }
+    // Ownership begins after exclusive creation, before any data is
+    // written. A partial write failure still closes/unlinks our temp.
+    await handle!.writeFile(data, "utf8");
+    await handle!.close();
+    handle = undefined;
+    await rename(tmpPath, filePath);
+    tmpPath = null;
+  } finally {
+    // Close before unlink so cleanup also works on Windows. Preserve any
+    // original write/close/rename error while attempting both cleanups.
+    if (handle) await handle.close().catch(() => {});
+    if (tmpPath !== null) {
+      try {
+        await unlink(tmpPath);
+      } catch {
+        /* best-effort cleanup of orphaned tmp */
+      }
+    }
+  }
 }
 
 // --- Fleet state ---
 
-const DEFAULT_FLEET_STATE: FleetState = {
-  version: 1,
-  updated_at: new Date().toISOString(),
-  projects: {},
-};
+function freshDefaultFleetState(): FleetState {
+  // Independent `projects` object every time — shallow-spreading a shared
+  // DEFAULT would let concurrent loaders mutate the same map.
+  return {
+    version: 1,
+    updated_at: new Date().toISOString(),
+    projects: {},
+  };
+}
+
+function resolveFleetStatePath(config?: DispatcherConfig, root?: string): string {
+  const r = root ?? getRootDir();
+  return config?.fleet_state_file
+    ? join(r, config.fleet_state_file)
+    : join(r, "fleet_state.json");
+}
+
+async function loadFleetStateAt(filePath: string): Promise<FleetState> {
+  if (!existsSync(filePath)) {
+    return freshDefaultFleetState();
+  }
+  const raw = await readFile(filePath, "utf8");
+  return JSON.parse(raw) as FleetState;
+}
+
+async function saveFleetStateAt(filePath: string, state: FleetState): Promise<void> {
+  state.updated_at = new Date().toISOString();
+  await atomicWrite(filePath, JSON.stringify(state, null, 2) + "\n");
+}
 
 export async function loadFleetState(
   config?: DispatcherConfig,
 ): Promise<FleetState> {
-  const root = getRootDir();
-  const filePath = config?.fleet_state_file
-    ? join(root, config.fleet_state_file)
-    : join(root, "fleet_state.json");
-
-  if (!existsSync(filePath)) {
-    return { ...DEFAULT_FLEET_STATE, updated_at: new Date().toISOString() };
-  }
-  const raw = await readFile(filePath, "utf8");
-  return JSON.parse(raw) as FleetState;
+  return loadFleetStateAt(resolveFleetStatePath(config));
 }
 
 export async function saveFleetState(
   state: FleetState,
   config?: DispatcherConfig,
 ) {
-  const root = getRootDir();
-  const filePath = config?.fleet_state_file
-    ? join(root, config.fleet_state_file)
-    : join(root, "fleet_state.json");
+  await saveFleetStateAt(resolveFleetStatePath(config), state);
+}
 
-  state.updated_at = new Date().toISOString();
-  await atomicWrite(filePath, JSON.stringify(state, null, 2) + "\n");
+// In-process mutex per resolved fleet file path. Serializes the entire
+// read/modify/write so concurrent executeCycle finalizers cannot clobber
+// each other's counters via a shared `.tmp` or lost update.
+const fleetUpdateChains = new Map<string, Promise<unknown>>();
+
+/**
+ * Transactional fleet update: lock the entire load→mutate→save for the
+ * fleet file resolved at call time. Waiting callers keep that captured
+ * path even if `setRootDir` changes while they are queued. Failure
+ * releases the lock; the process-wide root is never modified here.
+ */
+export async function withFleetStateTransaction<T>(
+  mutator: (fleet: FleetState) => T | Promise<T>,
+  config?: DispatcherConfig,
+): Promise<T> {
+  // Capture path at enqueue time so a queued waiter cannot drift if
+  // setRootDir changes while prior transactions run.
+  const filePath = resolve(resolveFleetStatePath(config, getRootDir()));
+
+  const prior = fleetUpdateChains.get(filePath) ?? Promise.resolve();
+  const run = prior.catch(() => {}).then(async () => {
+    const fleet = await loadFleetStateAt(filePath);
+    const result = await mutator(fleet);
+    await saveFleetStateAt(filePath, fleet);
+    return result;
+  });
+  // Keep the chain alive after rejection so the next waiter is not stranded.
+  fleetUpdateChains.set(
+    filePath,
+    run.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return run;
 }
 
 export function getProjectFleetState(

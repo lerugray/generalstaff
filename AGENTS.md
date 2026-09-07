@@ -23,10 +23,10 @@ Open source and free.
 
 ## 3. Done when
 
-v1.0 ships when at least 5 external users (not the maintainer) have
-completed a full bot session against their own project, with feedback
-confirming the orchestration was more useful than chaotic. The bar
-distinguishes "it installs" from "it actually delivers value."
+GeneralStaff succeeds when its operator can run real projects through it
+with dependable execution, verification, and control. The maintainer uses it
+for that purpose today. Continued work protects that usefulness. External
+adoption is welcome; releases do not depend on a user or star count.
 
 ## 4. What this infrastructure enables
 
@@ -120,14 +120,14 @@ fleet review found these three clauses missing from the house files.
 
 <!-- Update mode appends dated sections below. -->
 
-### 2026-07-27 — staleness check (no rewrite needed)
+### 2026-07-27 — staleness check (corrected 2026-09-07)
 
 Checked end-to-end after the private overlay (`generalstaff-private/AGENTS.md`)
-was found to be describing an April state months out of date. **This file
-held up.** Recorded here so the next session does not re-audit it:
+was found to be describing an April state months out of date. The original
+check mistakenly retained §3’s external-user target despite the maintainer’s
+July 27 ruling retiring adoption targets. Corrected September 7:
 
-- §3's v1.0 bar (5 external users completing a full bot session against
-  their own project) is a stable criterion, not a status claim — kept.
+- §3 now states the operator-usefulness criterion. No adoption target remains.
 - §6's constraints are current: the cross-platform amendment landed
   2026-05-01, and the Max-20x/BYOK cost ceiling still describes what this
   framework may assume of a user.

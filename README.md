@@ -40,7 +40,7 @@ gs cycle --project=<id>
 cat state/<id>/PROGRESS.jsonl
 ```
 
-The bot works in `.bot-worktree/` on a `bot/work` branch. Your `master` branch is untouched until you merge.
+The bot works in `.bot-worktree/` on a `bot/work` branch. Automatic local merging is off by default; setting `auto_merge: true` enables merges into the project checkout’s current branch. See the [mode guarantees](docs/COMPATIBILITY.md).
 
 ## What the gate catches
 
@@ -54,13 +54,13 @@ The bot works in `.bot-worktree/` on a `bot/work` branch. Your `master` branch i
 - **Scope-match is not correctness.** Tests are the correctness signal. If they pass for the wrong reason, the gate ratifies the cycle.
 - **Pre-diff failures.** A missing toolchain, a bad worktree setup, or an engineer crash leaves nothing to verify. The gate cannot catch what never reached it.
 - **Empty-diff streaks.** When the queue is thin the engineer may return `verified_weak` with no diff. Watch substantive landings, not raw cycle count.
-- **Push is best-effort.** The gate runs at commit time. Pushing `bot/work` to your remote depends on auth and network; it can fail silently.
+- **Remote effects of engineer commands and hooks.** GeneralStaff has no built-in remote-push stage, but it does not enforce a remote-access restriction on the tools you configure.
 
 ## Optional layers
 
 These sit on top of the same gate. None are required to start.
 
-- **Autonomous mode.** `gs autonomous` scopes and queues its own work, then routes it through the same verification gate. Default-off; the merge always stays your call. Exact per-mode push guarantees: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). Config: `projects.yaml.example`.
+- **Autonomous mode.** `gs autonomous` scopes and queues its own work, then routes it through the same verification gate. Default-off; execution inherits your project’s `auto_merge` setting. Exact per-mode push guarantees: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md). Config: `projects.yaml.example`.
 - **GeneralStaff Workbench.** The desktop surface for directing a GeneralStaff fleet in plain English. Choose a project and which AI should do the job, direct the work through conversation, answer decisions, and inspect the result. The GeneralStaff CLI remains the verification gate; Workbench does not accept work just because an agent says it is finished. It ships from the GeneralStaff Desktop repository as a thin Visual Studio Code extension and isolated profile, with code, diffs, previews, and a terminal available when needed. See [releases](https://github.com/lerugray/generalstaff-desktop/releases) and [source](https://github.com/lerugray/generalstaff-desktop).
 - **Local dashboard.** `generalstaff serve --open` opens a fleet view at `127.0.0.1:3737`. No telemetry, no hosted tier.
 - **Hammerstein.** A separate strategic-audit CLI for plans before they reach the queue. See [`docs/ADVISOR.md`](docs/ADVISOR.md) and [`docs/JUDGMENT-GATE.md`](docs/JUDGMENT-GATE.md). Compatibility notes for all layers: [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).

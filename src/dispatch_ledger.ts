@@ -2,9 +2,9 @@
 //
 // A durable, deduped, cross-run JSON ledger of auto-dispatched cycles awaiting
 // Ray's review+merge. The autonomous loop dispatches BOT-SAFE work through the
-// normal cycle (engineer → verify → reviewer → bot branch) but NEVER pushes or
-// merges — the work is automated, the MERGE stays gated on Ray. Without this
-// ledger those cycles strand on the host's local clone; it surfaces them at the
+// normal cycle (engineer → verify → reviewer → bot branch), inheriting the
+// project's opt-in auto_merge policy. This ledger records review custody; it
+// does not enforce remote restrictions or prevent merges. It surfaces work at the
 // next session's catch-up (gs-bot-diff-review): for each, read the diff, relay
 // it in plain English, then merge or delete.
 //

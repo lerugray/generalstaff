@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { join, resolve as resolvePath } from "path";
 import { tmpdir } from "os";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "fs";
 import { $ } from "bun";
 import { existsSync } from "fs";
 import {
@@ -19,11 +19,19 @@ import {
   peekNextBotPickableTask,
   validateExpectedWorktree,
   validateKnownGitSha,
+  finalizeCycleStateAndCleanup,
 } from "../src/cycle";
-import { setRootDir } from "../src/state";
+import {
+  setRootDir,
+  loadFleetState,
+  saveFleetState,
+  loadProjectState,
+  saveProjectState,
+} from "../src/state";
 import { readJsonl } from "../src/audit";
 import type { ProjectConfig, ReviewerResponse } from "../src/types";
 import type { ReviewerResult } from "../src/reviewer";
+import { makeDispatcherConfig } from "./helpers/fixtures";
 
 function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
   return {
@@ -1156,6 +1164,147 @@ describe("peekNextBotPickableTask (gs-281)", () => {
       expect(entry.data.error).toContain("invalid JSON");
     } finally {
       teardown();
+    }
+  });
+});
+
+describe("finalizeCycleStateAndCleanup", () => {
+  const cycleId = "cycle-cleanup";
+  const outcome = () => ({
+    final_outcome: "verified" as const,
+    started_at: new Date(Date.now() - 60_000).toISOString(),
+    ended_at: new Date().toISOString(),
+  });
+
+  /** Root + project dir + stale worktree + STATE.json seeded with an active cycle marker. */
+  async function seedFixture(name: string) {
+    const dir = mkdtempSync(join(tmpdir(), `gs-finalize-${name}-`));
+    setRootDir(dir);
+    const projectPath = join(dir, "proj");
+    mkdirSync(projectPath, { recursive: true });
+    const wt = join(projectPath, ".bot-worktree");
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, "stale.txt"), "left behind");
+    const config = makeDispatcherConfig({
+      state_dir: "./state",
+      fleet_state_file: "./fleet_state.json",
+    });
+    const project = makeProject({ id: "cleanup-proj", path: projectPath });
+    const seeded = await loadProjectState(project.id, config);
+    seeded.current_cycle_id = "active-cycle";
+    await saveProjectState(seeded, config);
+    expect(existsSync(join(dir, "state", project.id, "STATE.json"))).toBe(true);
+    return { dir, wt, config, project };
+  }
+
+  async function runExpectingFailure(
+    project: ProjectConfig,
+    config: ReturnType<typeof makeDispatcherConfig>,
+  ): Promise<NodeJS.ErrnoException> {
+    let caught: unknown = null;
+    try {
+      await finalizeCycleStateAndCleanup(project, config, cycleId, outcome());
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    return caught as NodeJS.ErrnoException;
+  }
+
+  it("clears current_cycle_id and removes the worktree when the fleet file cannot be read", async () => {
+    const { dir, wt, config, project } = await seedFixture("load");
+    try {
+      // fleet_state.json as a directory: readFile fails with EISDIR.
+      mkdirSync(join(dir, "fleet_state.json"), { recursive: true });
+
+      const err = await runExpectingFailure(project, config);
+      expect(err.code).toBe("EISDIR");
+
+      const after = await loadProjectState(project.id, config);
+      expect(after.current_cycle_id).toBeNull();
+      expect(after.last_cycle_id).toBe(cycleId);
+      expect(after.last_cycle_outcome).toBe("verified");
+      expect(after.cycles_this_session).toBe(1);
+      expect(existsSync(wt)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("clears current_cycle_id and removes the worktree when the fleet write fails", async () => {
+    // Permission bits do not bind for root or on win32; the load-failure
+    // case above still covers the separation there.
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const { dir, wt, config, project } = await seedFixture("write");
+    try {
+      // A valid fleet file exists so the load succeeds; the root directory
+      // is then made read-only so the fleet temp file cannot be created
+      // (state/<id>/ stays writable, so the project reset can proceed).
+      await saveFleetState(await loadFleetState(config), config);
+      chmodSync(dir, 0o555);
+      let err: NodeJS.ErrnoException;
+      try {
+        err = await runExpectingFailure(project, config);
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+      expect(err.code).toBe("EACCES");
+
+      const fleet = await loadFleetState(config);
+      expect(fleet.projects[project.id]).toBeUndefined();
+      const after = await loadProjectState(project.id, config);
+      expect(after.current_cycle_id).toBeNull();
+      expect(after.last_cycle_id).toBe(cycleId);
+      expect(existsSync(wt)).toBe(false);
+    } finally {
+      try {
+        chmodSync(dir, 0o755);
+      } catch {
+        /* already restored */
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the first failure and attaches later ones as suppressed; cleanup still runs", async () => {
+    const { dir, wt, config, project } = await seedFixture("both");
+    try {
+      mkdirSync(join(dir, "fleet_state.json"), { recursive: true });
+      // Break the project state file too so the second step also fails.
+      const statePath = join(dir, "state", project.id, "STATE.json");
+      rmSync(statePath, { force: true });
+      mkdirSync(statePath, { recursive: true });
+
+      const err = await runExpectingFailure(project, config);
+      expect(err.code).toBe("EISDIR");
+      const suppressed = (err as Error & { suppressed?: unknown[] }).suppressed;
+      expect(Array.isArray(suppressed)).toBe(true);
+      expect(suppressed).toHaveLength(1);
+      expect(suppressed![0]).toBeInstanceOf(Error);
+      expect(existsSync(wt)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists fleet counters and clears the project marker on the happy path", async () => {
+    const { dir, wt, config, project } = await seedFixture("ok");
+    try {
+      await finalizeCycleStateAndCleanup(project, config, cycleId, {
+        final_outcome: "verified",
+        started_at: new Date(Date.now() - 120_000).toISOString(),
+        ended_at: new Date().toISOString(),
+      });
+
+      const fleet = await loadFleetState(config);
+      expect(fleet.projects[project.id]?.total_cycles).toBe(1);
+      expect(fleet.projects[project.id]?.total_verified).toBe(1);
+      const after = await loadProjectState(project.id, config);
+      expect(after.current_cycle_id).toBeNull();
+      expect(after.last_cycle_id).toBe(cycleId);
+      expect(existsSync(wt)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

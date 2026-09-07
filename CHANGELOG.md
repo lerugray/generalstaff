@@ -7,6 +7,35 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## v0.14.0 — 2026-09-07
+
+Parallel-cycle reliability and clearer operating guarantees.
+
+- Concurrent cycle finalizers update fleet counters through a per-file transaction,
+  preventing lost updates inside one GeneralStaff process. Atomic writes use
+  exclusive temporary files and clean them after failed writes or renames.
+- STOP reaches every registered engineer. A fresh check prevents a preparing
+  sibling from launching after STOP. On Unix, owned engineer process groups
+  receive termination and escalation; engineer completion waits for cleanup,
+  including descendants whose leader has already closed its output streams.
+  Dispatcher signal/exit cleanup covers those owned groups. Windows retains
+  its `taskkill /T /F` path.
+- Fleet persistence failures still attempt project-state reset and worktree
+  cleanup, then surface the original failure.
+- Adds the previously unreleased OpenRouter provider adapter for registry-routed
+  digests, cycle summaries and classification. It uses the configured model and
+  a named environment variable for its API key; default routes remain Ollama.
+  Thanks to Daniel Liu for the adapter contribution.
+- Documents the actual merge/push boundary: autonomous execution inherits
+  `auto_merge`; automatic local merging is off by default. There is no built-in
+  dispatcher push stage or general remote-access restriction on configured tools.
+- Replaces the obsolete free-model example with an explicit provider model choice
+  and corrects stale project instructions. Default provider routes are unchanged.
+
+Fleet transactions serialize within one process; they are not cross-process
+locks or a durable database. Verification and operator-configured scope gates
+remain in place.
+
 ## v0.13.0 — 2026-08-23
 
 Trust-surface release, driven by an external cold read of the repo. No gate-behavior changes.

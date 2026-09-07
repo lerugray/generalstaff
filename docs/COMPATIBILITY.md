@@ -2,7 +2,7 @@
 
 Single page for what a new reader otherwise has to reconstruct across
 README, DESIGN, the marketing site, and this repo vs companion repos.
-Facts below are grounded in those sources as of CLI **v0.13.0**
+Facts below are grounded in those sources as of CLI **v0.14.0**
 (`package.json`).
 
 ## Product surfaces
@@ -14,53 +14,36 @@ Facts below are grounded in those sources as of CLI **v0.13.0**
 | **Local web dashboard** | Fleet / project / cycle / inbox / session-tail views from local state; not hosted, no telemetry. | Ships **in this repo** — `generalstaff serve --open` (default `127.0.0.1:3737`; README Observability) | **No** — optional |
 | **Hammerstein** | Companion strategic-reasoning / reviewer-framework CLI for work *before* the queue (`h audit`, `h next`, `h worth`); also wired opt-in as advisor / judgment gate. GeneralStaff gates execution; Hammerstein audits the plan. | Separate project: [github.com/lerugray/hammerstein](https://github.com/lerugray/hammerstein) (README Strategic-reasoning companion; site footer “built on Hammerstein”) | **No** — companion; advisor/judgment_gate opt-in |
 
-## Mode guarantees (push / merge / audit)
+## Mode behavior (push / merge / audit)
 
-Rows derived from `README.md` and `DESIGN.md` only. Where those texts
-disagree (or README disagrees with itself), the row is **UNRESOLVED**
-with quotes — no inference from code.
+These statements follow the implementation, including
+[`dispatchItem`](../src/autonomous_session.ts),
+[`executeCycle`](../src/cycle.ts), and
+[session-end merging](../src/session.ts). They replace the earlier unresolved
+comparison of README quotations.
 
-### Manually queued cycle (`gs cycle` / `gs session` — work you queue)
-
-| | Guarantee | Source |
+| Mode | Local branch behavior | Remote behavior |
 | --- | --- | --- |
-| **May be pushed** | Verified bot work may be pushed to the project’s `bot/work` branch on **your** git remote (nowhere else). Push is best-effort (can fail silently offline / auth-expired). | README: “Bot pushes to `bot/work` on your remote, nowhere else.”; Hard Rule 7; “Push is best-effort.” DESIGN: work stays on a per-project bot branch (not master). |
-| **Never pushed** | Never push to `master` / `main` directly; user’s default branch stays untouched until **you** merge. No force-push / `--no-verify` / skipped hooks (DESIGN safety list). Auto-merge remains off until you opt in after clean cycles. | DESIGN: “Never push to master directly.” README: “Your `master` is untouched until you merge.”; Hard Rule 4 (auto-merge off by default). |
-| **Preserved for audit** | Full prompts, responses, tool calls, and diffs in `state/<project>/PROGRESS.jsonl` (plus related cycle artifacts as the gate writes them). | README Hard Rule 9 / open audit log; DESIGN v2 open audit log (`PROGRESS.jsonl`). |
+| Manually queued cycle (`gs cycle`) | Works on the configured bot branch. With `auto_merge: true`, cycle preflight merges accumulated bot-branch work into the project checkout’s current `HEAD`. | No built-in dispatcher push stage. Configured engineer commands, provider tools and Git hooks can have their own remote effects. |
+| Session (`gs session`) | Uses the same cycle policy and also attempts a final merge for eligible projects with `auto_merge: true`. | Same command/provider/hook boundary as a cycle. |
+| Autonomous preview (`gs autonomous`) | Surveys and classifies work and records decisions; does not dispatch an engineer cycle. | May call configured survey/reasoning providers; it is not an offline mode. |
+| Autonomous execution (`gs autonomous --execute`) | Passes the project configuration into the normal cycle, including `auto_merge`. It does not force that setting off. | Same command/provider/hook boundary as a cycle; no separate remote-push stage. |
 
-### Autonomous mode (`gs autonomous` / `--execute`)
+`auto_merge` defaults to `false` in the
+[project configuration loader](../src/projects.ts). Leave it false when every
+local merge must be manual. Turning it on authorizes automatic **local** merges
+into the checkout’s current branch; it is not a remote-push option.
 
-| | Guarantee | Source |
-| --- | --- | --- |
-| **May be pushed** | **UNRESOLVED** — see quotes below. | README status line vs autonomous section vs Hard Rule 7 / “normal cycle”; DESIGN has no autonomous-specific remote-push rule (only “Never push to master directly”). |
-| **Never pushed** | **UNRESOLVED** for *remote push of `bot/work`* (same conflict). **Agreed:** autonomous mode does not merge for you — merge stays your call; auto-merge / master is not the autonomous path’s job. | README: “never pushes or merges”; “the merge stays your call.” DESIGN: “Never push to master directly.” |
-| **Preserved for audit** | Cycle audit still lands in `PROGRESS.jsonl` when work runs through the normal cycle. Autonomous **decision** and **dispatch** ledgers are local and gitignored (`gs forks` / `gs branches`). | README autonomous section; Hard Rule 9 / DESIGN `PROGRESS.jsonl`. |
-
-#### UNRESOLVED — autonomous remote push
-
-README describes autonomous dispatch as reusing the **normal cycle** (which elsewhere may push `bot/work`) **and** as never pushing:
-
-> “Autonomous mode remains opt-in, default-off, and **never auto-pushes**.”  
-> — README status blurb
-
-> “Mechanical work is dispatched through the **normal cycle**. … It is … and **never pushes or merges**: dispatched work lands on the bot branch and in a review ledger (`gs branches`), and the merge stays your call.”  
-> — README § Autonomous mode
-
-> “Bot pushes to `bot/work` on your remote only.” / Hard Rule 7  
-> — README (manual / hard-rules surface — same “normal cycle” rails)
-
-DESIGN does not resolve the remote-push half:
-
-> “Never push to master directly. Always work on a per-project bot branch.”  
-> — DESIGN.md safety list
-
-So: **merge-to-default-branch stays human** is consistent across README + DESIGN. Whether an autonomous `--execute` cycle may still **push `bot/work` to origin** (as a manually queued cycle may) is **not** settled by those two docs alone — mark unresolved until README/DESIGN are aligned.
+Cycle bookkeeping can create local commits of `state/` in the GeneralStaff
+checkout. Cycle evidence is recorded in `state/<project>/PROGRESS.jsonl` and its
+related artifacts. Autonomous decision/dispatch ledgers track work for review;
+a ledger entry does not itself prevent a merge or constrain provider Git access.
 
 ## Version compatibility
 
 | Component | Version / note |
 | --- | --- |
-| GeneralStaff CLI (this repo) | **0.13.0** (`package.json` `"version"`) |
+| GeneralStaff CLI (this repo) | **0.14.0** (`package.json` `"version"`) |
 | GeneralStaff Desktop | See Desktop repo — not derivable from this tree |
 | Local web dashboard | Same tree / same release as the CLI above (`serve`) |
 | Hammerstein | Separate release train — see Hammerstein repo |

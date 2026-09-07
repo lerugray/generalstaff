@@ -45,7 +45,8 @@ The canonical list is in `docs/internal/RULE-RELAXATION-2026-04-15.md`. There ar
 2. **File-based state SSOT.** *(Relaxed 2026-04-15:)* Local desktop
    UI is now permitted as a viewer/controller layer. No databases,
    no SaaS orchestration, no GeneralStaff-the-company in the loop.
-3. **Sequential cycles for MVP.** Parallel worktrees come later.
+3. **Sequential cycles by default.** Opt-in `max_parallel_slots` runs isolated
+   per-project worktrees concurrently; see DESIGN.md’s Phase 4 contract.
 4. **Auto-merge OFF by default.** Users opt in per-project after 5
    clean verification-passing cycles.
 5. **Mandatory hands-off lists** at the Claude Code permission

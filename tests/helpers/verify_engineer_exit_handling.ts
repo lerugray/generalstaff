@@ -114,6 +114,18 @@ mock.module("../../src/state", () => ({
   }),
   saveFleetState: async () => {},
   updateProjectFleetState: () => {},
+  withFleetStateTransaction: async (mutator: (fleet: {
+    version: number;
+    updated_at: string;
+    projects: Record<string, unknown>;
+  }) => unknown) => {
+    const fleet = {
+      version: 1 as const,
+      updated_at: new Date().toISOString(),
+      projects: {} as Record<string, unknown>,
+    };
+    return await mutator(fleet);
+  },
   getRootDir: () => TEST_DIR,
   botWorktreePath: (project: { path: string }) => join(project.path, ".bot-worktree"),
 }));

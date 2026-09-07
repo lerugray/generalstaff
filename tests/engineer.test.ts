@@ -4,10 +4,21 @@ import {
   killChildTree,
   killActiveEngineer,
   getActiveEngineerChild,
+  markOwnedUnixProcessGroup,
 } from "../src/engineer";
+import {
+  setActiveEngineerChild,
+  clearActiveEngineerChild,
+  getActiveEngineerChildren,
+  settleOwnedUnixProcessGroup,
+  isOwnedUnixProcessGroupTracked,
+} from "../src/active_engineer";
+import { startStopFileWatcher } from "../src/stop_watcher";
 import { setRootDir, readCycleFile } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { spawn } from "child_process";
+import { tmpdir } from "os";
 import type { ProjectConfig } from "../src/types";
 import { GENERALSTAFF_TASK_CLAIM_PREFIX } from "../src/prompts/engineer_claim";
 
@@ -33,9 +44,11 @@ function makeProject(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
   setRootDir(TEST_DIR);
+  setActiveEngineerChild(null);
 });
 
 afterEach(() => {
+  setActiveEngineerChild(null);
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
@@ -239,6 +252,714 @@ describe("engineer module", () => {
       // win32 taskkill. Either way, it's not a clean 0.
       expect(result.exitCode).not.toBe(0);
       expect(getActiveEngineerChild()).toBeNull();
+    });
+
+    it("registers two owners without overwrite; kill signals both", () => {
+      const kills: string[] = [];
+      const a = {
+        pid: 101,
+        kill: () => {
+          kills.push("a");
+          return true;
+        },
+      };
+      const b = {
+        pid: 102,
+        kill: () => {
+          kills.push("b");
+          return true;
+        },
+      };
+      setActiveEngineerChild(a);
+      setActiveEngineerChild(b);
+      expect(getActiveEngineerChildren()).toHaveLength(2);
+      expect(getActiveEngineerChild()).toBe(b);
+
+      const killed = killActiveEngineer({
+        platform: "linux",
+        setTimeoutFn: () => 0,
+      });
+      expect(killed).toBe(true);
+      expect(kills).toEqual(["a", "b"]);
+    });
+
+    it("clearing either owner leaves the sibling registered", () => {
+      const a = { pid: 201, kill: () => true };
+      const b = { pid: 202, kill: () => true };
+      setActiveEngineerChild(a);
+      setActiveEngineerChild(b);
+      clearActiveEngineerChild(a);
+      expect(getActiveEngineerChildren()).toEqual([b]);
+      expect(getActiveEngineerChild()).toBe(b);
+      clearActiveEngineerChild(b);
+      expect(getActiveEngineerChildren()).toHaveLength(0);
+      expect(getActiveEngineerChild()).toBeNull();
+    });
+
+    it("setActiveEngineerChild(null) clears all owners", () => {
+      setActiveEngineerChild({ pid: 1, kill: () => true });
+      setActiveEngineerChild({ pid: 2, kill: () => true });
+      setActiveEngineerChild(null);
+      expect(getActiveEngineerChildren()).toHaveLength(0);
+      expect(killActiveEngineer()).toBe(false);
+    });
+
+    it("repeated stop returns true while active and does not stack escalations", () => {
+      const killCalls: Array<string | number> = [];
+      let timeoutCount = 0;
+      const child = {
+        pid: 303,
+        kill: (sig?: NodeJS.Signals | number) => {
+          killCalls.push(sig ?? "kill");
+          return true;
+        },
+      };
+      setActiveEngineerChild(child);
+      const opts = {
+        platform: "linux" as const,
+        setTimeoutFn: (_cb: () => void, _ms: number) => {
+          timeoutCount += 1;
+          return timeoutCount;
+        },
+      };
+      expect(killActiveEngineer(opts)).toBe(true);
+      expect(killActiveEngineer(opts)).toBe(true);
+      expect(timeoutCount).toBe(1);
+      expect(killCalls).toEqual(["SIGTERM", "SIGTERM"]);
+    });
+
+    it("engineer exiting removes only itself while sibling remains", async () => {
+      const projectA = makeProject({
+        id: "own-a",
+        engineer_command: "sleep 0.2",
+      });
+      const projectB = makeProject({
+        id: "own-b",
+        engineer_command: "sleep 5",
+      });
+      const runA = runEngineer(projectA, "cycle-exit-a");
+      const runB = runEngineer(projectB, "cycle-exit-b");
+
+      for (let i = 0; i < 40 && getActiveEngineerChildren().length < 2; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(getActiveEngineerChildren().length).toBeGreaterThanOrEqual(2);
+
+      await runA;
+      expect(getActiveEngineerChildren().length).toBe(1);
+      expect(killActiveEngineer()).toBe(true);
+      const resultB = await runB;
+      expect(resultB.exitCode).not.toBe(0);
+      expect(getActiveEngineerChildren()).toHaveLength(0);
+    });
+
+    it("overlapping real engineer processes are both killed by STOP", async () => {
+      const projectA = makeProject({
+        id: "para-a",
+        engineer_command: "sleep 20",
+      });
+      const projectB = makeProject({
+        id: "para-b",
+        engineer_command: "sleep 20",
+      });
+      const runA = runEngineer(projectA, "cycle-para-a");
+      const runB = runEngineer(projectB, "cycle-para-b");
+
+      for (let i = 0; i < 40 && getActiveEngineerChildren().length < 2; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      expect(getActiveEngineerChildren().length).toBe(2);
+
+      expect(killActiveEngineer()).toBe(true);
+      const [ra, rb] = await Promise.all([runA, runB]);
+      expect(ra.exitCode).not.toBe(0);
+      expect(rb.exitCode).not.toBe(0);
+      expect(getActiveEngineerChildren()).toHaveLength(0);
+    });
+  });
+
+  describe("Unix owned process groups", () => {
+    const isUnix = process.platform !== "win32";
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const q = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+
+    /** Live process check: zombies/dead count as not alive (Linux /proc; kill(0) elsewhere). */
+    function alive(pid: number): boolean {
+      try {
+        if (process.platform === "linux") {
+          const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+          const state = stat.charAt(stat.lastIndexOf(")") + 2);
+          return state !== "Z" && state !== "X";
+        }
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function groupAlive(pgid: number): boolean {
+      try {
+        process.kill(-pgid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    // Fixture cleanup only ever targets the exact pids/groups the test created.
+    function killGroup(pgid: number | null | undefined): void {
+      if (!pgid || pgid <= 1 || pgid === process.pid) return;
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+    function killPid(pid: number | null | undefined): void {
+      if (!pid || pid <= 1 || pid === process.pid || !alive(pid)) return;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+    async function waitFor(fn: () => boolean, ms = 5_000, step = 25): Promise<boolean> {
+      const end = Date.now() + ms;
+      while (!fn()) {
+        if (Date.now() > end) return false;
+        await sleep(step);
+      }
+      return true;
+    }
+    async function bounded<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          p,
+          new Promise<never>((_, rej) => {
+            timer = setTimeout(() => rej(new Error(`${label} did not complete in ${ms}ms`)), ms);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    function readPidFile(p: string): number {
+      const n = Number(readFileSync(p, "utf8").trim());
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+    /** A descendant that ignores TERM, publishes its pid, and drops every stdio pipe. */
+    function resistantRedirected(pidFile: string): string {
+      return `trap "" TERM; echo $$ > ${q(pidFile)}; exec >/dev/null 2>&1; sleep 60`;
+    }
+
+    it("signals the process group (-pid) only for children marked as owned", () => {
+      const killCalls: Array<[number, NodeJS.Signals | number | undefined]> = [];
+      const killFn = (pid: number, sig?: NodeJS.Signals | number) => {
+        killCalls.push([pid, sig]);
+        return true;
+      };
+      const childKills: Array<NodeJS.Signals | number | undefined> = [];
+      const owned = { pid: 4242, kill: (s?: NodeJS.Signals | number) => (childKills.push(s), true) };
+      markOwnedUnixProcessGroup(owned);
+      killChildTree(owned, { platform: "linux", setTimeoutFn: () => 0, killFn });
+      expect(killCalls).toEqual([[-4242, "SIGTERM"]]);
+      expect(childKills).toEqual([]);
+
+      killCalls.length = 0;
+      const unmarked = { pid: 4243, kill: (s?: NodeJS.Signals | number) => (childKills.push(s), true) };
+      killChildTree(unmarked, { platform: "linux", setTimeoutFn: () => 0, killFn });
+      expect(killCalls).toEqual([]);
+      expect(childKills).toEqual(["SIGTERM"]);
+    });
+
+    it("never marks or negative-signals the parent's own pid or a pid-less child", () => {
+      const killCalls: number[] = [];
+      const killFn = (pid: number) => (killCalls.push(pid), true);
+      const self = { pid: process.pid, kill: () => true };
+      markOwnedUnixProcessGroup(self);
+      expect(isOwnedUnixProcessGroupTracked(self)).toBe(false);
+      killChildTree(self, { platform: "linux", setTimeoutFn: () => 0, killFn });
+      const noPid = { pid: undefined, kill: () => true };
+      markOwnedUnixProcessGroup(noPid);
+      expect(isOwnedUnixProcessGroupTracked(noPid)).toBe(false);
+      expect(killCalls.every((p) => p >= 0)).toBe(true);
+    });
+
+    it("escalation re-probes and never signals a group already observed gone", () => {
+      const killCalls: Array<[number, NodeJS.Signals | number | undefined]> = [];
+      let groupGone = false;
+      const killFn = (pid: number, sig?: NodeJS.Signals | number) => {
+        killCalls.push([pid, sig]);
+        if (groupGone) {
+          const err = new Error("ESRCH") as NodeJS.ErrnoException;
+          err.code = "ESRCH";
+          throw err;
+        }
+        return true;
+      };
+      let escalate: (() => void) | null = null;
+      const child = { pid: 5150, kill: () => true };
+      markOwnedUnixProcessGroup(child);
+      killChildTree(child, {
+        platform: "linux",
+        killFn,
+        setTimeoutFn: (cb) => ((escalate = cb), 1),
+        clearTimeoutFn: () => {},
+      });
+      expect(killCalls).toEqual([[-5150, "SIGTERM"]]);
+      // Repeated STOP re-sends TERM but does not arm a second escalation.
+      killChildTree(child, { platform: "linux", killFn, setTimeoutFn: () => 2 });
+      expect(killCalls).toEqual([[-5150, "SIGTERM"], [-5150, "SIGTERM"]]);
+
+      groupGone = true; // every member exited before the escalation fired
+      escalate!();
+      expect(killCalls[killCalls.length - 1]).toEqual([-5150, 0]); // probe only
+      expect(killCalls.some(([, s]) => s === "SIGKILL")).toBe(false);
+      expect(isOwnedUnixProcessGroupTracked(child)).toBe(false);
+
+      // After the group is gone, no further negative signal is ever sent.
+      killCalls.length = 0;
+      killChildTree(child, { platform: "linux", killFn, setTimeoutFn: () => 3 });
+      expect(killCalls).toEqual([]);
+    });
+
+    it("settlement keeps escalation alive when the leader closes but members remain", () => {
+      const killCalls: Array<[number, NodeJS.Signals | number | undefined]> = [];
+      const killFn = (pid: number, sig?: NodeJS.Signals | number) => (killCalls.push([pid, sig]), true);
+      let escalate: (() => void) | null = null;
+      let cleared = 0;
+      const child = { pid: 6160, kill: () => true };
+      markOwnedUnixProcessGroup(child);
+      killChildTree(child, {
+        platform: "linux",
+        killFn,
+        setTimeoutFn: (cb) => ((escalate = cb), 1),
+        clearTimeoutFn: () => cleared++,
+      });
+      // Leader's close: group still alive (probe succeeds) → timer must survive.
+      expect(settleOwnedUnixProcessGroup(child, { killFn })).toEqual({ lingering: true });
+      expect(cleared).toBe(0);
+      expect(isOwnedUnixProcessGroupTracked(child)).toBe(true);
+      escalate!();
+      expect(killCalls[killCalls.length - 1]).toEqual([-6160, "SIGKILL"]);
+      expect(isOwnedUnixProcessGroupTracked(child)).toBe(false);
+    });
+
+    it("STOP reaps a TERM-ignoring descendant that redirected its stdio; unrelated sibling survives", async () => {
+      if (!isUnix) return;
+      const dir = mkdtempSync(join(tmpdir(), "gs-pg-redirect-"));
+      const pidFile = join(dir, "desc.pid");
+      const project = makeProject({
+        path: dir,
+        engineer_command: `bash -c ${q(resistantRedirected(pidFile))} & wait`,
+      });
+      const unrelated = spawn("sleep", ["60"], { stdio: "ignore" });
+      let pgid: number | undefined;
+      let desc = 0;
+      let run: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      try {
+        run = runEngineer(project, "cycle-pg-redirect");
+        expect(await waitFor(() => existsSync(pidFile) && readPidFile(pidFile) > 0)).toBe(true);
+        desc = readPidFile(pidFile);
+        pgid = getActiveEngineerChild()?.pid;
+        expect(pgid).toBeTruthy();
+        expect(alive(desc)).toBe(true);
+
+        expect(killActiveEngineer({ escalationMs: 100 })).toBe(true);
+        const result = await bounded(run, 10_000, "runEngineer");
+        expect(result.exitCode).not.toBe(0);
+        expect(alive(desc)).toBe(false);
+        expect(await waitFor(() => !alive(desc), 3_000)).toBe(true);
+        expect(await waitFor(() => !groupAlive(pgid!), 3_000)).toBe(true);
+        expect(alive(unrelated.pid!)).toBe(true);
+        expect(readFileSync(result.logPath, "utf8")).toContain("owned process group");
+      } finally {
+        killGroup(pgid);
+        killPid(desc);
+        unrelated.kill("SIGKILL");
+        if (run) await bounded(run, 5_000, "runEngineer cleanup").catch(() => {});
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 20_000);
+
+    it("engineer timeout reaps a TERM-ignoring descendant that redirected its stdio", async () => {
+      if (!isUnix) return;
+      const dir = mkdtempSync(join(tmpdir(), "gs-pg-timeout-"));
+      const pidFile = join(dir, "desc.pid");
+      const project = makeProject({
+        path: dir,
+        engineer_command: `bash -c ${q(resistantRedirected(pidFile))} & wait`,
+      });
+      let pgid: number | undefined;
+      let desc = 0;
+      let run: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      try {
+        run = runEngineer(project, "cycle-pg-timeout", undefined, false, undefined, undefined, {
+          timeoutMs: 400,
+          escalationMs: 100,
+        });
+        expect(await waitFor(() => existsSync(pidFile) && readPidFile(pidFile) > 0)).toBe(true);
+        desc = readPidFile(pidFile);
+        pgid = getActiveEngineerChild()?.pid;
+        expect(alive(desc)).toBe(true);
+
+        const result = await bounded(run, 10_000, "runEngineer");
+        expect(result.timedOut).toBe(true);
+        expect(result.exitCode).not.toBe(0);
+        expect(alive(desc)).toBe(false);
+        expect(readFileSync(result.logPath, "utf8")).toContain("TIMED OUT");
+        expect(await waitFor(() => !alive(desc), 3_000)).toBe(true);
+        expect(await waitFor(() => !groupAlive(pgid!), 3_000)).toBe(true);
+      } finally {
+        killGroup(pgid);
+        killPid(desc);
+        if (run) await bounded(run, 5_000, "runEngineer cleanup").catch(() => {});
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 20_000);
+
+    it("a member outliving a normally-exited leader is terminated at settlement", async () => {
+      if (!isUnix) return;
+      const dir = mkdtempSync(join(tmpdir(), "gs-pg-linger-"));
+      const pidFile = join(dir, "desc.pid");
+      const project = makeProject({
+        path: dir,
+        engineer_command: `bash -c ${q(resistantRedirected(pidFile))} & exit 0`,
+      });
+      let desc = 0;
+      let run: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      try {
+        run = runEngineer(project, "cycle-pg-linger", undefined, false, undefined, undefined, {
+          escalationMs: 100,
+        });
+        const result = await bounded(run, 10_000, "runEngineer");
+        expect(result.exitCode).toBe(0);
+        expect(await waitFor(() => existsSync(pidFile) && readPidFile(pidFile) > 0)).toBe(true);
+        desc = readPidFile(pidFile);
+        expect(readFileSync(result.logPath, "utf8")).toContain("still has members");
+        expect(await waitFor(() => !alive(desc), 3_000)).toBe(true);
+      } finally {
+        killPid(desc);
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 20_000);
+
+    it("kills TERM-ignoring descendant that keeps the pipes and completes runEngineer promise", async () => {
+      if (!isUnix) return;
+
+      const fixtureDir = mkdtempSync(join(tmpdir(), "gs-pg-pipes-"));
+      const project = makeProject({
+        path: fixtureDir,
+        // Descendant ignores TERM and inherits stdout; group SIGKILL must reap it.
+        engineer_command: `trap "" TERM; sleep 60 & echo DESC:$!; wait`,
+      });
+
+      const unrelated = spawn("sleep", ["60"], { stdio: "ignore" });
+      const unrelatedPid = unrelated.pid ?? null;
+      let descPid: number | null = null;
+      let pgid: number | undefined;
+      let runPromise: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+
+      try {
+        runPromise = runEngineer(project, "cycle-pg-1");
+        expect(await waitFor(() => !!getActiveEngineerChild())).toBe(true);
+        pgid = getActiveEngineerChild()?.pid;
+        expect(pgid).toBeTruthy();
+
+        const logPath = join(TEST_DIR, "state", "test-proj", "cycles", "cycle-pg-1", "engineer.log");
+        expect(
+          await waitFor(() => {
+            if (!existsSync(logPath)) return false;
+            const m = readFileSync(logPath, "utf8").match(/DESC:(\d+)/);
+            if (m) descPid = Number(m[1]);
+            return descPid !== null;
+          }),
+        ).toBe(true);
+        expect(alive(descPid!)).toBe(true);
+        expect(unrelatedPid && alive(unrelatedPid)).toBe(true);
+
+        expect(killActiveEngineer({ escalationMs: 50 })).toBe(true);
+        const result = await bounded(runPromise, 10_000, "runEngineer");
+        expect(result.exitCode).not.toBe(0);
+
+        expect(await waitFor(() => !alive(descPid!), 3_000)).toBe(true);
+        expect(await waitFor(() => !groupAlive(pgid!), 3_000)).toBe(true);
+        expect(unrelatedPid && alive(unrelatedPid)).toBe(true);
+      } finally {
+        killGroup(pgid);
+        killPid(descPid);
+        killPid(unrelatedPid);
+        unrelated.kill("SIGKILL");
+        if (runPromise) await bounded(runPromise, 5_000, "runEngineer cleanup").catch(() => {});
+        rmSync(fixtureDir, { recursive: true, force: true });
+      }
+    }, 20_000);
+
+    it("markOwnedUnixProcessGroup enables group kill on a real spawn", async () => {
+      if (!isUnix) return;
+
+      const child = spawn(
+        "bash",
+        ["-c", 'trap "" TERM; sleep 60 & echo $!; wait'],
+        { detached: true, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      markOwnedUnixProcessGroup(child);
+      let descPid: number | null = null;
+      try {
+        await new Promise<void>((resolve) => {
+          child.stdout?.on("data", (chunk: Buffer) => {
+            const n = Number(chunk.toString().trim().split("\n")[0]);
+            if (Number.isFinite(n) && n > 0) descPid = n;
+            resolve();
+          });
+          setTimeout(resolve, 2000);
+        });
+        expect(child.pid).toBeTruthy();
+        expect(descPid).not.toBeNull();
+
+        killChildTree(child, { escalationMs: 50 });
+        await bounded(new Promise<void>((r) => child.on("close", () => r())), 10_000, "child close");
+        expect(await waitFor(() => !alive(descPid!), 3_000)).toBe(true);
+        expect(await waitFor(() => !isOwnedUnixProcessGroupTracked(child), 3_000)).toBe(true);
+      } finally {
+        killGroup(child.pid);
+        killPid(descPid);
+      }
+    }, 20_000);
+  });
+
+  describe("STOP before spawn (late parallel sibling)", () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const q = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+    function killGroup(pgid: number | null | undefined): void {
+      if (!pgid || pgid <= 1 || pgid === process.pid) return;
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+    async function waitFor(fn: () => boolean, ms = 5_000): Promise<boolean> {
+      const end = Date.now() + ms;
+      while (!fn()) {
+        if (Date.now() > end) return false;
+        await sleep(25);
+      }
+      return true;
+    }
+
+    it("refuses to spawn a sibling that reaches spawn after STOP was written; running engineer stops", async () => {
+      if (process.platform === "win32") return;
+      const stopPath = join(TEST_DIR, "STOP");
+      const marker = join(TEST_DIR, "late-started");
+      let stops = 0;
+      const watcher = startStopFileWatcher(stopPath, () => {
+        stops++;
+        killActiveEngineer({ escalationMs: 100 });
+      });
+      let aGroup: number | undefined;
+      let a: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      let b: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      try {
+        a = runEngineer(makeProject({ id: "early", engineer_command: "sleep 60" }), "cycle-early");
+        expect(await waitFor(() => !!getActiveEngineerChild())).toBe(true);
+        aGroup = getActiveEngineerChild()?.pid;
+
+        // Sibling is "preparing" (worktree setup) and only reaches spawn later.
+        b = (async () => {
+          await sleep(250);
+          return runEngineer(
+            makeProject({ id: "late", engineer_command: `touch ${q(marker)}; sleep 60` }),
+            "cycle-late",
+          );
+        })();
+
+        writeFileSync(stopPath, "stop\n");
+        expect(await waitFor(() => stops > 0)).toBe(true);
+
+        const rb = await Promise.race([
+          b,
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("late sibling hung")), 5_000)),
+        ]);
+        expect(rb.stoppedBeforeSpawn).toBe(true);
+        expect(rb.exitCode).toBeNull();
+        expect(existsSync(marker)).toBe(false);
+        expect(readFileSync(rb.logPath, "utf8")).toContain("STOP file present before spawn");
+
+        const ra = await Promise.race([
+          a,
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("early engineer hung")), 5_000)),
+        ]);
+        expect(ra.exitCode).not.toBe(0);
+        expect(getActiveEngineerChildren()).toHaveLength(0);
+
+        const progress = readFileSync(join(TEST_DIR, "state", "late", "PROGRESS.jsonl"), "utf8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l));
+        const completed = progress.find((e: { event: string }) => e.event === "engineer_completed");
+        expect(completed.data.stopped_before_spawn).toBe(true);
+      } finally {
+        watcher.close();
+        killGroup(aGroup);
+        killActiveEngineer({ escalationMs: 50 });
+        rmSync(stopPath, { force: true });
+        if (a) await a.catch(() => {});
+        if (b) await b.catch(() => {});
+      }
+    }, 20_000);
+
+    it("negative control: without STOP the delayed sibling starts", async () => {
+      if (process.platform === "win32") return;
+      const marker = join(TEST_DIR, "late-started-control");
+      let aGroup: number | undefined;
+      let bGroup: number | undefined;
+      let a: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      let b: Promise<Awaited<ReturnType<typeof runEngineer>>> | undefined;
+      try {
+        a = runEngineer(makeProject({ id: "early-c", engineer_command: "sleep 60" }), "cycle-early-c");
+        expect(await waitFor(() => !!getActiveEngineerChild())).toBe(true);
+        aGroup = getActiveEngineerChild()?.pid;
+        b = (async () => {
+          await sleep(250);
+          return runEngineer(
+            makeProject({ id: "late-c", engineer_command: `touch ${q(marker)}; sleep 60` }),
+            "cycle-late-c",
+          );
+        })();
+        expect(await waitFor(() => existsSync(marker))).toBe(true);
+        expect(getActiveEngineerChildren()).toHaveLength(2);
+        bGroup = getActiveEngineerChild()?.pid;
+      } finally {
+        killActiveEngineer({ escalationMs: 50 });
+        killGroup(aGroup);
+        killGroup(bGroup);
+        if (a) await a.catch(() => {});
+        if (b) await b.catch(() => {});
+      }
+    }, 20_000);
+  });
+
+  describe("dispatcher process signals", () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const q = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+    function alive(pid: number): boolean {
+      try {
+        if (process.platform === "linux") {
+          const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+          const state = stat.charAt(stat.lastIndexOf(")") + 2);
+          return state !== "Z" && state !== "X";
+        }
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function killGroup(pgid: number | null | undefined): void {
+      if (!pgid || pgid <= 1 || pgid === process.pid) return;
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch {
+        /* already gone */
+      }
+    }
+    async function waitFor(fn: () => boolean, ms = 8_000): Promise<boolean> {
+      const end = Date.now() + ms;
+      while (!fn()) {
+        if (Date.now() > end) return false;
+        await sleep(25);
+      }
+      return true;
+    }
+    function readPid(p: string): number {
+      if (!existsSync(p)) return 0;
+      const n = Number(readFileSync(p, "utf8").trim());
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    async function signalProbe(signal: "SIGINT" | "SIGTERM" | "SIGHUP"): Promise<void> {
+      const dir = mkdtempSync(join(tmpdir(), `gs-sig-${signal.toLowerCase()}-`));
+      const pidFile = join(dir, "engineer.pid");
+      const script = join(dir, "dispatcher.ts");
+      const project = makeProject({
+        id: "sig",
+        path: dir,
+        // `$$` is the group leader (bash), which exec's into sleep: one pid = leader = pgid.
+        engineer_command: `echo $$ > ${q(pidFile)}; exec sleep 60`,
+      });
+      writeFileSync(
+        script,
+        `import { runEngineer } from ${JSON.stringify(join(import.meta.dir, "..", "src", "engineer.ts"))};\n` +
+          `import { setRootDir } from ${JSON.stringify(join(import.meta.dir, "..", "src", "state.ts"))};\n` +
+          `setRootDir(${JSON.stringify(dir)});\n` +
+          `const result = await runEngineer(${JSON.stringify(project)}, "cycle-signal");\n` +
+          `console.log("ENGINEER_DONE " + JSON.stringify(result.exitCode));\n`,
+      );
+      const unrelated = spawn("sleep", ["60"], { stdio: "ignore" });
+      const dispatcher = spawn(process.execPath, [script], {
+        cwd: dir,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      dispatcher.stderr?.on("data", (c: Buffer) => (stderr += c.toString()));
+      dispatcher.stdout?.on("data", () => {});
+      const exited = new Promise<[number | null, string | null]>((r) =>
+        dispatcher.on("exit", (code, sig) => r([code, sig])),
+      );
+      let engineer = 0;
+      try {
+        expect(await waitFor(() => readPid(pidFile) > 0)).toBe(true);
+        engineer = readPid(pidFile);
+        expect(alive(engineer)).toBe(true);
+
+        dispatcher.kill(signal);
+        const [code, sig] = await Promise.race([
+          exited,
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("dispatcher did not exit")), 15_000)),
+        ]);
+        // Conventional termination: the dispatcher dies by the same signal.
+        expect([code, sig]).toEqual([null, signal]);
+        expect(await waitFor(() => !alive(engineer), 3_000)).toBe(true);
+        expect(alive(unrelated.pid!)).toBe(true);
+        expect(stderr).toContain(`${signal} received`);
+      } finally {
+        killGroup(engineer);
+        try {
+          dispatcher.kill("SIGKILL");
+        } catch {
+          /* gone */
+        }
+        unrelated.kill("SIGKILL");
+        await exited.catch(() => {});
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    it("SIGINT to the dispatcher terminates its detached engineer before exit", async () => {
+      if (process.platform === "win32") return;
+      await signalProbe("SIGINT");
+    }, 30_000);
+
+    it("SIGTERM to the dispatcher terminates its detached engineer before exit", async () => {
+      if (process.platform === "win32") return;
+      await signalProbe("SIGTERM");
+    }, 30_000);
+
+    it("SIGHUP to the dispatcher terminates its detached engineer before exit", async () => {
+      if (process.platform === "win32") return;
+      await signalProbe("SIGHUP");
+    }, 30_000);
+
+    it("installs signal/exit listeners only while an engineer is tracked and restores them after", async () => {
+      const events = ["SIGINT", "SIGTERM", "SIGHUP", "exit"] as const;
+      const before = Object.fromEntries(events.map((e) => [e, process.listenerCount(e)]));
+      const run = runEngineer(makeProject({ engineer_command: "sleep 0.3" }), "cycle-listeners");
+      expect(await waitFor(() => !!getActiveEngineerChild())).toBe(true);
+      for (const e of events) expect(process.listenerCount(e)).toBe(before[e] + 1);
+      await run;
+      expect(getActiveEngineerChildren()).toHaveLength(0);
+      for (const e of events) expect(process.listenerCount(e)).toBe(before[e]);
     });
   });
 

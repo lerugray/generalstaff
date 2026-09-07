@@ -281,8 +281,8 @@ export interface ForkLedger {
   updated?: string;
 }
 
-// An auto-dispatched cycle awaiting review+merge. The loop never pushes/merges,
-// so without this the work strands on the host's local clone. Unlike
+// An auto-dispatched cycle recorded for review. Execution inherits the project
+// auto_merge policy; this record is not a remote or merge restriction. Unlike
 // wintermute (one unique branch per dispatch), GS dispatches reuse cycle.ts,
 // which lands every cycle on the project's shared bot branch — so the dedup key
 // is the cycle_id (unique per dispatch), and `sha` pins the exact reviewable

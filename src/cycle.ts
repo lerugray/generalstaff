@@ -10,8 +10,7 @@ import {
   writeCycleFile,
   loadProjectState,
   saveProjectState,
-  loadFleetState,
-  saveFleetState,
+  withFleetStateTransaction,
   updateProjectFleetState,
   getRootDir,
   botWorktreePath,
@@ -175,6 +174,79 @@ async function cleanupWorktree(project: ProjectConfig): Promise<void> {
       const { rmSync } = require("fs");
       try { rmSync(wt, { recursive: true, force: true }); } catch { /* best-effort */ }
     }
+  }
+}
+
+/**
+ * Persist fleet counters, reset project runtime state, remove the bot
+ * worktree and auto-commit state artifacts — each step attempted
+ * independently, so a fleet persistence failure can no longer leave
+ * `current_cycle_id` set or the worktree behind. The first failure is
+ * rethrown after every step ran; later failures are logged and attached
+ * to it as `suppressed`. Never turns a failed persist into success.
+ */
+export async function finalizeCycleStateAndCleanup(
+  project: ProjectConfig,
+  config: DispatcherConfig,
+  cycleId: string,
+  result: {
+    final_outcome: CycleOutcome;
+    started_at: string;
+    ended_at: string;
+  },
+): Promise<void> {
+  const durationMinutes =
+    (new Date(result.ended_at).getTime() -
+      new Date(result.started_at).getTime()) /
+    60_000;
+
+  const failures: Array<{ step: string; error: unknown }> = [];
+  const attempt = async (step: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (error) {
+      failures.push({ step, error });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[generalstaff] cycle ${cycleId} finalizer: ${step} failed for ${project.id}: ${message}`,
+      );
+    }
+  };
+
+  await attempt("fleet state persistence", () =>
+    withFleetStateTransaction((fleet) => {
+      updateProjectFleetState(
+        fleet,
+        project.id,
+        result.final_outcome,
+        durationMinutes,
+      );
+    }, config),
+  );
+
+  await attempt("project state reset", async () => {
+    const projState = await loadProjectState(project.id, config);
+    projState.current_cycle_id = null;
+    projState.last_cycle_id = cycleId;
+    projState.last_cycle_outcome = result.final_outcome;
+    projState.last_cycle_at = result.ended_at;
+    projState.cycles_this_session += 1;
+    await saveProjectState(projState, config);
+  });
+
+  await attempt("worktree cleanup", () => cleanupWorktree(project));
+  await attempt("state auto-commit", () =>
+    autoCommitState(project, cycleId, result.final_outcome),
+  );
+
+  if (failures.length > 0) {
+    const [first, ...rest] = failures;
+    if (first!.error instanceof Error && rest.length > 0) {
+      (first!.error as Error & { suppressed?: unknown[] }).suppressed = rest.map(
+        (f) => f.error,
+      );
+    }
+    throw first!.error;
   }
 }
 
@@ -1591,29 +1663,7 @@ export async function executeCycle(
     };
     await appendProgress(project.id, "cycle_end", cycleEndData, cycleId);
 
-    const fleet = await loadFleetState(config);
-    const durationMinutes =
-      (new Date(result.ended_at).getTime() -
-        new Date(result.started_at).getTime()) /
-      60_000;
-    updateProjectFleetState(
-      fleet,
-      project.id,
-      result.final_outcome,
-      durationMinutes,
-    );
-    await saveFleetState(fleet, config);
-
-    const projState = await loadProjectState(project.id, config);
-    projState.current_cycle_id = null;
-    projState.last_cycle_id = cycleId;
-    projState.last_cycle_outcome = result.final_outcome;
-    projState.last_cycle_at = result.ended_at;
-    projState.cycles_this_session += 1;
-    await saveProjectState(projState, config);
-
-    await cleanupWorktree(project);
-    await autoCommitState(project, cycleId, result.final_outcome);
+    await finalizeCycleStateAndCleanup(project, config, cycleId, result);
   }
 
   return result;

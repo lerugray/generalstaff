@@ -5,6 +5,7 @@ import {
   saveFleetState,
   getProjectFleetState,
   updateProjectFleetState,
+  withFleetStateTransaction,
   loadProjectState,
   saveProjectState,
   ensureCycleDir,
@@ -18,7 +19,7 @@ import {
 } from "../src/state";
 import type { ProjectConfig } from "../src/types";
 import { join } from "path";
-import { mkdirSync, rmSync, existsSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, existsSync, writeFileSync, readdirSync, readFileSync } from "fs";
 
 const TEST_DIR = join(import.meta.dir, "fixtures", "state_test");
 
@@ -32,6 +33,42 @@ afterEach(() => {
 });
 
 describe("fleet state", () => {
+  it("cleans up a partially written temp and preserves the previous fleet file", async () => {
+    if (process.platform === "win32") return; // POSIX file-size limit fixture
+    await saveFleetState({ version: 1, updated_at: "", projects: {} });
+    const original = readFileSync(join(TEST_DIR, "fleet_state.json"), "utf8");
+    const helper = join(import.meta.dir, "helpers", "verify_atomic_write_partial_failure.ts");
+    const result = Bun.spawnSync([
+      "bash", "-c", 'ulimit -f 1; exec "$1" "$2" "$3"',
+      "bash", process.execPath, helper, TEST_DIR,
+    ], { stdout: "pipe", stderr: "pipe" });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain("EFBIG");
+    expect(readFileSync(join(TEST_DIR, "fleet_state.json"), "utf8")).toBe(original);
+    expect(readdirSync(TEST_DIR)).toEqual(["fleet_state.json"]);
+  });
+
+  it("captures an absolute transaction destination when the root is relative", async () => {
+    const originalCwd = process.cwd();
+    const other = join(TEST_DIR, "other");
+    mkdirSync(join(TEST_DIR, "relative"), { recursive: true });
+    mkdirSync(join(other, "relative"), { recursive: true });
+    try {
+      process.chdir(TEST_DIR);
+      setRootDir("relative");
+      const update = withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "captured", "verified", 1);
+      });
+      process.chdir(other);
+      await update;
+      expect(existsSync(join(TEST_DIR, "relative", "fleet_state.json"))).toBe(true);
+      expect(existsSync(join(other, "relative", "fleet_state.json"))).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+      setRootDir(TEST_DIR);
+    }
+  });
+
   it("returns default state when no file exists", async () => {
     const state = await loadFleetState();
     expect(state.version).toBe(1);
@@ -477,5 +514,176 @@ describe("botWorktreePath", () => {
       hands_off: [],
     };
     expect(botWorktreePath(project)).toBe(join("./relative/path", ".bot-worktree"));
+  });
+});
+
+describe("fleet concurrent persistence (reliability)", () => {
+  it("independent fresh defaults do not share projects maps", async () => {
+    const a = await loadFleetState();
+    const b = await loadFleetState();
+    expect(a.projects).not.toBe(b.projects);
+    a.projects["only-a"] = {
+      last_cycle_at: null,
+      last_cycle_outcome: null,
+      total_cycles: 1,
+      total_verified: 0,
+      total_failed: 0,
+      accumulated_minutes: 0,
+    };
+    expect(b.projects["only-a"]).toBeUndefined();
+    expect(Object.keys(b.projects)).toHaveLength(0);
+  });
+
+  it("concurrent transactions for different projects keep both counters", async () => {
+    const baseline = await loadFleetState();
+    await saveFleetState(baseline);
+
+    await Promise.all([
+      withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "project-a", "verified", 3);
+      }),
+      withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "project-b", "verified", 5);
+      }),
+    ]);
+
+    const loaded = await loadFleetState();
+    expect(loaded.projects["project-a"]?.total_cycles).toBe(1);
+    expect(loaded.projects["project-a"]?.accumulated_minutes).toBe(3);
+    expect(loaded.projects["project-b"]?.total_cycles).toBe(1);
+    expect(loaded.projects["project-b"]?.accumulated_minutes).toBe(5);
+  });
+
+  it("concurrent same-project increments serialize to the sum", async () => {
+    await saveFleetState(await loadFleetState());
+
+    await Promise.all([
+      withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "shared", "verified", 1);
+      }),
+      withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "shared", "verified", 1);
+      }),
+      withFleetStateTransaction((fleet) => {
+        updateProjectFleetState(fleet, "shared", "verification_failed", 1);
+      }),
+    ]);
+
+    const loaded = await loadFleetState();
+    expect(loaded.projects["shared"].total_cycles).toBe(3);
+    expect(loaded.projects["shared"].total_verified).toBe(2);
+    expect(loaded.projects["shared"].total_failed).toBe(1);
+    expect(loaded.projects["shared"].accumulated_minutes).toBe(3);
+  });
+
+  it("transaction failure releases the lock for subsequent updates", async () => {
+    await saveFleetState(await loadFleetState());
+
+    let failed = false;
+    try {
+      await withFleetStateTransaction((_fleet) => {
+        throw new Error("inject-fail");
+      });
+    } catch (err) {
+      failed = err instanceof Error && err.message === "inject-fail";
+    }
+    expect(failed).toBe(true);
+
+    await withFleetStateTransaction((fleet) => {
+      updateProjectFleetState(fleet, "after-fail", "verified", 2);
+    });
+    const loaded = await loadFleetState();
+    expect(loaded.projects["after-fail"]?.total_cycles).toBe(1);
+  });
+
+  it("queued transaction keeps the resolved path captured at enqueue", async () => {
+    const rootA = join(TEST_DIR, "root-a");
+    const rootB = join(TEST_DIR, "root-b");
+    mkdirSync(rootA, { recursive: true });
+    mkdirSync(rootB, { recursive: true });
+
+    setRootDir(rootA);
+    await saveFleetState(await loadFleetState());
+
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+    let firstEntered = false;
+
+    const first = withFleetStateTransaction(async (fleet) => {
+      firstEntered = true;
+      await firstGate;
+      updateProjectFleetState(fleet, "in-a", "verified", 1);
+    });
+
+    for (let i = 0; i < 50 && !firstEntered; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(firstEntered).toBe(true);
+
+    // Enqueue while first still holds the lock, then flip root — second
+    // must still write to rootA (path captured at invocation).
+    const second = withFleetStateTransaction((fleet) => {
+      updateProjectFleetState(fleet, "also-a", "verified", 1);
+    });
+    setRootDir(rootB);
+
+    releaseFirst();
+    await Promise.all([first, second]);
+
+    setRootDir(rootA);
+    const loadedA = await loadFleetState();
+    expect(loadedA.projects["in-a"]?.total_cycles).toBe(1);
+    expect(loadedA.projects["also-a"]?.total_cycles).toBe(1);
+
+    setRootDir(rootB);
+    const loadedB = await loadFleetState();
+    expect(loadedB.projects["in-a"]).toBeUndefined();
+    expect(loadedB.projects["also-a"]).toBeUndefined();
+
+    setRootDir(TEST_DIR);
+  });
+});
+
+describe("atomicWrite (exclusive temp + same-directory rename)", () => {
+  const tmpEntries = () => readdirSync(TEST_DIR).filter((n) => n.includes(".tmp"));
+
+  it("leaves no temp files after concurrent fleet saves and the result parses", async () => {
+    const base = await loadFleetState();
+    await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        saveFleetState({
+          ...base,
+          projects: {
+            [`p${i}`]: {
+              last_cycle_at: null,
+              last_cycle_outcome: null,
+              total_cycles: i,
+              total_verified: 0,
+              total_failed: 0,
+              accumulated_minutes: 0,
+            },
+          },
+        }),
+      ),
+    );
+    expect(tmpEntries()).toEqual([]);
+    const parsed = JSON.parse(readFileSync(join(TEST_DIR, "fleet_state.json"), "utf8"));
+    expect(parsed.version).toBe(1);
+    expect(Object.keys(parsed.projects)).toHaveLength(1);
+  });
+
+  it("removes its temp file when the final rename fails", async () => {
+    // A directory at the destination makes rename(2) fail with EISDIR.
+    mkdirSync(join(TEST_DIR, "fleet_state.json"), { recursive: true });
+    let caught: unknown = null;
+    try {
+      await saveFleetState({ version: 1, updated_at: new Date().toISOString(), projects: {} });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(tmpEntries()).toEqual([]);
   });
 });

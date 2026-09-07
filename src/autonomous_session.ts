@@ -13,8 +13,8 @@
 //     non-live item is reported as a dispatch-candidate but nothing runs.
 //   EXECUTE (opts.execute) — additionally dispatch BOT-SAFE+KEEP work through
 //     the normal cycle (engineer → verify → reviewer → bot branch), capped, and
-//     record each in the dispatch-ledger for Ray's review. NEVER pushes/merges
-//     — the work is automated, the MERGE stays gated on Ray. Live/revenue
+//     record each in the dispatch-ledger for review. Project auto_merge is
+//     inherited; remote effects depend on engineer commands and hooks. Live/revenue
 //     projects only dispatch when opts.liveDispatch is set (separate, tighter
 //     cap); otherwise their bot-safe work is held (fork-ledger live-held).
 //
@@ -188,9 +188,9 @@ export function resolveLiveDispatchCap(config: ProjectsYaml): number {
  *  every pre-existing task so the cycle can only pick the new one, runs the full
  *  cycle (engineer → verify → reviewer → bot branch), and returns a
  *  DispatchedCycle when the cycle left reviewable work (verified / verified_weak)
- *  — null otherwise (skipped, failed-and-rolled-back, or no diff). NEVER pushes
- *  or merges: that's cycle.ts's auto_merge gate (kept false on dispatched
- *  projects), and the merge stays Ray's call. */
+ *  — null otherwise (skipped, failed-and-rolled-back, or no diff). The original
+ *  project config is passed through, including opt-in auto_merge; this path
+ *  adds no remote-push stage or provider-side remote restriction. */
 export async function dispatchItem(
   project: ProjectConfig,
   config: DispatcherConfig,
@@ -259,7 +259,7 @@ export function dispatchRecordFromResult(
 /** Run the autonomous-mode pipeline across all autonomous-enabled projects in
  *  `config`. In PREVIEW mode (default) the only write is the fork-ledger; in
  *  EXECUTE mode it additionally dispatches BOT-SAFE work through cycle.ts and
- *  writes the dispatch-ledger (never pushing/merging). One project's failure is
+ *  writes the dispatch-ledger. Cycle merge policy is inherited. One project's failure is
  *  captured in its result and does not abort the rest. */
 export async function runAutonomousSession(
   config: ProjectsYaml,
