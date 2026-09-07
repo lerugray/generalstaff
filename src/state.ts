@@ -92,8 +92,30 @@ function ensureDir(dir: string) {
 // on any failure so a failed write leaves nothing behind.
 const ATOMIC_WRITE_NAME_ATTEMPTS = 8;
 
-async function atomicWrite(filePath: string, data: string) {
-  filePath = resolve(filePath);
+// Serialize replacements of one absolute destination within this process.
+// Unique temps alone do not prevent concurrent Windows rename failures.
+// This is separate from the fleet read-modify-write queue: fleet updates
+// acquire this queue while saving, and atomic writes never acquire that one.
+const atomicWriteChains = new Map<string, Promise<void>>();
+
+function atomicWrite(filePath: string, data: string): Promise<void> {
+  // Capture cwd before waiting, including for writers queued behind a save.
+  const destination = resolve(filePath);
+  const prior = atomicWriteChains.get(destination) ?? Promise.resolve();
+  const run = prior.then(() => atomicWriteAt(destination, data));
+  // A failed write rejects its caller without poisoning queued successors.
+  const settled = run.then(() => undefined, () => undefined);
+  atomicWriteChains.set(destination, settled);
+  void settled.then(() => {
+    // An earlier completion must not remove a newer queued writer's tail.
+    if (atomicWriteChains.get(destination) === settled) {
+      atomicWriteChains.delete(destination);
+    }
+  });
+  return run;
+}
+
+async function atomicWriteAt(filePath: string, data: string) {
   ensureDir(dirname(filePath));
   let tmpPath: string | null = null;
   let handle: Awaited<ReturnType<typeof open>> | undefined;

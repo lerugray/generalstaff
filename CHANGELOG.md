@@ -12,8 +12,9 @@ in practice, entries prioritize
 Parallel-cycle reliability and clearer operating guarantees.
 
 - Concurrent cycle finalizers update fleet counters through a per-file transaction,
-  preventing lost updates inside one GeneralStaff process. Atomic writes use
-  exclusive temporary files and clean them after failed writes or renames.
+  preventing lost updates inside one GeneralStaff process. Atomic writes also
+  serialize replacements of each destination to avoid Windows rename contention.
+  They use exclusive temporary files and clean them after failed writes or renames.
 - STOP reaches every registered engineer. A fresh check prevents a preparing
   sibling from launching after STOP. On Unix, owned engineer process groups
   receive termination and escalation; engineer completion waits for cleanup,

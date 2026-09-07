@@ -649,6 +649,58 @@ describe("fleet concurrent persistence (reliability)", () => {
 describe("atomicWrite (exclusive temp + same-directory rename)", () => {
   const tmpEntries = () => readdirSync(TEST_DIR).filter((n) => n.includes(".tmp"));
 
+  it("continues a queued write after a partial-write failure", async () => {
+    if (process.platform === "win32") return; // POSIX file-size limit fixture
+    await writeStateFile("queued", "state.txt", "original");
+    // Exercise the real writer in an isolated process: the first write
+    // exceeds its file-size limit after creating a temp, while the second
+    // is already queued for the same destination and fits within the limit.
+    const fixture = `
+      import { setRootDir, writeStateFile } from ${JSON.stringify(join(import.meta.dir, "../src/state.ts"))};
+      process.on("SIGXFSZ", () => {});
+      setRootDir(${JSON.stringify(TEST_DIR)});
+      const results = await Promise.allSettled([
+        writeStateFile("queued", "state.txt", "x".repeat(100_000)),
+        writeStateFile("queued", "state.txt", "recovered"),
+      ]);
+      console.log(JSON.stringify(results.map((result) => ({
+        status: result.status,
+        code: result.status === "rejected" ? result.reason.code : null,
+      }))));
+    `;
+    const result = Bun.spawnSync([
+      "bash", "-c", 'ulimit -f 1; exec "$1" -e "$2"',
+      "bash", process.execPath, fixture,
+    ], { stdout: "pipe", stderr: "pipe" });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual([
+      { status: "rejected", code: "EFBIG" },
+      { status: "fulfilled", code: null },
+    ]);
+    expect(await readStateFile("queued", "state.txt")).toBe("recovered");
+    expect(readdirSync(join(TEST_DIR, "state", "queued"))).toEqual(["state.txt"]);
+  });
+
+  it("captures absolute destinations before queued writes wait", async () => {
+    const originalCwd = process.cwd();
+    const other = join(TEST_DIR, "other");
+    mkdirSync(other, { recursive: true });
+    try {
+      process.chdir(TEST_DIR);
+      setRootDir("relative");
+      const first = writeStateFile("queued", "state.txt", "first");
+      setRootDir(join("relative", "unused", ".."));
+      const second = writeStateFile("queued", "state.txt", "second");
+      process.chdir(other);
+      await Promise.all([first, second]);
+      expect(readFileSync(join(TEST_DIR, "relative", "state", "queued", "state.txt"), "utf8")).toBe("second");
+      expect(existsSync(join(other, "relative"))).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+      setRootDir(TEST_DIR);
+    }
+  });
+
   it("leaves no temp files after concurrent fleet saves and the result parses", async () => {
     const base = await loadFleetState();
     await Promise.all(
