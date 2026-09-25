@@ -7,7 +7,9 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
-## Unreleased
+## v0.15.0 — 2026-09-25
+
+Aides: persistent agents beside the fleet.
 
 - Adds optional Aides registry, door messaging, append-only inbox records, CLI commands, and a read-only dashboard section. Aide credentials stay outside GeneralStaff; Aide-authored code enters through the existing verification gate.
 
