@@ -1,0 +1,37 @@
+# Fictional examples only. Copy to aides.yaml and replace the door commands.
+# The registry holds credential scope descriptions, never credential values.
+aides:
+  - name: Cinder
+    kind: independent bot
+    owner: Example Operator
+    description: A persistent bot on another machine that reads a shared file door.
+    door:
+      type: file
+      path: aides/cinder-door.md
+    inbox: aides/cinder-inbox.md
+    capabilities:
+      - research
+      - drafting
+    credential_scope: Access to its own research service; no credential value lives here.
+    hard_lines:
+      - Do not modify project branches without a task and review.
+      - Keep its own credentials on its own machine.
+
+  - name: Lumen
+    kind: hosted personal agent
+    owner: Example Operator
+    description: A hosted personal agent reached through a local client command.
+    door:
+      type: command
+      argv:
+        - fictional-agent-client
+        - send
+        - lumen
+    inbox: aides/lumen-inbox.md
+    capabilities:
+      - planning
+      - source review
+    credential_scope: Its hosted workspace credentials remain with the agent.
+    hard_lines:
+      - Log decisions in its inbox before claiming completion.
+      - No direct access to GeneralStaff project credentials.

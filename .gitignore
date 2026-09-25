@@ -8,6 +8,10 @@ projects.yaml
 # Root-only match so test fixtures under tests/fixtures/ stay tracked.
 /provider_config.yaml
 
+# Optional Aides registry and local inbox/door data are operator-owned.
+/aides.yaml
+/aides/
+
 # Logs from dispatcher runs
 logs/
 *.log

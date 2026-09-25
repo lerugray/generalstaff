@@ -21,6 +21,8 @@ import {
 } from "./server/routes/phase";
 import { getFleetOverview } from "./views/fleet_overview";
 import type { FleetOverviewProjectRow } from "./views/fleet_overview";
+import { aidePath, loadAides, readInbox } from "./aides";
+import { getRootDir } from "./state";
 
 export interface StartServerOptions {
   port?: number;
@@ -130,7 +132,25 @@ function renderProjectRow(p: FleetOverviewProjectRow): string {
 </tr>`;
 }
 
+async function renderAidesSection(): Promise<string> {
+  try {
+    const rootDir = getRootDir();
+    const aides = loadAides(rootDir);
+    const cards = await Promise.all(aides.map(async (aide) => {
+      const rows = (await readInbox(aidePath(rootDir, aide.inbox))).slice(-5).reverse();
+      const recent = rows.length
+        ? `<ul>${rows.map((row) => `<li><strong>${escHtml(row.timestamp)}</strong> ${escHtml(row.from)}: ${escHtml(row.title)}${row.tags.map((tag) => ` [${escHtml(tag)}]`).join("")}<ul>${row.body.map((line) => `<li>${escHtml(line)}</li>`).join("")}</ul></li>`).join("")}</ul>`
+        : `<p class="empty">No inbox rows yet.</p>`;
+      return `<article><h3>${escHtml(aide.name)}</h3><p>Door: ${escHtml(aide.door.type)}</p>${recent}</article>`;
+    }));
+    return `<section class="panel" aria-labelledby="aides-heading"><h2 id="aides-heading">Aides</h2>${cards.length ? cards.join("\n") : `<p class="empty">No Aides registered. See <code>aides.yaml.example</code>.</p>`}</section>`;
+  } catch (error) {
+    return `<section class="panel" aria-labelledby="aides-heading"><h2 id="aides-heading">Aides</h2><p class="empty">${escHtml((error as Error).message)}</p></section>`;
+  }
+}
+
 async function renderIndex(): Promise<string> {
+  const aidesSection = await renderAidesSection();
   let data;
   try {
     data = await getFleetOverview();
@@ -143,7 +163,7 @@ async function renderIndex(): Promise<string> {
 <h2 id="fleet-heading">Fleet overview</h2>
 <p class="empty">Could not load projects.yaml: <code>${escHtml(msg)}</code></p>
 <p>Run <code>generalstaff doctor</code> to diagnose, or check <code>projects.yaml.example</code> for the schema.</p>
-</section>`,
+</section>${aidesSection}`,
     });
   }
 
@@ -191,7 +211,7 @@ ${projectsBody}
 <dt>Stop the dispatcher</dt><dd><code>generalstaff stop</code></dd>
 <dt>Tail live events</dt><dd><a href="/inbox">/inbox</a> (attention items) or <code>generalstaff status --watch</code></dd>
 </dl>
-</section>`;
+</section>${aidesSection}`;
 
   return layout({
     title: "GeneralStaff — Fleet",

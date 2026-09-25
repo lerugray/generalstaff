@@ -1718,3 +1718,25 @@ Scope boundary: this is dogfood policy, not the recommended default for
 third-party projects. Any broader use requires a separate explicit rule
 relaxation; changing these modes back to a stricter working Claude Code
 mode remains preferable when unattended execution can still complete.
+
+## Aides layer — 2026-09-25
+
+Aides are optional, persistent agents outside the per-cycle engineer pool.
+`aides.yaml` records identity, operator, capabilities, credential scope, hard
+lines, one contact door, and an inbox path. The registry and inbox are separate
+from `projects.yaml` and project state; the dispatcher does not schedule Aides.
+
+The door is the only outbound contact path. Command doors receive text on stdin
+through argv spawning, file doors receive Markdown request rows, and HTTP doors
+receive JSON with runtime headers sourced from environment variable names.
+Successful sends append an outbound inbox row. Aides or their bridges append
+decision rows; the CLI and dashboard read those rows. The dashboard escapes
+content and never sends requests. Each inbox append serializes read/replace
+within one process and uses an exclusive temporary file plus atomic rename.
+Independent processes writing one inbox require coordination outside this layer.
+
+The Aide's credentials remain with it. The registry validator rejects values
+recognized by `redactSecrets`; its HTTP mapping contains environment variable
+names only. Aide-authored code receives no privilege: it enters the normal
+project cycle and verification gate. This architecture adds no path around the
+existing hands-off, reviewer, dispatcher, or merge controls.
