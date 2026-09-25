@@ -26,6 +26,7 @@ import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
 import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, matchesHandsOffSymlinkAware } from "./safety";
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import { formatSecretRedactionWarning, redactSecrets } from "./secrets";
+import { patchDigestFromBytes } from "./cycle_result_v1";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -798,6 +799,8 @@ export async function executeCycle(
   let nextTask: GreenfieldTask | undefined;
   let engineerResult: EngineerResult | undefined;
   let mainHeadStartSha = "unknown";
+  /** Digest of diff.patch bytes as written; frozen onto cycle_end (closes G2). */
+  let writtenPatchDigest: string | null = null;
 
   assemble: {
     // 1. Pre-flight skip paths
@@ -1242,6 +1245,7 @@ export async function executeCycle(
       redactedDiff.redacted,
       config,
     );
+    writtenPatchDigest = patchDigestFromBytes(redactedDiff.redacted);
     await appendProgress(project.id, "diff_summary", {
       start_sha: cycleStartSha,
       end_sha: cycleEndSha,
@@ -1641,6 +1645,8 @@ export async function executeCycle(
     if (cycleEndAttemptedId) {
       result.attempted_task_id = cycleEndAttemptedId;
     }
+    // Additive identity fields (2026-09-25): freeze checkout/branch/base and
+    // patch digest on cycle_end so desktop can bind without live drift (G1/G2).
     const cycleEndData: Record<string, unknown> = {
       outcome: result.final_outcome,
       reason: result.reason,
@@ -1649,6 +1655,10 @@ export async function executeCycle(
       engineer_exit_code: result.engineer_exit_code,
       verification_outcome: result.verification_outcome,
       reviewer_verdict: result.reviewer_verdict,
+      checkout_path: project.path,
+      branch,
+      base_revision: result.cycle_start_sha,
+      ...(writtenPatchDigest ? { patch_digest: writtenPatchDigest } : {}),
       ...(handsOffViolations ? { hands_off_violations: handsOffViolations } : {}),
       diff_stats: result.diff_stats,
       duration_seconds: Math.round(

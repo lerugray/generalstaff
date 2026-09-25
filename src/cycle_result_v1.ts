@@ -11,6 +11,9 @@ import { getRootDir } from "./state";
 
 export const CYCLE_RESULT_SCHEMA_VERSION = "cycle-result/v1" as const;
 
+/** Closed for cycles recorded after 2026-09-25 when identity is frozen on cycle_end. */
+export const G1_G2_CLOSED_AFTER = "2026-09-25";
+
 export type CycleResultGateState =
   | "passed"
   | "failed"
@@ -87,6 +90,12 @@ interface RawEvent {
   data: Record<string, unknown>;
 }
 
+const PATCH_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+
+export function isValidPatchDigest(digest: string | null | undefined): boolean {
+  return typeof digest === "string" && PATCH_DIGEST_RE.test(digest);
+}
+
 function asString(v: unknown): string | null {
   return typeof v === "string" && v.length > 0 ? v : null;
 }
@@ -119,6 +128,39 @@ export function patchDigestFromBytes(bytes: string | Uint8Array): string {
   return `sha256:${hash}`;
 }
 
+function receiptIdsOk(doc: CycleResultV1): boolean {
+  const vId = doc.receipts.verification.id;
+  const rId = doc.receipts.reviewer.id;
+  return (
+    vId === `${doc.cycleId}:verification` &&
+    rId === `${doc.cycleId}:reviewer`
+  );
+}
+
+function evidenceComplete(doc: CycleResultV1): boolean {
+  const e = doc.evidence;
+  return (
+    e.progressPath !== null &&
+    e.cycleDir !== null &&
+    e.diffPatchPath !== null &&
+    e.reviewerResponsePath !== null
+  );
+}
+
+function identityComplete(doc: CycleResultV1): boolean {
+  const i = doc.identity;
+  return (
+    i.checkoutPath !== null &&
+    i.branch !== null &&
+    i.baseRevision !== null &&
+    isValidPatchDigest(i.patchDigest)
+  );
+}
+
+/**
+ * Contract pass condition (docs/contracts/cycle-result-v1.md §4).
+ * Does not include recorded-vs-current digest staleness (emitter conflict rule).
+ */
 export function meetsPassCondition(doc: CycleResultV1): boolean {
   if (doc.schemaVersion !== CYCLE_RESULT_SCHEMA_VERSION) return false;
   const fo = doc.outcome.finalOutcome;
@@ -130,13 +172,9 @@ export function meetsPassCondition(doc: CycleResultV1): boolean {
   if (!doc.receipts.verification.present || !doc.receipts.reviewer.present) {
     return false;
   }
-  if (
-    doc.identity.patchDigest === null ||
-    !doc.identity.patchDigest.startsWith("sha256:") ||
-    doc.identity.patchDigest.length <= "sha256:".length
-  ) {
-    return false;
-  }
+  if (!receiptIdsOk(doc)) return false;
+  if (!identityComplete(doc)) return false;
+  if (!evidenceComplete(doc)) return false;
   return true;
 }
 
@@ -203,12 +241,18 @@ export async function getCycleResultV1(
     null;
   let reviewerVerdict: CycleResultV1["outcome"]["reviewerVerdict"] = null;
   let reason: string | null = null;
+  // Receipts present ONLY from dedicated events (never from cycle_end alone).
   let verificationPresent = false;
   let reviewerPresent = false;
   let verificationSummary: string | null = null;
   let reviewerSummary: string | null = null;
   let cycleEndCount = 0;
   let cycleSkippedCount = 0;
+  // Frozen on cycle_end after 2026-09-25 (closes G1/G2 for new records).
+  let recordedPatchDigest: string | null = null;
+  let recordedCheckoutPath: string | null = null;
+  let recordedBranch: string | null = null;
+  let recordedBaseRevision: string | null = null;
 
   for (const evt of events) {
     if (projectId === null) {
@@ -276,22 +320,39 @@ export async function getCycleResultV1(
           asString(evt.data.end_sha) ??
           asString(evt.data.sha_after) ??
           endRevision;
+        // Outcome fields may be mirrored on cycle_end for display, but must
+        // NOT invent receipt present=true (SPEC: independent events).
         const vo = asString(evt.data.verification_outcome);
-        if (vo === "passed" || vo === "failed" || vo === "weak") {
+        if (
+          (vo === "passed" || vo === "failed" || vo === "weak") &&
+          verificationOutcome === null
+        ) {
           verificationOutcome = vo;
-          verificationPresent = true;
-          verificationSummary = verificationSummary ?? vo;
+        }
+        if (verificationSummary === null && vo !== null) {
+          verificationSummary = vo;
         }
         const rv = asString(evt.data.reviewer_verdict);
         if (
-          rv === "verified" ||
-          rv === "verified_weak" ||
-          rv === "verification_failed"
+          (rv === "verified" ||
+            rv === "verified_weak" ||
+            rv === "verification_failed") &&
+          reviewerVerdict === null
         ) {
           reviewerVerdict = rv;
-          reviewerPresent = true;
-          reviewerSummary = reviewerSummary ?? rv;
         }
+        if (reviewerSummary === null && rv !== null) {
+          reviewerSummary = rv;
+        }
+        recordedPatchDigest =
+          asString(evt.data.patch_digest) ?? recordedPatchDigest;
+        recordedCheckoutPath =
+          asString(evt.data.checkout_path) ?? recordedCheckoutPath;
+        recordedBranch = asString(evt.data.branch) ?? recordedBranch;
+        recordedBaseRevision =
+          asString(evt.data.base_revision) ??
+          asString(evt.data.start_sha) ??
+          recordedBaseRevision;
         break;
       }
       case "cycle_skipped": {
@@ -312,9 +373,7 @@ export async function getCycleResultV1(
     );
   }
 
-  const gaps: CycleResultGap[] = ["G1", "G2", "G3", "G5"];
-
-  let checkoutPath: string | null =
+  let liveCheckoutPath: string | null =
     opts.checkoutPathOverride === undefined
       ? null
       : opts.checkoutPathOverride;
@@ -322,20 +381,34 @@ export async function getCycleResultV1(
     try {
       const projects = await loadProjects();
       const match = projects.find((p) => p.id === projectId);
-      checkoutPath = match?.path ?? null;
+      liveCheckoutPath = match?.path ?? null;
     } catch {
-      checkoutPath = null;
+      liveCheckoutPath = null;
     }
   }
+
+  const checkoutPath = recordedCheckoutPath ?? liveCheckoutPath;
+  if (recordedBranch !== null) branch = recordedBranch;
+  if (recordedBaseRevision !== null) baseRevision = recordedBaseRevision;
 
   const cycleDirAbs = join(root, "state", projectId, "cycles", cycleId);
   const diffAbs = join(cycleDirAbs, "diff.patch");
   const reviewerAbs = join(cycleDirAbs, "reviewer-response.txt");
 
-  let patchDigest: string | null = null;
+  let currentPatchDigest: string | null = null;
   if (existsSync(diffAbs)) {
     const bytes = await readFile(diffAbs);
-    patchDigest = patchDigestFromBytes(bytes);
+    currentPatchDigest = patchDigestFromBytes(bytes);
+  }
+  // Document identity digest is the bytes on disk now (desktop binds against it).
+  const patchDigest = currentPatchDigest;
+
+  const gaps: CycleResultGap[] = ["G3", "G5"];
+  if (recordedCheckoutPath === null) gaps.unshift("G1");
+  if (recordedPatchDigest === null) {
+    // Insert G2 after G1 if present, else at front before G3.
+    const g3Idx = gaps.indexOf("G3");
+    gaps.splice(g3Idx, 0, "G2");
   }
 
   const progressRel =
@@ -389,7 +462,7 @@ export async function getCycleResultV1(
   };
 
   const terminals = cycleEndCount + cycleSkippedCount;
-  if (cycleEndCount > 1 || (cycleEndCount >= 1 && cycleSkippedCount >= 1)) {
+  if (terminals > 1) {
     doc.state = "unavailable";
     doc.unavailableReason = "duplicate_terminal_records";
     return doc;
@@ -400,7 +473,40 @@ export async function getCycleResultV1(
     return doc;
   }
 
-  if (meetsPassCondition(doc)) {
+  // Outcome + dedicated receipts look like a pass candidate?
+  const fo = doc.outcome.finalOutcome;
+  const vo = doc.outcome.verificationOutcome;
+  const rv = doc.outcome.reviewerVerdict;
+  const outcomePass =
+    (fo === "verified" || fo === "verified_weak") &&
+    (vo === "passed" || vo === "weak") &&
+    (rv === "verified" || rv === "verified_weak") &&
+    verificationPresent &&
+    reviewerPresent;
+
+  if (outcomePass) {
+    if (recordedPatchDigest === null) {
+      // Pre-2026-09-25 cycle: no frozen digest → never passed.
+      doc.state = "stale_uncertain";
+      return doc;
+    }
+    if (
+      currentPatchDigest === null ||
+      recordedPatchDigest !== currentPatchDigest
+    ) {
+      doc.state = "stale_uncertain";
+      return doc;
+    }
+    if (!identityComplete(doc) || !evidenceComplete(doc) || !receiptIdsOk(doc)) {
+      doc.state = "unavailable";
+      doc.unavailableReason = "missing_identity_or_evidence";
+      return doc;
+    }
+    if (!isValidPatchDigest(recordedPatchDigest)) {
+      doc.state = "unavailable";
+      doc.unavailableReason = "malformed_patch_digest";
+      return doc;
+    }
     doc.state = "passed";
     return doc;
   }

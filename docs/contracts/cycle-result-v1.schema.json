@@ -49,14 +49,15 @@
         "projectId": { "type": "string", "minLength": 1 },
         "checkoutPath": {
           "type": ["string", "null"],
-          "description": "Absolute checkout path from live projects.yaml, or null when unknown (gap G1)."
+          "description": "Absolute checkout path; prefer cycle_end.checkout_path (frozen after 2026-09-25), else live projects.yaml. Null when unknown (gap G1 for older cycles)."
         },
         "branch": { "type": ["string", "null"] },
         "baseRevision": { "type": ["string", "null"] },
         "endRevision": { "type": ["string", "null"] },
         "patchDigest": {
           "type": ["string", "null"],
-          "description": "sha256:<hex> of UTF-8 diff.patch bytes, or null if missing."
+          "description": "sha256:<64 lowercase hex> of UTF-8 diff.patch bytes as read now, or null if missing. Pass requires equality with cycle_end.patch_digest when present.",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         }
       }
     },
