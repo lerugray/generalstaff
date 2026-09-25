@@ -147,13 +147,29 @@ function evidenceComplete(doc: CycleResultV1): boolean {
   );
 }
 
+function nonEmpty(s: string | null | undefined): boolean {
+  return typeof s === "string" && s.length > 0;
+}
+
 function identityComplete(doc: CycleResultV1): boolean {
   const i = doc.identity;
   return (
-    i.checkoutPath !== null &&
-    i.branch !== null &&
-    i.baseRevision !== null &&
+    nonEmpty(i.projectId) &&
+    nonEmpty(i.checkoutPath) &&
+    nonEmpty(i.branch) &&
+    nonEmpty(i.baseRevision) &&
     isValidPatchDigest(i.patchDigest)
+  );
+}
+
+/** Malformed JSONL that still names this cycle or a terminal event → fail closed. */
+function lineLooksRelevantToCycle(line: string, cycleId: string): boolean {
+  if (line.includes(cycleId)) return true;
+  return (
+    line.includes('"cycle_end"') ||
+    line.includes('"cycle_skipped"') ||
+    line.includes("cycle_end") ||
+    line.includes("cycle_skipped")
   );
 }
 
@@ -206,6 +222,7 @@ export async function getCycleResultV1(
 
   const events: RawEvent[] = [];
   let progressPathUsed: string | null = null;
+  let relevantMalformedLine = false;
 
   for (const path of paths) {
     let raw: string;
@@ -218,7 +235,12 @@ export async function getCycleResultV1(
       const trimmed = line.trim();
       if (!trimmed) continue;
       const evt = parseRawEvent(trimmed);
-      if (!evt) continue;
+      if (!evt) {
+        if (lineLooksRelevantToCycle(trimmed, cycleId)) {
+          relevantMalformedLine = true;
+        }
+        continue;
+      }
       const evtCycleId = evt.cycle_id ?? asString(evt.data.cycle_id);
       if (evtCycleId !== cycleId) continue;
       events.push(evt);
@@ -248,6 +270,9 @@ export async function getCycleResultV1(
   let reviewerSummary: string | null = null;
   let cycleEndCount = 0;
   let cycleSkippedCount = 0;
+  const verificationOutcomesSeen = new Set<string>();
+  const reviewerVerdictsSeen = new Set<string>();
+  let conflictingReceipts = false;
   // Frozen on cycle_end after 2026-09-25 (closes G1/G2 for new records).
   let recordedPatchDigest: string | null = null;
   let recordedCheckoutPath: string | null = null;
@@ -279,8 +304,16 @@ export async function getCycleResultV1(
         verificationPresent = true;
         const o = asString(evt.data.outcome);
         if (o === "passed" || o === "failed" || o === "weak" || o === "pass") {
-          verificationOutcome =
+          const normalized =
             o === "pass" ? "passed" : (o as "passed" | "failed" | "weak");
+          if (
+            verificationOutcomesSeen.size > 0 &&
+            !verificationOutcomesSeen.has(normalized)
+          ) {
+            conflictingReceipts = true;
+          }
+          verificationOutcomesSeen.add(normalized);
+          verificationOutcome = normalized;
         }
         verificationSummary = o;
         break;
@@ -294,6 +327,13 @@ export async function getCycleResultV1(
           v === "verified_weak" ||
           v === "verification_failed"
         ) {
+          if (
+            reviewerVerdictsSeen.size > 0 &&
+            !reviewerVerdictsSeen.has(v)
+          ) {
+            conflictingReceipts = true;
+          }
+          reviewerVerdictsSeen.add(v);
           reviewerVerdict = v;
         }
         reviewerSummary = v ?? asString(evt.data.reason);
@@ -387,7 +427,12 @@ export async function getCycleResultV1(
     }
   }
 
-  const checkoutPath = recordedCheckoutPath ?? liveCheckoutPath;
+  // Post-freeze cycles (recorded patch_digest) bind checkout only from cycle_end;
+  // live projects.yaml fallback is for pre-freeze display and can never pass.
+  const checkoutPath =
+    recordedPatchDigest !== null
+      ? recordedCheckoutPath
+      : (recordedCheckoutPath ?? liveCheckoutPath);
   if (recordedBranch !== null) branch = recordedBranch;
   if (recordedBaseRevision !== null) baseRevision = recordedBaseRevision;
 
@@ -462,6 +507,16 @@ export async function getCycleResultV1(
   };
 
   const terminals = cycleEndCount + cycleSkippedCount;
+  if (relevantMalformedLine) {
+    doc.state = "unavailable";
+    doc.unavailableReason = "malformed_progress_line";
+    return doc;
+  }
+  if (conflictingReceipts) {
+    doc.state = "unavailable";
+    doc.unavailableReason = "conflicting_receipts";
+    return doc;
+  }
   if (terminals > 1) {
     doc.state = "unavailable";
     doc.unavailableReason = "duplicate_terminal_records";
@@ -490,11 +545,9 @@ export async function getCycleResultV1(
       doc.state = "stale_uncertain";
       return doc;
     }
-    if (
-      currentPatchDigest === null ||
-      recordedPatchDigest !== currentPatchDigest
-    ) {
-      doc.state = "stale_uncertain";
+    if (!isValidPatchDigest(recordedPatchDigest)) {
+      doc.state = "unavailable";
+      doc.unavailableReason = "malformed_patch_digest";
       return doc;
     }
     if (!identityComplete(doc) || !evidenceComplete(doc) || !receiptIdsOk(doc)) {
@@ -502,9 +555,11 @@ export async function getCycleResultV1(
       doc.unavailableReason = "missing_identity_or_evidence";
       return doc;
     }
-    if (!isValidPatchDigest(recordedPatchDigest)) {
-      doc.state = "unavailable";
-      doc.unavailableReason = "malformed_patch_digest";
+    if (
+      currentPatchDigest === null ||
+      recordedPatchDigest !== currentPatchDigest
+    ) {
+      doc.state = "stale_uncertain";
       return doc;
     }
     doc.state = "passed";

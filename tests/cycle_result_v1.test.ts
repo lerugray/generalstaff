@@ -490,6 +490,230 @@ describe("getCycleResultV1", () => {
     expect(doc.state).toBe("failed");
     expect(meetsPassCondition(doc)).toBe(false);
   });
+
+  it("rejects empty projectId/checkoutPath/branch/baseRevision for pass", async () => {
+    const patch = "diff --git a/x.ts b/x.ts\n+export const ok = true;\n";
+    const digest = patchDigestFromBytes(patch);
+    writeFileSync(join(CYCLE_DIR, "diff.patch"), patch);
+    writeFileSync(join(CYCLE_DIR, "reviewer-response.txt"), "verified\n");
+    writeFileSync(
+      FLEET_LOG,
+      [
+        {
+          timestamp: "2026-09-25T12:00:00Z",
+          event: "cycle_start",
+          cycle_id: CYCLE_ID,
+          project_id: "",
+          data: { start_sha: "aaa111", branch: "bot/work" },
+        },
+        {
+          timestamp: "2026-09-25T12:01:00Z",
+          event: "verification_outcome",
+          cycle_id: CYCLE_ID,
+          project_id: "",
+          data: { outcome: "passed" },
+        },
+        {
+          timestamp: "2026-09-25T12:02:00Z",
+          event: "reviewer_verdict",
+          cycle_id: CYCLE_ID,
+          project_id: "",
+          data: { verdict: "verified" },
+        },
+        {
+          timestamp: "2026-09-25T12:03:00Z",
+          event: "cycle_end",
+          cycle_id: CYCLE_ID,
+          project_id: "",
+          data: {
+            outcome: "verified",
+            reason: "ok",
+            start_sha: "aaa111",
+            end_sha: "bbb222",
+            verification_outcome: "passed",
+            reviewer_verdict: "verified",
+            patch_digest: digest,
+            checkout_path: "",
+            branch: "bot/work",
+            base_revision: "aaa111",
+          },
+        },
+      ]
+        .map((l) => JSON.stringify(l))
+        .join("\n") + "\n",
+    );
+    // Evidence under empty projectId path segment (join collapses "").
+    const emptyProjectCycleDir = join(VIEW_DIR, "state", "cycles", CYCLE_ID);
+    mkdirSync(emptyProjectCycleDir, { recursive: true });
+    writeFileSync(join(emptyProjectCycleDir, "diff.patch"), patch);
+    writeFileSync(join(emptyProjectCycleDir, "reviewer-response.txt"), "verified\n");
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "",
+    });
+    expect(doc.identity.projectId).toBe("");
+    expect(doc.state).toBe("unavailable");
+    expect(doc.unavailableReason).toBe("missing_identity_or_evidence");
+    expect(meetsPassCondition(doc)).toBe(false);
+  });
+
+  it("marks conflicting verification_outcome receipts as unavailable", async () => {
+    writePassedLog();
+    const conflict = {
+      timestamp: "2026-09-25T12:01:30Z",
+      event: "verification_outcome",
+      cycle_id: CYCLE_ID,
+      project_id: PROJECT,
+      data: { outcome: "failed" },
+    };
+    // Insert after first verification_outcome (failed then passed already in log order:
+    // writePassedLog writes passed first — append a disagreeing failed).
+    writeFileSync(
+      FLEET_LOG,
+      readFileSync(FLEET_LOG, "utf8") + JSON.stringify(conflict) + "\n",
+    );
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/alpha",
+    });
+    expect(doc.state).toBe("unavailable");
+    expect(doc.unavailableReason).toBe("conflicting_receipts");
+    expect(meetsPassCondition(doc)).toBe(false);
+  });
+
+  it("allows identical duplicate verification_outcome to collapse", async () => {
+    writePassedLog();
+    const dup = {
+      timestamp: "2026-09-25T12:01:30Z",
+      event: "verification_outcome",
+      cycle_id: CYCLE_ID,
+      project_id: PROJECT,
+      data: { outcome: "passed" },
+    };
+    writeFileSync(
+      FLEET_LOG,
+      readFileSync(FLEET_LOG, "utf8") + JSON.stringify(dup) + "\n",
+    );
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/alpha",
+    });
+    expect(doc.state).toBe("passed");
+  });
+
+  it("does not pass post-freeze cycle via live checkout fallback (G1)", async () => {
+    const patch = "diff --git a/x.ts b/x.ts\n+export const ok = true;\n";
+    const digest = patchDigestFromBytes(patch);
+    writeFileSync(join(CYCLE_DIR, "diff.patch"), patch);
+    writeFileSync(join(CYCLE_DIR, "reviewer-response.txt"), "verified\n");
+    writeFileSync(
+      FLEET_LOG,
+      [
+        {
+          timestamp: "2026-09-25T12:00:00Z",
+          event: "cycle_start",
+          cycle_id: CYCLE_ID,
+          project_id: PROJECT,
+          data: { start_sha: "aaa111", branch: "bot/work" },
+        },
+        {
+          timestamp: "2026-09-25T12:01:00Z",
+          event: "verification_outcome",
+          cycle_id: CYCLE_ID,
+          project_id: PROJECT,
+          data: { outcome: "passed" },
+        },
+        {
+          timestamp: "2026-09-25T12:02:00Z",
+          event: "reviewer_verdict",
+          cycle_id: CYCLE_ID,
+          project_id: PROJECT,
+          data: { verdict: "verified" },
+        },
+        {
+          timestamp: "2026-09-25T12:03:00Z",
+          event: "cycle_end",
+          cycle_id: CYCLE_ID,
+          project_id: PROJECT,
+          data: {
+            outcome: "verified",
+            reason: "ok",
+            start_sha: "aaa111",
+            end_sha: "bbb222",
+            verification_outcome: "passed",
+            reviewer_verdict: "verified",
+            patch_digest: digest,
+            branch: "bot/work",
+            base_revision: "aaa111",
+            // no checkout_path — post-freeze must not fall back to live path
+          },
+        },
+      ]
+        .map((l) => JSON.stringify(l))
+        .join("\n") + "\n",
+    );
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/live-other-clone",
+    });
+    expect(doc.identity.checkoutPath).toBeNull();
+    expect(doc.gaps).toContain("G1");
+    expect(doc.state).toBe("unavailable");
+    expect(doc.unavailableReason).toBe("missing_identity_or_evidence");
+  });
+
+  it("marks relevant malformed progress line as unavailable", async () => {
+    writePassedLog();
+    writeFileSync(
+      FLEET_LOG,
+      readFileSync(FLEET_LOG, "utf8") +
+        `{"timestamp":"2026-09-25T12:04:00Z","event":"cycle_end","cycle_id":"${CYCLE_ID}",NOT_JSON\n`,
+    );
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/alpha",
+    });
+    expect(doc.state).toBe("unavailable");
+    expect(doc.unavailableReason).toBe("malformed_progress_line");
+  });
+
+  it("skips unrelated malformed lines without failing the cycle", async () => {
+    writePassedLog();
+    writeFileSync(
+      FLEET_LOG,
+      readFileSync(FLEET_LOG, "utf8") +
+        `{not json about another cycle}\n`,
+    );
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/alpha",
+    });
+    expect(doc.state).toBe("passed");
+  });
+
+  it("marks malformed recorded patch_digest as unavailable not stale", async () => {
+    writePassedLog();
+    const lines = readFileSync(FLEET_LOG, "utf8")
+      .split("\n")
+      .filter((l) => l.trim())
+      .map((l) => {
+        const o = JSON.parse(l) as {
+          event?: string;
+          data?: Record<string, unknown>;
+        };
+        if (o.event === "cycle_end" && o.data) {
+          o.data.patch_digest = "sha256:abc";
+        }
+        return JSON.stringify(o);
+      });
+    writeFileSync(FLEET_LOG, lines.join("\n") + "\n");
+    const doc = await getCycleResultV1(CYCLE_ID, {
+      fleetLogPath: FLEET_LOG,
+      checkoutPathOverride: "/tmp/alpha",
+    });
+    expect(doc.state).toBe("unavailable");
+    expect(doc.unavailableReason).toBe("malformed_patch_digest");
+  });
 });
 
 describe("cycle result CLI", () => {

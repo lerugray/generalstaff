@@ -35,8 +35,8 @@ view (gs-264). Its JSON shape is **not** this contract.
 | `schemaVersion` | Always `"cycle-result/v1"` for this document | Emitter constant (not stored on cycle_end) |
 | `cycleId` | Stable cycle id | `PROGRESS.jsonl` `cycle_id` / `CycleResult.cycle_id` (`YYYYMMDDHHMMSS_xxxx`) |
 | `state` | Gate projection (see §3) | Derived from recorded events + evidence |
-| `identity.projectId` | Registered project id | `project_id` on progress events / `CycleResult` |
-| `identity.checkoutPath` | Absolute path of the project checkout | Prefer `cycle_end.data.checkout_path` (frozen after **2026-09-25**). Else live `projects.yaml` `path` |
+| `identity.projectId` | Registered project id | `project_id` on progress events / `CycleResult` — **non-empty** required for `passed` |
+| `identity.checkoutPath` | Absolute path of the project checkout | Prefer `cycle_end.data.checkout_path` (frozen after **2026-09-25**). Live `projects.yaml` `path` is a display fallback **only for pre-freeze cycles** (no recorded `patch_digest`); a post-freeze cycle without recorded `checkout_path` never `passed` |
 | `identity.branch` | Effective bot branch for the cycle | Prefer `cycle_end.data.branch`; else `cycle_start` / `diff_summary` `branch` |
 | `identity.baseRevision` | SHA at cycle start | Prefer `cycle_end.data.base_revision`; else `start_sha` / `CycleResult.cycle_start_sha` |
 | `identity.endRevision` | SHA at cycle end (post-rollback if failed) | `cycle_end` `end_sha` / `CycleResult.cycle_end_sha` |
@@ -73,8 +73,8 @@ Existing readers ignore unknown fields. Cycles recorded before this change omit 
 | `failed` | Terminal whose outcome is not a pass, or required dedicated receipts are absent |
 | `running` | `cycle_start` (or later non-terminal events) present and **no** `cycle_end` / `cycle_skipped` yet |
 | `not_submitted` | Not emitted for a real `cycleId`. Desktop uses this when **no** cycle is bound to an order; the CLI has no such row |
-| `unavailable` | Two or more terminal records of any kind (including multiple `cycle_skipped`); missing identity/evidence when a pass would otherwise be claimed; malformed recorded digest |
-| `stale_uncertain` | Recorded `patch_digest` missing (pre-freeze cycle) or ≠ digest of `diff.patch` read now, when the cycle would otherwise look like a pass |
+| `unavailable` | Two or more terminal records of any kind (including multiple `cycle_skipped`); missing / empty identity or evidence when a pass would otherwise be claimed; malformed recorded digest; conflicting dedicated verification/reviewer receipts; a progress line that fails JSON parse but names this `cycleId` or a terminal event |
+| `stale_uncertain` | Recorded `patch_digest` missing (pre-freeze cycle) or ≠ digest of `diff.patch` read now (when the recorded digest is well-formed), when the cycle would otherwise look like a pass |
 
 Desktop must never show `passed` unless §4 holds **and** the bound candidate’s identity (project, cycle, checkout, branch, base revision, patch digest) equals the document.
 
@@ -87,8 +87,8 @@ Desktop must never show `passed` unless §4 holds **and** the bound candidate’
 3. `outcome.verificationOutcome` ∈ {`passed`, `weak`}, from a **dedicated** verification event (`receipts.verification.present === true`).
 4. `outcome.reviewerVerdict` ∈ {`verified`, `verified_weak`}, from a **dedicated** reviewer event (`receipts.reviewer.present === true`).
 5. Receipt ids equal `{cycleId}:verification` and `{cycleId}:reviewer`.
-6. `identity.checkoutPath`, `identity.branch`, and `identity.baseRevision` are non-null.
-7. `identity.patchDigest` matches `^sha256:[0-9a-f]{64}$` and equals `cycle_end.data.patch_digest` (recorded) **and** the digest of `diff.patch` bytes read now.
+6. `identity.projectId`, `identity.checkoutPath`, `identity.branch`, and `identity.baseRevision` are non-null **and non-empty**. For post-freeze cycles (`cycle_end.data.patch_digest` present), `checkoutPath` must come from recorded `checkout_path` (live `projects.yaml` fallback does not satisfy pass).
+7. `identity.patchDigest` matches `^sha256:[0-9a-f]{64}$` and equals `cycle_end.data.patch_digest` (recorded) **and** the digest of `diff.patch` bytes read now. A malformed recorded digest → `unavailable` (not `stale_uncertain`).
 8. All `evidence.*` paths are non-null.
 
 `verified_weak` / verification `weak` count as pass for the gate (same convention as `src/results.ts`).
@@ -97,14 +97,16 @@ A cycle recorded **before** 2026-09-25 with no `patch_digest` on `cycle_end` nev
 
 ## 5. Conflict rules
 
-1. **Changed patch invalidates a pass.** If `cycle_end.data.patch_digest` ≠ digest of current `diff.patch`, emit `stale_uncertain` (not `passed`). Desktop also rejects when its bound candidate digest ≠ `identity.patchDigest`.
+1. **Changed patch invalidates a pass.** If `cycle_end.data.patch_digest` ≠ digest of current `diff.patch`, emit `stale_uncertain` (not `passed`). Desktop also rejects when its bound candidate digest ≠ `identity.patchDigest`. Validate the recorded digest format first; malformed → `unavailable`.
 2. **Two or more terminal records for one cycle.** If more than one terminal (`cycle_end` and/or `cycle_skipped`, including two skips) exist for the same `cycleId`, emit `state: unavailable` with reason `duplicate_terminal_records`.
+3. **Conflicting dedicated receipts.** Two or more `verification_outcome` (or `reviewer_verdict`) events for one cycle that disagree → `unavailable` with reason `conflicting_receipts`. Identical duplicates may collapse to one.
+4. **Relevant malformed progress lines.** A line that fails JSON parsing but contains this `cycleId` or a terminal event name (`cycle_end` / `cycle_skipped`) → `unavailable` with reason `malformed_progress_line`. Unrelated malformed lines are skipped.
 
 ## 6. Versioned gaps
 
 | Code | Status | Gap |
 | --- | --- | --- |
-| `G1` | **Closed** for cycles recorded after **2026-09-25** (`checkout_path` on `cycle_end`). Still listed when that field is absent (older cycles / live `projects.yaml` fallback). | Checkout path was previously read only from live `projects.yaml`. |
+| `G1` | **Closed** for cycles recorded after **2026-09-25** (`checkout_path` on `cycle_end`). Still listed when that field is absent. Live `projects.yaml` fallback does **not** enable `passed` for post-freeze cycles. | Checkout path was previously read only from live `projects.yaml`. |
 | `G2` | **Closed** for cycles recorded after **2026-09-25** (`patch_digest` on `cycle_end`). Older cycles without a recorded digest never `passed` (`stale_uncertain`). | Patch digest was previously computed only at read from `diff.patch`. |
 | `G3` | **Open** | No durable independent receipt UUIDs; v1 uses synthetic `{cycleId}:verification` / `{cycleId}:reviewer`. |
 | `G4` | Open (desktop-only) | `not_submitted` is a desktop binder state only; CLI never emits it for a looked-up cycle id. |
