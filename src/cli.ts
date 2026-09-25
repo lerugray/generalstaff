@@ -444,84 +444,91 @@ switch (command) {
       }
       break;
     }
-    const aides = loadAides(rootDir);
-    if (subcommand === "list") {
-      if (!aides.length) console.log("No Aides registered. See aides.yaml.example.");
-      else for (const aide of aides) console.log(`${aide.name}\t${aide.kind}\t${aide.door.type}`);
-      break;
-    }
-    if (subcommand === "show") {
-      if (!args[2]) throw new Error("Usage: generalstaff aides show <name>");
-      const aide = findAide(aides, args[2]);
-      console.log(`${aide.name} (${aide.kind})\nOwner: ${aide.owner}\n${aide.description}`);
-      console.log(`Door: ${aide.door.type}\nInbox: ${aide.inbox}`);
-      console.log(`Capabilities: ${aide.capabilities.join(", ") || "none"}`);
-      console.log(`Credential scope: ${aide.credential_scope}`);
-      console.log(`Hard lines: ${aide.hard_lines.join("; ") || "none"}`);
-      break;
-    }
-    if (subcommand === "say") {
-      if (!args[2] || args.length < 4) throw new Error("Usage: generalstaff aides say <name> <message>");
-      const aide = findAide(aides, args[2]);
-      await sayToAide(aide, args.slice(3).join(" "), rootDir);
-      console.log(`Sent to ${aide.name}; outbound row appended to ${aide.inbox}.`);
-      break;
-    }
-    if (subcommand === "inbox") {
-      const { values, positionals } = parseArgs({
-        args: args.slice(2), allowPositionals: true,
-        options: { since: { type: "string" } },
-      });
-      if (positionals.length !== 1) throw new Error("Usage: generalstaff aides inbox <name> [--since <time>]");
-      const aide = findAide(aides, positionals[0]);
-      const since = values.since ? Date.parse(values.since) : Number.NEGATIVE_INFINITY;
-      if (values.since && Number.isNaN(since)) throw new Error("--since must be an ISO timestamp or date");
-      const rows = (await readInbox(aidePath(rootDir, aide.inbox)))
-        .filter((row) => inboxRowDate(row) >= since);
-      for (const row of rows) {
-        console.log(`## ${row.timestamp} ${row.from}: ${row.title}${row.tags.map((tag) => ` [${tag}]`).join("")}`);
-        for (const line of row.body) console.log(`- ${line}`);
-        console.log();
+    // Expected failures (bad registry, usage, unknown Aide, door refusal) print one line, like `check`.
+    try {
+      const aides = loadAides(rootDir);
+      if (subcommand === "list") {
+        if (!aides.length) console.log("No Aides registered. See aides.yaml.example.");
+        else for (const aide of aides) console.log(`${aide.name}\t${aide.kind}\t${aide.door.type}`);
+        break;
       }
-      break;
-    }
-    if (subcommand === "watch") {
-      const { values } = parseArgs({
-        args: args.slice(2), options: { json: { type: "boolean", default: false } },
-      });
-      const seen = new Map(aides.map((aide) => [aide.name, 0]));
-      for (const aide of aides) seen.set(aide.name, (await readInbox(aidePath(rootDir, aide.inbox))).length);
-      const emit = (aideName: string, row: InboxRow) => {
-        if (values.json) console.log(JSON.stringify({ aide: aideName, ...row }));
-        else {
-          console.log(`${aideName}: ## ${row.timestamp} ${row.from}: ${row.title}${row.tags.map((tag) => ` [${tag}]`).join("")}`);
+      if (subcommand === "show") {
+        if (!args[2]) throw new Error("Usage: generalstaff aides show <name>");
+        const aide = findAide(aides, args[2]);
+        console.log(`${aide.name} (${aide.kind})\nOwner: ${aide.owner}\n${aide.description}`);
+        console.log(`Door: ${aide.door.type}\nInbox: ${aide.inbox}`);
+        console.log(`Capabilities: ${aide.capabilities.join(", ") || "none"}`);
+        console.log(`Credential scope: ${aide.credential_scope}`);
+        console.log(`Hard lines: ${aide.hard_lines.join("; ") || "none"}`);
+        break;
+      }
+      if (subcommand === "say") {
+        if (!args[2] || args.length < 4) throw new Error("Usage: generalstaff aides say <name> <message>");
+        const aide = findAide(aides, args[2]);
+        await sayToAide(aide, args.slice(3).join(" "), rootDir);
+        console.log(`Sent to ${aide.name}; outbound row appended to ${aide.inbox}.`);
+        break;
+      }
+      if (subcommand === "inbox") {
+        const { values, positionals } = parseArgs({
+          args: args.slice(2), allowPositionals: true,
+          options: { since: { type: "string" } },
+        });
+        if (positionals.length !== 1) throw new Error("Usage: generalstaff aides inbox <name> [--since <time>]");
+        const aide = findAide(aides, positionals[0]);
+        const since = values.since ? Date.parse(values.since) : Number.NEGATIVE_INFINITY;
+        if (values.since && Number.isNaN(since)) throw new Error("--since must be an ISO timestamp or date");
+        const rows = (await readInbox(aidePath(rootDir, aide.inbox)))
+          .filter((row) => inboxRowDate(row) >= since);
+        for (const row of rows) {
+          console.log(`## ${row.timestamp} ${row.from}: ${row.title}${row.tags.map((tag) => ` [${tag}]`).join("")}`);
           for (const line of row.body) console.log(`- ${line}`);
+          console.log();
         }
-      };
-      await new Promise<void>((done, reject) => {
-        let busy = false;
-        const timer = setInterval(async () => {
-          if (busy) return;
-          busy = true;
-          try {
-            for (const aide of aides) {
-              const rows = await readInbox(aidePath(rootDir, aide.inbox));
-              const previous = seen.get(aide.name) ?? 0;
-              for (const row of rows.slice(previous)) emit(aide.name, row);
-              seen.set(aide.name, rows.length);
-            }
-          } catch (error) {
-            clearInterval(timer);
-            process.off("SIGINT", stop);
-            reject(error);
-          } finally { busy = false; }
-        }, 1000);
-        const stop = () => { clearInterval(timer); process.off("SIGINT", stop); done(); };
-        process.on("SIGINT", stop);
-      });
-      break;
+        break;
+      }
+      if (subcommand === "watch") {
+        const { values } = parseArgs({
+          args: args.slice(2), options: { json: { type: "boolean", default: false } },
+        });
+        const seen = new Map(aides.map((aide) => [aide.name, 0]));
+        for (const aide of aides) seen.set(aide.name, (await readInbox(aidePath(rootDir, aide.inbox))).length);
+        const emit = (aideName: string, row: InboxRow) => {
+          if (values.json) console.log(JSON.stringify({ aide: aideName, ...row }));
+          else {
+            console.log(`${aideName}: ## ${row.timestamp} ${row.from}: ${row.title}${row.tags.map((tag) => ` [${tag}]`).join("")}`);
+            for (const line of row.body) console.log(`- ${line}`);
+          }
+        };
+        await new Promise<void>((done, reject) => {
+          let busy = false;
+          const timer = setInterval(async () => {
+            if (busy) return;
+            busy = true;
+            try {
+              for (const aide of aides) {
+                const rows = await readInbox(aidePath(rootDir, aide.inbox));
+                const previous = seen.get(aide.name) ?? 0;
+                for (const row of rows.slice(previous)) emit(aide.name, row);
+                seen.set(aide.name, rows.length);
+              }
+            } catch (error) {
+              clearInterval(timer);
+              process.off("SIGINT", stop);
+              reject(error);
+            } finally { busy = false; }
+          }, 1000);
+          const stop = () => { clearInterval(timer); process.off("SIGINT", stop); done(); };
+          process.on("SIGINT", stop);
+        });
+        break;
+      }
+      throw new Error(`Unknown aides command: ${subcommand}`);
+    } catch (error) {
+      console.error(`Aides: ${(error as Error).message}`);
+      process.exitCode = 1;
     }
-    throw new Error(`Unknown aides command: ${subcommand}`);
+    break;
   }
   case "session": {
     // gs-244: subcommand-level --help / help matching gs-233's view pattern.
