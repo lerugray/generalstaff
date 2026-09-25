@@ -120,6 +120,7 @@ dist/
 # subdir and nukes it on cleanup), but re-include the reviewer_calibration
 # subdir — those files (gs-156) are tracked data, not generated.
 tests/fixtures/*
+!tests/fixtures/cycle-result-v1/
 !tests/fixtures/reviewer_calibration/
 !tests/fixtures/provider_config_malformed/
 !tests/fixtures/fake_project/

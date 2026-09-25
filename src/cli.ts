@@ -866,25 +866,66 @@ switch (command) {
       console.log(
         "Usage: generalstaff cycle --project=<id> [options]\n" +
           "       generalstaff cycle show <cycle-id> [--json]\n" +
+          "       generalstaff cycle result <cycle-id> --json\n" +
           "\n" +
           "Run exactly one cycle on a single project — pick one task, execute one\n" +
           "engineer + reviewer pass, and update state. Useful for probing a specific\n" +
           "project without committing to a full session.\n" +
           "\n" +
           "Sub-subcommands:\n" +
-          "  show <cycle-id>  Alias for `view dispatch-detail <cycle-id>` (gs-264)\n" +
+          "  show <cycle-id>    Alias for `view dispatch-detail <cycle-id>` (gs-264)\n" +
+          "  result <cycle-id>  Emit frozen cycle-result/v1 JSON for desktop gate binding\n" +
           "\n" +
           "Options:\n" +
-          "  --project=<id>   Project id (required)\n" +
+          "  --project=<id>   Project id (required for a run)\n" +
           "  --dry-run        Preview without committing\n" +
+          "  --json           Required for `cycle result` (machine-readable v1 document)\n" +
           "\n" +
           "Examples:\n" +
           "  generalstaff cycle --project=myapp\n" +
           "  generalstaff cycle --project=myapp --dry-run\n" +
           "  generalstaff cycle show cyc-001\n" +
-          "  generalstaff cycle show cyc-001 --json\n",
+          "  generalstaff cycle show cyc-001 --json\n" +
+          "  generalstaff cycle result cyc-001 --json\n",
       );
       process.exit(0);
+    }
+
+    // cycle-result/v1: read-only machine contract for one cycle (desktop gate).
+    // Distinct from `cycle show --json` (DispatchDetailData / gs-264).
+    if (args[1] === "result") {
+      const { values: resultValues, positionals: resultPositionals } = parseArgs({
+        args: args.slice(2),
+        options: {
+          json: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+      });
+      const cycleId = resultPositionals[0];
+      if (!cycleId) {
+        console.error("Error: cycle result requires <cycle-id>");
+        process.exit(1);
+      }
+      if (!resultValues.json) {
+        console.error(
+          "Error: cycle result requires --json (emits cycle-result/v1 only)",
+        );
+        process.exit(1);
+      }
+      const { getCycleResultV1, CycleResultError } = await import(
+        "./cycle_result_v1"
+      );
+      try {
+        const data = await getCycleResultV1(cycleId);
+        console.log(JSON.stringify(data, null, 2));
+      } catch (err) {
+        if (err instanceof CycleResultError) {
+          console.error(`Error: ${err.message}`);
+          process.exit(1);
+        }
+        throw err;
+      }
+      break;
     }
 
     // gs-264: `cycle show <cycle-id> [--json]` — text-mode-friendly alias

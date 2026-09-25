@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "cycle-result/v1",
+  "cycleId": "20260925120200_unavail",
+  "state": "unavailable",
+  "identity": {
+    "projectId": "demo",
+    "checkoutPath": "/tmp/demo-checkout",
+    "branch": "bot/work",
+    "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "endRevision": "cccccccccccccccccccccccccccccccccccccccc",
+    "patchDigest": "sha256:74c07f01187d8c4aa17be408257b0ca91ca48b8ec56a9b669cf63718063fdd96"
+  },
+  "outcome": {
+    "finalOutcome": "verified",
+    "verificationOutcome": "passed",
+    "reviewerVerdict": "verified",
+    "reason": "duplicate terminal records detected"
+  },
+  "receipts": {
+    "verification": {
+      "id": "20260925120200_unavail:verification",
+      "present": true,
+      "summary": "passed"
+    },
+    "reviewer": {
+      "id": "20260925120200_unavail:reviewer",
+      "present": true,
+      "summary": "verified"
+    }
+  },
+  "evidence": {
+    "progressPath": "state/demo/PROGRESS.jsonl",
+    "cycleDir": "state/demo/cycles/20260925120200_unavail",
+    "diffPatchPath": "state/demo/cycles/20260925120200_unavail/diff.patch",
+    "reviewerResponsePath": null
+  },
+  "timestamps": {
+    "startedAt": "2026-09-25T12:02:00.000Z",
+    "endedAt": "2026-09-25T12:04:00.000Z"
+  },
+  "gaps": ["G1", "G2", "G3", "G5"],
+  "unavailableReason": "duplicate_terminal_records"
+}
