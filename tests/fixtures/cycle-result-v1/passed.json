@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "cycle-result/v1",
+  "cycleId": "20260925120000_pass",
+  "state": "passed",
+  "identity": {
+    "projectId": "demo",
+    "checkoutPath": "/tmp/demo-checkout",
+    "branch": "bot/work",
+    "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "endRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "patchDigest": "sha256:74c07f01187d8c4aa17be408257b0ca91ca48b8ec56a9b669cf63718063fdd96"
+  },
+  "outcome": {
+    "finalOutcome": "verified",
+    "verificationOutcome": "passed",
+    "reviewerVerdict": "verified",
+    "reason": "scope matched; verification passed"
+  },
+  "receipts": {
+    "verification": {
+      "id": "20260925120000_pass:verification",
+      "present": true,
+      "summary": "passed"
+    },
+    "reviewer": {
+      "id": "20260925120000_pass:reviewer",
+      "present": true,
+      "summary": "verified"
+    }
+  },
+  "evidence": {
+    "progressPath": "state/demo/PROGRESS.jsonl",
+    "cycleDir": "state/demo/cycles/20260925120000_pass",
+    "diffPatchPath": "state/demo/cycles/20260925120000_pass/diff.patch",
+    "reviewerResponsePath": "state/demo/cycles/20260925120000_pass/reviewer-response.txt"
+  },
+  "timestamps": {
+    "startedAt": "2026-09-25T12:00:00.000Z",
+    "endedAt": "2026-09-25T12:05:00.000Z"
+  },
+  "gaps": ["G3", "G5"]
+}

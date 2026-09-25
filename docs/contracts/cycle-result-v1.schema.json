@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://generalstaff.dev/contracts/cycle-result-v1.schema.json",
+  "title": "GeneralStaff cycle result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "cycleId",
+    "state",
+    "identity",
+    "outcome",
+    "receipts",
+    "evidence",
+    "timestamps",
+    "gaps"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "cycle-result/v1"
+    },
+    "cycleId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "running",
+        "not_submitted",
+        "unavailable",
+        "stale_uncertain"
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "checkoutPath",
+        "branch",
+        "baseRevision",
+        "endRevision",
+        "patchDigest"
+      ],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 },
+        "checkoutPath": {
+          "type": ["string", "null"],
+          "description": "Absolute checkout path; prefer cycle_end.checkout_path (frozen after 2026-09-25), else live projects.yaml. Null when unknown (gap G1 for older cycles)."
+        },
+        "branch": { "type": ["string", "null"] },
+        "baseRevision": { "type": ["string", "null"] },
+        "endRevision": { "type": ["string", "null"] },
+        "patchDigest": {
+          "type": ["string", "null"],
+          "description": "sha256:<64 lowercase hex> of UTF-8 diff.patch bytes as read now, or null if missing. Pass requires equality with cycle_end.patch_digest when present.",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finalOutcome",
+        "verificationOutcome",
+        "reviewerVerdict",
+        "reason"
+      ],
+      "properties": {
+        "finalOutcome": {
+          "type": ["string", "null"],
+          "enum": [
+            "verified",
+            "verified_weak",
+            "verification_failed",
+            "cycle_skipped",
+            null
+          ]
+        },
+        "verificationOutcome": {
+          "type": ["string", "null"],
+          "enum": ["passed", "failed", "weak", null]
+        },
+        "reviewerVerdict": {
+          "type": ["string", "null"],
+          "enum": [
+            "verified",
+            "verified_weak",
+            "verification_failed",
+            null
+          ]
+        },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "receipts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verification", "reviewer"],
+      "properties": {
+        "verification": { "$ref": "#/$defs/receipt" },
+        "reviewer": { "$ref": "#/$defs/receipt" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "progressPath",
+        "cycleDir",
+        "diffPatchPath",
+        "reviewerResponsePath"
+      ],
+      "properties": {
+        "progressPath": { "type": ["string", "null"] },
+        "cycleDir": { "type": ["string", "null"] },
+        "diffPatchPath": { "type": ["string", "null"] },
+        "reviewerResponsePath": { "type": ["string", "null"] }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startedAt", "endedAt"],
+      "properties": {
+        "startedAt": { "type": ["string", "null"] },
+        "endedAt": { "type": ["string", "null"] }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["G1", "G2", "G3", "G4", "G5"]
+      },
+      "uniqueItems": true
+    },
+    "unavailableReason": {
+      "type": "string",
+      "description": "Present when state is unavailable."
+    }
+  },
+  "$defs": {
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "present"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "present": { "type": "boolean" },
+        "summary": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

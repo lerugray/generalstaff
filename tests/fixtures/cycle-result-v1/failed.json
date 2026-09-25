@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "cycle-result/v1",
+  "cycleId": "20260925120100_fail",
+  "state": "failed",
+  "identity": {
+    "projectId": "demo",
+    "checkoutPath": "/tmp/demo-checkout",
+    "branch": "bot/work",
+    "baseRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "endRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "patchDigest": "sha256:3dbbeacafa8f183c26c3281100ff660b6cba8f3869cec6f89d601711deb19e36"
+  },
+  "outcome": {
+    "finalOutcome": "verification_failed",
+    "verificationOutcome": "failed",
+    "reviewerVerdict": "verification_failed",
+    "reason": "verification command exited non-zero"
+  },
+  "receipts": {
+    "verification": {
+      "id": "20260925120100_fail:verification",
+      "present": true,
+      "summary": "failed"
+    },
+    "reviewer": {
+      "id": "20260925120100_fail:reviewer",
+      "present": true,
+      "summary": "verification_failed"
+    }
+  },
+  "evidence": {
+    "progressPath": "state/demo/PROGRESS.jsonl",
+    "cycleDir": "state/demo/cycles/20260925120100_fail",
+    "diffPatchPath": "state/demo/cycles/20260925120100_fail/diff.patch",
+    "reviewerResponsePath": null
+  },
+  "timestamps": {
+    "startedAt": "2026-09-25T12:01:00.000Z",
+    "endedAt": "2026-09-25T12:03:00.000Z"
+  },
+  "gaps": ["G1", "G2", "G3", "G5"]
+}

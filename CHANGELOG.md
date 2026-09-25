@@ -7,6 +7,13 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## Unreleased
+
+A frozen, machine-readable cycle result for tools that must not guess a verdict.
+
+- Adds `generalstaff cycle result <cycle-id> --json`, which emits the versioned `cycle-result/v1` document (contract and JSON Schema in `docs/contracts/`). It reports `passed` only when the cycle's own verification and reviewer records both pass for the same recorded patch, checkout, branch and base revision; anything missing, conflicting, malformed or changed since reads `unavailable` or `stale_uncertain`.
+- `cycle_end` now also records `patch_digest`, `checkout_path`, `branch` and `base_revision` (additive fields). Cycles recorded before this change can never read `passed`.
+
 ## v0.15.0 — 2026-09-25
 
 Aides: persistent agents beside the fleet.
