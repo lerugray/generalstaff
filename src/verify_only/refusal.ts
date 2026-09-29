@@ -25,6 +25,7 @@ export type RefusalCode =
   | "no_verification_command"
   | "verify_in_progress"
   | "materialize_failed"
+  | "interrupted"
   | "internal_error";
 
 export class VerifyRefusal extends Error {
@@ -47,6 +48,7 @@ const BUNDLE_CODE_MAP: Partial<Record<BundleErrorCode | DigestErrorCode, Refusal
   bundle_empty: "bundle_empty",
   bundle_unreadable: "bundle_unreadable",
   bundle_escapes: "bundle_escapes",
+  bundle_too_deep: "snapshot_limit",
   untracked_symlink: "bundle_escapes",
   empty_patch: "empty_patch",
   file_too_large: "snapshot_limit",

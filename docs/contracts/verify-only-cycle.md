@@ -34,7 +34,7 @@ convenience; a caller that binds a check to a change reads the receipt.
 | `--json` | Write one machine-readable object to stdout (see below). |
 | `--verification-timeout=<s>` | Budget for the verification command, all stages together. Default 600. |
 | `--reviewer-timeout=<s>` | Budget for the reviewer. Default 300. |
-| `--overall-timeout=<s>` | Budget for the whole check after it starts. Default 900. |
+| `--overall-timeout=<s>` | Budget for the whole check after it starts. Default 900; must be at least `--verification-timeout` + `--reviewer-timeout` (lower is refused, exit 3, no receipt). When it is omitted and either of those two is given, the default is raised to their sum if that is larger than 900. |
 | `--grace=<s>` | Wait between the polite stop signal and the force kill. Default 10. |
 
 There is no model, provider or runner flag. The reviewer is chosen by the
@@ -42,9 +42,31 @@ project's configuration and the user's own `GENERALSTAFF_REVIEWER_*`
 variables, exactly as for an autonomous cycle. The receipt records the provider
 that actually ran.
 
-The overall budget is the hard limit. A caller that supervises the process
-should give it strictly more than `overall + grace` so the check can always
-write its own terminal record.
+The budgets interact in these fixed ways:
+
+- The overall budget is the hard limit, so it must cover the stages it
+  contains: the CLI refuses an `--overall-timeout` below
+  `--verification-timeout` + `--reviewer-timeout` (a preflight refusal, exit 3,
+  before anything is recorded; the message names the minimum and the fix). An
+  omitted `--overall-timeout` is raised to that sum when it would otherwise be
+  smaller; an explicit one is never changed. A check can always fail inside a
+  stage instead of being cut mid-record.
+- Everything before the overall timer starts runs under one hard cap of 120
+  seconds: the leftover sweep, checkout probes, global-excludes resolution,
+  digest recompute, worktree materialization, the review diff, secret
+  redaction and the `digest-input` / `diff.patch` writes. A breach is a
+  preflight refusal (exit 3): the in-flight git (its process groups included)
+  is killed and reaped, then the partially materialized tree is removed.
+- After the overall timer fires, the check waits at most `--grace` seconds for
+  the verification runner to finish its own kill, then force-kills every group
+  it owns and records the terminal `cycle_end`.
+- Cleanup of the worktree is three steps (`git worktree remove`, directory
+  removal, `git worktree prune`) of at most 10 seconds each: 30 seconds.
+- The real worst-case wall clock is therefore
+  `120 (preflight cap) + overall + grace + 30 (cleanup)` seconds. A caller
+  that supervises the process should give it strictly more than that so the
+  check can always write its own terminal record and clean up. The `.lock`
+  time-to-live is that same sum plus 90 seconds.
 
 ### Exit codes
 
@@ -54,24 +76,34 @@ write its own terminal record.
 | 1 | The check ran and did not pass | yes |
 | 2 | Usage error: a missing, malformed or unknown flag | no |
 | 3 | Preflight refusal (below) | no |
-| 4 | Internal error before a receipt could be written | no |
-| 128+N | Interrupted by signal N; a terminal record was written | yes |
+| 4 | Internal error, including a progress-log write failure after `cycle_start` | may be absent or lack a terminal record |
+| 128+N | Interrupted by signal N after `cycle_start` | yes, unless the progress log becomes unwritable or a second signal forces exit |
+| 128+N | Interrupted by signal N before `cycle_start`; refusal JSON with reason `interrupted` | no |
 
 ### `--json` output
 
 Exactly one line on stdout; everything else goes to stderr.
 
-Started (written as soon as the cycle is recorded):
+Started (written after the startup events are recorded, before verification runs):
 
 ```json
 {"schemaVersion":"cycle-verify/v1","cycleId":"20260929155314_nt3x","projectId":"app","state":"running","mode":"verify_only"}
 ```
 
-Refused (exit 2 or 3; nothing was recorded):
+Refused (exit 2, 3 or 4, or 128+N, when no start object was emitted):
 
 ```json
 {"schemaVersion":"cycle-verify/v1","refused":true,"state":"refused","cycleId":null,"reason":"digest_mismatch","message":"..."}
 ```
+
+Exit 2 and preflight refusals record no cycle. An internal error or interruption
+while appending startup events can leave `cycle_start` recorded before the start
+object is emitted; the refusal object then still has `cycleId: null`. If an
+exception escapes after the start object was emitted, stdout keeps that single
+start line and the error goes only to stderr (exit 4, or 128+N if a signal was
+seen). The check attempts `cycle_end`, but an unwritable `PROGRESS.jsonl` can
+prevent it, leaving the receipt without a terminal verdict. The start object
+is never a verdict.
 
 A refusal also prints one scrubbed line to stderr:
 `generalstaff: verify refused (<reason>): <message>`.
@@ -96,6 +128,7 @@ Each is a stable `reason` code. None records a cycle.
 | `no_verification_command` | the project has no verification command |
 | `verify_in_progress` | another check is running for this project |
 | `materialize_failed` | the isolated worktree could not be built or the patch did not apply |
+| `interrupted` | a signal stopped preflight before `cycle_start` (exit 128+N) |
 | `internal_error` | anything unexpected |
 
 ## The bundle
@@ -132,8 +165,9 @@ is taken.
    verification command (and, when configured, the project's player-path,
    claim-battery and customer-facing smoke stages, in the usual sequence), then the
    reviewer, appending the usual `PROGRESS.jsonl` events.
-6. Writes one `cycle_end` (on every path: pass, fail, timeout, signal, internal
-   error), then removes the worktree.
+6. Writes one `cycle_end` (pass, fail, timeout, signal, internal error), then
+   removes the worktree. A progress-log write failure or a second signal can
+   prevent the terminal record.
 
 Not run, and not reachable: the engineer, advisor, judgment gate, mission-swarm
 preview, creative routing, work detection, branch reset/merge/accumulate, the
@@ -152,11 +186,24 @@ The verification command runs in its own process group (a `taskkill /T` tree on
 Windows). On a timeout, a signal or the overall budget the group receives a
 polite stop, then a force kill after the grace period. After every command the
 group is swept, so background processes the command left running do not survive.
+A process group that could not be *proven* reaped fails the check
+(`verify.reaped` is `false`, category `verification_error`): a surviving group
+may still be running commands against operator state, and must never read as a
+pass. If the worktree cannot be removed after the check, a
+`verify_cleanup_failed` event is appended to the cycle's `PROGRESS.jsonl` and a
+warning goes to stderr; the next check for the project sweeps the leftover.
 The command's environment is a small pinned set (`PATH`, `HOME`, locale,
 temp-dir variables, `GENERALSTAFF_VERIFY_ONLY=1`, `GENERALSTAFF_CYCLE_ID`);
 other variables of the calling process, including reviewer credentials, are not
 passed unless named in `GENERALSTAFF_VERIFY_ENV_PASSTHROUGH` (comma separated).
-The reviewer process keeps the calling environment, as always.
+The reviewer process keeps the calling environment, as always, but runs from
+the cycle's verify directory — never from inside the materialized tree, whose
+entire content is untrusted bundle bytes.
+
+A second signal force-kills owned processes and exits immediately, so it can
+skip the terminal `cycle_end` record.
+During preflight, a second signal after cycle-directory creation can also leave
+an orphaned `cycles/<id>` directory; the next verify sweep covers only `verify/`.
 
 ## The receipt
 
@@ -171,16 +218,27 @@ with these additive fields (see [cycle-result-v1.md](./cycle-result-v1.md) §8):
   edited file reads `stale_uncertain`. `evidence.diffPatchPath` is a separate,
   human-readable patch (untracked files shown as added files, secrets redacted).
 - `verify` carries `mode` (`"verify_only"`), `changesetDigest`, `digestAlgorithm`,
-  `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`, `handsOffHits`,
-  `cliVersion`, `reviewerProvider` and `failureCategory`.
+  `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`,
+  `globalExcludesFile` and `globalExcludesSha256` (the user's effective global
+  git excludes file this check pinned on every change-set git call, and the
+  SHA-256 of its bytes — both `null` when the user has none),
+  `handsOffHits`, `cliVersion`, `reviewerProvider`, `failureCategory`, and
+  `reaped` (whether every verification process group was proven reaped), and
+  `cleanupFailed` (added by the receipt reader when the cycle's log has a
+  `verify_cleanup_failed` event; the check's worktree could not be removed).
 
 `verify.failureCategory` is `null` for a pass, else one of
 `verification_nonzero`, `verification_timeout`, `verification_error`,
 `reviewer_rejected`, `reviewer_error`, `reviewer_timeout`, `interrupted`,
-`overall_timeout`, `internal_error`. `outcome.reason` reads
+`overall_timeout`, `internal_error`. `outcome.reason` is human-readable text,
+not an exhaustive enum. It includes verification and stage failures (nonzero
+exit, timeout, spawn error or an unproven process-tree reap), reviewer reasons
+and reviewer failures (timeout, error or an unparseable response), interruption,
+overall-budget expiry, and internal errors. Examples include
 `Verification gate failed (exit N)`, `Verification timed out (time budget Ns)`,
-the reviewer's own reason, `Check interrupted (SIGTERM)`, or
-`Check exceeded its overall time budget (Ns)`.
+`Reviewer response could not be parsed`, `Check interrupted (SIGTERM)`,
+`Check exceeded its overall time budget (Ns)`, and
+`Verification command's process tree was not proven reaped`.
 
 A receipt with no `verify` object, or with another `mode`, is not a
 verification of a change-set; a consumer must not treat it as one.

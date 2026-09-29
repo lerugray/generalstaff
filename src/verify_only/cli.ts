@@ -8,12 +8,13 @@
 //   1   the check ran and did not pass; a receipt exists
 //   2   usage error (bad or missing flag); no receipt
 //   3   preflight refusal; no receipt
-//   4   internal error before a receipt could be written; no receipt
-//   128+N  interrupted by signal N; a terminal receipt was written
+//   4   internal error; a recorded cycle may lack a terminal receipt
+//   128+N  interrupted by signal N; terminal receipt is not guaranteed
 //
 // With --json the only thing written to stdout is one JSON object: the start
-// object (cycleId, projectId, state "running") or, for a refusal or usage
-// error, an object with refused: true and a stable reason code. Everything
+// object (cycleId, projectId, state "running") or, if no start was reported,
+// an object with refused: true and a stable reason code. An internal error may
+// leave a recorded cycle without a terminal receipt. Everything
 // else goes to stderr. The receipt is read afterwards with
 // `generalstaff cycle result <cycle-id> --json`; it is the only verdict.
 
@@ -23,7 +24,7 @@ import { parseArgs } from "util";
 import { BundleError, writeBundle } from "./bundle";
 import { PATCH_DIGEST_ALGORITHM } from "./constants";
 import { DigestError } from "./digest";
-import { scrubLine } from "./git";
+import { killAndReapLiveGitGroups, reapLiveGitGroups, scrubLine, withGitAbort } from "./git";
 import { toRefusal, VerifyRefusal, type RefusalCode } from "./refusal";
 import { killAllOwnedGroups } from "./runner";
 import { DEFAULT_VERIFY_BUDGETS, runVerifyOnlyCycle } from "./run";
@@ -38,6 +39,26 @@ export const EXIT_USAGE = 2;
 export const EXIT_REFUSED = 3;
 export const EXIT_INTERNAL = 4;
 
+/**
+ * An explicit --overall-timeout is used as given (run.ts refuses one below
+ * verification + reviewer). Without one, the default is raised to cover the
+ * verification and reviewer budgets the caller did set, so lengthening just
+ * --verification-timeout does not trip the refusal.
+ */
+function resolveBudgets(b: {
+  verificationSec?: number;
+  reviewerSec?: number;
+  overallSec?: number;
+  graceSec?: number;
+}) {
+  if (b.overallSec !== undefined) return b;
+  if (b.verificationSec === undefined && b.reviewerSec === undefined) return b;
+  const needed =
+    (b.verificationSec ?? DEFAULT_VERIFY_BUDGETS.verificationSec) +
+    (b.reviewerSec ?? DEFAULT_VERIFY_BUDGETS.reviewerSec);
+  return { ...b, overallSec: Math.max(DEFAULT_VERIFY_BUDGETS.overallSec, needed) };
+}
+
 export const CYCLE_VERIFY_HELP = `Usage: generalstaff cycle verify --project=<id> --checkout=<abs path>
                                --base=<40-hex> --branch=<name> --bundle=<abs dir>
                                --digest=sha256:<64-hex>
@@ -49,7 +70,9 @@ export const CYCLE_VERIFY_HELP = `Usage: generalstaff cycle verify --project=<id
 Verify a snapshot of an uncommitted change in an isolated worktree and write a
 cycle-result/v1 receipt bound to the snapshot's digest. Runs the project's
 verification command, then the reviewer, and nothing else: no engineer, no
-advisor, no judgment gate, no bot. The checkout itself is never written to.
+advisor, no judgment gate, no bot. Working files, index, HEAD and refs are
+untouched; git worktree metadata is added under .git/worktrees/<id> and removed
+afterward.
 
   --project      Registered project id (its registered path must be --checkout)
   --checkout     Absolute path of the checkout the snapshot was taken from
@@ -62,11 +85,15 @@ advisor, no judgment gate, no bot. The checkout itself is never written to.
   --json         Write one machine-readable object to stdout
 
 Time budgets (seconds): verification ${DEFAULT_VERIFY_BUDGETS.verificationSec}, reviewer ${DEFAULT_VERIFY_BUDGETS.reviewerSec}, overall ${DEFAULT_VERIFY_BUDGETS.overallSec}, grace ${DEFAULT_VERIFY_BUDGETS.graceSec}.
+--overall-timeout must be at least --verification-timeout + --reviewer-timeout
+(default ${DEFAULT_VERIFY_BUDGETS.verificationSec + DEFAULT_VERIFY_BUDGETS.reviewerSec}); a lower value is refused (exit 3, no receipt). If you give
+--verification-timeout and/or --reviewer-timeout but no --overall-timeout, the
+overall budget is raised to their sum when that exceeds ${DEFAULT_VERIFY_BUDGETS.overallSec}.
 The reviewer is chosen by the project's configuration and GENERALSTAFF_REVIEWER_*
 variables; there is no provider or model flag.
 
 Exit codes: 0 passed, 1 not passed (receipt written), 2 usage error, 3 refused
-(no receipt), 4 internal error (no receipt), 128+N interrupted by signal N.
+(no receipt), 4 internal error (receipt may be incomplete), 128+N interrupted by signal N.
 Read the receipt with: generalstaff cycle result <cycle-id> --json
 `;
 
@@ -220,12 +247,12 @@ export async function runCycleVerifyCli(
       digestAlgorithm,
       branch,
       exclude: values.exclude ?? [],
-      budgets: {
+      budgets: resolveBudgets({
         verificationSec: parsePositiveSeconds(values["verification-timeout"], "--verification-timeout"),
         reviewerSec: parsePositiveSeconds(values["reviewer-timeout"], "--reviewer-timeout"),
         overallSec: parsePositiveSeconds(values["overall-timeout"], "--overall-timeout"),
         graceSec: parsePositiveSeconds(values.grace, "--grace"),
-      },
+      }),
     };
   } catch (err) {
     if (err instanceof UsageError) {
@@ -238,17 +265,22 @@ export async function runCycleVerifyCli(
   const originalLog = console.log;
   if (wantsJson) console.log = (...a: unknown[]) => console.error(...a);
 
+  let startReported = false;
   const controller = new AbortController();
   let signalNumber: number | null = null;
   const handlers: Array<[NodeJS.Signals, number, () => void]> = [];
   for (const [name, num] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]] as const) {
     const handler = () => {
       if (signalNumber !== null) {
-        // A second signal: stop waiting politely.
+        // A second signal: stop waiting politely. Git runs in its own
+        // process group, so exit without killing it would orphan that group.
         killAllOwnedGroups();
+        killAndReapLiveGitGroups();
         process.exit(128 + num);
       }
       signalNumber = num;
+      // Preflight owns an abort context that stops its git groups while
+      // keeping cleanup immune to the first signal.
       controller.abort(name);
     };
     process.on(name, handler);
@@ -323,6 +355,7 @@ export async function runCycleVerifyCli(
       cliVersion,
       signal: controller.signal,
       onStarted: ({ cycleId, projectId }) => {
+        startReported = true;
         if (wantsJson) {
           writeJsonLine({
             schemaVersion: "cycle-verify/v1",
@@ -346,17 +379,28 @@ export async function runCycleVerifyCli(
     if (signalNumber !== null) return 128 + signalNumber;
     return result.passed ? EXIT_PASSED : EXIT_FAILED;
   } catch (err) {
+    // After the start object, even a log-write failure must stay on stderr.
+    const reportJson = wantsJson && !startReported;
+    if (signalNumber !== null) {
+      return reportNoReceipt(
+        reportJson,
+        "interrupted",
+        startReported ? "Check interrupted" : "Check interrupted during preflight",
+        128 + signalNumber,
+      );
+    }
     const mapped = toRefusal(err);
     if (mapped instanceof VerifyRefusal) {
-      return reportNoReceipt(wantsJson, mapped.code, mapped.message, EXIT_REFUSED);
+      return reportNoReceipt(reportJson, mapped.code, mapped.message, EXIT_REFUSED);
     }
     return reportNoReceipt(
-      wantsJson,
+      reportJson,
       "internal_error",
       err instanceof Error ? err.message : String(err),
       EXIT_INTERNAL,
     );
   } finally {
+    await reapLiveGitGroups();
     for (const [name, , handler] of handlers) process.off(name, handler);
     console.log = originalLog;
   }
@@ -398,6 +442,22 @@ export async function runChangesetCli(argv: string[]): Promise<number> {
     console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
     return EXIT_USAGE;
   }
+  const controller = new AbortController();
+  let signalNumber: number | null = null;
+  const handlers: Array<[NodeJS.Signals, () => void]> = [];
+  for (const [name, num] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]] as const) {
+    const handler = () => {
+      if (signalNumber !== null) {
+        killAndReapLiveGitGroups();
+        process.exit(128 + num);
+      }
+      signalNumber = num;
+      controller.abort(name);
+    };
+    process.on(name, handler);
+    handlers.push([name, handler]);
+  }
+  let exitCode: number;
   try {
     const checkout = checkedPath(values.checkout, "--checkout");
     const out = checkedPath(values.out, "--out");
@@ -405,12 +465,13 @@ export async function runChangesetCli(argv: string[]): Promise<number> {
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(base)) {
       throw new UsageError("--base must be a full lowercase hex commit id");
     }
-    const info = await writeBundle({
+    const info = await withGitAbort(controller.signal, () => writeBundle({
       checkout,
       base,
       outDir: out,
       exclude: values.exclude ?? [],
-    });
+    }));
+    controller.signal.throwIfAborted();
     if (wantsJson) {
       writeJsonLine({ schemaVersion: "changeset-bundle/v1", ...info });
     } else {
@@ -426,17 +487,24 @@ export async function runChangesetCli(argv: string[]): Promise<number> {
           `--digest-algorithm=${info.digestAlgorithm}`,
       );
     }
-    return EXIT_PASSED;
+    exitCode = EXIT_PASSED;
   } catch (err) {
-    if (err instanceof UsageError) {
+    if (signalNumber !== null) {
+      console.error(`Error (interrupted): Bundle interrupted (${controller.signal.reason})`);
+      exitCode = 128 + signalNumber;
+    } else if (err instanceof UsageError) {
       console.error(`Error: ${err.message}`);
-      return EXIT_USAGE;
-    }
-    if (err instanceof BundleError || err instanceof DigestError) {
+      exitCode = EXIT_USAGE;
+    } else if (err instanceof BundleError || err instanceof DigestError) {
       console.error(`Error (${err.code}): ${scrubLine(err.message)}`);
-      return EXIT_REFUSED;
+      exitCode = EXIT_REFUSED;
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      exitCode = EXIT_INTERNAL;
     }
-    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    return EXIT_INTERNAL;
+  } finally {
+    await reapLiveGitGroups();
+    for (const [name, handler] of handlers) process.off(name, handler);
   }
+  return signalNumber === null ? exitCode : 128 + signalNumber;
 }

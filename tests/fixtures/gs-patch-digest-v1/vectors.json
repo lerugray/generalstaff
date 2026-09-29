@@ -954,6 +954,142 @@
       "expect": {
         "refuse": "untracked_path_invalid"
       }
+    },
+    {
+      "id": "global-excludes-config",
+      "description": "The user's global git config names a core.excludesFile listing secret.env: the pinned file hides it, so only keep.txt is in U.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "globalExcludes": {
+        "source": "config",
+        "text": "secret.env\n"
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "keep.txt",
+          "text": "keep\n"
+        },
+        {
+          "op": "write",
+          "path": "secret.env",
+          "text": "TOKEN=live\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:b5d76bac15a74eaa4905ffeb0db6948a2f886efde0a6b98b6cc2e781d9d42303"
+      }
+    },
+    {
+      "id": "global-excludes-xdg",
+      "description": "No core.excludesFile, XDG_CONFIG_HOME set with git/ignore listing secret.env: same effective excludes, same digest as the config case.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "globalExcludes": {
+        "source": "xdg",
+        "text": "secret.env\n"
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "keep.txt",
+          "text": "keep\n"
+        },
+        {
+          "op": "write",
+          "path": "secret.env",
+          "text": "TOKEN=live\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:b5d76bac15a74eaa4905ffeb0db6948a2f886efde0a6b98b6cc2e781d9d42303",
+        "sameAs": "global-excludes-config"
+      }
+    },
+    {
+      "id": "global-excludes-none",
+      "description": "No global excludes file at all: secret.env is untracked and not ignored, so it is bound into the digest.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "globalExcludes": {
+        "source": "none"
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "keep.txt",
+          "text": "keep\n"
+        },
+        {
+          "op": "write",
+          "path": "secret.env",
+          "text": "TOKEN=live\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:4dba50c22d4e3d2e7f8f7eeabf2aa4010c0f096fe61d1664b7cf83eca283e256",
+        "differsFrom": "global-excludes-config"
+      }
     }
   ]
 }

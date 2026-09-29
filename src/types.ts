@@ -664,6 +664,10 @@ export type ProgressEventType =
   | "provider_fallback"
   | "cycle_end"
   | "cycle_watchdog"
+  // A verify-only check whose worktree could not be removed
+  // after cycle_end. Appended after the terminal record, so the log — not
+  // operator memory — carries the leftover.
+  | "verify_cleanup_failed"
   | "project_soft_skipped"
   | "session_start"
   | "session_end"
@@ -954,6 +958,7 @@ const VALID_EVENTS: readonly string[] = [
   "worktree_preflight", "cycle_rollback", "secret_redaction",
   "provider_invoked", "provider_fallback",
   "cycle_end", "cycle_watchdog", "project_soft_skipped",
+  "verify_cleanup_failed",
   "session_start", "session_end", "session_complete",
   "session_end_auto_merge",
   "malformed_json",

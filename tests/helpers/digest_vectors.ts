@@ -38,6 +38,8 @@ export interface Vector {
   base: { path: string; text?: string; base64?: string }[];
   steps: VectorStep[];
   exclude?: string[];
+  /** The user's global git excludes: `config` = core.excludesFile in ~/.gitconfig, `xdg` = only $XDG_CONFIG_HOME/git/ignore, `none` = no file. */
+  globalExcludes?: { source: "config" | "xdg" | "none"; text?: string };
   limits?: Record<string, number>;
   posixOnly?: boolean;
   expect: {
@@ -109,7 +111,12 @@ function nullDevice(): string {
  * Recompute the gs-patch-digest/v1 digest from git and sha256 alone.
  * Deliberately restates the contract in the most literal form.
  */
-export function oracleDigest(dir: string, base: string, exclude: string[] = []): {
+export function oracleDigest(
+  dir: string,
+  base: string,
+  exclude: string[] = [],
+  globalExcludesFile: string | null = null,
+): {
   digest: string;
   diff: Buffer;
 } {
@@ -153,7 +160,10 @@ export function oracleDigest(dir: string, base: string, exclude: string[] = []):
     "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--full-index",
     base, "--", ...pathspec,
   ]);
-  const listed = run(["ls-files", "--others", "--exclude-standard", "-z"])
+  const listed = run([
+    "-c", `core.excludesFile=${globalExcludesFile ?? nullDevice()}`,
+    "ls-files", "--others", "--exclude-standard", "-z",
+  ])
     .toString("utf8")
     .split("\0")
     .filter((p) => p.length > 0)

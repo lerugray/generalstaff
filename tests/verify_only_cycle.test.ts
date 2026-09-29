@@ -4,16 +4,20 @@
 // GeneralStaff root and a real git repository. The reviewer is a fake
 // `claude` script on PATH; no engineer, model CLI or network is ever started.
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   writeFileSync,
+  appendFileSync,
+  chmodSync,
 } from "fs";
+import * as fsp from "fs/promises";
 import { join } from "path";
 import { createHash } from "crypto";
+import * as childProcess from "child_process";
 import {
   getCycleResultV1,
   meetsPassCondition,
@@ -23,7 +27,18 @@ import { loadProjectsYaml } from "../src/projects";
 import { isWorkingTreeClean } from "../src/safety";
 import { setRootDir } from "../src/state";
 import { writeBundle } from "../src/verify_only/bundle";
-import { DEFAULT_VERIFY_BUDGETS, runVerifyOnlyCycle } from "../src/verify_only/run";
+import { runCycleVerifyCli } from "../src/verify_only/cli";
+import { CLEANUP_CAP_SEC, removeVerifyTree } from "../src/verify_only/materialize";
+import { VerifyRefusal } from "../src/verify_only/refusal";
+import type { RunnerResult } from "../src/verify_only/runner";
+import {
+  decide,
+  DEFAULT_VERIFY_BUDGETS,
+  PREFLIGHT_CAP_SEC,
+  runVerifyOnlyCycle,
+  worstCaseWallClockSec,
+} from "../src/verify_only/run";
+import type { ReviewerResult } from "../src/reviewer";
 import { validateAgainstSchema, type JsonSchema } from "./helpers/json_schema";
 import { git, makeVerifyFixture, type VerifyFixture } from "./helpers/verify_only_fixture";
 
@@ -55,17 +70,24 @@ function editCheckout(f: VerifyFixture, files: Record<string, string> = {}): voi
   }
 }
 
-async function cliBundle(f: VerifyFixture, extra: string[] = []) {
+async function cliBundle(
+  f: VerifyFixture,
+  extra: string[] = [],
+  env: Record<string, string> = {},
+) {
   const out = join(f.scratch, `bundle-${Math.random().toString(36).slice(2, 8)}`);
-  const r = await f.runCli([
-    "changeset",
-    "bundle",
-    `--checkout=${f.checkout}`,
-    `--base=${f.base}`,
-    `--out=${out}`,
-    "--json",
-    ...extra,
-  ]);
+  const r = await f.runCli(
+    [
+      "changeset",
+      "bundle",
+      `--checkout=${f.checkout}`,
+      `--base=${f.base}`,
+      `--out=${out}`,
+      "--json",
+      ...extra,
+    ],
+    { env },
+  );
   expect(r.exitCode).toBe(0);
   return JSON.parse(r.stdout) as { bundlePath: string; digest: string; digestAlgorithm: string };
 }
@@ -211,6 +233,11 @@ describe("cycle verify: a passing check", () => {
       handsOffHits: [],
       reviewerProvider: "claude",
       failureCategory: null,
+      // REAL #2: the passing check proved every process group reaped.
+      reaped: true,
+      // REAL #1: the hermetic test user has no global excludes file.
+      globalExcludesFile: null,
+      globalExcludesSha256: null,
     });
     expect(doc.verify!.cliVersion).toMatch(/^\d+\.\d+\.\d+/);
     expect(doc.verify!.worktreePath).toContain(join("state", fx.projectId, "verify", cycleId));
@@ -441,22 +468,38 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
 
   it("the overall budget ends a stuck check with a terminal record", async () => {
     fx = makeVerifyFixture({
-      verificationCommand: ({ scratch }) => `sleep 60 & echo $! > '${scratch}/pid.txt'; wait`,
+      verificationCommand: ({ scratch }) => `trap '' TERM; sleep 60 & echo $! > '${scratch}/pid.txt'; wait`,
     });
     const pidFile = join(fx.scratch, "pid.txt");
     editCheckout(fx);
     const bundle = await cliBundle(fx);
+    // A valid budget set: overall (2) covers verification (1) + reviewer (1).
+    // The command ignores the polite stop, so the overall timer fires while
+    // the stage is still being killed.
     const r = await fx.runCli(
-      verifyArgs(fx, bundle, ["--json", "--overall-timeout=2", "--verification-timeout=40", "--grace=1"]),
+      verifyArgs(fx, bundle, [
+        "--json",
+        "--verification-timeout=1",
+        "--reviewer-timeout=1",
+        "--overall-timeout=2",
+        "--grace=2",
+      ]),
     );
     expect(r.exitCode).toBe(1);
     const doc = await receiptOf(fx, startedCycleId(r.stdout));
     expect(doc.state).toBe("failed");
     expect(doc.outcome.reason).toContain("overall time budget");
     expect(doc.verify!.failureCategory).toBe("overall_timeout");
+    // cycle_start -> cycle_end is the timed part of the published budget: the
+    // overall budget (2 s) plus at most the grace (2 s) plus scheduling slack.
+    const ev = progressEvents(fx);
+    const startedMs = Date.parse((ev.find((e) => e.event === "cycle_start") as any).timestamp);
+    const endedMs = Date.parse((ev.find((e) => e.event === "cycle_end") as any).timestamp);
+    expect(endedMs - startedMs).toBeGreaterThanOrEqual(1900);
+    expect(endedMs - startedMs).toBeLessThan((2 + 2) * 1000 + 2500);
     expect(pidAlive(Number(readFileSync(pidFile, "utf8").trim()))).toBe(false);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
   it("a reviewer past its time budget fails the change and is ended", async () => {
     fx = makeVerifyFixture({ claudeDelay: "exec sleep 30" });
@@ -824,6 +867,658 @@ describe("receipt re-read", () => {
   });
 });
 
+// --- reviewer cwd, global excludes, reap and cleanup reporting ----------
+
+describe("hardening fix round 1", () => {
+  it("runs the reviewer from outside the materialized tree, never inside it", async () => {
+    // The reviewer subprocess is an agent CLI: it loads project instruction
+    // files and settings hooks from its working directory. Everything inside
+    // the materialized tree comes from the untrusted bundle, so the reviewer
+    // must not run there. Its cwd is the cycle's verify directory.
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    expect(r.exitCode).toBe(0);
+    const cycleId = startedCycleId(r.stdout);
+    const calls = fx.claudeInvocations();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.cwd).toContain(join("state", fx.projectId, "verify", cycleId));
+    expect(calls[0]!.cwd.endsWith("tree")).toBe(false);
+    noLeftovers(fx);
+  });
+
+  it("refuses an overall budget below the verification + reviewer budgets", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const r = await fx.runCli(
+      verifyArgs(fx, bundle, ["--json", "--overall-timeout=2", "--verification-timeout=40"]),
+    );
+    expect(r.exitCode).toBe(3);
+    expect(r.stdout.trim().split("\n")).toHaveLength(1);
+    const obj = JSON.parse(r.stdout.trim());
+    expect(obj.refused).toBe(true);
+    expect(obj.state).toBe("refused");
+    expect(obj.reason).toBe("invalid_argument");
+    noReceipt(fx);
+  });
+
+  it("pins a global excludes file from the user's git config: the ignored .env stays out of bundle, digest and diff.patch", async () => {
+    fx = makeVerifyFixture();
+    const ignoreFile = join(fx.scratch, "global-ignore");
+    writeFileSync(ignoreFile, ".env\n");
+    writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${ignoreFile}\n`);
+    editCheckout(fx, { "a.txt": "one\nchanged\n", ".env": "SECRET=live-token\n" });
+    const bundle = await cliBundle(fx);
+    // The bundle never carried the globally-ignored secret.
+    expect(existsSync(join(bundle.bundlePath, "files", ".env"))).toBe(false);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    expect(r.exitCode).toBe(0);
+    const doc = await receiptOf(fx, startedCycleId(r.stdout));
+    expect(doc.state).toBe("passed");
+    // The receipt records WHICH global excludes file was in force — the pin,
+    // not the user's ambient config, decided what "ignored" meant.
+    expect(doc.verify!.globalExcludesFile).toBe(ignoreFile);
+    expect(doc.verify!.globalExcludesSha256).toBe(
+      createHash("sha256").update(".env\n").digest("hex"),
+    );
+    const patch = readFileSync(join(fx.root, doc.evidence.diffPatchPath!), "utf8");
+    expect(patch).not.toContain(".env");
+    noLeftovers(fx);
+  });
+
+  it("falls back to ~/.config/git/ignore when no core.excludesFile is configured", async () => {
+    fx = makeVerifyFixture();
+    mkdirSync(join(fx.home, ".config", "git"), { recursive: true });
+    writeFileSync(join(fx.home, ".config", "git", "ignore"), ".env\n");
+    editCheckout(fx, { "a.txt": "one\nchanged\n", ".env": "SECRET=live-token\n" });
+    const bundle = await cliBundle(fx);
+    expect(existsSync(join(bundle.bundlePath, "files", ".env"))).toBe(false);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    expect(r.exitCode).toBe(0);
+    const doc = await receiptOf(fx, startedCycleId(r.stdout));
+    expect(doc.state).toBe("passed");
+    expect(doc.verify!.globalExcludesFile).toBe(join(fx.home, ".config", "git", "ignore"));
+    noLeftovers(fx);
+  });
+
+  it("an unproven reap fails the check even when the exit code was 0", () => {
+    const ver = {
+      outcome: "failed",
+      exitCode: 0,
+      timedOut: false,
+      aborted: false,
+      reaped: false,
+      durationSeconds: 1,
+      failedStage: null,
+      logPath: "verification.log",
+      logText: "",
+    } as Parameters<typeof decide>[0];
+    const reviewer = {
+      result: {
+        verdict: "verified",
+        response: { verdict: "verified", reason: "ok" },
+        rawResponse: "{}",
+        parseError: null,
+        provider: "claude",
+      },
+      timedOut: false,
+    } as Parameters<typeof decide>[1];
+    const d = decide(ver, reviewer, DEFAULT_VERIFY_BUDGETS);
+    expect(d.finalOutcome).toBe("verification_failed");
+    expect(d.category).toBe("verification_error");
+    expect(d.reason).toContain("not proven reaped");
+    expect(d.reaped).toBe(false);
+  });
+
+  it("a worktree cleanup failure is reported on the record, not silent", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    expect(r.exitCode).toBe(0);
+    const cycleId = startedCycleId(r.stdout);
+    // The cleanup-failure event is appended after the terminal record; the
+    // receipt reader surfaces it on the verify block.
+    appendFileSync(
+      join(fx.root, "state", fx.projectId, "PROGRESS.jsonl"),
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        event: "verify_cleanup_failed",
+        cycle_id: cycleId,
+        project_id: fx.projectId,
+        data: { path: join(fx.root, "state", fx.projectId, "verify", cycleId) },
+      })}\n`,
+      "utf8",
+    );
+    const doc = await receiptOf(fx, cycleId);
+    expect(doc.verify!.cleanupFailed).toBe(true);
+  });
+});
+
+// --- hardening fix round 2 ------------------------------------------------------------
+
+type InProcessOverrides = Partial<Parameters<typeof runVerifyOnlyCycle>[0]>;
+
+/**
+ * Run the real verify-only check in this process under the fixture's hermetic
+ * HOME, with the fixture's fake `claude` first on PATH. Restores the process
+ * environment and the root directory afterwards.
+ */
+async function inProcessVerify(
+  f: VerifyFixture,
+  over: InProcessOverrides = {},
+  env: { path?: string } = {},
+) {
+  editCheckout(f);
+  const info = await writeBundle({
+    checkout: f.checkout,
+    base: f.base,
+    outDir: join(f.scratch, `in-process-${Math.random().toString(36).slice(2, 8)}`),
+  });
+  const saved = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+    GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+  };
+  setRootDir(f.root);
+  const yaml = await loadProjectsYaml();
+  process.env.PATH = env.path ?? `${f.binDir}:${saved.PATH ?? ""}`;
+  process.env.HOME = f.home;
+  delete process.env.XDG_CONFIG_HOME;
+  delete process.env.GIT_CONFIG_GLOBAL;
+  let cycleId = "";
+  try {
+    const result = await runVerifyOnlyCycle({
+      project: yaml.projects[0]!,
+      dispatcher: yaml.dispatcher,
+      checkout: f.checkout,
+      base: f.base,
+      branch: "main",
+      bundleDir: info.bundlePath,
+      digest: info.digest,
+      digestAlgorithm: "gs-patch-digest/v1",
+      cliVersion: "test",
+      onStarted: (started) => {
+        cycleId = started.cycleId;
+      },
+      ...over,
+    });
+    return { result, cycleId: result.cycleId };
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    void cycleId;
+  }
+}
+
+/** A `git` on PATH that stalls (with a background child) for chosen subcommands, else runs real git. */
+function installSlowGit(
+  f: VerifyFixture,
+  stallWhen: string,
+  pidFile: string,
+  ignoreSignals = false,
+): void {
+  const realGit = Bun.which("git");
+  if (!realGit) throw new Error("git not found");
+  const script = [
+    "#!/bin/sh",
+    ignoreSignals ? "trap '' INT TERM HUP" : "",
+    `case " $* " in`,
+    `  *" ${stallWhen} "*)`,
+    `    sleep 120 &`,
+    `    echo $! > ${JSON.stringify(pidFile)}`,
+    `    echo $$ >> ${JSON.stringify(pidFile)}`,
+    `    wait`,
+    `    exit 1 ;;`,
+    `esac`,
+    `exec ${JSON.stringify(realGit)} "$@"`,
+    "",
+  ].join("\n");
+  const path = join(f.binDir, "git");
+  writeFileSync(path, script);
+  chmodSync(path, 0o755);
+}
+
+const stalledRunner = (): Promise<RunnerResult> => new Promise<RunnerResult>(() => undefined);
+
+describe("hardening fix round 2", () => {
+  it("item 1: cleanupFailed round-trips writer -> schema -> reader when a real worktree removal fails", async () => {
+    if (process.getuid?.() === 0) return; // root ignores directory permissions
+    // The verification command leaves a directory nobody can delete from, so
+    // the real cleanup (git worktree remove, then directory removal) fails.
+    fx = makeVerifyFixture({
+      verificationCommand: "mkdir locked && touch locked/f && chmod 500 locked",
+    });
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    let cycleId = "";
+    try {
+      expect(r.exitCode).toBe(0);
+      cycleId = startedCycleId(r.stdout);
+      expect(r.stderr).toContain("verify cleanup failed");
+      const events = progressEvents(fx).filter((e) => e.event === "verify_cleanup_failed");
+      expect(events).toHaveLength(1);
+      expect(events[0]!.cycle_id).toBe(cycleId);
+      const doc = await receiptOf(fx, cycleId);
+      expect(doc.verify!.cleanupFailed).toBe(true);
+      // The schema accepts the field the reader adds.
+      expect(validateAgainstSchema(doc, SCHEMA, SCHEMA)).toEqual([]);
+    } finally {
+      chmodSync(join(fx.root, "state", fx.projectId, "verify", cycleId, "tree", "locked"), 0o700);
+    }
+  }, 60_000);
+
+  it("item 1: the schema declares verify.cleanupFailed as a boolean, and the contract docs list it", () => {
+    const verifyProps = (SCHEMA as any).properties.verify.properties;
+    expect(verifyProps.cleanupFailed.type).toBe("boolean");
+    for (const doc of ["cycle-result-v1.md", "verify-only-cycle.md"]) {
+      const text = readFileSync(join(import.meta.dir, "..", "docs", "contracts", doc), "utf8");
+      expect(text).toContain("cleanupFailed");
+    }
+  });
+
+  it("item 2: an unproven reap in the real verification stage fails the check and is recorded", async () => {
+    fx = makeVerifyFixture();
+    const fake = async (): Promise<RunnerResult> => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      aborted: false,
+      durationSeconds: 0,
+      output: "ok\n",
+      omittedBytes: 0,
+      reaped: false,
+      pid: null,
+    });
+    const { result, cycleId } = await inProcessVerify(fx, { runShell: fake });
+    expect(result.passed).toBe(false);
+    expect(result.reaped).toBe(false);
+    expect(result.category).toBe("verification_error");
+    const doc = await receiptOf(fx, cycleId);
+    expect(doc.state).toBe("failed");
+    expect(doc.outcome.reason).toContain("not proven reaped");
+    expect(doc.verify!.reaped).toBe(false);
+    expect(doc.verify!.failureCategory).toBe("verification_error");
+    const log = readFileSync(join(fx.root, doc.evidence.cycleDir!, "verification.log"), "utf8");
+    expect(log).toContain("PROCESS TREE NOT PROVEN REAPED");
+    expect(validateAgainstSchema(doc, SCHEMA, SCHEMA)).toEqual([]);
+    noLeftovers(fx);
+  });
+
+  it("items 3 and 6: a stalled child ends inside the published budget; the abort waits grace, not grace + 5 s", async () => {
+    fx = makeVerifyFixture();
+    const budgets = { verificationSec: 1, reviewerSec: 1, overallSec: 2, graceSec: 1, preflightSec: 30 };
+    const wallStart = Date.now();
+    const { result, cycleId } = await inProcessVerify(fx, { runShell: stalledRunner, budgets });
+    const wall = Date.now() - wallStart;
+    expect(result.category).toBe("overall_timeout");
+    const ev = progressEvents(fx);
+    const startedMs = Date.parse((ev.find((e) => e.event === "cycle_start") as any).timestamp);
+    const endedMs = Date.parse((ev.find((e) => e.event === "cycle_end") as any).timestamp);
+    const timed = endedMs - startedMs;
+    // The timed part is overall + grace (3 s) plus slack; with the old
+    // grace + 5 s wait it would be about 8 s.
+    expect(timed).toBeGreaterThanOrEqual(2900);
+    expect(timed).toBeLessThan((budgets.overallSec + budgets.graceSec) * 1000 + 1800);
+    // The whole call, cleanup included, is inside the published worst case
+    // computed from the same numbers.
+    expect(wall).toBeLessThan(worstCaseWallClockSec({ ...DEFAULT_VERIFY_BUDGETS, ...budgets }) * 1000);
+    const doc = await receiptOf(fx, cycleId);
+    expect(doc.verify!.failureCategory).toBe("overall_timeout");
+    noLeftovers(fx);
+  }, 30_000);
+
+  it("items 5 and 6: the preflight cap fires, stops and reaps the in-flight git, then refuses cleanly", async () => {
+    fx = makeVerifyFixture();
+    const pidFile = join(fx.scratch, "slow-git.pids");
+    installSlowGit(fx, "worktree add", pidFile);
+    const started = Date.now();
+    let caught: unknown;
+    try {
+      await inProcessVerify(fx, { budgets: { preflightSec: 2 } });
+    } catch (err) {
+      caught = err;
+    }
+    const elapsed = Date.now() - started;
+    expect(caught).toBeInstanceOf(VerifyRefusal);
+    expect((caught as VerifyRefusal).code).toBe("materialize_failed");
+    expect((caught as VerifyRefusal).message).toContain("hard cap (2s)");
+    // cap + reap wait + cleanup, all small: nowhere near the fake git's 120 s.
+    expect(elapsed).toBeLessThan(2000 + 5000 + 4000 + 5000);
+    // The slow git and its background child are both gone, not orphaned.
+    const pids = readFileSync(pidFile, "utf8").split("\n").filter(Boolean).map(Number);
+    expect(pids).toHaveLength(2);
+    for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+    noLeftovers(fx);
+    noReceipt(fx);
+  }, 60_000);
+
+  it("item 5: cleanup itself is bounded when git stalls", async () => {
+    fx = makeVerifyFixture();
+    const pidFile = join(fx.scratch, "slow-cleanup-git.pids");
+    installSlowGit(fx, "prune", pidFile);
+    const verifyDir = join(fx.scratch, "verify-dir");
+    mkdirSync(join(verifyDir, "tree"), { recursive: true });
+    const savedPath = process.env.PATH;
+    const spawn = childProcess.spawn;
+    // Inject startup timing at the spawn boundary: the real shim must have
+    // entered its stall before git's 100 ms kill timer starts. Under load it
+    // could previously be killed before writing either PID (ENOENT).
+    const stalledGit = spawn(join(fx.binDir, "git"), ["worktree", "prune"], {
+      cwd: fx.checkout,
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let spawnSpy: ReturnType<typeof spyOn> | undefined;
+    let handedOff = false;
+    try {
+      // Readiness is setup, bounded by 5 s within the 30 s test timeout.
+      await waitFor(
+        () => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim().split("\n").length === 2,
+        5000,
+        "stalled prune shim readiness",
+      );
+      const pids = readFileSync(pidFile, "utf8").split("\n").filter(Boolean).map(Number);
+      expect(pids).toHaveLength(2);
+      for (const pid of pids) expect(pidAlive(pid)).toBe(true);
+      spawnSpy = spyOn(childProcess, "spawn").mockImplementation(((command, args, options) => {
+        if (command === "git" && args?.at(-1) === "prune") {
+          expect(handedOff).toBe(false);
+          handedOff = true;
+          return stalledGit;
+        }
+        return spawn(command, args ?? [], options ?? {});
+      }) as typeof childProcess.spawn);
+      process.env.PATH = `${fx.binDir}:${savedPath ?? ""}`;
+      const stepMs = 400;
+      const started = Date.now();
+      const gone = await removeVerifyTree(fx.checkout, verifyDir, stepMs);
+      // Three step caps plus git.ts's documented 3 s reap grace; unchanged
+      // from the original bound. Readiness and death observation are outside it.
+      expect(Date.now() - started).toBeLessThan(3 * stepMs + 3000);
+      expect(handedOff).toBe(true);
+      // The directory removal is its own step and still succeeded.
+      expect(gone).toBe(true);
+      expect(existsSync(verifyDir)).toBe(false);
+      // SIGKILL can precede OS reaping: allow at most 1 s to observe death,
+      // well inside the 30 s timeout. A surviving process still fails the test.
+      await waitFor(() => pids.every((pid) => !pidAlive(pid)), 1000, "stalled git PIDs to disappear");
+      for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+    } finally {
+      spawnSpy?.mockRestore();
+      process.env.PATH = savedPath;
+      // Also clean up the real group when readiness or an assertion fails.
+      try {
+        if (process.platform === "win32") stalledGit.kill("SIGKILL");
+        else if (stalledGit.pid !== undefined) process.kill(-stalledGit.pid, "SIGKILL");
+      } catch { /* already gone */ }
+      await waitFor(
+        () => stalledGit.exitCode !== null || stalledGit.signalCode !== null,
+        1000,
+        "stalled git leader reaping",
+      );
+    }
+  }, 30_000);
+
+  it("item 4: the published formula matches what the code bounds", () => {
+    const doc = readFileSync(
+      join(import.meta.dir, "..", "docs", "contracts", "verify-only-cycle.md"),
+      "utf8",
+    );
+    expect(doc).toContain(
+      `${PREFLIGHT_CAP_SEC} (preflight cap) + overall + grace + ${CLEANUP_CAP_SEC} (cleanup)`,
+    );
+    expect(worstCaseWallClockSec(DEFAULT_VERIFY_BUDGETS)).toBe(
+      PREFLIGHT_CAP_SEC +
+        DEFAULT_VERIFY_BUDGETS.overallSec +
+        DEFAULT_VERIFY_BUDGETS.graceSec +
+        CLEANUP_CAP_SEC,
+    );
+    // The preflight cap covers the redaction and artifact writes too.
+    expect(doc).toContain("secret\n  redaction and the `digest-input` / `diff.patch` writes");
+  });
+
+  it("item 4: a hostile diff full of unterminated private-key headers is redacted in bounded time", async () => {
+    fx = makeVerifyFixture();
+    const spam = "-----BEGIN PRIVATE KEY-----\n".repeat(Math.floor((1024 * 1024) / 28));
+    editCheckout(fx, { "spam.txt": spam });
+    const bundle = await cliBundle(fx);
+    const started = Date.now();
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    expect(r.exitCode).toBe(0);
+    // The quadratic form took over ten seconds on 1 MiB of this.
+    expect(Date.now() - started).toBeLessThan(20_000);
+    noLeftovers(fx);
+  }, 60_000);
+
+  it("item 7: --help and the refusal name the overall-timeout minimum and how to fix the call", async () => {
+    fx = makeVerifyFixture();
+    const help = await fx.runCli(["cycle", "verify", "--help"]);
+    expect(help.stdout).toMatch(/--overall-timeout must be at least --verification-timeout \+ --reviewer-timeout/);
+    expect(help.stdout).toContain("raised to their sum");
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const r = await fx.runCli(
+      verifyArgs(fx, bundle, ["--json", "--overall-timeout=2", "--verification-timeout=40"]),
+    );
+    expect(r.exitCode).toBe(3);
+    const obj = JSON.parse(r.stdout.trim());
+    expect(obj.message).toContain("minimum of 340s");
+    expect(obj.message).toContain("raise --overall-timeout to at least 340");
+    noReceipt(fx);
+  });
+
+  it("item 7: giving only --verification-timeout raises the default overall budget instead of refusing", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    // 1000 + 300 > the default overall 900: without the auto-raise this is refused.
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json", "--verification-timeout=1000"]));
+    expect(r.exitCode).toBe(0);
+    const doc = await receiptOf(fx, startedCycleId(r.stdout));
+    expect(doc.state).toBe("passed");
+    // An explicit --overall-timeout is never changed.
+    const bundle2 = await cliBundle(fx);
+    const bad = await fx.runCli(
+      verifyArgs(fx, bundle2, ["--json", "--verification-timeout=1000", "--overall-timeout=900"]),
+    );
+    expect(bad.exitCode).toBe(3);
+  });
+});
+
+// --- hardening fix round 3 ------------------------------------------------------------
+
+describe("hardening fix round 3", () => {
+  function cycleDirGone(f: VerifyFixture): void {
+    expect(existsSync(join(f.root, "state", f.projectId, "cycles"))).toBe(false);
+  }
+
+  it("item 1: a forced write failure in preflight leaves no worktree, no git worktree list entry and no cycle directory", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const info = await writeBundle({
+      checkout: fx.checkout,
+      base: fx.base,
+      outDir: join(fx.scratch, "bundle-write-fail"),
+    });
+    const orig = fsp.writeFile;
+    const digestPath = join(fx.root, "state", fx.projectId, "cycles");
+    const spy = spyOn(fsp, "writeFile").mockImplementation(((path: unknown, data: unknown, opts: unknown) => {
+      if (String(path).startsWith(digestPath) && String(path).endsWith("digest-input.bin")) {
+        return Promise.reject(
+          Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }),
+        );
+      }
+      return orig(path as never, data as never, opts as never);
+    }) as typeof fsp.writeFile);
+    const saved = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+      GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+    };
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    const origErr = console.error;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdout.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stdout.write;
+    console.error = (...args: unknown[]) => {
+      stderr.push(args.map(String).join(" "));
+    };
+    setRootDir(fx.root);
+    process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+    process.env.HOME = fx.home;
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.GIT_CONFIG_GLOBAL;
+    try {
+      const code = await runCycleVerifyCli(
+        [
+          `--project=${fx.projectId}`,
+          `--checkout=${fx.checkout}`,
+          `--base=${fx.base}`,
+          "--branch=main",
+          `--bundle=${info.bundlePath}`,
+          `--digest=${info.digest}`,
+          "--digest-algorithm=gs-patch-digest/v1",
+          "--json",
+        ],
+        "test",
+      );
+      expect(code).toBe(4);
+      const record = JSON.parse(stdout.join("").trim()) as {
+        refused: boolean;
+        reason: string;
+        cycleId: null;
+        state: string;
+      };
+      expect(record.refused).toBe(true);
+      expect(record.state).toBe("refused");
+      expect(record.cycleId).toBeNull();
+      expect(record.reason).toBe("internal_error");
+      expect(stderr.join("\n")).toContain("verify refused (internal_error)");
+      noLeftovers(fx);
+      cycleDirGone(fx);
+      noReceipt(fx);
+    } finally {
+      process.stdout.write = origWrite;
+      console.error = origErr;
+      spy.mockRestore();
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 60_000);
+
+  it("item 1: the preflight cap firing after the cycle directory exists leaves no worktree and no cycle directory", async () => {
+    fx = makeVerifyFixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const orig = fsp.writeFile;
+    const digestPath = join(fx.root, "state", fx.projectId, "cycles");
+    const spy = spyOn(fsp, "writeFile").mockImplementation(((path: unknown, data: unknown, opts: unknown) => {
+      if (String(path).startsWith(digestPath) && String(path).endsWith("digest-input.bin")) {
+        return gate.then(() =>
+          Promise.reject(new Error("preflight write released after the cap")),
+        );
+      }
+      return orig(path as never, data as never, opts as never);
+    }) as typeof fsp.writeFile);
+    let caught: unknown;
+    try {
+      await inProcessVerify(fx, { budgets: { preflightSec: 2 } });
+    } catch (err) {
+      caught = err;
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+    expect(caught).toBeInstanceOf(VerifyRefusal);
+    expect((caught as VerifyRefusal).code).toBe("materialize_failed");
+    expect((caught as VerifyRefusal).message).toContain("hard cap (2s)");
+    noLeftovers(fx);
+    cycleDirGone(fx);
+    noReceipt(fx);
+  }, 30_000);
+
+  async function signalSlowGit(
+    signal: "SIGINT" | "SIGTERM",
+    twice: boolean,
+  ): Promise<{ exitCode: number; pids: number[] }> {
+    const pidFile = join(fx!.scratch, "slow-git.pids");
+    installSlowGit(fx!, "worktree add", pidFile, twice);
+    editCheckout(fx!);
+    const bundle = await cliBundle(fx!);
+    const { proc, result } = fx!.spawnCli(verifyArgs(fx!, bundle, ["--json"]));
+    const pids: number[] = [];
+    try {
+      await waitFor(
+        () => existsSync(pidFile) && readFileSync(pidFile, "utf8").split("\n").filter(Boolean).length >= 2,
+        20_000,
+        "slow git to start",
+      );
+      pids.push(...readFileSync(pidFile, "utf8").split("\n").filter(Boolean).map(Number));
+      expect(pids).toHaveLength(2);
+      for (const pid of pids) expect(pidAlive(pid)).toBe(true);
+      proc.kill(signal);
+      if (twice) {
+        await new Promise((r) => setTimeout(r, 200));
+        proc.kill(signal);
+      }
+      const r = await Promise.race([
+        result,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("verify did not exit after the signal")), 15_000),
+        ),
+      ]);
+      for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+      return { exitCode: r.exitCode, pids };
+    } finally {
+      try {
+        proc.kill("SIGKILL");
+      } catch {
+        /* already exited */
+      }
+      for (const pid of pids) {
+        try {
+          process.kill(-pid, "SIGKILL");
+        } catch {
+          /* group already gone */
+        }
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  }
+
+  it("item 2: SIGTERM aborts preflight and no live git process survives", async () => {
+    fx = makeVerifyFixture();
+    const { pids } = await signalSlowGit("SIGTERM", false);
+    for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+  }, 40_000);
+
+  it("item 2: preflight SIGINT exits 130 with no surviving git, even when git traps SIGINT and another is sent", async () => {
+    fx = makeVerifyFixture();
+    const { exitCode, pids } = await signalSlowGit("SIGINT", true);
+    expect(exitCode).toBe(130);
+    for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+  }, 40_000);
+});
+
 // --- CLI surface ----------------------------------------------------------------
 
 describe("CLI help", () => {
@@ -844,4 +1539,255 @@ describe("CLI help", () => {
     const g = await fx.runCli(["--help"]);
     expect(g.stdout).toContain("changeset bundle");
   });
+});
+
+
+// --- hardening fix round 5 -------------------------------------------------------
+
+describe("hardening fix round 5", () => {
+  it("finding 1: SIGTERM during preflight reports interrupted, exit 143, no receipt or debris", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const pidFile = join(fx.scratch, "preflight-signal.pids");
+    installSlowGit(fx, "worktree add", pidFile);
+    const { proc, result } = fx.spawnCli(verifyArgs(fx, bundle, ["--json"]));
+    const pids: number[] = [];
+    try {
+      await waitFor(
+        () => existsSync(pidFile) && readFileSync(pidFile, "utf8").trim().split("\n").length === 2,
+        20_000,
+        "preflight worktree add",
+      );
+      pids.push(...readFileSync(pidFile, "utf8").trim().split("\n").map(Number));
+      proc.kill("SIGTERM");
+      const r = await result;
+      // Check the outcome as well as exit status: a signal must not blame the bundle.
+      const record = JSON.parse(r.stdout.trim());
+      expect(record.reason).toBe("interrupted");
+      expect(r.exitCode).toBe(143);
+      expect(record.refused).toBe(true);
+      expect(record.state).toBe("refused");
+      expect(record.cycleId).toBeNull();
+      expect(r.stderr).toContain("verify refused (interrupted)");
+      for (const pid of pids) expect(pidAlive(pid)).toBe(false);
+      noLeftovers(fx);
+      noReceipt(fx);
+    } finally {
+      proc.kill("SIGKILL");
+      for (const pid of pids) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* gone */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+      }
+      await result;
+    }
+  }, 40_000);
+
+  it("finding 2: a refusal before tree creation spawns no git worktree prune", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const bundle = await cliBundle(fx);
+    const realGit = Bun.which("git")!;
+    const log = join(fx.scratch, "git-calls.log");
+    const shim = join(fx.binDir, "git");
+    writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec '${realGit}' "$@"\n`);
+    chmodSync(shim, 0o755);
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"], { base: "f".repeat(40) }));
+    expect(r.exitCode).toBe(3);
+    expect(JSON.parse(r.stdout).reason).toBe("base_unresolvable");
+    expect(readFileSync(log, "utf8")).not.toContain("worktree prune");
+    noLeftovers(fx);
+    noReceipt(fx);
+  });
+
+  it("finding 5: preflight cleanup preserves a cycle created concurrently in its parent", async () => {
+    fx = makeVerifyFixture();
+    const parent = join(fx.root, "state", fx.projectId, "cycles");
+    const neighbor = join(parent, "concurrent-autonomous-cycle");
+    const origWrite = fsp.writeFile;
+    const origRm = fsp.rm;
+    const origRmdir = fsp.rmdir;
+    const writeSpy = spyOn(fsp, "writeFile").mockImplementation(((path: unknown, ...args: unknown[]) => {
+      if (String(path).startsWith(parent) && String(path).endsWith("digest-input.bin")) {
+        return Promise.reject(new Error("forced preflight write failure"));
+      }
+      return origWrite(path as never, ...args as [never, never]);
+    }) as typeof fsp.writeFile);
+    let raced = false;
+    const race = (path: unknown) => {
+      if (String(path) === parent) {
+        raced = true;
+        mkdirSync(neighbor);
+        writeFileSync(join(neighbor, "evidence"), "keep me");
+      }
+    };
+    const rmSpy = spyOn(fsp, "rm").mockImplementation(((path: unknown, opts: unknown) => {
+      race(path);
+      return origRm(path as never, opts as never);
+    }) as typeof fsp.rm);
+    const rmdirSpy = spyOn(fsp, "rmdir").mockImplementation(((path: unknown) => {
+      race(path);
+      return origRmdir(path as never);
+    }) as typeof fsp.rmdir);
+    try {
+      await expect(inProcessVerify(fx)).rejects.toThrow("forced preflight write failure");
+      expect(raced).toBe(true);
+      expect(existsSync(join(neighbor, "evidence"))).toBe(true);
+      expect(readdirSync(parent)).toEqual(["concurrent-autonomous-cycle"]);
+      expect(progressEvents(fx)).toEqual([]);
+      noLeftovers(fx);
+    } finally {
+      writeSpy.mockRestore();
+      rmSpy.mockRestore();
+      rmdirSpy.mockRestore();
+    }
+  });
+
+  for (const mode of ["dies", "hangs"] as const) {
+    it(`finding 6: cycle verify refuses when global-excludes git ${mode}`, async () => {
+      fx = makeVerifyFixture();
+      // Build with an explicitly configured global ignore, then make resolution
+      // indeterminate. Falling back to no excludes would misclassify this bundle.
+      writeFileSync(join(fx.home, ".gitignore"), ".env\n");
+      writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${join(fx.home, ".gitignore")}\n`);
+      editCheckout(fx);
+      writeFileSync(join(fx.checkout, ".env"), "local secret\n");
+      const bundle = await cliBundle(fx);
+      const realGit = Bun.which("git")!;
+      const shim = join(fx.binDir, "git");
+      writeFileSync(shim, [
+        "#!/bin/sh",
+        'case " $* " in',
+        '  *" config --global --path --get core.excludesFile "*)',
+        mode === "dies" ? '    kill -KILL $$ ;;' : '    exec sleep 120 ;;',
+        "esac",
+        `exec '${realGit}' "$@"`,
+        "",
+      ].join("\n"));
+      chmodSync(shim, 0o755);
+      if (mode === "dies") {
+        const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+        expect(r.exitCode).toBe(3);
+        const record = JSON.parse(r.stdout);
+        expect(record.reason).toBe("materialize_failed");
+        expect(record.message).toContain("could not resolve");
+      } else {
+        // The CLI has no git-timeout flag; exercise its real run call with a
+        // short git budget, without waiting for the production 60-second cap.
+        await expect(inProcessVerify(fx, {
+          bundleDir: bundle.bundlePath,
+          digest: bundle.digest,
+          gitTimeoutMs: 500,
+        })).rejects.toThrow("could not resolve");
+      }
+      noLeftovers(fx);
+      noReceipt(fx);
+    }, 15_000);
+
+    it(`finding 6: changeset bundle refuses when global-excludes git ${mode}`, async () => {
+      fx = makeVerifyFixture();
+      editCheckout(fx);
+      writeFileSync(join(fx.home, ".gitignore"), ".env\n");
+      writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${join(fx.home, ".gitignore")}\n`);
+      writeFileSync(join(fx.checkout, ".env"), "local secret\n");
+      const realGit = Bun.which("git")!;
+      const shim = join(fx.binDir, "git");
+      writeFileSync(shim, [
+        "#!/bin/sh",
+        'case " $* " in',
+        '  *" config --global --path --get core.excludesFile "*)',
+        mode === "dies" ? '    kill -KILL $$ ;;' : '    exec sleep 120 ;;',
+        "esac",
+        `exec '${realGit}' "$@"`,
+        "",
+      ].join("\n"));
+      chmodSync(shim, 0o755);
+      const out = join(fx.scratch, "indeterminate-bundle");
+      const saved = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL };
+      process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+      process.env.HOME = fx.home;
+      delete process.env.XDG_CONFIG_HOME;
+      delete process.env.GIT_CONFIG_GLOBAL;
+      try {
+        await expect(writeBundle({ checkout: fx.checkout, base: fx.base, outDir: out, gitTimeoutMs: 500 })).rejects.toThrow("could not resolve");
+        expect(existsSync(out)).toBe(false);
+        expect(readFileSync(join(fx.checkout, ".env"), "utf8")).toBe("local secret\n");
+      } finally {
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    }, 15_000);
+  }
+});
+
+// --- hardening fix round 6 -------------------------------------------------------
+
+describe("hardening fix round 6", () => {
+  it("D2: an unwritable progress log after start keeps stdout to one JSON line", async () => {
+    fx = makeVerifyFixture();
+    editCheckout(fx);
+    const info = await writeBundle({
+      checkout: fx.checkout,
+      base: fx.base,
+      outDir: join(fx.scratch, "bundle-log-fail"),
+    });
+    const progressPath = join(fx.root, "state", fx.projectId, "PROGRESS.jsonl");
+    let started = false;
+    let failedAppends = 0;
+    const originalAppend = fsp.appendFile;
+    const spy = spyOn(fsp, "appendFile").mockImplementation(((path: unknown, data: unknown, opts: unknown) => {
+      if (String(path) === progressPath && started) {
+        failedAppends++;
+        return Promise.reject(Object.assign(new Error("ENOSPC: progress log is unwritable"), { code: "ENOSPC" }));
+      }
+      return originalAppend(path as never, data as never, opts as never);
+    }) as typeof fsp.appendFile);
+    const saved = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+      GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+    };
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const originalWrite = process.stdout.write;
+    const originalError = console.error;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      const line = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      stdout.push(line);
+      if (JSON.parse(line).state === "running") started = true;
+      return true;
+    }) as typeof process.stdout.write;
+    console.error = (...args: unknown[]) => stderr.push(args.map(String).join(" "));
+    setRootDir(fx.root);
+    process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+    process.env.HOME = fx.home;
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.GIT_CONFIG_GLOBAL;
+    try {
+      const code = await runCycleVerifyCli(verifyArgs(fx, info, ["--json"]).slice(2), "test");
+      expect(code).toBe(4);
+      expect(started).toBe(true);
+      expect(failedAppends).toBeGreaterThan(0);
+      const events = progressEvents(fx);
+      expect(events.some((e) => e.event === "cycle_start")).toBe(true);
+      expect(events.some((e) => e.event === "cycle_end")).toBe(false);
+      const lines = stdout.join("").trim().split("\n");
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0]!)).toMatchObject({ state: "running", projectId: fx.projectId });
+      expect(stderr.join("\n")).toContain("internal_error");
+      expect(stderr.join("\n")).toContain("progress log is unwritable");
+      noLeftovers(fx);
+    } finally {
+      process.stdout.write = originalWrite;
+      console.error = originalError;
+      spy.mockRestore();
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 60_000);
 });

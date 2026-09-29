@@ -56,7 +56,16 @@ git --no-pager
   `LC_ALL`, `LC_CTYPE`, `TMPDIR`, `TMP`, `TEMP` (plus the Windows system
   variables), with `GIT_CONFIG_NOSYSTEM=1` and the user and system config files
   pointed at the null device. Repository-local configuration cannot change the
-  bytes: every setting that affects diff text is pinned above.
+  bytes: every setting that affects diff text is pinned above. ONE user setting
+  is not cleared away but carried in explicitly: the caller resolves its
+  effective global excludes file once per run (`core.excludesFile` from the
+  user's normal git config if set; else `$XDG_CONFIG_HOME/git/ignore` when
+  `XDG_CONFIG_HOME` is set and non-empty (and only that: `$HOME/.config` is not
+  consulted then, as in git); else `$HOME/.config/git/ignore`; else none) and pins it on every git call here as
+  `-c core.excludesFile=<resolved path or the null device>`. The resolved path
+  and the SHA-256 of its bytes are recorded with the receipt, so a reader can
+  see exactly which third ignore source was in force. An indeterminate answer
+  from git config is refused, never guessed past.
 - The invocation must not write to the checkout. `git diff` refreshes and
   rewrites the index, so an implementation points `GIT_INDEX_FILE` at a private
   copy of the checkout's index for the duration.
@@ -66,8 +75,14 @@ git --no-pager
 ### U: the untracked side
 
 `git ls-files --others --exclude-standard -z` in the same directory (same
-environment, same private index) lists exactly the untracked, non-ignored files.
-Ignored files never appear, so they cannot move the digest.
+environment, same private index, same `core.excludesFile` pin) lists exactly
+the untracked, non-ignored files. Ignored files never appear, so they cannot
+move the digest. `--exclude-standard` consults three ignore sources: the tree's
+own `.gitignore` files, `.git/info/exclude`, and the pinned global excludes
+file above. U is defined relative to that *effective* exclude set — the pinned
+and recorded one, not the user's ambient config — so a locally-ignored file
+stays out of the change-set, the bundle and the verify tree on every machine
+that runs the check.
 
 1. Drop excluded paths (section 3).
 2. Sort the remaining paths by the UTF-8 bytes of the path (not by locale, not
@@ -133,6 +148,7 @@ An implementation refuses (throws) rather than return a digest for:
 | `untracked_unreadable` | an untracked entry that is missing, unreadable or not a regular file |
 | `untracked_path_invalid` | a path with a control character or a non-repo-relative shape |
 | `path_not_utf8` | an untracked path that is not valid UTF-8 |
+| `copy_failed` | an untracked file could not be read or copied; maps to `materialize_failed` in `cycle verify` |
 
 The vector file's `refuse` entries use these codes. The caps are parameters:
 the vector `limits` object lowers them so the refusals can be tested without
@@ -143,8 +159,13 @@ huge files. An implementation must expose the same three limits for testing
 
 `vectors.json` is language neutral. Each vector describes a base commit
 (`base`: files as UTF-8 `text` or `base64`), a list of working-tree `steps`
-(`write`, `delete`, `stage`, `rename`, `symlink`), optional `exclude` and
-`limits`, and an `expect`:
+(`write`, `delete`, `stage`, `rename`, `symlink`), optional `exclude`,
+`limits` and `globalExcludes`, and an `expect`. `globalExcludes` is
+`{source, text}`: `config` puts `text` in a file that the user's global git
+config names as `core.excludesFile`; `xdg` sets `XDG_CONFIG_HOME` and puts
+`text` in `$XDG_CONFIG_HOME/git/ignore` with no `core.excludesFile`; `none`
+has no global excludes file. The implementation resolves it as in section 2
+and pins the result:
 
 | `expect` | Meaning |
 | --- | --- |

@@ -56,3 +56,42 @@ describe("redactSecrets", () => {
     expect(warning).toContain("openai_token:2");
   });
 });
+
+describe("redactSecrets private-key blocks", () => {
+  const begin = (label: string) => `-----BEGIN ${label}PRIVATE KEY-----`;
+  const end = (label: string) => `-----END ${label}PRIVATE KEY-----`;
+
+  it("masks each complete block, keeps the text around it, and counts them", () => {
+    const input = [
+      "before",
+      begin("RSA "),
+      "AAAA",
+      end("RSA "),
+      "between",
+      begin(""),
+      "BBBB",
+      end(""),
+      "after",
+    ].join("\n");
+    const r = redactSecrets(input);
+    expect(r.redacted).toBe("before\n[REDACTED:pem_private_key]\nbetween\n[REDACTED:pem_private_key]\nafter");
+    expect(r.hits).toEqual([{ kind: "pem_private_key", count: 2 }]);
+  });
+
+  it("leaves a header with no END untouched, even when a complete block follows it", () => {
+    // The lazy form matches from the FIRST header to the first END, so the
+    // unterminated-looking header is swallowed into the block.
+    const input = `${begin("")}\nx\n${begin("EC ")}\ny\n${end("EC ")}\ntail`;
+    const r = redactSecrets(input);
+    expect(r.redacted).toBe("[REDACTED:pem_private_key]\ntail");
+    expect(redactSecrets(`${begin("")}\nno end here`).redacted).toBe(`${begin("")}\nno end here`);
+  });
+
+  it("stays linear on many unterminated headers", () => {
+    const spam = `${begin("")}\n`.repeat(40_000);
+    const started = performance.now();
+    const r = redactSecrets(spam);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(r.hits).toEqual([]);
+  });
+});

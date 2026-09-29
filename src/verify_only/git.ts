@@ -6,6 +6,7 @@
 // hashed. Hooks, fsmonitor and external diff drivers are switched off.
 
 import { spawn, type ChildProcess } from "child_process";
+import { AsyncLocalStorage } from "async_hooks";
 
 export const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 
@@ -104,12 +105,117 @@ export const GIT_DIFF_PIN_ARGS: readonly string[] = [
   "-c", `diff.orderFile=${NULL_DEVICE}`,
 ];
 
+const abortContext = new AsyncLocalStorage<AbortSignal | undefined>();
+
+/**
+ * Every git call started inside `fn` (however deep) is stopped, process group
+ * and all, when `signal` aborts. A call started after the abort returns at
+ * once without spawning.
+ */
+export function withGitAbort<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  return abortContext.run(signal, fn);
+}
+
+/** Run `fn` outside any abort context (cleanup after an abort must still run git). */
+export function withoutGitAbort<T>(fn: () => Promise<T>): Promise<T> {
+  return abortContext.run(undefined, fn);
+}
+
+const isWindows = process.platform === "win32";
+
+function killGitGroup(child: ChildProcess): void {
+  const pid = child.pid;
+  try {
+    if (pid !== undefined && !isWindows) process.kill(-pid, "SIGKILL");
+    else child.kill("SIGKILL");
+  } catch {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+function gitGroupAlive(pid: number | undefined): boolean {
+  if (pid === undefined || isWindows) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Longest a stopped git call waits for its process group to disappear. */
+const GIT_REAP_WAIT_MS = 3000;
+
+/**
+ * Process-group ids of git calls still running. `detached` puts git outside
+ * the terminal's foreground group, so a Ctrl-C delivered to this process does
+ * not reach git unless its abort context stops it, and a second signal's exit would
+ * otherwise orphan the group.
+ */
+const liveGitGroups = new Set<number>();
+
+function registerGitGroup(pid: number | undefined): void {
+  if (pid !== undefined) liveGitGroups.add(pid);
+}
+
+/** Kill remaining members and await the bounded reap before releasing ownership. */
+async function releaseGitGroup(pid: number | undefined): Promise<void> {
+  if (pid === undefined) return;
+  if (isWindows || !gitGroupAlive(pid)) {
+    liveGitGroups.delete(pid);
+    return;
+  }
+  signalGitPid(pid, "SIGKILL");
+  const deadline = Date.now() + GIT_REAP_WAIT_MS;
+  while (liveGitGroups.has(pid) && gitGroupAlive(pid) && Date.now() < deadline) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  }
+  if (liveGitGroups.has(pid) && gitGroupAlive(pid)) signalGitPid(pid, "SIGKILL");
+  liveGitGroups.delete(pid);
+}
+
+function signalGitPid(pid: number, signal: NodeJS.Signals): void {
+  try {
+    if (!isWindows) process.kill(-pid, signal);
+    else process.kill(pid, signal);
+  } catch {
+    /* already gone */
+  }
+}
+
+/** Forward a terminal signal to every git process group that is still running. */
+export function signalLiveGitGroups(signal: NodeJS.Signals): void {
+  for (const pid of liveGitGroups) signalGitPid(pid, signal);
+}
+
+/**
+ * SIGKILL every live git group before a second signal's process.exit.
+ * This does not prove reaping: a synchronous wait would block the event loop
+ * from reaping our direct children and count their zombies as live groups.
+ */
+export function killAndReapLiveGitGroups(): void {
+  for (const pid of liveGitGroups) signalGitPid(pid, "SIGKILL");
+  liveGitGroups.clear();
+}
+
+/** Ordinary CLI exits can yield to the event loop and await owned group shutdown. */
+export async function reapLiveGitGroups(): Promise<void> {
+  for (const pid of liveGitGroups) signalGitPid(pid, "SIGKILL");
+  await Promise.all([...liveGitGroups].map(releaseGitGroup));
+}
+
 export interface GitRunOptions {
   cwd: string;
   env?: Record<string, string>;
   timeoutMs?: number;
   maxStdoutBytes?: number;
   stdin?: Buffer | string;
+  /** Overrides the ambient abort context (see withGitAbort). */
+  signal?: AbortSignal;
 }
 
 export interface GitResult {
@@ -119,6 +225,8 @@ export interface GitResult {
   timedOut: boolean;
   /** stdout exceeded the cap; the kept bytes must not be used. */
   truncated: boolean;
+  /** The call was stopped by an abort signal; its process group was killed. */
+  aborted?: boolean;
   spawnError?: string;
 }
 
@@ -137,13 +245,28 @@ export function runGitRaw(
 ): Promise<GitResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
   const maxStdout = opts.maxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
+  const signal = opts.signal ?? abortContext.getStore();
   return new Promise<GitResult>((resolve) => {
+    if (signal?.aborted) {
+      resolve({
+        code: null,
+        stdout: Buffer.alloc(0),
+        stderr: "",
+        timedOut: false,
+        truncated: false,
+        aborted: true,
+      });
+      return;
+    }
     let child: ChildProcess;
     try {
+      // Own process group, so a stop reaches git's own children too (for
+      // example the `reset` that `worktree add` runs).
       child = spawn("git", [...args], {
         cwd: opts.cwd,
         env: opts.env ?? pinnedGitEnv(),
         stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        detached: !isWindows,
         windowsHide: true,
       });
     } catch (err) {
@@ -157,32 +280,54 @@ export function runGitRaw(
       });
       return;
     }
+    registerGitGroup(child.pid);
 
     const stdoutChunks: Buffer[] = [];
     let stdoutLen = 0;
     let truncated = false;
     let stderrBuf = "";
     let timedOut = false;
+    let aborted = false;
     let settled = false;
 
-    const finish = (result: GitResult) => {
+    const finish = async (result: GitResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      await releaseGitGroup(child.pid);
       resolve(result);
     };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGitGroup(child);
     }, timeoutMs);
+
+    // Finish owns the bounded group reap on every exit, including an abort:
+    // the caller may remove the tree git was working in right away.
+    const onAbort = () => {
+      aborted = true;
+      killGitGroup(child);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      void finish({
+        code: null,
+        stdout: Buffer.alloc(0),
+        stderr: stderrBuf,
+        timedOut,
+        truncated,
+        aborted: true,
+      });
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     child.stdout?.on("data", (chunk: Buffer) => {
       if (truncated) return;
       stdoutLen += chunk.length;
       if (stdoutLen > maxStdout) {
         truncated = true;
-        child.kill("SIGKILL");
+        killGitGroup(child);
         return;
       }
       stdoutChunks.push(chunk);
@@ -199,10 +344,12 @@ export function runGitRaw(
         stderr: stderrBuf,
         timedOut,
         truncated,
+        aborted,
         spawnError: err.message,
       });
     });
     child.on("close", (code) => {
+      if (aborted) return;
       finish({
         code,
         stdout: truncated ? Buffer.alloc(0) : Buffer.concat(stdoutChunks),

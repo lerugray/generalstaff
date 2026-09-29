@@ -49,10 +49,18 @@ export interface CycleResultVerify {
   checkoutPath: string | null;
   worktreePath: string | null;
   excludedPaths: string[];
+  /** The global git excludes pin the check ran under. */
+  globalExcludesFile?: string | null;
+  /** SHA-256 of the pinned excludes file's bytes (null when none/unreadable). */
+  globalExcludesSha256?: string | null;
   handsOffHits: Array<{ file: string; pattern: string }>;
   cliVersion: string | null;
   reviewerProvider: string | null;
   failureCategory: string | null;
+  /** Every verification process group was proven reaped. */
+  reaped?: boolean;
+  /** The worktree could not be removed after the check. */
+  cleanupFailed?: boolean;
 }
 
 export interface CycleResultV1 {
@@ -215,10 +223,15 @@ function parseVerifyBlock(v: unknown): CycleResultVerify | null {
     checkoutPath: asString(o.checkoutPath),
     worktreePath: asString(o.worktreePath),
     excludedPaths: asStringArray(o.excludedPaths),
+    globalExcludesFile: asString(o.globalExcludesFile),
+    globalExcludesSha256: asString(o.globalExcludesSha256),
     handsOffHits: hits,
     cliVersion: asString(o.cliVersion),
     reviewerProvider: asString(o.reviewerProvider),
     failureCategory: asString(o.failureCategory),
+    // Only present when the recorded block carries it: an absent boolean must
+    // not become a present-but-undefined key (the schema walks the keys).
+    ...(typeof o.reaped === "boolean" ? { reaped: o.reaped } : {}),
   };
 }
 
@@ -478,6 +491,13 @@ export async function getCycleResultV1(
         endAlgorithm =
           asString(evt.data.patch_digest_algorithm) ?? endAlgorithm;
         recordedVerify = parseVerifyBlock(evt.data.verify) ?? recordedVerify;
+        break;
+      }
+      case "verify_cleanup_failed": {
+        // The check's worktree could not be removed. Flag the
+        // parsed verify block so the leftover is visible to receipt consumers,
+        // not just grep.
+        if (recordedVerify) recordedVerify.cleanupFailed = true;
         break;
       }
       case "cycle_skipped": {

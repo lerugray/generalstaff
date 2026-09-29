@@ -14,8 +14,9 @@
 // `cycle_end` before returning.
 
 import { randomInt } from "crypto";
-import { readdirSync, realpathSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { existsSync, realpathSync, writeFileSync } from "fs";
+import { readdir, rm, rmdir, writeFile } from "fs/promises";
+import { dirname, join } from "path";
 import { appendProgress } from "../audit";
 import { matchesHandsOffSymlinkAware } from "../safety";
 import { redactSecrets, formatSecretRedactionWarning } from "../secrets";
@@ -39,10 +40,12 @@ import {
   VERIFY_MODE,
 } from "./constants";
 import { normalizeExclude, type DigestLimits } from "./digest";
-import { scrubLine } from "./git";
+import { resolveGlobalExcludes, type GlobalExcludes } from "./excludes";
+import { scrubLine, withGitAbort } from "./git";
 import { enterVerifyOnlyMode, verifyOnlyProjectView } from "./guard";
 import { acquireVerifyLock } from "./lock";
 import {
+  CLEANUP_CAP_SEC,
   baseIsCommit,
   isGitTopLevel,
   materializeSnapshot,
@@ -51,25 +54,56 @@ import {
   type Materialized,
 } from "./materialize";
 import { VerifyRefusal, toRefusal } from "./refusal";
-import { killAllOwnedGroups } from "./runner";
+import { killAllOwnedGroups, type RunnerOptions, type RunnerResult } from "./runner";
 import { runVerifyOnlyVerification } from "./verification";
 
 // --- Budgets ---------------------------------------------------------------
+
+/**
+ * REAL #3: hard cap on everything that runs before the overall timer starts:
+ * the leftover sweep, checkout probes, excludes resolution, digest recompute,
+ * worktree materialization, the review diff, secret redaction and the
+ * digest-input / diff.patch writes. Normally seconds, not minutes.
+ */
+export const PREFLIGHT_CAP_SEC = 120;
+
+/** After the preflight cap fires: how long the aborted chain gets to unwind. */
+export const PREFLIGHT_REAP_WAIT_MS = 5000;
 
 export interface VerifyBudgets {
   verificationSec: number;
   reviewerSec: number;
   overallSec: number;
   graceSec: number;
+  /** The pre-timer cap above. Only tests lower it. */
+  preflightSec: number;
 }
 
-/** Defaults. A caller's own budget for the whole call must exceed overall + grace. */
+/**
+ * Defaults. The published worst-case wall clock of one call is
+ *   preflightSec + overallSec + graceSec + CLEANUP_CAP_SEC
+ * (see docs/contracts/verify-only-cycle.md): the pre-timer stages are capped
+ * at preflightSec, the timed stages at overallSec, an abort waits at most
+ * graceSec for the runner to finish its own kill, and cleanup is three steps
+ * of at most 10 s each. A caller that supervises the process should allow
+ * strictly more than that.
+ */
 export const DEFAULT_VERIFY_BUDGETS: VerifyBudgets = {
   verificationSec: 10 * 60,
   reviewerSec: 5 * 60,
   overallSec: 15 * 60,
   graceSec: 10,
+  preflightSec: PREFLIGHT_CAP_SEC,
 };
+
+/** The published worst-case wall clock for a set of budgets, in seconds. */
+export function worstCaseWallClockSec(b: VerifyBudgets): number {
+  return (
+    b.preflightSec +
+    Math.max(b.overallSec + b.graceSec, PREFLIGHT_REAP_WAIT_MS / 1000) +
+    CLEANUP_CAP_SEC
+  );
+}
 
 export type FailureCategory =
   | "verification_nonzero"
@@ -103,6 +137,8 @@ export interface VerifyRunRequest {
   cliVersion: string;
   /** External abort (process signals). Aborting ends the check as interrupted. */
   signal?: AbortSignal;
+  /** Test seam: replaces the owned shell runner for the verification command. */
+  runShell?: (opts: RunnerOptions) => Promise<RunnerResult>;
   /** Called once, right after cycle_start is recorded. */
   onStarted?: (info: { cycleId: string; projectId: string }) => void;
 }
@@ -260,6 +296,20 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
     }
   }
 
+  // The overall budget is the hard limit, so it must cover the stages it
+  // contains: a check whose stages could outrun the overall budget would be
+  // aborted mid-flight (mid kill, mid record) instead of failing cleanly in a
+  // stage. Refuse up front, before anything is recorded. Equality is allowed:
+  // the shipped defaults are exactly verification + reviewer.
+  if (budgets.overallSec < budgets.verificationSec + budgets.reviewerSec) {
+    throw new VerifyRefusal(
+      "invalid_argument",
+      `--overall-timeout (${budgets.overallSec}s) is below the minimum of ${budgets.verificationSec + budgets.reviewerSec}s ` +
+        `(the verification budget ${budgets.verificationSec}s + the reviewer budget ${budgets.reviewerSec}s); ` +
+        `raise --overall-timeout to at least ${budgets.verificationSec + budgets.reviewerSec}, or lower --verification-timeout / --reviewer-timeout`,
+    );
+  }
+
   // Preflight that needs no filesystem. Each failure is a refusal.
   if (!project.verification_command || project.verification_command.trim() === "") {
     throw new VerifyRefusal(
@@ -286,53 +336,147 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
     throw toRefusal(err);
   }
 
-  if (!(await isGitTopLevel(req.checkout, (p) => realpathSync.native(p), req.gitTimeoutMs))) {
-    throw new VerifyRefusal(
-      "checkout_invalid",
-      "the checkout is not the top level of a git work tree",
-    );
-  }
-  if (!(await baseIsCommit(req.checkout, req.base, req.gitTimeoutMs))) {
-    throw new VerifyRefusal(
-      "base_unresolvable",
-      "the base revision is not a commit in the checkout",
-    );
-  }
-
   const cycleId = generateCycleId();
   const verifyRoot = join(projectStateDir(project.id, req.dispatcher), "verify");
   const verifyDir = join(verifyRoot, cycleId);
   const lock = acquireVerifyLock(
     verifyRoot,
     cycleId,
-    (budgets.overallSec + budgets.graceSec + 120) * 1000,
+    // REAL #3: the lock covers the published worst case (see
+    // worstCaseWallClockSec) plus a 90 s margin.
+    (worstCaseWallClockSec(budgets) + 90) * 1000,
   );
   try {
-    // Leftovers of a check that died without cleaning up. Safe to remove:
-    // this process holds the project's verify lock.
-    for (const name of safeReaddir(verifyRoot)) {
-      if (name === ".lock" || name === cycleId) continue;
-      rmSync(join(verifyRoot, name), { recursive: true, force: true });
-    }
+    // Everything until the overall timer starts runs under ONE hard cap
+    // (budgets.preflightSec): the leftover sweep, the git probes and the
+    // materialization, the review diff, secret redaction and the artifact
+    // writes. On a breach or any other failure the in-flight git (process
+    // groups included) is stopped and reaped, the tree is removed (worktree
+    // registration included) and a cycle directory this preflight created
+    // is removed. Nothing is recorded: the refusal is the terminal record.
+    const preflightAbort = new AbortController();
+    // Abort only preflight's git context; cleanup deliberately runs outside
+    // it. Forwarding terminal signals to all live git would interrupt cleanup.
+    const onPreflightSignal = () => preflightAbort.abort(req.signal?.reason);
+    req.signal?.addEventListener("abort", onPreflightSignal, { once: true });
+    if (req.signal?.aborted) onPreflightSignal();
+    const interrupted = () => new VerifyRefusal(
+      "interrupted",
+      `Check interrupted (${scrubLine(String(req.signal?.reason ?? "signal"), 60)}) during preflight`,
+    );
+    let createdCycleDir: string | null = null;
+    const removePreflightDebris = async (): Promise<void> => {
+      if (existsSync(verifyDir)) await removeVerifyTree(req.checkout, verifyDir);
+      if (!createdCycleDir) return;
+      const dir = createdCycleDir;
+      createdCycleDir = null;
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      const parent = dirname(dir);
+      // An autonomous cycle can create a neighbor here while we clean up.
+      // rmdir removes only an empty parent, atomically, preserving that cycle.
+      await rmdir(parent).catch(() => undefined);
+    };
+    const preflightWork = withGitAbort(preflightAbort.signal, async () => {
+      // Leftovers of a check that died without cleaning up. Safe to remove:
+      // this process holds the project's verify lock.
+      for (const name of await readdir(verifyRoot).catch(() => [] as string[])) {
+        if (name === ".lock" || name === cycleId) continue;
+        await rm(join(verifyRoot, name), { recursive: true, force: true });
+      }
 
-    const materialized = await materializeSnapshot({
-      checkout: req.checkout,
-      verifyDir,
-      base: req.base,
-      bundleDir: req.bundleDir,
-      expectedDigest: req.digest,
-      exclude,
-      limits: req.limits,
-      gitTimeoutMs: req.gitTimeoutMs,
+      if (!(await isGitTopLevel(req.checkout, (p) => realpathSync.native(p), req.gitTimeoutMs))) {
+        throw new VerifyRefusal(
+          "checkout_invalid",
+          "the checkout is not the top level of a git work tree",
+        );
+      }
+      if (!(await baseIsCommit(req.checkout, req.base, req.gitTimeoutMs))) {
+        throw new VerifyRefusal(
+          "base_unresolvable",
+          "the base revision is not a commit in the checkout",
+        );
+      }
+
+      // REAL #1: resolve the user's effective global git excludes file ONCE
+      // per run, then pin it on every git call that decides the change-set,
+      // so the digest recompute agrees with how the bundle was made. A
+      // configured file is how a locally-ignored secret would otherwise
+      // enter the change-set. This must run under the caller's own
+      // environment (it reads user config); if git cannot answer, refuse
+      // rather than guess.
+      let globalExcludes: Awaited<ReturnType<typeof resolveGlobalExcludes>>;
+      try {
+        globalExcludes = await resolveGlobalExcludes({ timeoutMs: req.gitTimeoutMs });
+      } catch (err) {
+        throw new VerifyRefusal(
+          "materialize_failed",
+          `could not resolve the global git excludes file: ${scrubLine(
+            err instanceof Error ? err.message : String(err),
+            160,
+          )}`,
+        );
+      }
+
+      const materialized = await materializeSnapshot({
+        checkout: req.checkout,
+        verifyDir,
+        base: req.base,
+        bundleDir: req.bundleDir,
+        expectedDigest: req.digest,
+        exclude,
+        globalExcludesFile: globalExcludes.path,
+        limits: req.limits,
+        gitTimeoutMs: req.gitTimeoutMs,
+      });
+
+      const review = await renderReviewDiff(
+        materialized.treePath,
+        req.base,
+        req.gitTimeoutMs,
+        globalExcludes.path,
+      );
+
+      const cycleDirAbs = ensureCycleDir(project.id, cycleId, req.dispatcher);
+      createdCycleDir = cycleDirAbs;
+      await writeFile(
+        join(cycleDirAbs, DIGEST_INPUT_FILENAME),
+        materialized.snapshot.digestInput,
+      );
+      const redacted = redactSecrets(review.diff || "(empty diff)\n");
+      await writeFile(join(cycleDirAbs, "diff.patch"), redacted.redacted);
+      return { globalExcludes, materialized, review, redacted, cycleDirAbs };
     });
-
-    let review;
+    // A late rejection after the cap fired must not become an unhandled one.
+    preflightWork.catch(() => undefined);
+    let preflight: Awaited<typeof preflightWork> | null;
     try {
-      review = await renderReviewDiff(materialized.treePath, req.base, req.gitTimeoutMs);
+      preflight = await withTimeout(preflightWork, budgets.preflightSec * 1000);
     } catch (err) {
-      await removeVerifyTree(req.checkout, verifyDir);
+      await removePreflightDebris();
+      if (req.signal?.aborted) throw interrupted();
       throw err;
+    } finally {
+      req.signal?.removeEventListener("abort", onPreflightSignal);
     }
+    if (preflight === null) {
+      preflightAbort.abort();
+      // Aborted git returns once its group is dead; give the chain a moment
+      // to unwind so nothing races the cleanup below.
+      await withTimeout(preflightWork.catch(() => undefined), PREFLIGHT_REAP_WAIT_MS);
+      await removePreflightDebris();
+      if (req.signal?.aborted) throw interrupted();
+      throw new VerifyRefusal(
+        "materialize_failed",
+        `preflight and materialization did not finish within the hard cap (${budgets.preflightSec}s)`,
+      );
+    }
+    if (req.signal?.aborted) {
+      await removePreflightDebris();
+      throw interrupted();
+    }
+    // Preflight finished; the recorded check owns the cycle directory.
+    createdCycleDir = null;
+    const { globalExcludes, materialized, review, redacted, cycleDirAbs } = preflight;
 
     let result: VerifyRunResult | undefined;
     try {
@@ -342,24 +486,33 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
         budgets,
         cycleId,
         exclude,
+        globalExcludes,
         materialized,
         review,
+        redacted,
+        cycleDirAbs,
       });
     } finally {
+      // REAL #2: cleanup must not fail silently. A worktree that survives
+      // its check holds bundled bytes and the tree's index; say so on the
+      // record and on stderr. The receipt's verify block carries reaped;
+      // cleanup status reaches the log through this event.
       const cleanedUp = await removeVerifyTree(req.checkout, verifyDir);
       if (result) result.cleanedUp = cleanedUp;
+      if (!cleanedUp) {
+        console.error(
+          `generalstaff: verify cleanup failed: the worktree directory ${verifyDir} could not be removed; the next check for this project will sweep it`,
+        );
+        try {
+          await appendProgress(project.id, "verify_cleanup_failed", { path: verifyDir }, cycleId);
+        } catch {
+          /* the log itself is unwritable; nothing more can be recorded */
+        }
+      }
     }
     return result;
   } finally {
     lock.release();
-  }
-}
-
-function safeReaddir(dir: string): string[] {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
   }
 }
 
@@ -369,29 +522,26 @@ interface RecordedCheckArgs {
   budgets: VerifyBudgets;
   cycleId: string;
   exclude: string[];
+  /** The resolved global excludes pin (REAL #1), recorded in the receipt. */
+  globalExcludes: GlobalExcludes;
   materialized: Materialized;
   review: { diff: string; stat: string; nameStatusZ: string };
+  /** Redacted review diff, already written to the cycle's diff.patch. */
+  redacted: ReturnType<typeof redactSecrets>;
+  cycleDirAbs: string;
 }
 
 /** From cycle_start to cycle_end: everything here is on the record. */
 async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> {
-  const { req, project, budgets, cycleId, exclude, materialized, review } = a;
+  const { req, project, budgets, cycleId, exclude, materialized, review, redacted, cycleDirAbs } = a;
   const started = performance.now();
   const graceMs = budgets.graceSec * 1000;
   const tree = materialized.treePath;
   const dispatcher = req.dispatcher;
 
-  const cycleDirAbs = ensureCycleDir(project.id, cycleId, dispatcher);
-  writeFileSync(
-    join(cycleDirAbs, DIGEST_INPUT_FILENAME),
-    materialized.snapshot.digestInput,
-  );
-
-  const redacted = redactSecrets(review.diff || "(empty diff)\n");
   if (redacted.hits.length > 0) {
     console.warn(formatSecretRedactionWarning("diff.patch", redacted.hits));
   }
-  writeFileSync(join(cycleDirAbs, "diff.patch"), redacted.redacted);
 
   const changedFiles = changedFilesFromNameStatus(review.nameStatusZ);
   const handsOffHits: Array<{ file: string; pattern: string }> = [];
@@ -430,10 +580,15 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
           checkoutPath: req.checkout,
           worktreePath: tree,
           excludedPaths: exclude,
+          // REAL #1: the global excludes pin this check ran under.
+          globalExcludesFile: a.globalExcludes.path,
+          globalExcludesSha256: a.globalExcludes.sha256,
           handsOffHits,
           cliVersion: req.cliVersion,
           reviewerProvider: decision.reviewerProvider,
           failureCategory: decision.category,
+          // REAL #2: whether every verification process group was proven reaped.
+          reaped: decision.reaped,
         },
         diff_stats: diffStats,
         duration_seconds: Math.round((performance.now() - started) / 1000),
@@ -444,6 +599,10 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
 
   const controller = new AbortController();
   let overallTimer: ReturnType<typeof setTimeout> | undefined;
+  // REAL #2: the last verification step's reap result. Terminal records
+  // written without a decision (abort, internal error) report this instead of
+  // silently claiming "reaped".
+  let lastReaped = false;
   const onExternalAbort = () => {
     if (!controller.signal.aborted) {
       controller.abort(`interrupted:${String(req.signal?.reason ?? "signal")}`);
@@ -511,14 +670,22 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
         budgetMs: budgets.verificationSec * 1000,
         graceMs,
         signal: controller.signal,
+        runShell: req.runShell,
       });
+      lastReaped = ver.reaped;
       if (controller.signal.aborted) throw new AbortedFlow();
 
       const reviewer = await runReviewerStep({
         project,
         cycleId,
         dispatcher,
-        tree,
+        // The reviewer subprocess is an agent CLI that auto-loads project
+        // instruction files and settings from its working directory. The
+        // materialized tree's entire content comes from the bundle, which is
+        // untrusted; running the reviewer from inside it would let a crafted
+        // bundle execute or steer it. The cycle's verify directory is
+        // operator-owned state and contains no bundled bytes.
+        reviewerCwd: materialized.verifyDir,
         review,
         redactedDiff: redacted.redacted,
         handsOffHits,
@@ -546,7 +713,7 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
       // Stop the reviewer, let the verification runner finish its own group
       // kill, then record the interruption.
       terminateReviewerChildren();
-      await withTimeout(flowPromise, graceMs + 5000);
+      await withTimeout(flowPromise, graceMs);
       terminateReviewerChildren();
       killAllOwnedGroups();
       const why = String(controller.signal.reason ?? "interrupted");
@@ -554,16 +721,18 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
         decision = failedDecision(
           `Check exceeded its overall time budget (${budgets.overallSec}s)`,
           "overall_timeout",
+          lastReaped,
         );
       } else {
         interruptedBy = why.replace(/^interrupted:/, "");
-        decision = failedDecision(`Check interrupted (${interruptedBy})`, "interrupted");
+        decision = failedDecision(`Check interrupted (${interruptedBy})`, "interrupted", lastReaped);
       }
     } else if (first.kind === "error") {
       const msg = first.err instanceof Error ? first.err.message : String(first.err);
       decision = failedDecision(
         `Check failed with an internal error: ${scrubLine(msg, 200)}`,
         "internal_error",
+        lastReaped,
       );
     } else {
       decision = first.decision;
@@ -595,6 +764,7 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
           failedDecision(
             `Check failed with an internal error: ${scrubLine(msg, 200)}`,
             "internal_error",
+            lastReaped,
           ),
         );
       } catch {
@@ -615,7 +785,11 @@ class AbortedFlow extends Error {
   }
 }
 
-function failedDecision(reason: string, category: FailureCategory): Decision {
+function failedDecision(
+  reason: string,
+  category: FailureCategory,
+  reaped: boolean,
+): Decision {
   return {
     finalOutcome: "verification_failed",
     reason,
@@ -623,7 +797,7 @@ function failedDecision(reason: string, category: FailureCategory): Decision {
     verificationOutcome: "failed",
     reviewerVerdict: "verification_failed",
     reviewerProvider: null,
-    reaped: true,
+    reaped,
   };
 }
 
@@ -636,7 +810,8 @@ async function runReviewerStep(a: {
   project: ProjectConfig;
   cycleId: string;
   dispatcher: DispatcherConfig;
-  tree: string;
+  /** Working directory for the reviewer subprocess: outside the tree. */
+  reviewerCwd: string;
   review: { diff: string; stat: string };
   redactedDiff: string;
   handsOffHits: Array<{ file: string; pattern: string }>;
@@ -661,9 +836,12 @@ async function runReviewerStep(a: {
   const useQuorum = (project.review?.reviewers.length ?? 0) > 1;
   // The reviewer resolves its provider from project configuration and the
   // GENERALSTAFF_REVIEWER_* variables only. This request carries none.
+  // Its cwd is the cycle's verify directory, never the materialized tree:
+  // agent CLIs load instruction files and settings hooks from their cwd, and
+  // everything inside the tree is untrusted bundle content.
   const reviewerPromise: Promise<ReviewerResult> = useQuorum
-    ? runQuorumReview(project, cycleId, params, a.dispatcher, false, a.tree)
-    : runReviewer(project, cycleId, params, a.dispatcher, false, a.tree);
+    ? runQuorumReview(project, cycleId, params, a.dispatcher, false, a.reviewerCwd)
+    : runReviewer(project, cycleId, params, a.dispatcher, false, a.reviewerCwd);
   const guarded = reviewerPromise.catch(
     (err: unknown): ReviewerResult => ({
       verdict: "verification_failed",
@@ -721,7 +899,7 @@ async function runReviewerStep(a: {
 }
 
 /** Combine the verification and reviewer outcomes the way an autonomous cycle does. */
-function decide(
+export function decide(
   ver: Awaited<ReturnType<typeof runVerifyOnlyVerification>>,
   reviewer: ReviewerStepResult,
   budgets: VerifyBudgets,
@@ -734,6 +912,18 @@ function decide(
     reaped: ver.reaped,
   };
   if (ver.outcome === "failed") {
+    // REAL #2: an unproven reap fails the check, whatever else happened. A
+    // verification process group that survived its kill can still be running
+    // arbitrary commands against operator state; the check must not pass while
+    // one might be alive.
+    if (!ver.reaped) {
+      return {
+        ...base,
+        finalOutcome: "verification_failed",
+        reason: "Verification command's process tree was not proven reaped",
+        category: "verification_error",
+      };
+    }
     if (ver.timedOut) {
       return {
         ...base,

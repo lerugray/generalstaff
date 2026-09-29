@@ -178,7 +178,23 @@
         },
         "cliVersion": { "type": ["string", "null"] },
         "reviewerProvider": { "type": ["string", "null"] },
-        "failureCategory": { "type": ["string", "null"] }
+        "failureCategory": { "type": ["string", "null"] },
+        "globalExcludesFile": {
+          "type": ["string", "null"],
+          "description": "The global git excludes file this check pinned on every change-set git call (null when the user has none)."
+        },
+        "globalExcludesSha256": {
+          "type": ["string", "null"],
+          "description": "SHA-256 of the pinned excludes file's bytes (null when there is no file or it could not be read)."
+        },
+        "reaped": {
+          "type": "boolean",
+          "description": "Every verification command's process group was proven reaped. An unproven reap fails the check."
+        },
+        "cleanupFailed": {
+          "type": "boolean",
+          "description": "Set by the reader (never written on cycle_end) when the cycle's PROGRESS log carries a verify_cleanup_failed event, i.e. the check's worktree could not be removed."
+        }
       }
     }
   },

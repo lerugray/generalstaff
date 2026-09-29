@@ -48,6 +48,32 @@ function replaceWhole(
   });
 }
 
+const PEM_BEGIN = /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g;
+const PEM_END = /-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g;
+
+/**
+ * Masks BEGIN...END private-key blocks. Same matches as the lazy one-regex
+ * form (`BEGIN[\s\S]*?END`), but linear: that form rescans to the end of the
+ * input from every BEGIN that has no END, which is quadratic on a hostile
+ * diff. Once one BEGIN finds no END, no later BEGIN can either.
+ */
+function redactPemBlocks(input: string, counts: Map<SecretKind, number>): string {
+  let out = "";
+  let cursor = 0;
+  for (;;) {
+    PEM_BEGIN.lastIndex = cursor;
+    const begin = PEM_BEGIN.exec(input);
+    if (!begin) break;
+    PEM_END.lastIndex = begin.index + begin[0].length;
+    const end = PEM_END.exec(input);
+    if (!end) break;
+    out += input.slice(cursor, begin.index) + maskFor("pem_private_key");
+    addHit(counts, "pem_private_key");
+    cursor = end.index + end[0].length;
+  }
+  return cursor === 0 ? input : out + input.slice(cursor);
+}
+
 /**
  * Pure, deliberately small scanner for content that crosses the cycle-artifact
  * or reviewer boundary. It is not a credential validator: prefix-shaped
@@ -58,12 +84,7 @@ export function redactSecrets(input: string): SecretRedaction {
   const counts = new Map<SecretKind, number>();
   let redacted = input;
 
-  redacted = replaceWhole(
-    redacted,
-    /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
-    "pem_private_key",
-    counts,
-  );
+  redacted = redactPemBlocks(redacted, counts);
   redacted = replaceWhole(
     redacted,
     /\bsk-ant-[A-Za-z0-9_-]{20,}\b/g,

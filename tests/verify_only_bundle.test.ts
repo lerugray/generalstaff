@@ -14,7 +14,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { BundleError, readBundle, writeBundle } from "../src/verify_only/bundle";
+import { BundleError, MAX_BUNDLE_PATH_DEPTH, readBundle, writeBundle } from "../src/verify_only/bundle";
 import {
   collectChangeset,
   digestOfBytes,
@@ -256,6 +256,26 @@ describe("a bundle is only accepted if it reproduces the bound digest", () => {
     const { dir, base, out } = await bundleOf("wrong-digest");
     const r = await refusalOf(materialize(dir, base, out, `sha256:${"0".repeat(64)}`));
     expect(r.code).toBe("digest_mismatch");
+  });
+
+  it("refuses a bundle whose files/ nest deeper than the path-depth cap", async () => {
+    // Deep nesting costs unbounded recursion before any file-count or size
+    // cap fires, so the bundle reader refuses it outright.
+    if (process.platform === "win32") return;
+    const f = await bundleOf("too-deep");
+    let deep = join(f.out, "files");
+    for (let i = 0; i <= MAX_BUNDLE_PATH_DEPTH + 1; i++) {
+      deep = join(deep, "d");
+      mkdirSync(deep);
+    }
+    writeFileSync(join(deep, "bottom.txt"), "one file at the bottom\n");
+    const r = await refusalOf(materialize(f.dir, f.base, f.out, f.digest));
+    expect(r.code).toBe("snapshot_limit");
+    expect(r.message).toContain("deeper than 128");
+    // Nothing was left behind.
+    expect(
+      readdirSync(scratch).filter((n) => n.startsWith("verify-") && existsSync(join(scratch, n, "tree"))),
+    ).toEqual([]);
   });
 
   it("refuses symlinks, .git entries and non-directories inside the bundle", async () => {

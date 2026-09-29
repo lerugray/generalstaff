@@ -19,9 +19,9 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  rmSync,
   statSync,
 } from "fs";
+import { rm } from "fs/promises";
 import { isAbsolute, join } from "path";
 import {
   BundleError,
@@ -35,11 +35,13 @@ import {
   type ChangesetSnapshot,
   type DigestLimits,
 } from "./digest";
+import { excludesFilePinArgs } from "./excludes";
 import {
   GIT_DIFF_PIN_ARGS,
   pinnedGitEnv,
   runGit,
   scrubLine,
+  withoutGitAbort,
 } from "./git";
 import { VerifyRefusal, toRefusal } from "./refusal";
 
@@ -53,6 +55,18 @@ export interface MaterializeOptions {
   expectedDigest: string;
   /** Normalized exclusions (see normalizeExclude). */
   exclude: string[];
+  /**
+   * The effective global git excludes file, pinned on every git call that
+   * decides the change-set (see excludes.ts). Must match how the bundle was
+   * made, or the digest recompute refuses. Null pins "no global excludes".
+   */
+  /**
+   * The resolved global git excludes file to pin (REAL #1), or null when the
+   * user has none. Optional: callers that have not resolved it run under the
+   * pinned child env, where global config is already nulled — the same
+   * effective ignore set as "none".
+   */
+  globalExcludesFile?: string | null;
   limits?: Partial<DigestLimits>;
   gitTimeoutMs?: number;
 }
@@ -187,33 +201,60 @@ function isDanglingLink(path: string): boolean {
   }
 }
 
-/** Remove the worktree and its directory. Never throws; returns whether it is gone. */
-export async function removeVerifyTree(
+/** Each cleanup step (worktree remove, directory removal, prune) gets this long. */
+export const CLEANUP_STEP_MS = 10_000;
+/** Cleanup runs three steps, so it is bounded by three step budgets. */
+export const CLEANUP_CAP_SEC = (3 * CLEANUP_STEP_MS) / 1000;
+
+async function boundedStep(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      work.catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Remove the worktree and its directory. Never throws; returns whether it is
+ * gone. Bounded: at most three steps of `stepMs` each. Runs outside any git
+ * abort context, so it still works after the check's own git was stopped.
+ */
+export function removeVerifyTree(
   checkout: string,
   verifyDir: string,
+  stepMs: number = CLEANUP_STEP_MS,
 ): Promise<boolean> {
-  const tree = join(verifyDir, "tree");
-  try {
+  // git's own timer fires (and kills its group) before the step's race ends.
+  const gitStepMs = Math.max(100, stepMs - 500);
+  return withoutGitAbort(async () => {
+    const tree = join(verifyDir, "tree");
     if (existsSync(tree)) {
-      await runGit(["worktree", "remove", "--force", tree], {
+      await boundedStep(
+        runGit(["worktree", "remove", "--force", tree], {
+          cwd: checkout,
+          maxStdoutBytes: 64 * 1024,
+          timeoutMs: gitStepMs,
+        }),
+        stepMs,
+      );
+    }
+    await boundedStep(rm(verifyDir, { recursive: true, force: true }), stepMs);
+    await boundedStep(
+      runGit(["worktree", "prune"], {
         cwd: checkout,
         maxStdoutBytes: 64 * 1024,
-      });
-    }
-  } catch {
-    /* best effort */
-  }
-  try {
-    rmSync(verifyDir, { recursive: true, force: true });
-  } catch {
-    /* best effort */
-  }
-  try {
-    await runGit(["worktree", "prune"], { cwd: checkout, maxStdoutBytes: 64 * 1024 });
-  } catch {
-    /* best effort */
-  }
-  return !existsSync(verifyDir);
+        timeoutMs: gitStepMs,
+      }),
+      stepMs,
+    );
+    return !existsSync(verifyDir);
+  });
 }
 
 /**
@@ -224,6 +265,7 @@ export async function materializeSnapshot(
   opts: MaterializeOptions,
 ): Promise<Materialized> {
   const limits: DigestLimits = { ...DEFAULT_DIGEST_LIMITS, ...opts.limits };
+  const excludesPin = excludesFilePinArgs(opts.globalExcludesFile ?? null);
   const tree = join(opts.verifyDir, "tree");
   let created = false;
   try {
@@ -237,12 +279,14 @@ export async function materializeSnapshot(
     mkdirSync(opts.verifyDir, { recursive: true, mode: 0o700 });
     created = true;
 
-    await runGit(["worktree", "prune"], {
+    await runGit([...excludesPin, "worktree", "prune"], {
       cwd: opts.checkout,
       timeoutMs: opts.gitTimeoutMs,
       maxStdoutBytes: 64 * 1024,
     });
-    const add = await runGit(["worktree", "add", "--detach", tree, opts.base], {
+    const add = await runGit(
+      [...excludesPin, "worktree", "add", "--detach", tree, opts.base],
+      {
       cwd: opts.checkout,
       timeoutMs: opts.gitTimeoutMs,
       maxStdoutBytes: 1024 * 1024,
@@ -256,7 +300,9 @@ export async function materializeSnapshot(
 
     if (bundle.patchBytes > 0) {
       const gitEnv = pinnedGitEnv();
-      const listed = await runGit(["apply", "--numstat", "-z", "--", bundle.patchPath], {
+      const listed = await runGit(
+        [...excludesPin, "apply", "--numstat", "-z", "--", bundle.patchPath],
+        {
         cwd: tree,
         env: gitEnv,
         timeoutMs: opts.gitTimeoutMs,
@@ -272,7 +318,14 @@ export async function materializeSnapshot(
         assertPatchPathSafe(p);
       }
       const applied = await runGit(
-        ["apply", "--index", "--whitespace=nowarn", "--", bundle.patchPath],
+        [
+          ...excludesPin,
+          "apply",
+          "--index",
+          "--whitespace=nowarn",
+          "--",
+          bundle.patchPath,
+        ],
         {
           cwd: tree,
           env: gitEnv,
@@ -296,6 +349,7 @@ export async function materializeSnapshot(
         cwd: tree,
         base: opts.base,
         exclude: opts.exclude,
+        globalExcludesFile: opts.globalExcludesFile ?? null,
         limits,
         gitTimeoutMs: opts.gitTimeoutMs,
       });
@@ -358,9 +412,11 @@ export async function renderReviewDiff(
   tree: string,
   base: string,
   timeoutMs?: number,
+  globalExcludesFile: string | null = null,
 ): Promise<ReviewDiff> {
   const env = pinnedGitEnv();
-  const add = await runGit(["add", "-A", "-N", "--", "."], {
+  const excludesPin = excludesFilePinArgs(globalExcludesFile);
+  const add = await runGit([...excludesPin, "add", "-A", "-N", "--", "."], {
     cwd: tree,
     env,
     timeoutMs,

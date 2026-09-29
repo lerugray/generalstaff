@@ -79,6 +79,8 @@ export interface VerifyFixture {
   projectId: string;
   /** Directory holding the fake `claude`; put first on PATH. */
   binDir: string;
+  /** Hermetic HOME the CLI subprocess runs under (empty unless a test writes it). */
+  home: string;
   /** Log written by the fake `claude`: one JSON line per invocation. */
   claudeLog: string;
   /** File the project's engineer_command would create if it ever ran. */
@@ -97,7 +99,7 @@ export interface VerifyFixture {
     proc: ReturnType<typeof Bun.spawn>;
     result: Promise<{ stdout: string; stderr: string; exitCode: number }>;
   };
-  claudeInvocations(): Array<{ args: string[]; stdinLength: number }>;
+  claudeInvocations(): Array<{ args: string[]; stdinLength: number; cwd: string }>;
   /** Invocations of any other agent CLI stub on PATH (codex, aider, ...). Must stay empty. */
   vendorCalls(): string[];
   lastReviewerPrompt(): string;
@@ -165,6 +167,11 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
 
   const binDir = join(scratch, "bin");
   mkdirSync(binDir, { recursive: true });
+  // Hermetic HOME for the CLI subprocess: global git config (and so the
+  // global excludes resolution) is read from scratch, never from the real
+  // user's environment, unless a test passes its own HOME in `extra`.
+  const home = join(scratch, "home");
+  mkdirSync(home, { recursive: true });
   const claudeLog = join(scratch, "claude-calls.jsonl");
   const promptCopy = join(scratch, "last-reviewer-prompt.txt");
   const verdict = opts.reviewerVerdict ?? {
@@ -190,7 +197,7 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     "done",
     'args_json="$args_json]"',
     `len=$(wc -c < ${JSON.stringify(promptCopy)} | tr -d ' ')`,
-    `printf '{"args":%s,"stdinLength":%s}\\n' "$args_json" "$len" >> ${JSON.stringify(claudeLog)}`,
+    `printf '{"args":%s,"stdinLength":%s,"cwd":"%s"}\\n' "$args_json" "$len" "$(pwd)" >> ${JSON.stringify(claudeLog)}`,
     typeof opts.claudeDelay === "function"
       ? opts.claudeDelay({ scratch })
       : (opts.claudeDelay ?? ""),
@@ -214,9 +221,12 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     for (const [k, v] of Object.entries(process.env)) {
       if (v === undefined) continue;
       if (k.startsWith("GENERALSTAFF_REVIEWER")) continue;
+      // Hermetic global git config: see `home` above.
+      if (k === "HOME" || k === "XDG_CONFIG_HOME" || k === "GIT_CONFIG_GLOBAL" || k === "GIT_CONFIG_SYSTEM") continue;
       base[k] = v;
     }
     base.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+    base.HOME = home;
     return { ...base, ...extra };
   };
 
@@ -227,6 +237,7 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     base,
     projectId,
     binDir,
+    home,
     claudeLog,
     engineerSentinel,
     cleanup() {
@@ -277,7 +288,7 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
       return readFileSync(claudeLog, "utf8")
         .split("\n")
         .filter(Boolean)
-        .map((l) => JSON.parse(l) as { args: string[]; stdinLength: number });
+        .map((l) => JSON.parse(l) as { args: string[]; stdinLength: number; cwd: string });
     },
     lastReviewerPrompt() {
       return existsSync(promptCopy) ? readFileSync(promptCopy, "utf8") : "";

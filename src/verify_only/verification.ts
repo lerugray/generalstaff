@@ -18,7 +18,7 @@ import {
   isNoopCommand,
 } from "../verification";
 import { minimalChildEnv } from "./git";
-import { runOwnedShell } from "./runner";
+import { runOwnedShell, type RunnerOptions, type RunnerResult } from "./runner";
 
 export interface VerifyStageResult {
   label: string;
@@ -117,6 +117,8 @@ export async function runVerifyOnlyVerification(args: {
   budgetMs: number;
   graceMs: number;
   signal?: AbortSignal;
+  /** Test seam: replaces the owned shell runner. */
+  runShell?: (opts: RunnerOptions) => Promise<RunnerResult>;
 }): Promise<VerifyVerificationResult> {
   const { project, cycleId, cwd } = args;
   const logPath = join(args.cycleDirPath, "verification.log");
@@ -172,7 +174,7 @@ export async function runVerifyOnlyVerification(args: {
       break;
     }
 
-    const run = await runOwnedShell({
+    const run = await (args.runShell ?? runOwnedShell)({
       command: stage.command,
       cwd,
       env,
@@ -201,6 +203,13 @@ export async function runVerifyOnlyVerification(args: {
       run.timedOut || run.aborted || run.spawnError !== undefined || run.exitCode !== 0
         ? "failed"
         : "passed";
+    // REAL #2: a process group that was not proven reaped fails the stage,
+    // whatever the exit code said. A surviving group can still be running
+    // arbitrary commands against operator state; it must never read as a pass.
+    const unreaped = !run.reaped;
+    if (unreaped) {
+      log += "\n=== PROCESS TREE NOT PROVEN REAPED; FAILING THIS STAGE ===\n";
+    }
     if (!isPrimary) {
       await appendProgress(
         project.id,
@@ -218,7 +227,7 @@ export async function runVerifyOnlyVerification(args: {
     exitCode = run.exitCode;
     timedOut = timedOut || run.timedOut;
     aborted = aborted || run.aborted;
-    if (stageOutcome === "failed") {
+    if (stageOutcome === "failed" || unreaped) {
       outcome = "failed";
       failedStage = stage.label;
       spawnError = run.spawnError;

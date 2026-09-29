@@ -12,6 +12,7 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { createHash } from "crypto";
 import {
   collectChangeset,
   DigestError,
@@ -20,6 +21,7 @@ import {
   pathExcluded,
   PATCH_DIGEST_ALGORITHM,
 } from "../src/verify_only/digest";
+import { resolveGlobalExcludes } from "../src/verify_only/excludes";
 import {
   buildVectorRepo,
   oracleDigest,
@@ -60,6 +62,9 @@ describe("gs-patch-digest/v1 vector file", () => {
       "untracked-symlink",
       "exclude-ancestor-replaced",
       "rename-detected",
+      "global-excludes-config",
+      "global-excludes-xdg",
+      "global-excludes-none",
     ]) {
       expect(byId.has(id)).toBe(true);
     }
@@ -73,43 +78,87 @@ describe("gs-patch-digest/v1 vector file", () => {
     it(`vector ${v.id}: ${v.description}`, async () => {
       if (v.posixOnly && process.platform === "win32") return;
       const { dir, base } = buildVectorRepo(scratch, v);
-      const run = () =>
-        collectChangeset({
-          cwd: dir,
-          base,
-          exclude: v.exclude,
-          limits: v.limits,
-        });
-
-      if (v.expect.refuse) {
-        let caught: unknown;
-        try {
-          await run();
-        } catch (err) {
-          caught = err;
+      // A vector that names global excludes gets a hermetic HOME (and XDG)
+      // holding exactly that setup; resolution then runs through the real
+      // resolver, so the frozen digest also pins the resolution rules.
+      let restoreEnv: (() => void) | undefined;
+      let globalExcludesFile: string | null = null;
+      if (v.globalExcludes) {
+        const home = join(scratch, `${v.id}-home`);
+        mkdirSync(home, { recursive: true });
+        const prev = {
+          HOME: process.env.HOME,
+          XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+          GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+        };
+        restoreEnv = () => {
+          for (const [k, val] of Object.entries(prev)) {
+            if (val === undefined) delete process.env[k];
+            else process.env[k] = val;
+          }
+        };
+        process.env.HOME = home;
+        delete process.env.XDG_CONFIG_HOME;
+        delete process.env.GIT_CONFIG_GLOBAL;
+        const text = v.globalExcludes.text ?? "";
+        if (v.globalExcludes.source === "config") {
+          const f = join(scratch, `${v.id}-ignore`);
+          writeFileSync(f, text);
+          writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${f}\n`);
+        } else if (v.globalExcludes.source === "xdg") {
+          const xdg = join(scratch, `${v.id}-xdg`);
+          mkdirSync(join(xdg, "git"), { recursive: true });
+          writeFileSync(join(xdg, "git", "ignore"), text);
+          process.env.XDG_CONFIG_HOME = xdg;
         }
-        expect(caught).toBeInstanceOf(DigestError);
-        expect((caught as DigestError).code).toBe(v.expect.refuse as never);
-        return;
       }
+      try {
+        if (v.globalExcludes) {
+          const r = await resolveGlobalExcludes();
+          expect(r.source).toBe(v.globalExcludes.source);
+          globalExcludesFile = r.path;
+        }
+        const run = () =>
+          collectChangeset({
+            cwd: dir,
+            base,
+            exclude: v.exclude,
+            limits: v.limits,
+            ...(v.globalExcludes ? { globalExcludesFile } : {}),
+          });
 
-      const snap = await run();
-      expect(snap.digest).toBe(v.expect.digest!);
-      // An independent restatement of the contract must agree.
-      const oracle = oracleDigest(dir, base, v.exclude ?? []);
-      expect(oracle.digest).toBe(snap.digest);
-      expect(snap.digestInput.equals(
-        Buffer.concat([oracle.diff, Buffer.from(snap.section, "utf8")]),
-      )).toBe(true);
+        if (v.expect.refuse) {
+          let caught: unknown;
+          try {
+            await run();
+          } catch (err) {
+            caught = err;
+          }
+          expect(caught).toBeInstanceOf(DigestError);
+          expect((caught as DigestError).code).toBe(v.expect.refuse as never);
+          return;
+        }
 
-      if (v.expect.sameAs) {
-        expect(snap.digest).toBe(byId.get(v.expect.sameAs)!.expect.digest!);
-      }
-      if (v.expect.differsFrom) {
-        expect(snap.digest).not.toBe(byId.get(v.expect.differsFrom)!.expect.digest!);
-      }
-      if (v.expect.diffContains) {
-        expect(snap.diff.toString("utf8")).toContain(v.expect.diffContains);
+        const snap = await run();
+        expect(snap.digest).toBe(v.expect.digest!);
+        // An independent restatement of the contract must agree.
+        const oracle = oracleDigest(dir, base, v.exclude ?? [], globalExcludesFile);
+        expect(oracle.digest).toBe(snap.digest);
+        expect(snap.digestInput.equals(
+          Buffer.concat([oracle.diff, Buffer.from(snap.section, "utf8")]),
+        )).toBe(true);
+
+        if (v.expect.sameAs) {
+          expect(snap.digest).toBe(byId.get(v.expect.sameAs)!.expect.digest!);
+        }
+        if (v.expect.differsFrom) {
+          expect(snap.digest).not.toBe(byId.get(v.expect.differsFrom)!.expect.digest!);
+        }
+        if (v.expect.diffContains) {
+          expect(snap.diff.toString("utf8")).toContain(v.expect.diffContains);
+        }
+      } finally {
+        restoreEnv?.();
       }
     });
   }
@@ -242,5 +291,129 @@ describe("exclusions", () => {
     expect(pathExcluded("foo", ex)).toBe(false);
     expect(pathExcluded("foo/bar", ex)).toBe(false);
     expect(pathExcluded("foo/bar/bazaar", ex)).toBe(false);
+  });
+});
+
+// --- The global excludes pin ----------------------------------
+
+describe("global excludes resolution and pinning", () => {
+  // resolveGlobalExcludes reads the calling process's environment, which in
+  // these tests is the test runner's own env: save, redirect, restore.
+  function redirectedEnv(home: string, xdg?: string): () => void {
+    const prev = {
+      HOME: process.env.HOME,
+      XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+      GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL,
+    };
+    process.env.HOME = home;
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.GIT_CONFIG_GLOBAL;
+    if (xdg !== undefined) process.env.XDG_CONFIG_HOME = xdg;
+    return () => {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    };
+  }
+
+  it("resolves core.excludesFile from the user's git config and hashes it", async () => {
+    const home = join(scratch, "excl-home-config");
+    mkdirSync(home, { recursive: true });
+    const ignoreFile = join(scratch, "config-ignore");
+    writeFileSync(ignoreFile, ".env\n*.pem\n");
+    writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${ignoreFile}\n`);
+    const restore = redirectedEnv(home);
+    try {
+      const r = await resolveGlobalExcludes();
+      expect(r.source).toBe("config");
+      expect(r.path).toBe(ignoreFile);
+      expect(r.sha256).toBe(createHash("sha256").update(".env\n*.pem\n").digest("hex"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("falls back to $XDG_CONFIG_HOME/git/ignore when no core.excludesFile is set", async () => {
+    const home = join(scratch, "excl-home-xdg");
+    mkdirSync(home, { recursive: true });
+    const xdg = join(scratch, "excl-xdg");
+    mkdirSync(join(xdg, "git"), { recursive: true });
+    writeFileSync(join(xdg, "git", "ignore"), ".env\n");
+    const restore = redirectedEnv(home, xdg);
+    try {
+      const r = await resolveGlobalExcludes();
+      expect(r.source).toBe("xdg");
+      expect(r.path).toBe(join(xdg, "git", "ignore"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("falls back to HOME/.config/git/ignore when neither config nor XDG names one", async () => {
+    const home = join(scratch, "excl-home-default");
+    mkdirSync(join(home, ".config", "git"), { recursive: true });
+    writeFileSync(join(home, ".config", "git", "ignore"), ".env\n");
+    const restore = redirectedEnv(home);
+    try {
+      const r = await resolveGlobalExcludes();
+      expect(r.source).toBe("default");
+      expect(r.path).toBe(join(home, ".config", "git", "ignore"));
+    } finally {
+      restore();
+    }
+  });
+
+  it("with XDG_CONFIG_HOME set, does not fall back to HOME/.config/git/ignore (matches git)", async () => {
+    const home = join(scratch, "excl-home-xdg-nofallback");
+    mkdirSync(join(home, ".config", "git"), { recursive: true });
+    writeFileSync(join(home, ".config", "git", "ignore"), ".env\n");
+    const xdg = join(scratch, "excl-xdg-empty");
+    mkdirSync(xdg, { recursive: true });
+    const restore = redirectedEnv(home, xdg);
+    try {
+      const r = await resolveGlobalExcludes();
+      expect(r.source).toBe("none");
+      expect(r.path).toBeNull();
+      expect(r.sha256).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("reports none when the user has no global excludes file", async () => {
+    const home = join(scratch, "excl-home-none");
+    mkdirSync(home, { recursive: true });
+    const restore = redirectedEnv(home);
+    try {
+      const r = await resolveGlobalExcludes();
+      expect(r.source).toBe("none");
+      expect(r.path).toBeNull();
+      expect(r.sha256).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("a globally-ignored file stays out of U when the pin is in force, and returns when it is not", async () => {
+    const { dir, base } = makeRepo(scratch, "excludes-pin");
+    writeFileSync(join(dir, "a.txt"), "one\nchanged\n");
+    writeFileSync(join(dir, ".env"), "SECRET=live-token\n");
+    const ignoreFile = join(scratch, "pin-ignore");
+    writeFileSync(ignoreFile, ".env\n");
+
+    // Pinned to a file that ignores .env: the digest is the digest of the
+    // same change-set WITHOUT .env at all.
+    const pinned = await collectChangeset({ cwd: dir, base, globalExcludesFile: ignoreFile });
+    rmSync(join(dir, ".env"));
+    const without = await collectChangeset({ cwd: dir, base });
+    expect(pinned.digest).toBe(without.digest);
+    expect(pinned.digestInput.includes(Buffer.from("gs-untracked-file: .env"))).toBe(false);
+
+    // Unpinned: the same working tree binds the secret's bytes.
+    writeFileSync(join(dir, ".env"), "SECRET=live-token\n");
+    const unpinned = await collectChangeset({ cwd: dir, base, globalExcludesFile: null });
+    expect(unpinned.digest).not.toBe(pinned.digest);
+    expect(unpinned.digestInput.includes(Buffer.from("gs-untracked-file: .env"))).toBe(true);
   });
 });

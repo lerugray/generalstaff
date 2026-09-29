@@ -36,6 +36,7 @@ import {
 import { tmpdir } from "os";
 import { dirname, isAbsolute, join, resolve } from "path";
 import { PATCH_DIGEST_ALGORITHM } from "./constants";
+import { excludesFilePinArgs } from "./excludes";
 import {
   GIT_DIFF_PIN_ARGS,
   pinnedGitEnv,
@@ -112,6 +113,13 @@ export interface CollectChangesetOptions {
   /** Base commit: 7-64 hex characters. */
   base: string;
   exclude?: readonly string[];
+  /**
+   * The effective global git excludes file, pinned on every git call that
+   * decides the change-set (see excludes.ts). `undefined` or null pins the
+   * null device: no global excludes. Entry points (bundle, verify) resolve it
+   * once and pass it down; direct callers get a hermetic "none".
+   */
+  globalExcludesFile?: string | null;
   limits?: Partial<DigestLimits>;
   /** When set, each untracked file is also copied to `<copyFilesTo>/<path>`. */
   copyFilesTo?: string;
@@ -455,9 +463,10 @@ export async function collectChangeset(
   }
   const limits: DigestLimits = { ...DEFAULT_DIGEST_LIMITS, ...opts.limits };
   const exclude = normalizeExclude(opts.exclude);
+  const excludesPin = excludesFilePinArgs(opts.globalExcludesFile ?? null);
 
   return withPrivateIndex(opts.cwd, opts.gitTimeoutMs, async (env) => {
-    const diffRun = await runGit(digestDiffArgs(opts.base, exclude), {
+    const diffRun = await runGit([...excludesPin, ...digestDiffArgs(opts.base, exclude)], {
       cwd: opts.cwd,
       env,
       timeoutMs: opts.gitTimeoutMs,
@@ -472,7 +481,7 @@ export async function collectChangeset(
     if (diffRun.code !== 0) throw gitFailure("diff", diffRun);
 
     const listed = await runGit(
-      ["ls-files", "--others", "--exclude-standard", "-z"],
+      [...excludesPin, "ls-files", "--others", "--exclude-standard", "-z"],
       {
         cwd: opts.cwd,
         env,

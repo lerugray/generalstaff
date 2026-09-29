@@ -36,6 +36,7 @@ import {
   type DigestErrorCode,
   type DigestLimits,
 } from "./digest";
+import { excludesFilePinArgs, resolveGlobalExcludes } from "./excludes";
 import { runGit } from "./git";
 
 export type BundleErrorCode =
@@ -46,7 +47,8 @@ export type BundleErrorCode =
   | "bundle_missing"
   | "bundle_empty"
   | "bundle_unreadable"
-  | "bundle_escapes";
+  | "bundle_escapes"
+  | "bundle_too_deep";
 
 export class BundleError extends Error {
   constructor(
@@ -60,6 +62,14 @@ export class BundleError extends Error {
 
 /** Largest transport patch a bundle may carry (binary changes included). */
 export const MAX_BUNDLE_PATCH_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Deepest directory nesting the bundle reader will walk. A bundle with deeper
+ * paths is refused instead of exhausting the reader's stack: `readBundle`
+ * recurses per path segment, so an attacker-crafted bundle with unbounded
+ * depth could crash (or wedge) the verify process before a refusal is written.
+ */
+export const MAX_BUNDLE_PATH_DEPTH = 128;
 
 export interface BundleWriteOptions {
   checkout: string;
@@ -76,6 +86,10 @@ export interface BundleInfo {
   digestAlgorithm: typeof PATCH_DIGEST_ALGORITHM;
   baseRevision: string;
   excludedPaths: string[];
+  /** The global git excludes file the snapshot was pinned to (null = none). */
+  globalExcludesFile: string | null;
+  /** SHA-256 of the global excludes file's bytes (null when none or unreadable). */
+  globalExcludesSha256: string | null;
   untrackedFileCount: number;
   patchBytes: number;
 }
@@ -114,6 +128,11 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
   }
   const exclude = normalizeExclude(opts.exclude);
   const limits: DigestLimits = { ...DEFAULT_DIGEST_LIMITS, ...opts.limits };
+  // Resolve the user's effective global excludes file once, then pin it on
+  // every git call that decides the change-set: the two collectChangeset
+  // passes and the transport diff must all agree (REAL #1).
+  const globalExcludes = await resolveGlobalExcludes({ timeoutMs: opts.gitTimeoutMs });
+  const excludesPin = excludesFilePinArgs(globalExcludes.path);
 
   // Resolve the output location without following a symlink at the leaf.
   const outParent = resolve(dirname(opts.outDir));
@@ -161,6 +180,7 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
       cwd: checkoutReal,
       base: opts.base,
       exclude,
+      globalExcludesFile: globalExcludes.path,
       limits,
       copyFilesTo: filesDir,
       gitTimeoutMs: opts.gitTimeoutMs,
@@ -174,7 +194,7 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
       checkoutReal,
       opts.gitTimeoutMs,
       (env) =>
-        runGit(transportDiffArgs(opts.base, exclude), {
+        runGit([...excludesPin, ...transportDiffArgs(opts.base, exclude)], {
           cwd: checkoutReal,
           env,
           timeoutMs: opts.gitTimeoutMs,
@@ -197,6 +217,7 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
       cwd: checkoutReal,
       base: opts.base,
       exclude,
+      globalExcludesFile: globalExcludes.path,
       limits,
       gitTimeoutMs: opts.gitTimeoutMs,
     });
@@ -213,6 +234,8 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
       digestAlgorithm: PATCH_DIGEST_ALGORITHM,
       baseRevision: opts.base,
       excludedPaths: first.excluded,
+      globalExcludesFile: globalExcludes.path,
+      globalExcludesSha256: globalExcludes.sha256,
       untrackedFileCount: first.untracked.length,
       patchBytes: transport.stdout.length,
     };
@@ -240,7 +263,13 @@ function compareBytes(a: string, b: string): number {
 
 function walkFiles(root: string, limits: DigestLimits): string[] {
   const out: string[] = [];
-  const visit = (abs: string, rel: string) => {
+  const visit = (abs: string, rel: string, depth: number) => {
+    if (depth > MAX_BUNDLE_PATH_DEPTH) {
+      throw new BundleError(
+        "bundle_too_deep",
+        `the bundle nests deeper than ${MAX_BUNDLE_PATH_DEPTH} directories: ${rel}`,
+      );
+    }
     for (const entry of readdirSync(abs, { withFileTypes: true })) {
       const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
       const childAbs = join(abs, entry.name);
@@ -261,7 +290,7 @@ function walkFiles(root: string, limits: DigestLimits): string[] {
         throw new BundleError("bundle_escapes", `the bundle contains a symlink: ${childRel}`);
       }
       if (st.isDirectory()) {
-        visit(childAbs, childRel);
+        visit(childAbs, childRel, depth + 1);
       } else if (st.isFile()) {
         if (st.size > limits.maxUntrackedFileBytes) {
           throw new BundleError(
@@ -284,7 +313,7 @@ function walkFiles(root: string, limits: DigestLimits): string[] {
       }
     }
   };
-  visit(root, "");
+  visit(root, "", 0);
   return out.sort(compareBytes);
 }
 
