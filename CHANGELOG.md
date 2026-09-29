@@ -7,7 +7,9 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
-## Unreleased
+## v0.16.0 — 2026-09-29
+
+You can now run the gate on work GeneralStaff didn't write: your own change, or one from Claude Code, Cursor or another agent. You get the same checks and a receipt.
 
 A frozen, machine-readable cycle result for tools that must not guess a verdict.
 
@@ -20,6 +22,11 @@ Verify a change you have not committed.
 - Adds `generalstaff changeset bundle`, which snapshots a checkout's uncommitted change (tracked changes plus untracked, non-ignored files) into a patch bundle and prints its `gs-patch-digest/v1` digest. Contract and test vectors: `docs/contracts/gs-patch-digest-v1.md`, `tests/fixtures/gs-patch-digest-v1/`. Workflow, flags, exit codes and refusals: `docs/contracts/verify-only-cycle.md`.
 - `cycle-result/v1` gains optional fields (`identity.patchDigestAlgorithm`, `evidence.bundlePath`, `verify`) and an algorithm-aware digest recompute. Cycles that record none of them read exactly as before; the autonomous `cycle` path is unchanged.
 - The reviewer prompt gains an optional verify-only section (absent, and byte-identical, everywhere else), and `ReviewerResult` an optional `provider` field.
+- Verify pins your global git excludes file for each git call it makes and records the file's path and SHA-256 in the receipt. A globally ignored `.env` stays out of the bundle.
+- If verify can't prove that the verification command's processes have all exited, the check fails.
+- Adds `--verification-timeout`, `--reviewer-timeout` and `--overall-timeout` (defaults 600, 300 and 900 seconds). Verify refuses an overall timeout below the other two combined, before it runs anything. `docs/contracts/verify-only-cycle.md` gives the worst-case wall clock.
+- The receipt flags a check whose temporary worktree verify couldn't remove.
+- Stopping or interrupting a check also stops the git processes it started.
 
 ## v0.15.0 — 2026-09-25
 

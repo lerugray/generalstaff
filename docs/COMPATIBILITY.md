@@ -2,7 +2,7 @@
 
 Single page for what a new reader otherwise has to reconstruct across
 README, DESIGN, the marketing site, and this repo vs companion repos.
-Facts below are grounded in those sources as of CLI **v0.15.0**
+Facts below are grounded in those sources as of CLI **v0.16.0**
 (`package.json`).
 
 ## Product surfaces
@@ -44,7 +44,7 @@ a ledger entry does not itself prevent a merge or constrain provider Git access.
 
 | Component | Version / note |
 | --- | --- |
-| GeneralStaff CLI (this repo) | **0.15.0** (`package.json` `"version"`) |
+| GeneralStaff CLI (this repo) | **0.16.0** (`package.json` `"version"`) |
 | GeneralStaff Desktop | See Desktop repo — not derivable from this tree |
 | Local web dashboard | Same tree / same release as the CLI above (`serve`) |
 | Hammerstein | Separate release train — see Hammerstein repo |

@@ -56,6 +56,25 @@ The bot works in `.bot-worktree/` on a `bot/work` branch. Automatic local mergin
 - **Empty-diff streaks.** When the queue is thin the engineer may return `verified_weak` with no diff. Watch substantive landings, not raw cycle count.
 - **Remote effects of engineer commands and hooks.** GeneralStaff has no built-in remote-push stage, but it does not enforce a remote-access restriction on the tools you configure.
 
+## Verify work that is already done
+
+The gate can also check changes GeneralStaff didn't write: yours, or ones from Claude Code, Cursor or any other agent. `generalstaff changeset bundle` snapshots the uncommitted change with a digest. `generalstaff cycle verify` replays it in an isolated worktree, runs your `verification_command` and the reviewer, and writes a receipt bound to that digest. GeneralStaff's own engineer never runs. Register the project first, with `--checkout` as its path.
+
+```bash
+generalstaff changeset bundle --checkout=/work/app --base=<full commit id> --out=/tmp/app-bundle
+generalstaff cycle verify --project=app --checkout=/work/app --base=<full commit id> --branch=main \
+  --bundle=/tmp/app-bundle --digest=sha256:<printed by bundle> --digest-algorithm=gs-patch-digest/v1
+generalstaff cycle result <cycle-id> --json
+```
+
+- Verify leaves your working files, index, HEAD and branches untouched. It replays the change in a separate worktree, then removes that worktree and git's bookkeeping entry for it under `.git/worktrees`.
+- The receipt holds the verdict. Verify refuses any bundle that doesn't reproduce the digest. Exit 0 means pass and 1 means fail, both with a receipt; 2, 3 and 4 write none.
+- Your global git excludes apply, so a globally ignored `.env` stays out of every bundle.
+- If verify can't prove the verification command's processes have exited, the check fails.
+- Time budgets default to 600 seconds for verification, 300 for the reviewer and 900 overall. Worst-case wall clock is 120 + overall + grace + 30 seconds, so you can set a safe outer timeout.
+
+Contracts: [`docs/contracts/verify-only-cycle.md`](docs/contracts/verify-only-cycle.md) and [`docs/contracts/gs-patch-digest-v1.md`](docs/contracts/gs-patch-digest-v1.md).
+
 ## Optional layers
 
 These sit on top of the same gate. None are required to start.
