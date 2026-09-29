@@ -50,6 +50,10 @@ state/session.pid
 state/*/cycles/
 state/_fleet/cycles/
 
+# Verify-only checks build a throwaway git worktree here (removed when the
+# check ends) and hold a lock file. Runtime scratch, never committed.
+state/*/verify/
+
 # gs-332 (v0.8.0): autonomous-mode ledgers. The MACHINERY is public; the
 # DATA is per-host runtime state (which projects forked which decisions /
 # which branches await review) and carries Ray's private roster + live-
@@ -121,6 +125,7 @@ dist/
 # subdir — those files (gs-156) are tracked data, not generated.
 tests/fixtures/*
 !tests/fixtures/cycle-result-v1/
+!tests/fixtures/gs-patch-digest-v1/
 !tests/fixtures/reviewer_calibration/
 !tests/fixtures/provider_config_malformed/
 !tests/fixtures/fake_project/

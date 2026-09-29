@@ -14,6 +14,13 @@ A frozen, machine-readable cycle result for tools that must not guess a verdict.
 - Adds `generalstaff cycle result <cycle-id> --json`, which emits the versioned `cycle-result/v1` document (contract and JSON Schema in `docs/contracts/`). It reports `passed` only when the cycle's own verification and reviewer records both pass for the same recorded patch, checkout, branch and base revision; anything missing, conflicting, malformed or changed since reads `unavailable` or `stale_uncertain`.
 - `cycle_end` now also records `patch_digest`, `checkout_path`, `branch` and `base_revision` (additive fields). Cycles recorded before this change can never read `passed`.
 
+Verify a change you have not committed.
+
+- Adds `generalstaff cycle verify`: verifies a snapshot of an uncommitted change in an isolated worktree and writes a `cycle-result/v1` receipt bound to that snapshot. It runs the project's verification command and the reviewer and nothing else; no engineer, advisor, judgment gate or bot can be reached from it, and it never writes to the checkout. Hands-off matches are recorded on the receipt rather than failing the change. The command has its own time budgets, owns and reaps the verification command's process group, and writes its terminal record on every path (timeout, signal, error).
+- Adds `generalstaff changeset bundle`, which snapshots a checkout's uncommitted change (tracked changes plus untracked, non-ignored files) into a patch bundle and prints its `gs-patch-digest/v1` digest. Contract and test vectors: `docs/contracts/gs-patch-digest-v1.md`, `tests/fixtures/gs-patch-digest-v1/`. Workflow, flags, exit codes and refusals: `docs/contracts/verify-only-cycle.md`.
+- `cycle-result/v1` gains optional fields (`identity.patchDigestAlgorithm`, `evidence.bundlePath`, `verify`) and an algorithm-aware digest recompute. Cycles that record none of them read exactly as before; the autonomous `cycle` path is unchanged.
+- The reviewer prompt gains an optional verify-only section (absent, and byte-identical, everywhere else), and `ReviewerResult` an optional `provider` field.
+
 ## v0.15.0 — 2026-09-25
 
 Aides: persistent agents beside the fleet.

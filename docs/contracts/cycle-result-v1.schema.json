@@ -58,6 +58,10 @@
           "type": ["string", "null"],
           "description": "sha256:<64 lowercase hex> of UTF-8 diff.patch bytes as read now, or null if missing. Pass requires equality with cycle_end.patch_digest when present.",
           "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "patchDigestAlgorithm": {
+          "type": "string",
+          "description": "Optional. How patchDigest is computed and recomputed. Absent: sha256 of the bytes of diff.patch. \"gs-patch-digest/v1\": sha256 of the file at evidence.bundlePath."
         }
       }
     },
@@ -119,7 +123,11 @@
         "progressPath": { "type": ["string", "null"] },
         "cycleDir": { "type": ["string", "null"] },
         "diffPatchPath": { "type": ["string", "null"] },
-        "reviewerResponsePath": { "type": ["string", "null"] }
+        "reviewerResponsePath": { "type": ["string", "null"] },
+        "bundlePath": {
+          "type": ["string", "null"],
+          "description": "Optional. The frozen digest input, present when identity.patchDigestAlgorithm names one."
+        }
       }
     },
     "timestamps": {
@@ -142,6 +150,36 @@
     "unavailableReason": {
       "type": "string",
       "description": "Present when state is unavailable."
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional. Present on cycles written by `generalstaff cycle verify`. mode \"verify_only\" marks a verification of an uncommitted change; any other value, or no verify object, means the cycle is not that.",
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "minLength": 1 },
+        "changesetDigest": { "type": ["string", "null"] },
+        "digestAlgorithm": { "type": ["string", "null"] },
+        "baseRevision": { "type": ["string", "null"] },
+        "checkoutPath": { "type": ["string", "null"] },
+        "worktreePath": { "type": ["string", "null"] },
+        "excludedPaths": { "type": "array", "items": { "type": "string" } },
+        "handsOffHits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "pattern"],
+            "properties": {
+              "file": { "type": "string" },
+              "pattern": { "type": "string" }
+            }
+          }
+        },
+        "cliVersion": { "type": ["string", "null"] },
+        "reviewerProvider": { "type": ["string", "null"] },
+        "failureCategory": { "type": ["string", "null"] }
+      }
     }
   },
   "$defs": {

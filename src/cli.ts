@@ -141,6 +141,11 @@ Usage:
   generalstaff cycle --project=<id> [--dry-run]           Run one cycle on a project
     Example: generalstaff cycle --project=myapp
     Example: generalstaff cycle --project=myapp --dry-run
+  generalstaff cycle verify --project=<id> --checkout=<abs> --base=<sha> --branch=<name>
+                            --bundle=<abs dir> --digest=sha256:<hex> --digest-algorithm=gs-patch-digest/v1 [--json]
+                                                          Verify a bundled uncommitted change; no engineer runs
+  generalstaff changeset bundle --checkout=<abs> --base=<sha> --out=<abs dir> [--json]
+                                                          Snapshot a checkout's uncommitted change and print its digest
 
   generalstaff autonomous [--dry-run] [--project=<id>,...]  Autonomous mode (v0.8.0, opt-in): survey+scope+gate, route decisions
     Example: generalstaff autonomous                     # dry-run scope+gate over autonomous-enabled projects
@@ -401,6 +406,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "session",
   "session-report",
   "cycle",
+  "changeset",
   "status",
   "task",
   "todo",
@@ -861,12 +867,19 @@ switch (command) {
   }
 
   case "cycle": {
+    // Verify-only check of a bundled uncommitted change (own flags, own help).
+    if (args[1] === "verify") {
+      const { runCycleVerifyCli } = await import("./verify_only/cli");
+      process.exit(await runCycleVerifyCli(args.slice(2), VERSION));
+    }
+
     // gs-244: subcommand-level --help / help matching gs-233's view pattern.
     if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
       console.log(
         "Usage: generalstaff cycle --project=<id> [options]\n" +
           "       generalstaff cycle show <cycle-id> [--json]\n" +
           "       generalstaff cycle result <cycle-id> --json\n" +
+          "       generalstaff cycle verify --project=<id> --checkout=<abs> ... (see: cycle verify --help)\n" +
           "\n" +
           "Run exactly one cycle on a single project — pick one task, execute one\n" +
           "engineer + reviewer pass, and update state. Useful for probing a specific\n" +
@@ -875,6 +888,7 @@ switch (command) {
           "Sub-subcommands:\n" +
           "  show <cycle-id>    Alias for `view dispatch-detail <cycle-id>` (gs-264)\n" +
           "  result <cycle-id>  Emit frozen cycle-result/v1 JSON for desktop gate binding\n" +
+          "  verify             Verify a bundled uncommitted change in an isolated worktree\n" +
           "\n" +
           "Options:\n" +
           "  --project=<id>   Project id (required for a run)\n" +
@@ -1028,6 +1042,11 @@ switch (command) {
       dryRun: values["dry-run"]!,
     });
     break;
+  }
+
+  case "changeset": {
+    const { runChangesetCli } = await import("./verify_only/cli");
+    process.exit(await runChangesetCli(args.slice(1)));
   }
 
   case "status": {

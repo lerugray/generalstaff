@@ -24,6 +24,13 @@ export interface ReviewerPromptParams {
   // verdict-rules block below; the verdict still comes from the
   // existing scope/hands_off/evidence rules.
   publicFacing?: boolean;
+  // Verify-only marker. Set by `generalstaff cycle verify`, where the diff is a
+  // person's own uncommitted change rather than an engineer's cycle. Absent on
+  // every other path, and then the prompt is byte-identical to before.
+  // Hands-off matches are context for the reviewer, not a veto.
+  verifyOnly?: {
+    handsOffHits: Array<{ file: string; pattern: string }>;
+  };
 }
 
 const MAX_MISSIONSWARM_CONTEXT = 12_000;
@@ -72,6 +79,10 @@ export function buildReviewerPrompt(params: ReviewerPromptParams): string {
       `\`notes\`: "customer-facing surface untested — only unit tests exercised."\n\n` +
       `This is informational guidance, not a hard rule. Use judgment: a backend-only refactor on a ` +
       `customer-facing project doesn't need a browser test. A login-flow change does.`
+    : "";
+
+  const verifyOnlySection = params.verifyOnly
+    ? buildVerifyOnlySection(params.verifyOnly.handsOffHits)
     : "";
 
   return `You are the Reviewer agent for GeneralStaff, reviewing one cycle
@@ -225,5 +236,49 @@ When in doubt, err on the side of \`verification_failed\`. The
 cost of a false \`verified\` is much higher than the cost of a
 false \`verification_failed\`. False verified is the Polsia
 failure mode; false failed just means a human looks at the
-diff.`;
+diff.${verifyOnlySection}`;
+}
+
+const MAX_VERIFY_ONLY_HITS = 50;
+
+function buildVerifyOnlySection(
+  hits: Array<{ file: string; pattern: string }>,
+): string {
+  const shown = hits.slice(0, MAX_VERIFY_ONLY_HITS);
+  const hitLines =
+    shown.length === 0
+      ? "(none)"
+      : shown.map((h) => `- \`${h.file}\` (matched \`${h.pattern}\`)`).join("\n") +
+        (hits.length > shown.length
+          ? `\n- ... and ${hits.length - shown.length} more`
+          : "");
+  return `
+
+## VERIFY-ONLY MODE (overrides the rules above where they conflict)
+
+Mode: verify-only. This is not an engineer cycle. There is no Engineer, no
+claimed task list and no engineer note. The diff above is a snapshot of a
+person's own uncommitted change to the project, new files included, and it was
+verified in an isolated checkout that is discarded afterwards. Judge the change
+as written:
+
+- Ignore the claimed-work questions. With no marked-done tasks there is nothing
+  to compare the diff against, so do not report scope drift or silent failures
+  for missing claims.
+- The hands-off list is context here, not a veto. The tool has already recorded
+  which changed files match it (listed below). Copy those files into
+  \`hands_off_violations\` so the record is complete, but do not return
+  \`verification_failed\` for a hands-off match alone.
+- Return \`verification_failed\` when the verification command failed (non-zero
+  exit code), when the diff contains an evident defect the verification output
+  does not explain away (broken syntax, leftover conflict markers, a change
+  that disables or deletes the checks that would catch a problem, credentials
+  or other secrets in the diff), or when you cannot tell what the diff does.
+- Return \`verified_weak\` when the verification command was effectively a
+  no-op, or your confidence in the change is low.
+- Otherwise return \`verified\`.
+
+Hands-off matches recorded for this change:
+
+${hitLines}`;
 }

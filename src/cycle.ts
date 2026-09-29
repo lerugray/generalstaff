@@ -27,6 +27,7 @@ import { isStopFilePresent, isWorkingTreeClean, isBotRunning, matchesHandsOff, m
 import { loadProjectsYaml, getProject, ProjectNotFoundError } from "./projects";
 import { formatSecretRedactionWarning, redactSecrets } from "./secrets";
 import { patchDigestFromBytes } from "./cycle_result_v1";
+import { assertNotVerifyOnly } from "./verify_only/guard";
 import type {
   ProjectConfig,
   DispatcherConfig,
@@ -758,6 +759,7 @@ export async function executeCycle(
   reviewerProviderOverride?: string,
   sessionExcludedTaskIds?: ReadonlySet<string>,
 ): Promise<CycleResult> {
+  assertNotVerifyOnly("a full cycle");
   const cycleId = generateCycleId();
   const startedAt = new Date().toISOString();
   console.log(`\n=== Cycle ${cycleId} on ${project.id} ===`);

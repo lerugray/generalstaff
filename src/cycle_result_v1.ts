@@ -8,6 +8,11 @@ import { join, relative } from "path";
 import { collectProgressLogPaths } from "./views/dispatch_detail";
 import { loadProjects } from "./projects";
 import { getRootDir } from "./state";
+import {
+  DIGEST_INPUT_FILENAME,
+  PATCH_DIGEST_ALGORITHM,
+  VERIFY_MODE,
+} from "./verify_only/constants";
 
 export const CYCLE_RESULT_SCHEMA_VERSION = "cycle-result/v1" as const;
 
@@ -30,6 +35,26 @@ export interface CycleResultReceipt {
   summary: string | null;
 }
 
+/**
+ * Additive verify-only facts (written by `generalstaff cycle verify`).
+ * Present only on cycles that recorded them. `mode` is "verify_only" for a
+ * verification of someone's own uncommitted change; any other value, or no
+ * `verify` object at all, means the cycle is not that.
+ */
+export interface CycleResultVerify {
+  mode: string;
+  changesetDigest: string | null;
+  digestAlgorithm: string | null;
+  baseRevision: string | null;
+  checkoutPath: string | null;
+  worktreePath: string | null;
+  excludedPaths: string[];
+  handsOffHits: Array<{ file: string; pattern: string }>;
+  cliVersion: string | null;
+  reviewerProvider: string | null;
+  failureCategory: string | null;
+}
+
 export interface CycleResultV1 {
   schemaVersion: typeof CYCLE_RESULT_SCHEMA_VERSION;
   cycleId: string;
@@ -41,6 +66,12 @@ export interface CycleResultV1 {
     baseRevision: string | null;
     endRevision: string | null;
     patchDigest: string | null;
+    /**
+     * How `patchDigest` is computed and recomputed. Absent means the original
+     * rule: sha256 of the bytes of `diff.patch`. "gs-patch-digest/v1" means
+     * sha256 of the file at `evidence.bundlePath`.
+     */
+    patchDigestAlgorithm?: string;
   };
   outcome: {
     finalOutcome:
@@ -66,6 +97,8 @@ export interface CycleResultV1 {
     cycleDir: string | null;
     diffPatchPath: string | null;
     reviewerResponsePath: string | null;
+    /** The frozen digest input, when `identity.patchDigestAlgorithm` names one. */
+    bundlePath?: string | null;
   };
   timestamps: {
     startedAt: string | null;
@@ -73,6 +106,7 @@ export interface CycleResultV1 {
   };
   gaps: CycleResultGap[];
   unavailableReason?: string;
+  verify?: CycleResultVerify;
 }
 
 export class CycleResultError extends Error {
@@ -139,12 +173,53 @@ function receiptIdsOk(doc: CycleResultV1): boolean {
 
 function evidenceComplete(doc: CycleResultV1): boolean {
   const e = doc.evidence;
+  if (
+    doc.identity.patchDigestAlgorithm === PATCH_DIGEST_ALGORITHM &&
+    (e.bundlePath === undefined || e.bundlePath === null)
+  ) {
+    return false;
+  }
   return (
     e.progressPath !== null &&
     e.cycleDir !== null &&
     e.diffPatchPath !== null &&
     e.reviewerResponsePath !== null
   );
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** Whitelist the recorded verify object; anything malformed is dropped. */
+function parseVerifyBlock(v: unknown): CycleResultVerify | null {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const mode = asString(o.mode);
+  if (mode === null) return null;
+  const hits: Array<{ file: string; pattern: string }> = [];
+  if (Array.isArray(o.handsOffHits)) {
+    for (const h of o.handsOffHits) {
+      if (h !== null && typeof h === "object") {
+        const file = asString((h as Record<string, unknown>).file);
+        const pattern = asString((h as Record<string, unknown>).pattern);
+        if (file !== null && pattern !== null) hits.push({ file, pattern });
+      }
+    }
+  }
+  return {
+    mode,
+    changesetDigest: asString(o.changesetDigest),
+    digestAlgorithm: asString(o.digestAlgorithm),
+    baseRevision: asString(o.baseRevision),
+    checkoutPath: asString(o.checkoutPath),
+    worktreePath: asString(o.worktreePath),
+    excludedPaths: asStringArray(o.excludedPaths),
+    handsOffHits: hits,
+    cliVersion: asString(o.cliVersion),
+    reviewerProvider: asString(o.reviewerProvider),
+    failureCategory: asString(o.failureCategory),
+  };
 }
 
 function nonEmpty(s: string | null | undefined): boolean {
@@ -278,6 +353,11 @@ export async function getCycleResultV1(
   let recordedCheckoutPath: string | null = null;
   let recordedBranch: string | null = null;
   let recordedBaseRevision: string | null = null;
+  // Verify-only cycles name their digest algorithm on cycle_start (so a
+  // running cycle reads consistently) and again on cycle_end.
+  let startAlgorithm: string | null = null;
+  let endAlgorithm: string | null = null;
+  let recordedVerify: CycleResultVerify | null = null;
 
   for (const evt of events) {
     if (projectId === null) {
@@ -286,6 +366,8 @@ export async function getCycleResultV1(
     switch (evt.event) {
       case "cycle_start": {
         startedAt = startedAt ?? evt.timestamp;
+        startAlgorithm =
+          startAlgorithm ?? asString(evt.data.patch_digest_algorithm);
         branch = branch ?? asString(evt.data.branch);
         baseRevision =
           baseRevision ??
@@ -393,6 +475,9 @@ export async function getCycleResultV1(
           asString(evt.data.base_revision) ??
           asString(evt.data.start_sha) ??
           recordedBaseRevision;
+        endAlgorithm =
+          asString(evt.data.patch_digest_algorithm) ?? endAlgorithm;
+        recordedVerify = parseVerifyBlock(evt.data.verify) ?? recordedVerify;
         break;
       }
       case "cycle_skipped": {
@@ -440,10 +525,25 @@ export async function getCycleResultV1(
   const diffAbs = join(cycleDirAbs, "diff.patch");
   const reviewerAbs = join(cycleDirAbs, "reviewer-response.txt");
 
+  const recordedAlgorithm = endAlgorithm ?? startAlgorithm;
+  const digestInputAbs = join(cycleDirAbs, DIGEST_INPUT_FILENAME);
   let currentPatchDigest: string | null = null;
-  if (existsSync(diffAbs)) {
-    const bytes = await readFile(diffAbs);
-    currentPatchDigest = patchDigestFromBytes(bytes);
+  let bundleRel: string | null = null;
+  let unsupportedAlgorithm = false;
+  if (recordedAlgorithm === null) {
+    if (existsSync(diffAbs)) {
+      const bytes = await readFile(diffAbs);
+      currentPatchDigest = patchDigestFromBytes(bytes);
+    }
+  } else if (recordedAlgorithm === PATCH_DIGEST_ALGORITHM) {
+    // The digest binds the frozen digest input, not the human-readable patch.
+    if (existsSync(digestInputAbs)) {
+      const bytes = await readFile(digestInputAbs);
+      currentPatchDigest = patchDigestFromBytes(bytes);
+      bundleRel = relFromRoot(root, digestInputAbs);
+    }
+  } else {
+    unsupportedAlgorithm = true;
   }
   // Document identity digest is the bytes on disk now (desktop binds against it).
   const patchDigest = currentPatchDigest;
@@ -477,6 +577,9 @@ export async function getCycleResultV1(
       baseRevision,
       endRevision,
       patchDigest,
+      ...(recordedAlgorithm !== null
+        ? { patchDigestAlgorithm: recordedAlgorithm }
+        : {}),
     },
     outcome: {
       finalOutcome,
@@ -501,9 +604,13 @@ export async function getCycleResultV1(
       cycleDir: cycleDirRel,
       diffPatchPath: diffRel,
       reviewerResponsePath: reviewerRel,
+      ...(recordedAlgorithm === PATCH_DIGEST_ALGORITHM
+        ? { bundlePath: bundleRel }
+        : {}),
     },
     timestamps: { startedAt, endedAt },
     gaps,
+    ...(recordedVerify !== null ? { verify: recordedVerify } : {}),
   };
 
   const terminals = cycleEndCount + cycleSkippedCount;
@@ -540,6 +647,11 @@ export async function getCycleResultV1(
     reviewerPresent;
 
   if (outcomePass) {
+    if (unsupportedAlgorithm) {
+      doc.state = "unavailable";
+      doc.unavailableReason = "unsupported_digest_algorithm";
+      return doc;
+    }
     if (recordedPatchDigest === null) {
       // Pre-2026-09-25 cycle: no frozen digest → never passed.
       doc.state = "stale_uncertain";
@@ -553,6 +665,18 @@ export async function getCycleResultV1(
     if (!identityComplete(doc) || !evidenceComplete(doc) || !receiptIdsOk(doc)) {
       doc.state = "unavailable";
       doc.unavailableReason = "missing_identity_or_evidence";
+      return doc;
+    }
+    if (
+      recordedVerify !== null &&
+      (recordedVerify as CycleResultVerify).mode === VERIFY_MODE &&
+      (recordedAlgorithm !== PATCH_DIGEST_ALGORITHM ||
+        (recordedVerify as CycleResultVerify).changesetDigest !==
+          recordedPatchDigest)
+    ) {
+      // A verify-only record must agree with itself about what it verified.
+      doc.state = "unavailable";
+      doc.unavailableReason = "verify_record_inconsistent";
       return doc;
     }
     if (

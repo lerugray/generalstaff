@@ -1,0 +1,959 @@
+{
+  "schema": "gs-patch-digest-vectors/v1",
+  "algorithm": "gs-patch-digest/v1",
+  "vectors": [
+    {
+      "id": "empty",
+      "description": "No change at all: the digest of zero bytes.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [],
+      "expect": {
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "tracked-edit",
+      "description": "One tracked file edited, not staged.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "tracked-edit-staged",
+      "description": "The same edit, staged. Staging never moves the digest: D is the working tree against the base.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        },
+        {
+          "op": "stage",
+          "path": "a.txt"
+        }
+      ],
+      "expect": {
+        "sameAs": "tracked-edit",
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "tracked-delete",
+      "description": "A tracked file removed from the working tree.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "delete",
+          "path": "b.txt"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:f8523e7f72fb227eeec0ee3323417e9f431c6a8e53f9db59f289b48619ce6413"
+      }
+    },
+    {
+      "id": "untracked-added",
+      "description": "A new untracked, non-ignored file is part of the change-set.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "new.txt",
+          "text": "brand new\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:7cbc546526b4172f42edaf9793d370683df4bdb41219e26b78c96b606b9bb5d4"
+      }
+    },
+    {
+      "id": "untracked-edited",
+      "description": "The same untracked file with different content moves the digest.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "new.txt",
+          "text": "brand new\nedited\n"
+        }
+      ],
+      "expect": {
+        "differsFrom": "untracked-added",
+        "digest": "sha256:90ab8e7bbc99de2fb246d5deb32bc51c75b78a225a66847d8c964ad91a86184b"
+      }
+    },
+    {
+      "id": "untracked-deleted",
+      "description": "An untracked file created and removed again leaves no trace.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        },
+        {
+          "op": "write",
+          "path": "new.txt",
+          "text": "brand new\n"
+        },
+        {
+          "op": "delete",
+          "path": "new.txt"
+        }
+      ],
+      "expect": {
+        "sameAs": "tracked-edit",
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "untracked-sorting",
+      "description": "Untracked records are sorted by the UTF-8 bytes of the path, not by locale or UTF-16 code units.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "Z-upper.txt",
+          "text": "z\n"
+        },
+        {
+          "op": "write",
+          "path": "a-lower.txt",
+          "text": "a\n"
+        },
+        {
+          "op": "write",
+          "path": "é-accent.txt",
+          "text": "e\n"
+        },
+        {
+          "op": "write",
+          "path": "dir/nested.txt",
+          "text": "n\n"
+        },
+        {
+          "op": "write",
+          "path": "dir-x.txt",
+          "text": "x\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:45b30e2c6c1dca64dcb3f78fc63eb398248ca285d8a60b7f9a41c24d2967c6ed"
+      }
+    },
+    {
+      "id": "untracked-crlf",
+      "description": "Untracked bytes are hashed as they are; line endings are never normalized.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "crlf.txt",
+          "text": "a\r\nb\r\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:c9094af46a2a2eb020a4a4ee17e0b0475f711f3ffa9089edfcf71af00fae7e65"
+      }
+    },
+    {
+      "id": "untracked-empty-file",
+      "description": "An empty untracked file is still a file.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "empty.txt",
+          "text": ""
+        }
+      ],
+      "expect": {
+        "digest": "sha256:09a83d25c4eb966b0154c2f8b2be5f08d29ab23a6463670ad41cc05863f700e4"
+      }
+    },
+    {
+      "id": "ignored-baseline",
+      "description": "Reference for the ignored-file vector: a tracked edit in a repository with a .gitignore.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        },
+        {
+          "path": ".gitignore",
+          "text": "*.log\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "ignored-changed",
+      "description": "An ignored file appears: the digest must not move.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        },
+        {
+          "path": ".gitignore",
+          "text": "*.log\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        },
+        {
+          "op": "write",
+          "path": "noise.log",
+          "text": "ignored\n"
+        }
+      ],
+      "expect": {
+        "sameAs": "ignored-baseline",
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "binary-tracked",
+      "description": "A tracked binary file changed. D shows only that it differs, but the full blob ids bind its content.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgK"
+        }
+      ],
+      "expect": {
+        "diffContains": "Binary files",
+        "digest": "sha256:6a9d5e7dd658affa96bc8906d51f083e4febd6c616a3a2e664bd29b3a1159475"
+      }
+    },
+    {
+      "id": "binary-tracked-same-length",
+      "description": "Another binary content of the same length: the digest must differ.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "bin/blob.dat",
+          "base64": "CQECAwQF//4ABwgK"
+        }
+      ],
+      "expect": {
+        "differsFrom": "binary-tracked",
+        "digest": "sha256:ef9c5f5960b94d095999e353236d458ba5bbc8b1d684aefb48df52bbfc0745ff"
+      }
+    },
+    {
+      "id": "binary-untracked",
+      "description": "An untracked binary file: hashed byte for byte.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "bin/new.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        }
+      ],
+      "expect": {
+        "digest": "sha256:2b9ca7c84a1d1332dc0de7d21684dbb7f2f4bd7b0def99c9bff93e3e116500b2"
+      }
+    },
+    {
+      "id": "rename-detected",
+      "description": "A staged rename with an edit: rename detection is on and pinned.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "steps": [
+        {
+          "op": "rename",
+          "from": "old-name.txt",
+          "to": "new-name.txt"
+        },
+        {
+          "op": "write",
+          "path": "new-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\nplus\n"
+        }
+      ],
+      "expect": {
+        "diffContains": "rename from",
+        "digest": "sha256:9cc25b1a5a8d1f8bd6bf72fed16e02c7fe4c1f9c1aceccc0f87170347f26826b"
+      }
+    },
+    {
+      "id": "exclude-scaffold",
+      "description": "An excluded path (and nothing else) is invisible: same digest as no change.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "exclude": [
+        "scaffold/proposal.md"
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "scaffold/proposal.md",
+          "text": "scaffold\n"
+        }
+      ],
+      "expect": {
+        "sameAs": "empty",
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "exclude-ancestor-replaced",
+      "description": "A file that replaces the excluded path's parent directory is a real change: an exclusion hides only itself and paths below it, never an ancestor.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "exclude": [
+        "scaffold/proposal.md"
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "scaffold",
+          "text": "replaced by a file\n"
+        }
+      ],
+      "expect": {
+        "differsFrom": "empty",
+        "digest": "sha256:49756e4e10f3dacf5f7804ce347ae3705035cfb41b5c1c2f590dd1dee13aa6f4"
+      }
+    },
+    {
+      "id": "exclude-tracked-side",
+      "description": "An exclusion also applies to the tracked diff.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "exclude": [
+        "b.txt"
+      ],
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nchanged\n"
+        },
+        {
+          "op": "write",
+          "path": "b.txt",
+          "text": "two\nedited\n"
+        }
+      ],
+      "expect": {
+        "sameAs": "tracked-edit",
+        "digest": "sha256:d19ac3e737b3f32a3769766ef53d21bf1bbe8f185f9d3c13c1e81a09aa438d9b"
+      }
+    },
+    {
+      "id": "file-too-large",
+      "description": "An untracked file over the size cap is refused, never truncated.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "limits": {
+        "maxUntrackedFileBytes": 8
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "big.txt",
+          "text": "123456789"
+        }
+      ],
+      "expect": {
+        "refuse": "file_too_large"
+      }
+    },
+    {
+      "id": "too-many-untracked",
+      "description": "More untracked files than the cap is refused, never hashed partially.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "limits": {
+        "maxUntrackedFiles": 2
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "f1.txt",
+          "text": "1"
+        },
+        {
+          "op": "write",
+          "path": "f2.txt",
+          "text": "2"
+        },
+        {
+          "op": "write",
+          "path": "f3.txt",
+          "text": "3"
+        }
+      ],
+      "expect": {
+        "refuse": "too_many_untracked"
+      }
+    },
+    {
+      "id": "diff-too-large",
+      "description": "A tracked diff over the cap is refused, never cut short.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "limits": {
+        "maxDiffBytes": 64
+      },
+      "steps": [
+        {
+          "op": "write",
+          "path": "a.txt",
+          "text": "one\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\nline of new text\n"
+        }
+      ],
+      "expect": {
+        "refuse": "diff_too_large"
+      }
+    },
+    {
+      "id": "untracked-symlink",
+      "description": "An untracked symlink is refused, never followed.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "posixOnly": true,
+      "steps": [
+        {
+          "op": "symlink",
+          "path": "leak.txt",
+          "target": "a.txt"
+        }
+      ],
+      "expect": {
+        "refuse": "untracked_symlink"
+      }
+    },
+    {
+      "id": "untracked-path-newline",
+      "description": "A path containing a newline could forge a neighbouring record and is refused.",
+      "base": [
+        {
+          "path": "a.txt",
+          "text": "one\n"
+        },
+        {
+          "path": "b.txt",
+          "text": "two\n"
+        },
+        {
+          "path": "src/main.ts",
+          "text": "export const x = 1;\n"
+        },
+        {
+          "path": "bin/blob.dat",
+          "base64": "AAECAwQF//4ABwgJ"
+        },
+        {
+          "path": "old-name.txt",
+          "text": "body\nmore\nlines\nfor\nrename\ndetect\nsimilarity\nand\nmore\n"
+        }
+      ],
+      "posixOnly": true,
+      "steps": [
+        {
+          "op": "write",
+          "path": "evil\ngs-content-sha256:0.txt",
+          "text": "x"
+        }
+      ],
+      "expect": {
+        "refuse": "untracked_path_invalid"
+      }
+    }
+  ]
+}

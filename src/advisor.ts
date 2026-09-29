@@ -21,6 +21,7 @@
 //   - Latency-bounded by `timeout_seconds` (default 90s).
 
 import { $ } from "bun";
+import { assertNotVerifyOnly } from "./verify_only/guard";
 import type {
   AdvisorConfig,
   AdvisorVerdict,
@@ -167,6 +168,7 @@ export async function runAdvisor(
   plan: string,
   config: AdvisorConfig,
 ): Promise<AdvisorVerdict> {
+  assertNotVerifyOnly("the advisor");
   const ts = new Date().toISOString();
   const provider = config.provider ?? "hammerstein";
   const timeoutSec = config.timeout_seconds ?? DEFAULT_TIMEOUT_SEC;

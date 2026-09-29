@@ -1740,3 +1740,54 @@ recognized by `redactSecrets`; its HTTP mapping contains environment variable
 names only. Aide-authored code receives no privilege: it enters the normal
 project cycle and verification gate. This architecture adds no path around the
 existing hands-off, reviewer, dispatcher, or merge controls.
+
+## §v10 — Verify-only cycle (2026-09-29)
+
+Verification is a gate, and the gate's question is "does this change pass?" An
+autonomous cycle answers it for the change its own engineer just made, on a
+clean tree it prepared, and refuses a tree that already has uncommitted edits
+(`isWorkingTreeClean`, Hard Rule 6 and the safety module). A person or another
+tool that has an uncommitted change and wants the same independent verdict
+cannot use it: the cycle would either refuse the tree or run its own engineer
+and verify something else. The verify-only cycle is the second door into the
+same gate.
+
+`generalstaff cycle verify` takes a frozen snapshot of the uncommitted change (a
+patch bundle: `git diff --binary` plus a byte copy of the untracked files),
+rebuilds it in an isolated detached worktree under `state/<project>/verify/`,
+and proves the rebuild is the snapshot by recomputing a digest
+(`gs-patch-digest/v1`) and comparing it with the one the caller bound. It runs
+the project's verification command and then the reviewer, and writes a
+`cycle-result/v1` receipt whose `identity.patchDigest` is that digest. The
+snapshot is the source of truth; the caller's tree may keep changing while the
+check runs, and a receipt for an old snapshot simply no longer matches.
+
+Decisions worth keeping:
+
+- **The clean-tree guard stays a precondition of the autonomous path, not of
+  verification.** Nothing in `safety.ts` changed. The verify path never reads
+  the caller's tree state, because it never verifies the caller's tree.
+- **No agent is reachable.** The verify modules do not import the engineer,
+  advisor, judgment gate, mission swarm or a full cycle (a test walks the
+  import graph), and a runtime guard makes those entry points throw while a
+  check is active. The reviewer is resolved from project configuration and the
+  user's `GENERALSTAFF_REVIEWER_*` variables; the request has no provider or
+  model field.
+- **Read-only against the caller.** git's opportunistic index refresh is
+  avoided by pointing digest computation at a private copy of the index; the
+  only writes to the caller's repository are git worktree metadata.
+- **The receipt is additive.** Same schema version and pass condition; new
+  optional fields (`identity.patchDigestAlgorithm`, `evidence.bundlePath`,
+  `verify`) that existing readers ignore. The reader recomputes the digest by
+  the recorded algorithm, so tampering with the frozen digest input reads
+  `stale_uncertain`.
+- **Hands-off matches are recorded, not enforced,** on this path only: the hard
+  hands-off gate exists to stop a bot editing what it must not, and this path
+  verifies a person's own change. The autonomous gate is unchanged.
+- **Every path ends on the record.** Own time budgets, an owned and reaped
+  process group for the verification command, and a terminal `cycle_end` on
+  success, failure, timeout, signal and internal error.
+
+Contracts: `docs/contracts/verify-only-cycle.md`,
+`docs/contracts/gs-patch-digest-v1.md` (with `tests/fixtures/gs-patch-digest-v1/`),
+and §8 of `docs/contracts/cycle-result-v1.md`.

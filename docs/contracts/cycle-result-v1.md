@@ -115,3 +115,33 @@ A cycle recorded **before** 2026-09-25 with no `patch_digest` on `cycle_end` nev
 ## 7. Fixtures
 
 Versioned JSON under `tests/fixtures/cycle-result-v1/`: `passed`, `failed`, `unavailable`, `mismatched-patch`, `stale-uncertain`. Each validates against the schema in tests. The `passed` fixture represents a post-2026-09-25 cycle (`gaps` omit G1/G2).
+
+## 8. Additive verify-only fields
+
+`generalstaff cycle verify` ([verify-only-cycle.md](./verify-only-cycle.md))
+writes cycles that verify a snapshot of someone's uncommitted change. Their
+receipts are ordinary `cycle-result/v1` documents: same schema version, same
+pass condition (§4). They add optional fields that readers of this contract
+already ignore; a cycle that recorded none of them reads exactly as before.
+
+| Field | Meaning |
+| --- | --- |
+| `identity.patchDigestAlgorithm` | How `identity.patchDigest` is computed and recomputed. Absent: `sha256` of the bytes of `diff.patch` (§2). `"gs-patch-digest/v1"`: `sha256` of the file at `evidence.bundlePath` (contract: [gs-patch-digest-v1.md](./gs-patch-digest-v1.md)). Recorded on `cycle_start` and `cycle_end` as `patch_digest_algorithm`. An id the reader does not know reads `unavailable` (`unsupported_digest_algorithm`) whenever the cycle would otherwise pass |
+| `evidence.bundlePath` | Relative path of the frozen digest input (`digest-input.bin` in the cycle directory). Emitted only with `patchDigestAlgorithm`; required for `passed` when the algorithm is `gs-patch-digest/v1` |
+| `verify` | Object of verify-only facts, recorded on `cycle_end` and whitelisted on read: `mode`, `changesetDigest`, `digestAlgorithm`, `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`, `handsOffHits` (`{file, pattern}` list), `cliVersion`, `reviewerProvider`, `failureCategory` |
+
+`verify.mode` is `"verify_only"` for a verification of an uncommitted change.
+A document with no `verify` object, or another `mode`, is not that; consumers
+that need a verification of a change-set must check it.
+
+Reader rules added for these cycles:
+
+1. The current digest is recomputed according to `identity.patchDigestAlgorithm`.
+   With no algorithm recorded, §2 applies unchanged.
+2. `passed` still requires the recorded digest to equal the digest recomputed from
+   disk, plus complete identity, complete evidence and valid receipt ids.
+3. A `verify` object with `mode` `"verify_only"` must agree with the cycle: its
+   `changesetDigest` must equal the recorded `patch_digest` and the algorithm must
+   be `gs-patch-digest/v1`, else the document reads `unavailable`
+   (`verify_record_inconsistent`).
+

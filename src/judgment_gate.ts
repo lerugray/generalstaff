@@ -36,6 +36,7 @@
 
 import { readFile } from "fs/promises";
 import { join } from "path";
+import { assertNotVerifyOnly } from "./verify_only/guard";
 import type {
   JudgmentGateMode,
   JudgmentVerdict,
@@ -256,6 +257,7 @@ export async function runJudgmentGate(
   task: { id: string; title?: string },
   opts: RunJudgmentGateOptions = {},
 ): Promise<JudgmentVerdict> {
+  assertNotVerifyOnly("the judgment gate");
   const ts = new Date().toISOString();
   const model =
     opts.model ??

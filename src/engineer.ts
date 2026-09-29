@@ -6,6 +6,7 @@ import { createWriteStream, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { ensureCycleDir, writeCycleFile, getRootDir } from "./state";
 import { appendProgress } from "./audit";
+import { assertNotVerifyOnly } from "./verify_only/guard";
 import {
   setActiveEngineerChild,
   clearActiveEngineerChild,
@@ -177,6 +178,7 @@ export async function runEngineer(
   context?: CycleCreativeContext,
   runOpts: RunEngineerOptions = {},
 ): Promise<EngineerResult> {
+  assertNotVerifyOnly("the engineer");
   const cycDir = ensureCycleDir(project.id, cycleId, config);
   const logPath = join(cycDir, "engineer.log");
 

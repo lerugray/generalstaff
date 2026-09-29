@@ -1,7 +1,7 @@
 // GeneralStaff — reviewer module (build step 11)
 // Spawn claude -p reviewer, parse JSON verdict
 
-import { spawn } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
 import { buildReviewerPrompt, type ReviewerPromptParams } from "./prompts/reviewer";
@@ -20,6 +20,10 @@ export interface ReviewerResult {
   response: ReviewerResponse | null;
   rawResponse: string;
   parseError: string | null;
+  // The provider that actually produced the response (the fallback provider
+  // when the primary errored; "quorum:<labels>" for a quorum review). Absent
+  // on dry runs. Additive; existing callers ignore it.
+  provider?: string;
 }
 
 const DEFAULT_FAILED_RESPONSE: ReviewerResponse = {
@@ -121,7 +125,7 @@ export async function runReviewer(
     ""
   ).toLowerCase();
   const cwd = cwdOverride ?? project.path;
-  const { rawResponse } = await invokeReviewerWithFallback(prompt, cwd, {
+  const { rawResponse, usedFallback } = await invokeReviewerWithFallback(prompt, cwd, {
     provider,
     fallback,
     onFallback: async (primaryError) => {
@@ -156,7 +160,13 @@ export async function runReviewer(
     silent_failures: response?.silent_failures ?? [],
   }, cycleId);
 
-  return { verdict, response, rawResponse, parseError };
+  return {
+    verdict,
+    response,
+    rawResponse,
+    parseError,
+    provider: usedFallback ? fallback : provider,
+  };
 }
 
 export function buildClaudeReviewerArgs(model?: string): string[] {
@@ -167,6 +177,24 @@ export function buildClaudeReviewerArgs(model?: string): string[] {
   ];
   if (model) args.push("--model", model);
   return args;
+}
+
+// Reviewer child processes currently running. A caller that gives up on a
+// review (a verify-only check hitting its time budget or being interrupted)
+// ends them through terminateReviewerChildren so none is left behind.
+const activeReviewerChildren = new Set<ChildProcess>();
+
+export function terminateReviewerChildren(signal: NodeJS.Signals = "SIGKILL"): number {
+  let count = 0;
+  for (const child of activeReviewerChildren) {
+    try {
+      child.kill(signal);
+      count += 1;
+    } catch {
+      /* already gone */
+    }
+  }
+  return count;
 }
 
 async function spawnClaude(prompt: string, cwd: string, model?: string): Promise<string> {
@@ -181,6 +209,9 @@ async function spawnClaude(prompt: string, cwd: string, model?: string): Promise
         env: { ...process.env },
       },
     );
+    activeReviewerChildren.add(child);
+    child.on("close", () => activeReviewerChildren.delete(child));
+    child.on("error", () => activeReviewerChildren.delete(child));
     child.stdin?.end(prompt);
 
     let stdout = "";
@@ -1259,5 +1290,11 @@ export async function runQuorumReview(
     cycleId,
   );
 
-  return { verdict: synth.verdict, response: synth.response, rawResponse: mergedRaw, parseError: null };
+  return {
+    verdict: synth.verdict,
+    response: synth.response,
+    rawResponse: mergedRaw,
+    parseError: null,
+    provider: `quorum:${voices.filter((v) => !v.errored).map((v) => v.label).join(",")}`,
+  };
 }
