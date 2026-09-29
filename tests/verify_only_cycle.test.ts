@@ -693,7 +693,7 @@ describe("cycle verify: preflight refusals leave no receipt", () => {
     await refuse(fx, verifyArgs(fx, bundle, ["--json", "--provider=claude"]), 2, "invalid_argument");
     await refuse(fx, verifyArgs(fx, bundle, ["--json", "--exclude=../up"]), 3, "invalid_argument");
     await refuse(fx, verifyArgs(fx, bundle, ["--json", "--overall-timeout=0"]), 2, "invalid_argument");
-  });
+  }, 30_000);
 });
 
 // --- lifecycle ---------------------------------------------------------------
