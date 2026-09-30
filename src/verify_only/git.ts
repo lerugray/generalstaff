@@ -5,7 +5,8 @@
 // GIT_DIR, GIT_EXTERNAL_DIFF, user config and similar cannot redirect what is
 // hashed. Hooks, fsmonitor and external diff drivers are switched off.
 
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
+import { join } from "path";
 import { AsyncLocalStorage } from "async_hooks";
 
 export const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
@@ -125,6 +126,10 @@ const isWindows = process.platform === "win32";
 
 function killGitGroup(child: ChildProcess): void {
   const pid = child.pid;
+  if (isWindows && pid !== undefined) {
+    signalGitPid(pid, "SIGKILL");
+    return;
+  }
   try {
     if (pid !== undefined && !isWindows) process.kill(-pid, "SIGKILL");
     else child.kill("SIGKILL");
@@ -157,15 +162,30 @@ const GIT_REAP_WAIT_MS = 3000;
  * otherwise orphan the group.
  */
 const liveGitGroups = new Set<number>();
+const windowsTreeKillErrors = new Map<number, string>();
+const windowsStoppedTrees = new Set<number>();
 
 function registerGitGroup(pid: number | undefined): void {
   if (pid !== undefined) liveGitGroups.add(pid);
 }
 
 /** Kill remaining members and await the bounded reap before releasing ownership. */
-async function releaseGitGroup(pid: number | undefined): Promise<void> {
+async function releaseGitGroup(pid: number | undefined): Promise<string | undefined> {
   if (pid === undefined) return;
-  if (isWindows || !gitGroupAlive(pid)) {
+  if (isWindows) {
+    // Abort can reach finish before the child's close event. Stop the native
+    // tree before handing its working directory back to the caller.
+    try {
+      process.kill(pid, 0);
+      signalGitPid(pid, "SIGKILL");
+    } catch { /* leader has already exited */ }
+    liveGitGroups.delete(pid);
+    const error = windowsTreeKillErrors.get(pid);
+    windowsTreeKillErrors.delete(pid);
+    windowsStoppedTrees.delete(pid);
+    return error;
+  }
+  if (!gitGroupAlive(pid)) {
     liveGitGroups.delete(pid);
     return;
   }
@@ -179,9 +199,30 @@ async function releaseGitGroup(pid: number | undefined): Promise<void> {
 }
 
 function signalGitPid(pid: number, signal: NodeJS.Signals): void {
+  if (isWindows) {
+    // A successful taskkill may precede the child's close event. Retrying in
+    // release would report "not found" as a failure (and double the reap cap).
+    if (windowsStoppedTrees.has(pid)) return;
+    windowsStoppedTrees.add(pid);
+    // Windows signals terminate only the leader. taskkill must see that leader
+    // alive to discover its descendants, and must finish before cleanup or exit.
+    // Use the system binary rather than a project-controlled PATH entry.
+    const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.WINDIR;
+    const taskkill = root ? join(root, "System32", "taskkill.exe") : "taskkill.exe";
+    const result = spawnSync(taskkill, ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+      stdio: "ignore",
+      timeout: GIT_REAP_WAIT_MS,
+      killSignal: "SIGKILL",
+    });
+    if (result.status !== 0) {
+      windowsTreeKillErrors.set(pid, `could not stop git process tree ${pid}: ${result.error?.message ?? `taskkill exited ${result.status}`}`);
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    return;
+  }
   try {
-    if (!isWindows) process.kill(-pid, signal);
-    else process.kill(pid, signal);
+    process.kill(-pid, signal);
   } catch {
     /* already gone */
   }
@@ -295,7 +336,8 @@ export function runGitRaw(
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      await releaseGitGroup(child.pid);
+      const reapError = await releaseGitGroup(child.pid);
+      if (reapError) result.spawnError = reapError;
       resolve(result);
     };
 
