@@ -71,7 +71,7 @@ generalstaff cycle result <cycle-id> --json
 - The receipt holds the verdict. Verify refuses any bundle that doesn't reproduce the digest. Exit 0 means pass and 1 means fail, both with a receipt; 2, 3 and 4 write none.
 - Your global git excludes apply, so a globally ignored `.env` stays out of every bundle.
 - If verify can't prove the verification command's processes have exited, the check fails.
-- Time budgets default to 600 seconds for verification, 300 for the reviewer and 900 overall. Worst-case wall clock is 120 + overall + grace + 30 seconds, so you can set a safe outer timeout.
+- Discover caps and the actual worst-case wall clock with `generalstaff cycle verify --print-budgets --json` (no project or state needed). Use `budgets.worstCaseWallClockSec` plus a supervision margin; see the [budget contract](docs/contracts/verify-only-cycle.md#time-budgets).
 
 Contracts: [`docs/contracts/verify-only-cycle.md`](docs/contracts/verify-only-cycle.md) and [`docs/contracts/gs-patch-digest-v1.md`](docs/contracts/gs-patch-digest-v1.md).
 

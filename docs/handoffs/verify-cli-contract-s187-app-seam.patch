@@ -1,0 +1,171 @@
+diff --git a/scripts/verify-gate-seam.cjs b/scripts/verify-gate-seam.cjs
+index 2195314..1b44a1b 100644
+--- a/scripts/verify-gate-seam.cjs
++++ b/scripts/verify-gate-seam.cjs
+@@ -6,27 +6,134 @@ const { spawn, spawnSync } = require('node:child_process');
+ const fs = require('node:fs'); const fsp = require('node:fs/promises');
+ const path = require('node:path'); const os = require('node:os'); const http = require('node:http');
+ const readline = require('node:readline'); const assert = require('node:assert/strict');
+-const { chromium } = require(process.env.PW_MODULE || 'playwright');
+ const root = path.resolve(__dirname, '..');
+ const out = path.resolve(process.env.SEAM_OUT || path.join(root,'docs/verification/verify-gate-app-s185'));
+ function git(cwd,args) { const r=spawnSync('git',args,{cwd,encoding:'utf8',env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null'}}); assert.equal(r.status,0,r.stderr); return r.stdout.trim(); }
++const REAL_CHECKS = ['passed','evidence','binding','reaped','reopen','stale','nonzero','corrupt','slow','unchanged'];
++function assertRealReceipt(doc, cycle, owner, gs, checkout, expectedState='passed') {
++  assert.equal(doc.cycleId,cycle); assert.equal(doc.schemaVersion,'cycle-result/v1');
++  assert.equal(doc.state,expectedState); assert.equal(doc.verify.mode,'verify_only');
++  assert.equal(doc.verify.reviewerProvider,'fixed'); assert.equal(doc.verify.reaped,true);
++  assert.equal(doc.verify.verificationTreeId,owner); assert(owner>0);
++  assert.equal(doc.identity.projectId,'project'); assert.equal(doc.identity.checkoutPath,fs.realpathSync(checkout));
++  assert.equal(doc.identity.patchDigest,doc.verify.changesetDigest);
++  assert.match(doc.identity.patchDigest,/^sha256:[0-9a-f]{64}$/);
++  assert.equal(doc.receipts.verification.present,true); assert.equal(doc.receipts.reviewer.present,true);
++  for(const key of ['bundlePath','diffPatchPath','progressPath','reviewerResponsePath','cycleDir']) {
++    const relative=doc.evidence[key]; assert.equal(typeof relative,'string');
++    assert(relative && !path.isAbsolute(relative) && !relative.split(/[\\/]/).includes('..'));
++    const target=fs.realpathSync(path.join(gs,relative)); assert(target.startsWith(fs.realpathSync(gs)+path.sep));
++    assert(key==='cycleDir'?fs.statSync(target).isDirectory():fs.statSync(target).isFile());
++  }
++  assert.equal(fs.existsSync(doc.verify.worktreePath),false);
++}
++function certifyRealCli(report,proof) {
++  for(const check of REAL_CHECKS) assert.equal(proof[check],true,`real CLI assertion missing: ${check}`);
++  report.realCliChecks=proof; report.realCliSeam='pass';
++}
++async function realCliLeg(ctx) {
++  const {page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv}=ctx;
++  const proof={};const yaml=path.join(gs,'projects.yaml');const original=fs.readFileSync(yaml,'utf8');
++  const originalHead=git(project,['rev-parse','HEAD']);const originalIndex=fs.readFileSync(path.join(project,'.git/index'));
++  const owners=()=>fs.existsSync(ownerLog)?fs.readFileSync(ownerLog,'utf8').trim().split('\n').filter(Boolean).map(Number):[];
++  const cycleCount=()=>fs.existsSync(path.join(gs,'state/project/cycles'))?fs.readdirSync(path.join(gs,'state/project/cycles')).length:0;
++  const read=cycle=>{const r=spawnSync(installedCli,['cycle','result',cycle,'--json'],{cwd:gs,env:cliEnv,encoding:'utf8',timeout:15000});assert.equal(r.status,0,r.stderr);return JSON.parse(r.stdout);};
++  async function passed(name,timeout=30000) {
++    await state('passed',timeout);assert.equal(await page.locator('[data-gate-accept]').isEnabled(),true);
++    const cycle=await page.evaluate(()=>document.body.dataset.cycleId);assert(cycle);
++    const owner=owners().at(-1);
++    // Exit may race the last projected pass by a few milliseconds. Group death
++    // is proven only with ESRCH, never by catching an arbitrary permission error.
++    const deadline=Date.now()+10000;let gone=false;
++    while(Date.now()<deadline){try{process.kill(-owner,0);}catch(e){assert.equal(e.code,'ESRCH');gone=true;break;}await new Promise(r=>setTimeout(r,25));}
++    assert(gone,'owned CLI group survived');const doc=read(cycle);assertRealReceipt(doc,cycle,owner,gs,project);await frame(name);return {cycle,doc};
++  }
++  try {
++    await page.goto(url);await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('real-cli-running');
++    const first=await passed('real-cli-passed');proof.passed=true;proof.reaped=true;
++    const view=await call('engine_get_cycle',{cycleId:first.cycle});
++    assert.equal(view.acceptEnabled,true);assert.equal(view.readyForAcceptance,true);
++    assert.equal(view.identity.patchDigest,first.doc.identity.patchDigest);proof.binding=true;
++    for (const selector of ['[data-bundle-evidence]','[data-diff-evidence]','[data-progress-evidence]','[data-reviewer-evidence]','.audit-list']) {
++      const link=selector==='.audit-list'?page.locator('.audit-list').locator('..').locator('a'):page.locator(selector);
++      await link.click();await page.locator('dialog').waitFor();assert((await page.locator('dialog pre').textContent()).length>0);await page.locator('dialog button').click();
++    }
++    proof.evidence=true;const starts=owners().length;const count=cycleCount();
++    await page.reload();await state('passed');assert.equal(await page.evaluate(()=>document.body.dataset.cycleId),first.cycle);
++    assert.equal(owners().length,starts);assert.equal(cycleCount(),count);proof.reopen=true;
++    fs.writeFileSync(path.join(project,'work.txt'),'real change after the passed render\n');
++    await page.locator('[data-gate-accept]').click();await state('stale_uncertain');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);
++    assert.equal(await page.evaluate(()=>document.body.dataset.cycleId),first.cycle);await frame('real-cli-stale');proof.stale=true;
++    const slow=Number(process.env.SEAM_SLOW_SECONDS||121);assert(Number.isInteger(slow)&&slow>=121&&slow<=180);
++    fs.writeFileSync(yaml,original.replace('sleep 2; exit 0',`sleep ${slow}; exit 0`));
++    await page.locator('[data-check-change]').click();await state('running');await new Promise(r=>setTimeout(r,35000));await state('running');await frame('real-cli-beyond-30s-running');
++    await passed('real-cli-two-minute-passed',(slow+30)*1000);proof.slow=true;report.slowRealCliSeconds=slow;
++    fs.writeFileSync(yaml,original.replace('sleep 2; exit 0','exit 7'));
++    fs.writeFileSync(path.join(project,'work.txt'),'a real nonzero verification change\n');
++    await page.locator('[data-check-change]').click();await state('failed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);
++    const failedCycle=await page.evaluate(()=>document.body.dataset.cycleId);
++    const failureDeadline=Date.now()+10000;let failureGone=false;while(Date.now()<failureDeadline){try{process.kill(-owners().at(-1),0);}catch(e){assert.equal(e.code,'ESRCH');failureGone=true;break;}await new Promise(r=>setTimeout(r,25));}assert(failureGone,'failed check group survived');
++    const failed=read(failedCycle);
++    assertRealReceipt(failed,failedCycle,owners().at(-1),gs,project,'failed');assert.equal(failed.verify.failureCategory,'verification_nonzero');
++    assert.match(await page.locator('[data-gate-state] > p.muted').textContent(),/exit code 7/);await frame('real-cli-failed-exit7');proof.nonzero=true;
++    const progress=path.join(gs,failed.evidence.progressPath);const saved=fs.readFileSync(progress);
++    try{fs.writeFileSync(progress,'{corrupted');await page.reload();await state('unavailable');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);await frame('real-cli-corrupted-unavailable');proof.corrupt=true;}
++    finally{fs.writeFileSync(progress,saved);}
++  } finally { fs.writeFileSync(yaml,original); }
++  assert.equal(fs.readFileSync(yaml,'utf8'),original);assert.equal(git(project,['rev-parse','HEAD']),originalHead);assert.deepEqual(fs.readFileSync(path.join(project,'.git/index')),originalIndex);
++  const progress=fs.readFileSync(path.join(gs,'state/project/PROGRESS.jsonl'),'utf8');assert(progress.trim().split('\n').every(line=>{const event=JSON.parse(line).event;return !event.startsWith('engineer_')&&event!=='cycle_skipped';}));
++  proof.unchanged=true;return proof;
++}
++function selfTest() {
++  const report={realCliSeam:'fail'};const complete=Object.fromEntries(REAL_CHECKS.map(k=>[k,true]));
++  for(const k of REAL_CHECKS){assert.throws(()=>certifyRealCli(report,{...complete,[k]:false}));assert.equal(report.realCliSeam,'fail');}
++  certifyRealCli(report,complete);assert.equal(report.realCliSeam,'pass');
++  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'seam-self-test-'));
++  try {
++    const checkout=path.join(scratch,'checkout');fs.mkdirSync(checkout);
++    const evidence={};for(const k of ['bundlePath','diffPatchPath','progressPath','reviewerResponsePath','cycleDir']){evidence[k]=k;if(k==='cycleDir')fs.mkdirSync(path.join(scratch,k));else fs.writeFileSync(path.join(scratch,k),'evidence');}
++    const doc={schemaVersion:'cycle-result/v1',cycleId:'c',state:'passed',verify:{mode:'verify_only',reviewerProvider:'fixed',reaped:true,verificationTreeId:42,changesetDigest:'sha256:'+'a'.repeat(64),worktreePath:path.join(scratch,'removed')},identity:{projectId:'project',checkoutPath:fs.realpathSync(checkout),patchDigest:'sha256:'+'a'.repeat(64)},receipts:{verification:{present:true},reviewer:{present:true}},evidence};
++    assertRealReceipt(doc,'c',42,scratch,checkout);
++    for(const [key,value] of [['mode','autonomous'],['reviewerProvider','claude'],['reaped',false],['verificationTreeId',41],['changesetDigest','sha256:'+'b'.repeat(64)]]) {
++      assert.throws(()=>assertRealReceipt({...doc,verify:{...doc.verify,[key]:value}},'c',42,scratch,checkout));
++    }
++    for(const key of Object.keys(evidence))assert.throws(()=>assertRealReceipt({...doc,evidence:{...evidence,[key]:'../escape'}},'c',42,scratch,checkout));
++    assert.throws(()=>assertRealReceipt({...doc,state:'failed'},'c',42,scratch,checkout));
++    fs.mkdirSync(doc.verify.worktreePath);assert.throws(()=>assertRealReceipt(doc,'c',42,scratch,checkout));
++  } finally {fs.rmSync(scratch,{recursive:true,force:true});}
++  console.log('real-CLI receipt checks and pass latch: PASS (no browser/native process launched)');
++}
++
+ async function main() {
++  const mode=process.env.SEAM_REAL_CLI||'record-refusal';assert(['record-refusal','expect-pass'].includes(mode));
++  const expectPass=mode==='expect-pass';
++  const { chromium } = require(process.env.PW_MODULE || 'playwright');
+   if (process.platform === 'linux') assert(process.env.DISPLAY, 'Use the existing Xvfb DISPLAY');
+-  fs.mkdirSync(out,{recursive:true}); const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'s185-seam-'));
++  fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'seam.json'),JSON.stringify({realCliSeam:'fail',fixtureSeam:'pending'})+'\n'); const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'s185-seam-'));
+   const gs=path.join(scratch,'gs');const project=path.join(gs,'project');const data=path.join(scratch,'app-data');fs.mkdirSync(project,{recursive:true});
+   git(project,['init','-q','-b','main']);git(project,['config','user.name','seam']);git(project,['config','user.email','seam@example.invalid']);
+   fs.writeFileSync(path.join(project,'work.txt'),'base\n');git(project,['add','.']);git(project,['commit','-qm','base']);fs.writeFileSync(path.join(project,'work.txt'),'a real uncommitted change\n');
+-  fs.writeFileSync(path.join(gs,'projects.yaml'),`projects:\n  - id: project\n    path: project\n    verification_command: "exit 0"\n`);
++  const yamlText=`projects:\n  - id: project\n    path: project\n    verification_command: "${expectPass?'sleep 2; exit 0':'exit 0'}"\n`;fs.writeFileSync(path.join(gs,'projects.yaml'),yamlText);
+   const installedCli=process.env.GS_SEAM_CLI;assert(installedCli,'GS_SEAM_CLI must name an installed CLI');
+   const cli=path.join(scratch,'generalstaff');
+   const shellQuote = value => "'" + value.replace(/'/g, "'\\''") + "'";
+-  fs.writeFileSync(cli,`#!/bin/sh\nexec ${shellQuote(installedCli)} "$@"\n`,{mode:0o700});
++  const ownerLog=path.join(scratch,'real-cli-owners');
++  // Hermetic resolver shared with the native app. The wrapper supplies the pin
++  // because the frozen app revision's request() has no pin flags yet.
++  const home=path.join(scratch,'home');fs.mkdirSync(home,{recursive:true});
++  const xdg=path.join(scratch,'custom-xdg');fs.mkdirSync(path.join(xdg,'git'),{recursive:true});
++  const pin=path.join(xdg,'git/ignore');fs.writeFileSync(pin,'globally-ignored.txt\n');
++  const hash=require('node:crypto').createHash('sha256').update(fs.readFileSync(pin)).digest('hex');
++  const cliEnv=expectPass?{...process.env,HOME:home,XDG_CONFIG_HOME:xdg,GENERALSTAFF_REVIEWER_PROVIDER:'fixed',GENERALSTAFF_REVIEWER_FIXED_VERDICT:'verified',GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER:''}:process.env;
++  if(expectPass)fs.writeFileSync(path.join(project,'globally-ignored.txt'),'not bundled\n');
++  const pinArgs=expectPass?`case "$1 $2" in "cycle verify") case " $* " in *" --print-budgets "*) ;; *) echo $$ >> ${shellQuote(ownerLog)};; esac; set -- "$@" ${shellQuote('--excludes-file='+pin)} ${shellQuote('--excludes-file-sha256='+hash)};; esac\n`:`case "$1 $2" in "cycle verify") case " $* " in *" --print-budgets "*) ;; *) echo 'refusal-recording mode cannot start a check; use SEAM_REAL_CLI=expect-pass' >&2; exit 3;; esac;; esac\n`;
++  fs.writeFileSync(cli,`#!/bin/sh\n${pinArgs}exec ${shellQuote(installedCli)} "$@"\n`,{mode:0o700});
+   const exe=process.env.GS_SEAM_NATIVE || path.join(root,'src-tauri/target/debug/examples/verify_gate_seam');
+-  const child=spawn(exe,[project,gs,data,cli],{env:process.env,stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',b=>{stderr=(stderr+b).slice(-4096);});
++  const child=spawn(exe,[project,gs,data,cli],{env:cliEnv,stdio:['pipe','pipe','pipe']});let stderr='';child.stderr.on('data',b=>{stderr=(stderr+b).slice(-4096);});
+   const lines=readline.createInterface({input:child.stdout});const pending=[];let initResolve;const initialized=new Promise(r=>initResolve=r);
+   lines.on('line',line=>{ const response=JSON.parse(line);if(response.session)initResolve(response);else pending.shift()?.(response); });
+   let serial=Promise.resolve(); function call(command,args={}) { const run=()=>new Promise((resolve,reject)=>{pending.push(v=>v.error?reject(v.error):resolve(v.result));child.stdin.write(JSON.stringify({command,args})+'\n');});const result=serial.then(run);serial=result.catch(()=>{});return result; }
+-  let browser;let server;const report={scratch,frames:[],realCliSeam:'fail',fixtureSeam:'pending'};
++  let browser;let server;let realProof;const report={scratch,frames:[],realCliSeam:'fail',fixtureSeam:'pending'};
+   try {
+     const {session}=await Promise.race([initialized,new Promise((_,reject)=>setTimeout(()=>reject(new Error(stderr||'Native seam did not initialize')),15000))]);
+     server=http.createServer(async(req,res)=>{ const file=path.resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}try{res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2'})[path.extname(file)]||'application/octet-stream');res.end(await fsp.readFile(file));}catch{res.writeHead(404).end();} });await new Promise(r=>server.listen(0,'127.0.0.1',r));
+@@ -35,7 +142,9 @@ async function main() {
+     const url=`http://127.0.0.1:${server.address().port}/src/review.html?session=${session}`;
+     async function state(expected,timeout=15000){await page.waitForFunction(expected=>document.body.dataset.screen !== 'review' && document.querySelector('[data-gate-state]')?.dataset.gateState===expected,expected,{timeout});}
+     async function frame(name){await page.screenshot({path:path.join(out,`${name}-1280x800-dpr2.png`)});report.frames.push(`${name}-1280x800-dpr2.png`);}
+-    await page.goto(url);await state('unavailable');report.realCliReason=await page.locator('#gate-reason').textContent();await frame('real-cli-budget-refused');assert.match(report.realCliReason,/does not support verify-only|incomplete verification budgets/);
++    if(expectPass)realProof=await realCliLeg({page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv});
++    else {await page.goto(url);await state('unavailable');report.realCliReason=await page.locator('#gate-reason').textContent();await frame('real-cli-budget-refused');assert.match(report.realCliReason,/does not support verify-only|incomplete verification budgets/);}
++    if(expectPass)fs.writeFileSync(path.join(project,'work.txt'),'fixture change after real CLI proof\n');
+     let fixture=await call('configure_fixture');await page.reload();await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('fixture-running');await state('passed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),true);await frame('fixture-passed');
+     for (const selector of ['[data-bundle-evidence]','[data-diff-evidence]','[data-progress-evidence]','[data-reviewer-evidence]','.audit-list']) {
+       const link=selector==='.audit-list' ? page.locator('.audit-list').locator('..').locator('a') : page.locator(selector);
+@@ -57,11 +166,12 @@ async function main() {
+     fixture=await call('configure_fixture',{fail:true});await page.locator('[data-check-change]').click();await state('failed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);assert.match(await page.locator('[data-gate-state] > p.muted').textContent(),/exit code 7/);assert.match(await page.locator('[data-check-cycle-id]').textContent(),/Check /);await frame('fixture-failed-exit7');
+     fs.writeFileSync(fixture.receipt,'{corrupted');await page.reload();await state('unavailable');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);await frame('fixture-corrupted-unavailable');
+     await call('configure_real');fs.renameSync(cli,`${cli}.away`);try{await page.reload();await state('unavailable');assert.match(await page.locator('[data-gate-state] > p.muted').textContent(),/Install GeneralStaff CLI/);await frame('real-cli-missing-install');}finally{fs.renameSync(`${cli}.away`,cli);}
+-    report.fixtureSeam='pass';report.projectsYamlUnchanged=fs.readFileSync(path.join(gs,'projects.yaml'),'utf8')===`projects:\n  - id: project\n    path: project\n    verification_command: "exit 0"\n`;assert(report.projectsYamlUnchanged);fs.writeFileSync(path.join(out,'seam.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
++    report.fixtureSeam='pass';report.projectsYamlUnchanged=fs.readFileSync(path.join(gs,'projects.yaml'),'utf8')===yamlText;assert(report.projectsYamlUnchanged);if(expectPass)certifyRealCli(report,realProof);fs.writeFileSync(path.join(out,'seam.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));
+   } finally {
+     await browser?.close();if(server)await new Promise(r=>server.close(r));
+     child.stdin.write(JSON.stringify({command:'shutdown',args:{}})+'\n');child.stdin.end();
+     await new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve));
+   }
+ }
+-main().catch(error=>{console.error(error);process.exitCode=1;});
++if(require.main===module){if(process.argv.includes('--self-test'))selfTest();else main().catch(error=>{console.error(error);process.exitCode=1;});}
++module.exports={assertRealReceipt,certifyRealCli,realCliLeg};

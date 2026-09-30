@@ -1,3 +1,4 @@
+import { verificationTreeId, verificationGroupMembers, signalVerificationMembers } from "./process_tree";
 // Pinned git invocation for the change-set digest and the verify-only path.
 //
 // Every call is argv-only (never a shell), has an explicit cwd, a wall-clock
@@ -106,6 +107,14 @@ export const GIT_DIFF_PIN_ARGS: readonly string[] = [
 ];
 
 const abortContext = new AsyncLocalStorage<AbortSignal | undefined>();
+const inheritedGroupContext = new AsyncLocalStorage<{ owned: boolean; tail: Promise<void> }>();
+/** A supervised verify CLI keeps its preflight/cleanup Git in the same group. */
+export function withInheritedGitGroup<T>(fn: () => Promise<T>): Promise<T> {
+  const owned = process.platform !== "win32" && verificationTreeId() === process.pid;
+  return inheritedGroupContext.run({ owned, tail: Promise.resolve() }, fn);
+}
+const inheritedGitPids = new Set<number>();
+
 
 /**
  * Every git call started inside `fn` (however deep) is stopped, process group
@@ -126,7 +135,7 @@ const isWindows = process.platform === "win32";
 function killGitGroup(child: ChildProcess): void {
   const pid = child.pid;
   try {
-    if (pid !== undefined && !isWindows) process.kill(-pid, "SIGKILL");
+    if (pid !== undefined && !isWindows) signalGitPid(pid, "SIGKILL");
     else child.kill("SIGKILL");
   } catch {
     try {
@@ -139,6 +148,10 @@ function killGitGroup(child: ChildProcess): void {
 
 function gitGroupAlive(pid: number | undefined): boolean {
   if (pid === undefined || isWindows) return false;
+  if (inheritedGitPids.has(pid)) {
+    const members = verificationGroupMembers();
+    return members === null || members.length > 0;
+  }
   try {
     process.kill(-pid, 0);
     return true;
@@ -151,15 +164,17 @@ function gitGroupAlive(pid: number | undefined): boolean {
 const GIT_REAP_WAIT_MS = 3000;
 
 /**
- * Process-group ids of git calls still running. `detached` puts git outside
- * the terminal's foreground group, so a Ctrl-C delivered to this process does
- * not reach git unless its abort context stops it, and a second signal's exit would
- * otherwise orphan the group.
+ * Git child ids still owned here. Standalone helpers use detached groups;
+ * supervised verify calls share the CLI group. Both paths await cleanup, and
+ * the second-signal path forwards a force kill before exiting.
  */
 const liveGitGroups = new Set<number>();
 
 function registerGitGroup(pid: number | undefined): void {
-  if (pid !== undefined) liveGitGroups.add(pid);
+  if (pid !== undefined) {
+    liveGitGroups.add(pid);
+    if (inheritedGroupContext.getStore()?.owned) inheritedGitPids.add(pid);
+  }
 }
 
 /** Kill remaining members and await the bounded reap before releasing ownership. */
@@ -167,6 +182,7 @@ async function releaseGitGroup(pid: number | undefined): Promise<void> {
   if (pid === undefined) return;
   if (isWindows || !gitGroupAlive(pid)) {
     liveGitGroups.delete(pid);
+    inheritedGitPids.delete(pid);
     return;
   }
   signalGitPid(pid, "SIGKILL");
@@ -176,11 +192,13 @@ async function releaseGitGroup(pid: number | undefined): Promise<void> {
   }
   if (liveGitGroups.has(pid) && gitGroupAlive(pid)) signalGitPid(pid, "SIGKILL");
   liveGitGroups.delete(pid);
+  inheritedGitPids.delete(pid);
 }
 
 function signalGitPid(pid: number, signal: NodeJS.Signals): void {
   try {
-    if (!isWindows) process.kill(-pid, signal);
+    if (inheritedGitPids.has(pid)) signalVerificationMembers(signal);
+    else if (!isWindows) process.kill(-pid, signal);
     else process.kill(pid, signal);
   } catch {
     /* already gone */
@@ -243,6 +261,16 @@ export function runGitRaw(
   args: readonly string[],
   opts: GitRunOptions,
 ): Promise<GitResult> {
+  const context = inheritedGroupContext.getStore();
+  if (!context?.owned) return runGitRawInner(args, opts);
+  // A group sweep may only follow the last active Git call. Serialize calls
+  // sharing the CLI group so one completed diff cannot kill a sibling diff.
+  const run = context.tail.then(() => runGitRawInner(args, opts));
+  context.tail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<GitResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
   const maxStdout = opts.maxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
   const signal = opts.signal ?? abortContext.getStore();
@@ -260,13 +288,13 @@ export function runGitRaw(
     }
     let child: ChildProcess;
     try {
-      // Own process group, so a stop reaches git's own children too (for
-      // example the `reset` that `worktree add` runs).
+      // Supervised verify calls inherit the CLI group; standalone helpers
+      // retain their owned Git groups and existing cleanup contract.
       child = spawn("git", [...args], {
         cwd: opts.cwd,
         env: opts.env ?? pinnedGitEnv(),
         stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-        detached: !isWindows,
+        detached: !isWindows && !inheritedGroupContext.getStore()?.owned,
         windowsHide: true,
       });
     } catch (err) {

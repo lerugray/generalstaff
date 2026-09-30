@@ -24,10 +24,10 @@ import { parseArgs } from "util";
 import { BundleError, writeBundle } from "./bundle";
 import { PATCH_DIGEST_ALGORITHM } from "./constants";
 import { DigestError } from "./digest";
-import { killAndReapLiveGitGroups, reapLiveGitGroups, scrubLine, withGitAbort } from "./git";
+import { killAndReapLiveGitGroups, reapLiveGitGroups, scrubLine, withGitAbort, withInheritedGitGroup } from "./git";
 import { toRefusal, VerifyRefusal, type RefusalCode } from "./refusal";
 import { killAllOwnedGroups } from "./runner";
-import { DEFAULT_VERIFY_BUDGETS, runVerifyOnlyCycle } from "./run";
+import { DEFAULT_VERIFY_BUDGETS, publishedVerifyBudgets, runVerifyOnlyCycle } from "./run";
 import {
   loadProjectsYaml,
   ProjectsYamlNotFoundError,
@@ -59,7 +59,8 @@ function resolveBudgets(b: {
   return { ...b, overallSec: Math.max(DEFAULT_VERIFY_BUDGETS.overallSec, needed) };
 }
 
-export const CYCLE_VERIFY_HELP = `Usage: generalstaff cycle verify --project=<id> --checkout=<abs path>
+export const CYCLE_VERIFY_HELP = `Usage: generalstaff cycle verify --print-budgets [--json]
+       generalstaff cycle verify --project=<id> --checkout=<abs path>
                                --base=<40-hex> --branch=<name> --bundle=<abs dir>
                                --digest=sha256:<64-hex>
                                --digest-algorithm=${PATCH_DIGEST_ALGORITHM}
@@ -83,6 +84,9 @@ afterward.
                  bundle does not reproduce it
   --exclude      Repeatable. Repo-relative paths left out of the snapshot
   --json         Write one machine-readable object to stdout
+  --print-budgets Print caps and the worst-case formula as JSON; start no check
+  --excludes-file Resolved absolute global excludes path, or "none"
+  --excludes-file-sha256 SHA-256 of that file, or empty for "none"; supply both
 
 Time budgets (seconds): verification ${DEFAULT_VERIFY_BUDGETS.verificationSec}, reviewer ${DEFAULT_VERIFY_BUDGETS.reviewerSec}, overall ${DEFAULT_VERIFY_BUDGETS.overallSec}, grace ${DEFAULT_VERIFY_BUDGETS.graceSec}.
 --overall-timeout must be at least --verification-timeout + --reviewer-timeout
@@ -187,6 +191,10 @@ export async function runCycleVerifyCli(
   argv: string[],
   cliVersion: string,
 ): Promise<number> {
+  return withInheritedGitGroup(() => runCycleVerifyCliInner(argv, cliVersion));
+}
+
+async function runCycleVerifyCliInner(argv: string[], cliVersion: string): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(CYCLE_VERIFY_HELP);
     return EXIT_PASSED;
@@ -211,6 +219,9 @@ export async function runCycleVerifyCli(
         "reviewer-timeout": { type: "string" },
         "overall-timeout": { type: "string" },
         grace: { type: "string" },
+        "print-budgets": { type: "boolean" },
+        "excludes-file": { type: "string" },
+        "excludes-file-sha256": { type: "string" },
       },
       allowPositionals: false,
     }));
@@ -223,8 +234,37 @@ export async function runCycleVerifyCli(
     );
   }
 
+  // Discovery needs neither a registry nor a checkout and writes no state.
+  if (values["print-budgets"]) {
+    try {
+      const overrides = resolveBudgets({
+        verificationSec: parsePositiveSeconds(values["verification-timeout"], "--verification-timeout"),
+        reviewerSec: parsePositiveSeconds(values["reviewer-timeout"], "--reviewer-timeout"),
+        overallSec: parsePositiveSeconds(values["overall-timeout"], "--overall-timeout"),
+        graceSec: parsePositiveSeconds(values.grace, "--grace"),
+      });
+      const budgets = { ...DEFAULT_VERIFY_BUDGETS, ...Object.fromEntries(Object.entries(overrides).filter(([,v])=>v!==undefined)) };
+      if (budgets.overallSec < budgets.verificationSec + budgets.reviewerSec) throw new UsageError("--overall-timeout is below verification + reviewer");
+      writeJsonLine({ schemaVersion: "cycle-verify-budgets/v1", budgets: publishedVerifyBudgets(budgets) });
+      return EXIT_PASSED;
+    } catch (err) {
+      return reportNoReceipt(wantsJson, "invalid_argument", (err as Error).message, EXIT_USAGE);
+    }
+  }
+
   let request;
   try {
+    const pinPath = values["excludes-file"];
+    const pinHash = values["excludes-file-sha256"];
+    if ((pinPath === undefined) !== (pinHash === undefined)) throw new UsageError("--excludes-file and --excludes-file-sha256 must be supplied together");
+    if (pinPath !== undefined) {
+      if (pinPath === "none") {
+        if (pinHash !== "") throw new UsageError("an explicit none pin requires an empty hash");
+      } else {
+        checkedPath(pinPath, "--excludes-file");
+        if (!/^[0-9a-f]{64}$/.test(pinHash!)) throw new UsageError("--excludes-file-sha256 must be 64 lowercase hex characters");
+      }
+    }
     const projectId = requireValue(values.project, "--project");
     const checkout = checkedPath(values.checkout, "--checkout");
     const bundle = checkedPath(values.bundle, "--bundle");
@@ -240,6 +280,7 @@ export async function runCycleVerifyCli(
     const branch = checkBranch(values.branch);
     request = {
       projectId,
+      excludesPin: pinPath === undefined ? undefined : { path: pinPath === "none" ? null : pinPath, sha256: pinHash === "" ? null : pinHash! },
       checkout,
       bundle,
       base,
@@ -349,12 +390,13 @@ export async function runCycleVerifyCli(
       digest: request.digest,
       digestAlgorithm: request.digestAlgorithm,
       exclude: request.exclude,
+      excludesPin: request.excludesPin,
       budgets: Object.fromEntries(
         Object.entries(request.budgets).filter(([, v]) => v !== undefined),
       ),
       cliVersion,
       signal: controller.signal,
-      onStarted: ({ cycleId, projectId }) => {
+      onStarted: ({ cycleId, projectId, verificationTreeId }) => {
         startReported = true;
         if (wantsJson) {
           writeJsonLine({
@@ -363,6 +405,7 @@ export async function runCycleVerifyCli(
             projectId,
             state: "running",
             mode: "verify_only",
+            verificationTreeId,
           });
         } else {
           console.log(`Verify-only cycle ${cycleId} started for ${projectId}`);

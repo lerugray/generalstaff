@@ -35,12 +35,44 @@ convenience; a caller that binds a check to a change reads the receipt.
 | `--verification-timeout=<s>` | Budget for the verification command, all stages together. Default 600. |
 | `--reviewer-timeout=<s>` | Budget for the reviewer. Default 300. |
 | `--overall-timeout=<s>` | Budget for the whole check after it starts. Default 900; must be at least `--verification-timeout` + `--reviewer-timeout` (lower is refused, exit 3, no receipt). When it is omitted and either of those two is given, the default is raised to their sum if that is larger than 900. |
+| `--print-budgets` | Print the budget object without starting a check; requires no project flags. |
+| `--excludes-file=<path or none>` / `--excludes-file-sha256=<hash or empty>` | Optional pair. Use this exact resolution; refuse missing/unreadable/changed bytes (`excludes_mismatch`, exit 3). Explicit none ignores ambient HOME/XDG/config. Omit both for legacy local resolution. |
 | `--grace=<s>` | Wait between the polite stop signal and the force kill. Default 10. |
 
 There is no model, provider or runner flag. The reviewer is chosen by the
 project's configuration and the user's own `GENERALSTAFF_REVIEWER_*`
 variables, exactly as for an autonomous cycle. The receipt records the provider
 that actually ran.
+
+### Deterministic test/sitting reviewer
+
+For a local integration test with no model calls, set both:
+
+```sh
+export GENERALSTAFF_REVIEWER_PROVIDER=fixed
+export GENERALSTAFF_REVIEWER_FIXED_VERDICT=verified
+```
+
+Accepted verdicts: `verified`, `verified_weak`, `verification_failed`. The mode
+is off by default. It returns that configured verdict, **does not review scope
+or correctness**, calls no model, needs no key, and starts no reviewer process.
+Missing/invalid verdicts fail closed and never invoke a fallback provider.
+On the verify-only path this explicit mode also suppresses configured quorum
+providers. Receipts identify `reviewerProvider: "fixed"`; normal prompt,
+response and verdict evidence is still written and labels the synthetic review.
+A fixed approval cannot override failing verification, digest mismatch or
+unproven reap. Use only for tests/sittings, never as evidence of a real review;
+unset both variables when finished. Default reviewers are unchanged.
+
+### Time budgets
+
+`generalstaff cycle verify --print-budgets --json` is the authoritative,
+side-effect-free discovery call, including outside a registered root. It returns
+`{schemaVersion:"cycle-verify-budgets/v1", budgets:{preflightCap, overall,
+verification, reviewer, grace, cleanup, preflightReap, worstCaseWallClockSec,
+formula}}`. All numeric values are seconds. Timeout/grace overrides are honored
+by the probe; `run.ts:publishedVerifyBudgets` and `worstCaseWallClockSec` supply
+both the probe and the lock calculation. Supervisors must consume this output.
 
 The budgets interact in these fixed ways:
 
@@ -63,10 +95,15 @@ The budgets interact in these fixed ways:
 - Cleanup of the worktree is three steps (`git worktree remove`, directory
   removal, `git worktree prune`) of at most 10 seconds each: 30 seconds.
 - The real worst-case wall clock is therefore
-  `120 (preflight cap) + overall + grace + 30 (cleanup)` seconds. A caller
+  `preflightCap + max(overall + grace, preflightReap) + cleanup` seconds
+  (defaults: `120 (preflight cap) + overall + grace + 30 (cleanup)`, 1060 s).
+  The +5-second allowance in Amendment A1 is a minimum, not enough for the
+  existing three cleanup steps. The published actual bound retains +30;
+  clients must use `worstCaseWallClockSec` plus their margin (default 60 s),
+  never hardcode +5. A caller
   that supervises the process should give it strictly more than that so the
-  check can always write its own terminal record and clean up. The `.lock`
-  time-to-live is that same sum plus 90 seconds.
+  check can write its terminal record and clean up. The `.lock`
+  time-to-live uses the same published bound plus 90 seconds.
 
 ### Exit codes
 
@@ -87,7 +124,7 @@ Exactly one line on stdout; everything else goes to stderr.
 Started (written after the startup events are recorded, before verification runs):
 
 ```json
-{"schemaVersion":"cycle-verify/v1","cycleId":"20260929155314_nt3x","projectId":"app","state":"running","mode":"verify_only"}
+{"schemaVersion":"cycle-verify/v1","cycleId":"20260929155314_nt3x","projectId":"app","state":"running","mode":"verify_only","verificationTreeId":12345}
 ```
 
 Refused (exit 2, 3 or 4, or 128+N, when no start object was emitted):
@@ -124,6 +161,7 @@ Each is a stable `reason` code. None records a cycle.
 | `snapshot_limit` | a file, file count or patch over the caps |
 | `unsupported_digest_algorithm` | any id other than `gs-patch-digest/v1` |
 | `digest_mismatch` | the bundle does not reproduce `--digest` |
+| `excludes_mismatch` | caller-pinned global excludes bytes no longer match; no check starts |
 | `empty_patch` | the change-set is empty |
 | `no_verification_command` | the project has no verification command |
 | `verify_in_progress` | another check is running for this project |
@@ -182,10 +220,21 @@ them as scope context. The autonomous cycle's hard hands-off gate is unchanged.
 
 ### Process ownership
 
-The verification command runs in its own process group (a `taskkill /T` tree on
-Windows). On a timeout, a signal or the overall budget the group receives a
-polite stop, then a force kill after the grace period. After every command the
-group is swept, so background processes the command left running do not survive.
+The verification command inherits the CLI's process group: it does not detach. `verificationTreeId` in start output and the terminal `verify`
+block is that group id (the supervised CLI PID). On Unix the caller must launch
+the CLI as group leader (e.g. Node `spawn(..., {detached:true})` or a foreground
+shell job). The CLI refuses to run a command in a shared group it cannot safely
+sweep. This is the A1-required compatibility change for unsupervised/shared-group
+callers; it prevents killing unrelated siblings. macOS uses a group-scoped
+kernel enumeration; Linux reads `/proc`. Enumeration failure fails closed.
+On timeout/abort, members receive TERM, then KILL after `--grace` seconds;
+the CLI remains alive to write its receipt. Normal completion also sweeps and
+proves the group empty except for the CLI itself. Caller group termination
+therefore reaches verification descendants, including grandchildren, and all
+preflight/cleanup Git children of a supervised verify call. Standalone bundle
+helpers retain their existing owned Git groups. Commands
+must not deliberately escape the owned group with setsid/setpgid. Windows still
+uses taskkill tree cleanup; no Windows Job-Object proof is claimed here.
 A process group that could not be *proven* reaped fails the check
 (`verify.reaped` is `false`, category `verification_error`): a surviving group
 may still be running commands against operator state, and must never read as a
@@ -219,6 +268,8 @@ with these additive fields (see [cycle-result-v1.md](./cycle-result-v1.md) §8):
   human-readable patch (untracked files shown as added files, secrets redacted).
 - `verify` carries `mode` (`"verify_only"`), `changesetDigest`, `digestAlgorithm`,
   `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`,
+  `verificationTreeId`, `excludesFilePath` (path or `"none"`),
+  `excludesFileSha256` (hash or empty) for caller-pinned calls; otherwise legacy
   `globalExcludesFile` and `globalExcludesSha256` (the user's effective global
   git excludes file this check pinned on every change-set git call, and the
   SHA-256 of its bytes — both `null` when the user has none),

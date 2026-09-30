@@ -1,13 +1,14 @@
 // Owned, bounded shell runner for the verification command.
 //
-// The command runs in its own process group (via setsid on Unix, a
-// taskkill tree on Windows). The runner owns that group for the whole run:
+// The command inherits the caller-owned CLI group on Unix. The CLI must be
+// its group leader; it enumerates and signals members without signalling itself:
 // on a timeout or an abort it signals the group, waits a grace period, then
 // force-kills it, and after the command ends it sweeps the group so nothing
 // the command left running survives. Output is captured with a head and a
 // tail so a noisy command cannot use unbounded memory.
 
 import { spawn, spawnSync, type ChildProcess } from "child_process";
+import { signalVerificationMembers, verificationGroupMembers } from "./process_tree";
 
 export interface RunnerOptions {
   command: string;
@@ -49,7 +50,7 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
         windowsHide: true,
       });
     } else {
-      process.kill(-pid, signal);
+      signalVerificationMembers(signal);
     }
   } catch {
     /* group already gone */
@@ -58,12 +59,8 @@ function killGroup(pid: number, signal: NodeJS.Signals): void {
 
 function groupAlive(pid: number): boolean {
   if (isWindows) return false;
-  try {
-    process.kill(-pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "EPERM";
-  }
+  const members = verificationGroupMembers();
+  return members === null || members.length > 0;
 }
 
 /** Force-kill every group this process still owns. Used on signals. */
@@ -119,6 +116,11 @@ function sleep(ms: number): Promise<void> {
 
 export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> {
   const graceMs = opts.graceMs ?? 10_000;
+  if (!isWindows && verificationGroupMembers() === null) {
+    return { exitCode: null, signal: null, timedOut: false, aborted: false,
+      spawnError: "verification requires a caller-owned process group led by the CLI", durationSeconds: 0,
+      output: "", omittedBytes: 0, reaped: false, pid: null };
+  }
   const capture = new HeadTailCapture(
     opts.headBytes ?? 1024 * 1024,
     opts.tailBytes ?? 1024 * 1024,
@@ -131,7 +133,7 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
       child = spawn("bash", ["-c", opts.command], {
         cwd: opts.cwd,
         env: opts.env,
-        detached: !isWindows,
+        detached: false,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
@@ -161,12 +163,14 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
     let spawnError: string | undefined;
     let done = false;
     let escalation: ReturnType<typeof setTimeout> | undefined;
+    let politeUntil: number | undefined;
 
     child.stdout?.on("data", (c: Buffer) => capture.push(c));
     child.stderr?.on("data", (c: Buffer) => capture.push(c));
 
     const stopGroup = () => {
-      if (pid === null || exited) return;
+      if (pid === null || politeUntil !== undefined) return;
+      politeUntil = performance.now() + graceMs;
       killGroup(pid, "SIGTERM");
       escalation = setTimeout(() => killGroup(pid, "SIGKILL"), graceMs);
     };
@@ -200,7 +204,7 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
         // signal, a short wait, then a force kill, then proof it is gone.
         if (groupAlive(pid)) {
           killGroup(pid, "SIGTERM");
-          const politeUntil = performance.now() + Math.min(graceMs, 2000);
+          politeUntil ??= performance.now() + graceMs;
           while (groupAlive(pid) && performance.now() < politeUntil) {
             await sleep(25);
           }

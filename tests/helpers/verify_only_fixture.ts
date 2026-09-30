@@ -247,6 +247,8 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     async runCli(args, o = {}) {
       const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
         cwd: root,
+        // Model the supervising caller: the CLI leads the owned group.
+        detached: process.platform != "win32",
         env: env(o.env),
         stdout: "pipe",
         stderr: "pipe",
@@ -265,6 +267,8 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     spawnCli(args, o = {}) {
       const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
         cwd: root,
+        // Model the supervising caller: the CLI leads the owned group.
+        detached: process.platform != "win32",
         env: env(o.env),
         stdout: "pipe",
         stderr: "pipe",

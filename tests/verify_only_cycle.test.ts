@@ -716,7 +716,7 @@ describe("cycle verify: one check per project at a time", () => {
     expect(cycles).toHaveLength(1);
     expect(progressEvents(fx).filter((e) => e.event === "cycle_start")).toHaveLength(1);
     noLeftovers(fx);
-  });
+  }, 30_000); // Includes a 20 s readiness wait and a 4 s command, plus preflight.
 
   it("replaces a lock whose owner is gone and sweeps a dead check's leftovers", async () => {
     fx = makeVerifyFixture();

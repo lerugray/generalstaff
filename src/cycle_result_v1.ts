@@ -51,6 +51,9 @@ export interface CycleResultVerify {
   excludedPaths: string[];
   /** The global git excludes pin the check ran under. */
   globalExcludesFile?: string | null;
+  verificationTreeId?: number;
+  excludesFilePath?: string;
+  excludesFileSha256?: string;
   /** SHA-256 of the pinned excludes file's bytes (null when none/unreadable). */
   globalExcludesSha256?: string | null;
   handsOffHits: Array<{ file: string; pattern: string }>;
@@ -223,8 +226,13 @@ function parseVerifyBlock(v: unknown): CycleResultVerify | null {
     checkoutPath: asString(o.checkoutPath),
     worktreePath: asString(o.worktreePath),
     excludedPaths: asStringArray(o.excludedPaths),
-    globalExcludesFile: asString(o.globalExcludesFile),
-    globalExcludesSha256: asString(o.globalExcludesSha256),
+    ...(typeof o.excludesFilePath === "string" ? {} : {
+      globalExcludesFile: asString(o.globalExcludesFile),
+      globalExcludesSha256: asString(o.globalExcludesSha256),
+    }),
+    ...(Number.isSafeInteger(o.verificationTreeId) && (o.verificationTreeId as number) > 0 ? { verificationTreeId: o.verificationTreeId as number } : {}),
+    ...(typeof o.excludesFilePath === "string" ? { excludesFilePath: o.excludesFilePath } : {}),
+    ...(typeof o.excludesFileSha256 === "string" ? { excludesFileSha256: o.excludesFileSha256 } : {}),
     handsOffHits: hits,
     cliVersion: asString(o.cliVersion),
     reviewerProvider: asString(o.reviewerProvider),

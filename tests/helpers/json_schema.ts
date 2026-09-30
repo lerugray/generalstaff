@@ -11,6 +11,7 @@ export type JsonSchema = {
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
   minLength?: number;
+  minimum?: number;
   uniqueItems?: boolean;
   pattern?: string;
   $defs?: Record<string, JsonSchema>;
@@ -28,6 +29,7 @@ function typeOk(value: unknown, type: string | string[] | undefined): boolean {
   if (type === undefined) return true;
   const types = Array.isArray(type) ? type : [type];
   return types.some((t) => {
+    if (t === "integer") return typeof value === "number" && Number.isInteger(value);
     if (t === "null") return value === null;
     if (t === "array") return Array.isArray(value);
     if (t === "object") {
@@ -53,6 +55,7 @@ export function validateAgainstSchema(
     errors.push(`${path}: type mismatch`);
     return errors;
   }
+  if (typeof value === "number" && s.minimum !== undefined && value < s.minimum) errors.push(`${path}: minimum`);
   if (typeof value === "string" && s.minLength !== undefined && value.length < s.minLength) {
     errors.push(`${path}: minLength`);
   }
