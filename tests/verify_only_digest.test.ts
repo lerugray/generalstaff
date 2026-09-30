@@ -104,7 +104,8 @@ describe("gs-patch-digest/v1 vector file", () => {
         if (v.globalExcludes.source === "config") {
           const f = join(scratch, `${v.id}-ignore`);
           writeFileSync(f, text);
-          writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${f}\n`);
+          // Let git quote native paths: raw Windows backslashes are config escapes.
+          git(home, ["config", "--file", join(home, ".gitconfig"), "core.excludesFile", f]);
         } else if (v.globalExcludes.source === "xdg") {
           const xdg = join(scratch, `${v.id}-xdg`);
           mkdirSync(join(xdg, "git"), { recursive: true });
@@ -322,7 +323,7 @@ describe("global excludes resolution and pinning", () => {
     mkdirSync(home, { recursive: true });
     const ignoreFile = join(scratch, "config-ignore");
     writeFileSync(ignoreFile, ".env\n*.pem\n");
-    writeFileSync(join(home, ".gitconfig"), `[core]\n\texcludesFile = ${ignoreFile}\n`);
+    git(home, ["config", "--file", join(home, ".gitconfig"), "core.excludesFile", ignoreFile]);
     const restore = redirectedEnv(home);
     try {
       const r = await resolveGlobalExcludes();

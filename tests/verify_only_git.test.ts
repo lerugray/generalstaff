@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { delimiter, join } from "path";
+import { minimalChildEnv, runGitRaw } from "../src/verify_only/git";
+import { installTestCli } from "./helpers/test_cli";
 
 let scratch: string | undefined;
 afterEach(() => {
@@ -74,6 +76,53 @@ console.log(JSON.stringify(observation));
 }
 
 describe("hardening fix round 5 git groups", () => {
+  for (const stop of ["timeout", "abort"] as const) {
+    it(`${stop} waits for the native Git leader and descendant to stop`, async () => {
+      scratch = realpathSync(mkdtempSync(join(tmpdir(), "gs-git-tree-test-")));
+      const marker = join(scratch, "pids.json");
+      const sleeper = join(scratch, "sleeper.mjs");
+      writeFileSync(sleeper, "setInterval(() => {}, 1000);\n");
+      installTestCli(scratch, "git", `
+import { spawn } from "child_process";
+import { writeFileSync } from "fs";
+const child = spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(sleeper)}], { stdio: "inherit" });
+child.on("spawn", () => writeFileSync(${JSON.stringify(marker)}, JSON.stringify([process.pid, child.pid])));
+setInterval(() => {}, 1000);
+`);
+      const controller = new AbortController();
+      const work = runGitRaw([], {
+        cwd: scratch,
+        env: minimalChildEnv({ PATH: `${scratch}${delimiter}${process.env.PATH ?? ""}` }),
+        timeoutMs: stop === "timeout" ? 2500 : 10_000,
+        signal: controller.signal,
+      });
+      let pids: number[] = [];
+      try {
+        const readyBy = Date.now() + 2000;
+        while (!existsSync(marker) && Date.now() < readyBy) await Bun.sleep(20);
+        expect(existsSync(marker)).toBe(true);
+        pids = JSON.parse(readFileSync(marker, "utf8"));
+        expect(pids).toHaveLength(2);
+        if (stop === "abort") controller.abort();
+        const result = await work;
+        expect(stop === "abort" ? result.aborted : result.timedOut).toBe(true);
+        expect(result.spawnError).toBeUndefined();
+        // No polling after return: callers can remove the working tree immediately.
+        for (const pid of pids) {
+          let alive = false;
+          try { process.kill(pid, 0); alive = true; } catch { /* reaped */ }
+          expect(alive).toBe(false);
+        }
+      } finally {
+        controller.abort();
+        await work;
+        for (const pid of pids) {
+          try { process.kill(pid, "SIGKILL"); } catch { /* gone */ }
+        }
+      }
+    }, 20_000);
+  }
+
   it("finding 3: the second-signal SIGKILL returns without blocking child reaping", async () => {
     if (process.platform === "win32") return; // POSIX process-group regression
     const result = await groupProbe("second-signal");

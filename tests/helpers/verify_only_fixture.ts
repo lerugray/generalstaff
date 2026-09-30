@@ -5,7 +5,6 @@
 
 import { spawnSync } from "child_process";
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,7 +14,8 @@ import {
   existsSync,
 } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { delimiter, join } from "path";
+import { installTestCli } from "./test_cli";
 
 const CLI_PATH = join(import.meta.dir, "..", "..", "src", "cli.ts");
 
@@ -24,10 +24,12 @@ export function git(cwd: string, args: string[]): string {
     cwd,
     encoding: "utf8",
     env: {
+      ...Object.fromEntries(Object.entries(process.env).filter(([k, v]) => v !== undefined && !k.startsWith("GIT_"))),
       PATH: process.env.PATH ?? "",
       HOME: process.env.HOME ?? "",
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      GIT_CONFIG_SYSTEM: "/dev/null",
+      GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_SYSTEM: process.platform === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
       GIT_AUTHOR_NAME: "t",
       GIT_AUTHOR_EMAIL: "t@t",
       GIT_COMMITTER_NAME: "t",
@@ -37,7 +39,7 @@ export function git(cwd: string, args: string[]): string {
     },
   });
   if (r.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
+    throw new Error(`git ${args.join(" ")} failed: ${r.error ?? r.stderr}`);
   }
   return r.stdout.trim();
 }
@@ -115,15 +117,18 @@ export interface FixtureOptions {
     verdict: "verified" | "verified_weak" | "verification_failed";
     reason?: string;
   };
-  /** Shell snippet run by the fake `claude` before it answers (e.g. `exec sleep 30`). */
-  claudeDelay?: string | ((ctx: { scratch: string }) => string);
+  /** Delay in milliseconds before the fake reviewer answers. */
+  claudeDelay?: number;
+  /** Capture the native reviewer PID in scratch/claude.pid. */
+  claudePid?: boolean;
   /** Make the fake `claude` exit with this code and print nothing. */
   claudeExit?: number;
   extraProjectYaml?: string;
 }
 
 export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "gs-verify-test-")));
+  // Match the CLI's canonical paths, including Windows 8.3 temp-directory names.
+  const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "gs-verify-test-")));
   const root = join(scratch, "gs-root");
   mkdirSync(join(root, "state"), { recursive: true });
   const { dir: checkout, base } = makeRepo(scratch, "project", { files: opts.files });
@@ -187,33 +192,24 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     silent_failures: [],
     notes: "fake",
   });
-  const claudeScript = [
-    "#!/bin/sh",
-    `cat > ${JSON.stringify(promptCopy)}`,
-    'args_json="["; first=1',
-    'for a in "$@"; do',
-    '  if [ "$first" = 1 ]; then first=0; else args_json="$args_json,"; fi',
-    '  args_json="$args_json\\"$a\\""',
-    "done",
-    'args_json="$args_json]"',
-    `len=$(wc -c < ${JSON.stringify(promptCopy)} | tr -d ' ')`,
-    `printf '{"args":%s,"stdinLength":%s,"cwd":"%s"}\\n' "$args_json" "$len" "$(pwd)" >> ${JSON.stringify(claudeLog)}`,
-    typeof opts.claudeDelay === "function"
-      ? opts.claudeDelay({ scratch })
-      : (opts.claudeDelay ?? ""),
-    opts.claudeExit !== undefined ? `exit ${opts.claudeExit}` : "",
-    `printf '%s' ${JSON.stringify(answer)}`,
-    "",
-  ].join("\n");
-  const claudePath = join(binDir, "claude");
-  writeFileSync(claudePath, claudeScript);
-  chmodSync(claudePath, 0o755);
+  installTestCli(binDir, "claude", `
+import { readFileSync, writeFileSync, appendFileSync } from "fs";
+const prompt = readFileSync(0);
+writeFileSync(${JSON.stringify(promptCopy)}, prompt);
+appendFileSync(${JSON.stringify(claudeLog)}, JSON.stringify({ args: process.argv.slice(2), stdinLength: prompt.length, cwd: process.cwd() }) + "\\n");
+${opts.claudePid ? `writeFileSync(${JSON.stringify(join(scratch, "claude.pid"))}, String(process.pid));` : ""}
+await new Promise(resolve => setTimeout(resolve, ${opts.claudeDelay ?? 0}));
+${opts.claudeExit !== undefined ? `process.exit(${opts.claudeExit});` : ""}
+process.stdout.write(${JSON.stringify(answer)});
+`);
 
   const vendorLog = join(scratch, "vendor-calls.log");
   for (const vendor of ["codex", "aider", "grok", "kimi", "gemini", "cursor-agent", "opencode"]) {
-    const stub = join(binDir, vendor);
-    writeFileSync(stub, `#!/bin/sh\necho "${vendor} $*" >> ${JSON.stringify(vendorLog)}\nexit 1\n`);
-    chmodSync(stub, 0o755);
+    installTestCli(binDir, vendor, `
+import { appendFileSync } from "fs";
+appendFileSync(${JSON.stringify(vendorLog)}, ${JSON.stringify(vendor)} + " " + process.argv.slice(2).join(" ") + "\\n");
+process.exit(1);
+`);
   }
 
   const env = (extra: Record<string, string> = {}): Record<string, string> => {
@@ -222,10 +218,11 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
       if (v === undefined) continue;
       if (k.startsWith("GENERALSTAFF_REVIEWER")) continue;
       // Hermetic global git config: see `home` above.
+      if (k.toUpperCase() === "PATH") continue;
       if (k === "HOME" || k === "XDG_CONFIG_HOME" || k === "GIT_CONFIG_GLOBAL" || k === "GIT_CONFIG_SYSTEM") continue;
       base[k] = v;
     }
-    base.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+    base.PATH = `${binDir}${delimiter}${process.env.PATH ?? ""}`;
     base.HOME = home;
     return { ...base, ...extra };
   };
@@ -245,7 +242,7 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
     },
     env,
     async runCli(args, o = {}) {
-      const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
+      const proc = Bun.spawn([process.execPath, "run", CLI_PATH, ...args], {
         cwd: root,
         // Model the supervising caller: the CLI leads the owned group.
         detached: process.platform != "win32",
@@ -265,7 +262,7 @@ export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
       return { stdout, stderr, exitCode };
     },
     spawnCli(args, o = {}) {
-      const proc = Bun.spawn(["bun", "run", CLI_PATH, ...args], {
+      const proc = Bun.spawn([process.execPath, "run", CLI_PATH, ...args], {
         cwd: root,
         // Model the supervising caller: the CLI leads the owned group.
         detached: process.platform != "win32",
