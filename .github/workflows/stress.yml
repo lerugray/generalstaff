@@ -1,0 +1,61 @@
+name: Verify-only stress
+
+# The verify-only tests drive real git processes, signals and file timestamps, so a timing flake can pass one
+# run and fail the next. A single `bun test` per push let three such flakes reach master in a row. This job runs
+# the verify-only files several times on every OS whenever a pull request touches that code, so a flake fails
+# the pull request instead of master.
+
+on:
+  pull_request:
+    paths:
+      - "src/verify_only/**"
+      - "tests/verify_only*"
+      - ".github/workflows/stress.yml"
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Passes over the verify-only test files"
+        default: "5"
+      only:
+        description: "Optional test-name filter (bun test -t)"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.0
+      - run: bun install --frozen-lockfile
+      - name: Run the verify-only tests repeatedly
+        shell: bash
+        env:
+          REPEAT: ${{ inputs.repeat || '5' }}
+          ONLY: ${{ inputs.only || '' }}
+        run: |
+          fails=0
+          for i in $(seq 1 "$REPEAT"); do
+            echo "::group::pass $i of $REPEAT"
+            if [ -n "$ONLY" ]; then
+              bun test tests/verify_only -t "$ONLY" || { fails=$((fails+1)); echo "::error::pass $i of $REPEAT failed"; }
+            else
+              bun test tests/verify_only || { fails=$((fails+1)); echo "::error::pass $i of $REPEAT failed"; }
+            fi
+            echo "::endgroup::"
+          done
+          echo "$fails of $REPEAT passes failed on ${{ matrix.os }}"
+          test "$fails" -eq 0
