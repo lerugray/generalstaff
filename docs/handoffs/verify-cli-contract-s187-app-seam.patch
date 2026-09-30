@@ -1,8 +1,8 @@
 diff --git a/scripts/verify-gate-seam.cjs b/scripts/verify-gate-seam.cjs
-index 2195314..1b44a1b 100644
+index 2195314..59810a7 100644
 --- a/scripts/verify-gate-seam.cjs
 +++ b/scripts/verify-gate-seam.cjs
-@@ -6,27 +6,134 @@ const { spawn, spawnSync } = require('node:child_process');
+@@ -6,27 +6,143 @@ const { spawn, spawnSync } = require('node:child_process');
  const fs = require('node:fs'); const fsp = require('node:fs/promises');
  const path = require('node:path'); const os = require('node:os'); const http = require('node:http');
  const readline = require('node:readline'); const assert = require('node:assert/strict');
@@ -33,7 +33,7 @@ index 2195314..1b44a1b 100644
 +  report.realCliChecks=proof; report.realCliSeam='pass';
 +}
 +async function realCliLeg(ctx) {
-+  const {page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv}=ctx;
++  const {page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv,engineerSentinel}=ctx;
 +  const proof={};const yaml=path.join(gs,'projects.yaml');const original=fs.readFileSync(yaml,'utf8');
 +  const originalHead=git(project,['rev-parse','HEAD']);const originalIndex=fs.readFileSync(path.join(project,'.git/index'));
 +  const owners=()=>fs.existsSync(ownerLog)?fs.readFileSync(ownerLog,'utf8').trim().split('\n').filter(Boolean).map(Number):[];
@@ -50,7 +50,10 @@ index 2195314..1b44a1b 100644
 +    assert(gone,'owned CLI group survived');const doc=read(cycle);assertRealReceipt(doc,cycle,owner,gs,project);await frame(name);return {cycle,doc};
 +  }
 +  try {
-+    await page.goto(url);await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('real-cli-running');
++    await page.goto(url);await state('running');
++    // A refused start ends the running state without a cycle id; fail on the gate's reason, not a bare timeout.
++    await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId)||document.querySelector('[data-gate-state]')?.dataset.gateState!=='running');
++    assert(await page.evaluate(()=>document.body.dataset.cycleId),'real CLI check did not start: '+await page.locator('#gate-reason').textContent());await frame('real-cli-running');
 +    const first=await passed('real-cli-passed');proof.passed=true;proof.reaped=true;
 +    const view=await call('engine_get_cycle',{cycleId:first.cycle});
 +    assert.equal(view.acceptEnabled,true);assert.equal(view.readyForAcceptance,true);
@@ -83,6 +86,7 @@ index 2195314..1b44a1b 100644
 +  } finally { fs.writeFileSync(yaml,original); }
 +  assert.equal(fs.readFileSync(yaml,'utf8'),original);assert.equal(git(project,['rev-parse','HEAD']),originalHead);assert.deepEqual(fs.readFileSync(path.join(project,'.git/index')),originalIndex);
 +  const progress=fs.readFileSync(path.join(gs,'state/project/PROGRESS.jsonl'),'utf8');assert(progress.trim().split('\n').every(line=>{const event=JSON.parse(line).event;return !event.startsWith('engineer_')&&event!=='cycle_skipped';}));
++  assert(engineerSentinel&&!fs.existsSync(engineerSentinel),'engineer_command ran during a verify-only check');
 +  proof.unchanged=true;return proof;
 +}
 +function selfTest() {
@@ -116,7 +120,12 @@ index 2195314..1b44a1b 100644
    git(project,['init','-q','-b','main']);git(project,['config','user.name','seam']);git(project,['config','user.email','seam@example.invalid']);
    fs.writeFileSync(path.join(project,'work.txt'),'base\n');git(project,['add','.']);git(project,['commit','-qm','base']);fs.writeFileSync(path.join(project,'work.txt'),'a real uncommitted change\n');
 -  fs.writeFileSync(path.join(gs,'projects.yaml'),`projects:\n  - id: project\n    path: project\n    verification_command: "exit 0"\n`);
-+  const yamlText=`projects:\n  - id: project\n    path: project\n    verification_command: "${expectPass?'sleep 2; exit 0':'exit 0'}"\n`;fs.writeFileSync(path.join(gs,'projects.yaml'),yamlText);
++  // A complete CLI registration, the shape `generalstaff register` writes: the
++  // CLI refuses a projects.yaml missing priority/engineer_command/budget/
++  // hands_off before any cycle starts. engineer_command leaves a sentinel that
++  // must never appear during a verify-only check.
++  const engineerSentinel=path.join(scratch,'ENGINEER-RAN');
++  const yamlText=['projects:','  - id: project','    path: project','    priority: 1',`    engineer_command: ${JSON.stringify('touch '+engineerSentinel)}`,`    verification_command: "${expectPass?'sleep 2; exit 0':'exit 0'}"`,'    cycle_budget_minutes: 5','    work_detection: tasks_json','    concurrency_detection: none','    branch: bot/work','    auto_merge: false','    hands_off:','      - "secrets/**"',''].join('\n');fs.writeFileSync(path.join(gs,'projects.yaml'),yamlText);
    const installedCli=process.env.GS_SEAM_CLI;assert(installedCli,'GS_SEAM_CLI must name an installed CLI');
    const cli=path.join(scratch,'generalstaff');
    const shellQuote = value => "'" + value.replace(/'/g, "'\\''") + "'";
@@ -143,18 +152,24 @@ index 2195314..1b44a1b 100644
    try {
      const {session}=await Promise.race([initialized,new Promise((_,reject)=>setTimeout(()=>reject(new Error(stderr||'Native seam did not initialize')),15000))]);
      server=http.createServer(async(req,res)=>{ const file=path.resolve(root,'.'+new URL(req.url,'http://localhost').pathname);if(!file.startsWith(root+path.sep)){res.writeHead(403).end();return;}try{res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.woff2':'font/woff2'})[path.extname(file)]||'application/octet-stream');res.end(await fsp.readFile(file));}catch{res.writeHead(404).end();} });await new Promise(r=>server.listen(0,'127.0.0.1',r));
-@@ -35,7 +142,9 @@ async function main() {
+@@ -35,8 +151,14 @@ async function main() {
      const url=`http://127.0.0.1:${server.address().port}/src/review.html?session=${session}`;
      async function state(expected,timeout=15000){await page.waitForFunction(expected=>document.body.dataset.screen !== 'review' && document.querySelector('[data-gate-state]')?.dataset.gateState===expected,expected,{timeout});}
      async function frame(name){await page.screenshot({path:path.join(out,`${name}-1280x800-dpr2.png`)});report.frames.push(`${name}-1280x800-dpr2.png`);}
 -    await page.goto(url);await state('unavailable');report.realCliReason=await page.locator('#gate-reason').textContent();await frame('real-cli-budget-refused');assert.match(report.realCliReason,/does not support verify-only|incomplete verification budgets/);
-+    if(expectPass)realProof=await realCliLeg({page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv});
+-    let fixture=await call('configure_fixture');await page.reload();await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('fixture-running');await state('passed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),true);await frame('fixture-passed');
++    if(expectPass)realProof=await realCliLeg({page,state,frame,call,url,gs,project,installedCli,ownerLog,report,cliEnv,engineerSentinel});
 +    else {await page.goto(url);await state('unavailable');report.realCliReason=await page.locator('#gate-reason').textContent();await frame('real-cli-budget-refused');assert.match(report.realCliReason,/does not support verify-only|incomplete verification budgets/);}
 +    if(expectPass)fs.writeFileSync(path.join(project,'work.txt'),'fixture change after real CLI proof\n');
-     let fixture=await call('configure_fixture');await page.reload();await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('fixture-running');await state('passed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),true);await frame('fixture-passed');
++    let fixture=await call('configure_fixture');
++    // After the real leg the candidate is bound to the real exit-7 cycle and a
++    // reload only re-reads it; start the fixture check the way a user would.
++    if(expectPass)await page.locator('[data-check-change]').click();else await page.reload();
++    await state('running');await page.waitForFunction(()=>Boolean(document.body.dataset.cycleId));await frame('fixture-running');await state('passed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),true);await frame('fixture-passed');
      for (const selector of ['[data-bundle-evidence]','[data-diff-evidence]','[data-progress-evidence]','[data-reviewer-evidence]','.audit-list']) {
        const link=selector==='.audit-list' ? page.locator('.audit-list').locator('..').locator('a') : page.locator(selector);
-@@ -57,11 +166,12 @@ async function main() {
+       await link.click(); await page.locator('dialog').waitFor(); assert((await page.locator('dialog pre').textContent()).length>0);await page.locator('dialog button').click();
+@@ -57,11 +179,12 @@ async function main() {
      fixture=await call('configure_fixture',{fail:true});await page.locator('[data-check-change]').click();await state('failed');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);assert.match(await page.locator('[data-gate-state] > p.muted').textContent(),/exit code 7/);assert.match(await page.locator('[data-check-cycle-id]').textContent(),/Check /);await frame('fixture-failed-exit7');
      fs.writeFileSync(fixture.receipt,'{corrupted');await page.reload();await state('unavailable');assert.equal(await page.locator('[data-gate-accept]').isEnabled(),false);await frame('fixture-corrupted-unavailable');
      await call('configure_real');fs.renameSync(cli,`${cli}.away`);try{await page.reload();await state('unavailable');assert.match(await page.locator('[data-gate-state] > p.muted').textContent(),/Install GeneralStaff CLI/);await frame('real-cli-missing-install');}finally{fs.renameSync(`${cli}.away`,cli);}
@@ -169,3 +184,23 @@ index 2195314..1b44a1b 100644
 -main().catch(error=>{console.error(error);process.exitCode=1;});
 +if(require.main===module){if(process.argv.includes('--self-test'))selfTest();else main().catch(error=>{console.error(error);process.exitCode=1;});}
 +module.exports={assertRealReceipt,certifyRealCli,realCliLeg};
+diff --git a/src-tauri/examples/verify_gate_seam.rs b/src-tauri/examples/verify_gate_seam.rs
+index 6ae0dc5..1af4d00 100644
+--- a/src-tauri/examples/verify_gate_seam.rs
++++ b/src-tauri/examples/verify_gate_seam.rs
+@@ -82,6 +82,15 @@ fn main() {
+                     doc["outcome"]["reason"] = "Verification gate failed (exit 7)".into();
+                     doc["verify"]["failureCategory"] = "verification_nonzero".into();
+                 }
++                // Echo the global-excludes pin the engine binds into the
++                // snapshot, as the real CLI's receipt does; without it a host
++                // (or seam) with a global excludes file refuses every fixture.
++                let (excludes_file, excludes_sha256) =
++                    generalstaff_engine::snapshot::resolve_excludes(&Default::default()).unwrap();
++                if let (Some(file), Some(hash)) = (excludes_file, excludes_sha256) {
++                    doc["verify"]["globalExcludesFile"] = file.to_string_lossy().into_owned().into();
++                    doc["verify"]["globalExcludesSha256"] = hash.into();
++                }
+                 let path = data.join(format!("fixture-result-{cycle}.json"));
+                 std::fs::write(&path, doc.to_string()).unwrap();
+                 let evidence = root.join("evidence");
