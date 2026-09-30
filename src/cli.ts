@@ -935,6 +935,7 @@ switch (command) {
       } catch (err) {
         if (err instanceof CycleResultError) {
           console.error(`Error: ${err.message}`);
+          console.log(JSON.stringify({ error: { code: err.code, message: err.message } }));
           process.exit(1);
         }
         throw err;
