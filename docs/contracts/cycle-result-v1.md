@@ -20,10 +20,14 @@ local inference of a pass.
 | Cwd | GeneralStaff root (directory that holds `projects.yaml` / state) |
 | Exit codes | Process exits `0` after a completed single cycle regardless of `final_outcome` (outcome lives in the audit log). Missing `--project` / unknown project → `1`. |
 | Stdout during run | Human progress lines (unbounded conversational). **Not** the v1 result document. |
-| Result readback | `generalstaff cycle result <cycle-id> --json` → **one** v1 JSON object on stdout, pretty-printed; stderr for errors. Exit `0` on emit; `1` if cycle not found or unreadable. |
+| Result readback | `generalstaff cycle result <cycle-id> --json` → **one** v1 JSON object on stdout, pretty-printed on success. Exit `0` on receipt emit; `1` if cycle not found or unreadable, with a JSON `error` object on stdout and one clean stderr line. |
 
 Bounded result stdout is the `cycle result --json` path only. Do not parse the
-human cycle runner log for gate state.
+human cycle runner log for gate state. Read failures emit
+`{"error":{"code":"receipt_evidence_unreadable","message":"receipt evidence unreadable: digest-input.bin (EISDIR)"}}`
+(with the actual artifact name and filesystem error code), never a passing
+receipt or a stack trace. Missing artifacts retain the existing unavailable
+receipt behavior; other result lookup errors use `cycle_result_unavailable`.
 
 `generalstaff cycle show <cycle-id> [--json]` remains the older dispatch-detail
 view (gs-264). Its JSON shape is **not** this contract.
