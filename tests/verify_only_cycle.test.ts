@@ -15,7 +15,8 @@ import {
   chmodSync,
 } from "fs";
 import * as fsp from "fs/promises";
-import { join } from "path";
+import { delimiter, join } from "path";
+import { cliFixturePath, installTestCli, scriptCommand, sleepingCommand } from "./helpers/test_cli";
 import { createHash } from "crypto";
 import * as childProcess from "child_process";
 import {
@@ -43,6 +44,9 @@ import { validateAgainstSchema, type JsonSchema } from "./helpers/json_schema";
 import { git, makeVerifyFixture, type VerifyFixture } from "./helpers/verify_only_fixture";
 
 const ORIGINAL_ROOT = process.cwd();
+// Windows kill(SIGTERM/SIGINT) force-terminates: these tests specifically assert
+// catchable POSIX signals and Unix exit conventions. Timeout/tree tests run everywhere.
+const posixIt = process.platform === "win32" ? it.skip : it;
 const SCHEMA = JSON.parse(
   readFileSync(
     join(import.meta.dir, "..", "docs", "contracts", "cycle-result-v1.schema.json"),
@@ -315,8 +319,12 @@ describe("cycle verify: a passing check", () => {
 
   it("runs the verification command in the isolated tree with a pinned environment", async () => {
     fx = makeVerifyFixture({
-      verificationCommand: ({ scratch }) =>
-        `pwd > '${scratch}/pwd.txt'; env > '${scratch}/env.txt'; test -f new.txt`,
+      verificationCommand: ({ scratch }) => scriptCommand(scratch, `
+import { writeFileSync, existsSync } from "fs";
+writeFileSync(${JSON.stringify(join(scratch, "pwd.txt"))}, process.cwd());
+writeFileSync(${JSON.stringify(join(scratch, "env.txt"))}, Object.entries(process.env).map(([k, v]) => k + "=" + v).join("\\n"));
+process.exit(existsSync("new.txt") ? 0 : 1);
+`),
     });
     editCheckout(fx);
     const bundle = await cliBundle(fx);
@@ -445,7 +453,7 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
 
   it("a verification command past its time budget fails and its whole process tree is reaped", async () => {
     fx = makeVerifyFixture({
-      verificationCommand: ({ scratch }) => `sleep 60 & echo $! > '${scratch}/pid.txt'; wait`,
+      verificationCommand: ({ scratch }) => sleepingCommand(scratch, 60_000),
     });
     const pidFile = join(fx.scratch, "pid.txt");
     editCheckout(fx);
@@ -464,15 +472,16 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
     const grandchild = Number(readFileSync(pidFile, "utf8").trim());
     expect(pidAlive(grandchild)).toBe(false);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
-  it("the overall budget ends a stuck check with a terminal record", async () => {
+  posixIt("the overall budget ends a stuck check with a terminal record", async () => {
     fx = makeVerifyFixture({
-      verificationCommand: ({ scratch }) => `trap '' TERM; sleep 60 & echo $! > '${scratch}/pid.txt'; wait`,
+      verificationCommand: ({ scratch }) => sleepingCommand(scratch, 60_000, true),
     });
     const pidFile = join(fx.scratch, "pid.txt");
     editCheckout(fx);
     const bundle = await cliBundle(fx);
+    // POSIX-only grace escalation: Windows taskkill cannot deliver a catchable TERM.
     // A valid budget set: overall (2) covers verification (1) + reviewer (1).
     // The command ignores the polite stop, so the overall timer fires while
     // the stage is still being killed.
@@ -502,7 +511,7 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
   }, 30_000);
 
   it("a reviewer past its time budget fails the change and is ended", async () => {
-    fx = makeVerifyFixture({ claudeDelay: "exec sleep 30" });
+    fx = makeVerifyFixture({ claudeDelay: 30_000, claudePid: true });
     editCheckout(fx);
     const bundle = await cliBundle(fx);
     const started = Date.now();
@@ -513,12 +522,14 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
     expect(doc.state).toBe("failed");
     expect(doc.verify!.failureCategory).toBe("reviewer_timeout");
     expect(doc.outcome.reason).toContain("Reviewer timed out");
+    const reviewerPid = Number(readFileSync(join(fx.scratch, "claude.pid"), "utf8"));
+    expect(pidAlive(reviewerPid)).toBe(false);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
-  it("SIGTERM writes a terminal record, reaps the process tree and exits 143", async () => {
+  posixIt("SIGTERM writes a terminal record, reaps the process tree and exits 143", async () => {
     fx = makeVerifyFixture({
-      verificationCommand: ({ scratch }) => `sleep 60 & echo $! > '${scratch}/pid.txt'; wait`,
+      verificationCommand: ({ scratch }) => sleepingCommand(scratch, 60_000),
     });
     const pidFile = join(fx.scratch, "pid.txt");
     editCheckout(fx);
@@ -537,11 +548,11 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
     expect(doc.timestamps.endedAt).not.toBeNull();
     expect(pidAlive(grandchild)).toBe(false);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
-  it("SIGTERM while the reviewer runs ends the reviewer, records the interruption and exits 143", async () => {
+  posixIt("SIGTERM while the reviewer runs ends the reviewer, records the interruption and exits 143", async () => {
     fx = makeVerifyFixture({
-      claudeDelay: ({ scratch }) => `echo $$ > '${scratch}/claude.pid'; exec sleep 60`,
+      claudeDelay: 60_000, claudePid: true,
     });
     editCheckout(fx);
     const bundle = await cliBundle(fx);
@@ -558,7 +569,7 @@ describe("cycle verify: checks that do not pass still leave a receipt", () => {
     expect(doc.verify!.failureCategory).toBe("interrupted");
     expect(pidAlive(reviewerPid)).toBe(false);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
   it("a verification command longer than the 30 second child budget completes", async () => {
     fx = makeVerifyFixture({ verificationCommand: "sleep 31" });
@@ -716,7 +727,7 @@ describe("cycle verify: one check per project at a time", () => {
     expect(cycles).toHaveLength(1);
     expect(progressEvents(fx).filter((e) => e.event === "cycle_start")).toHaveLength(1);
     noLeftovers(fx);
-  });
+  }, 30_000);
 
   it("replaces a lock whose owner is gone and sweeps a dead check's leftovers", async () => {
     fx = makeVerifyFixture();
@@ -743,7 +754,7 @@ describe("cycle verify: one check per project at a time", () => {
     expect(a.exitCode).toBe(0);
     expect(b.exitCode).toBe(0);
     expect(startedCycleId(a.stdout)).not.toBe(startedCycleId(b.stdout));
-  });
+  }, 15_000);
 });
 
 // --- reviewer providers ----------------------------------------------------------
@@ -864,7 +875,7 @@ describe("receipt re-read", () => {
         f.cleanup();
       }
     }
-  });
+  }, 30_000);
 });
 
 // --- reviewer cwd, global excludes, reap and cleanup reporting ----------
@@ -908,7 +919,7 @@ describe("hardening fix round 1", () => {
     fx = makeVerifyFixture();
     const ignoreFile = join(fx.scratch, "global-ignore");
     writeFileSync(ignoreFile, ".env\n");
-    writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${ignoreFile}\n`);
+    git(fx.home, ["config", "--file", join(fx.home, ".gitconfig"), "core.excludesFile", ignoreFile]);
     editCheckout(fx, { "a.txt": "one\nchanged\n", ".env": "SECRET=live-token\n" });
     const bundle = await cliBundle(fx);
     // The bundle never carried the globally-ignored secret.
@@ -994,7 +1005,7 @@ describe("hardening fix round 1", () => {
     );
     const doc = await receiptOf(fx, cycleId);
     expect(doc.verify!.cleanupFailed).toBe(true);
-  });
+  }, 15_000);
 });
 
 // --- hardening fix round 2 ------------------------------------------------------------
@@ -1025,7 +1036,7 @@ async function inProcessVerify(
   };
   setRootDir(f.root);
   const yaml = await loadProjectsYaml();
-  process.env.PATH = env.path ?? `${f.binDir}:${saved.PATH ?? ""}`;
+  process.env.PATH = env.path ?? `${f.binDir}${delimiter}${saved.PATH ?? ""}`;
   process.env.HOME = f.home;
   delete process.env.XDG_CONFIG_HOME;
   delete process.env.GIT_CONFIG_GLOBAL;
@@ -1065,30 +1076,31 @@ function installSlowGit(
 ): void {
   const realGit = Bun.which("git");
   if (!realGit) throw new Error("git not found");
-  const script = [
-    "#!/bin/sh",
-    ignoreSignals ? "trap '' INT TERM HUP" : "",
-    `case " $* " in`,
-    `  *" ${stallWhen} "*)`,
-    `    sleep 120 &`,
-    `    echo $! > ${JSON.stringify(pidFile)}`,
-    `    echo $$ >> ${JSON.stringify(pidFile)}`,
-    `    wait`,
-    `    exit 1 ;;`,
-    `esac`,
-    `exec ${JSON.stringify(realGit)} "$@"`,
-    "",
-  ].join("\n");
-  const path = join(f.binDir, "git");
-  writeFileSync(path, script);
-  chmodSync(path, 0o755);
+  const sleeper = join(f.scratch, "git-sleeper.mjs");
+  writeFileSync(sleeper, "setTimeout(() => {}, 120_000);\n");
+  installTestCli(f.binDir, "git", `
+import { spawn } from "child_process";
+import { writeFileSync } from "fs";
+${ignoreSignals ? 'for (const s of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(s, () => {});' : ''}
+const args = process.argv.slice(2);
+if ((" " + args.join(" ") + " ").includes(${JSON.stringify(" " + stallWhen + " ")})) {
+  const child = spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(sleeper)}], { stdio: "inherit" });
+  child.on("spawn", () => writeFileSync(${JSON.stringify(pidFile)}, child.pid + "\\n" + process.pid + "\\n"));
+  child.on("exit", () => process.exit(1));
+} else {
+  const child = spawn(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+  child.on("error", err => { console.error(err); process.exit(1); });
+  child.on("exit", code => process.exit(code ?? 1));
+}
+`);
 }
 
 const stalledRunner = (): Promise<RunnerResult> => new Promise<RunnerResult>(() => undefined);
 
 describe("hardening fix round 2", () => {
-  it("item 1: cleanupFailed round-trips writer -> schema -> reader when a real worktree removal fails", async () => {
+  posixIt("item 1: cleanupFailed round-trips writer -> schema -> reader when a real worktree removal fails", async () => {
     if (process.getuid?.() === 0) return; // root ignores directory permissions
+    // POSIX mode bits: chmod 500 does not remove Windows delete permission.
     // The verification command leaves a directory nobody can delete from, so
     // the real cleanup (git worktree remove, then directory removal) fails.
     fx = makeVerifyFixture({
@@ -1178,19 +1190,22 @@ describe("hardening fix round 2", () => {
     fx = makeVerifyFixture();
     const pidFile = join(fx.scratch, "slow-git.pids");
     installSlowGit(fx, "worktree add", pidFile);
+    // Preflight includes several real Git launches before the deliberately
+    // parked command. Leave setup room on Windows while still testing its cap.
+    const preflightSec = 5;
     const started = Date.now();
     let caught: unknown;
     try {
-      await inProcessVerify(fx, { budgets: { preflightSec: 2 } });
+      await inProcessVerify(fx, { budgets: { preflightSec } });
     } catch (err) {
       caught = err;
     }
     const elapsed = Date.now() - started;
     expect(caught).toBeInstanceOf(VerifyRefusal);
     expect((caught as VerifyRefusal).code).toBe("materialize_failed");
-    expect((caught as VerifyRefusal).message).toContain("hard cap (2s)");
+    expect((caught as VerifyRefusal).message).toContain(`hard cap (${preflightSec}s)`);
     // cap + reap wait + cleanup, all small: nowhere near the fake git's 120 s.
-    expect(elapsed).toBeLessThan(2000 + 5000 + 4000 + 5000);
+    expect(elapsed).toBeLessThan(preflightSec * 1000 + 5000 + 4000 + 5000);
     // The slow git and its background child are both gone, not orphaned.
     const pids = readFileSync(pidFile, "utf8").split("\n").filter(Boolean).map(Number);
     expect(pids).toHaveLength(2);
@@ -1210,7 +1225,7 @@ describe("hardening fix round 2", () => {
     // Inject startup timing at the spawn boundary: the real shim must have
     // entered its stall before git's 100 ms kill timer starts. Under load it
     // could previously be killed before writing either PID (ENOENT).
-    const stalledGit = spawn(join(fx.binDir, "git"), ["worktree", "prune"], {
+    const stalledGit = spawn(cliFixturePath(fx.binDir, "git"), ["worktree", "prune"], {
       cwd: fx.checkout,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
@@ -1235,7 +1250,7 @@ describe("hardening fix round 2", () => {
         }
         return spawn(command, args ?? [], options ?? {});
       }) as typeof childProcess.spawn);
-      process.env.PATH = `${fx.binDir}:${savedPath ?? ""}`;
+      process.env.PATH = `${fx.binDir}${delimiter}${savedPath ?? ""}`;
       const stepMs = 400;
       const started = Date.now();
       const gone = await removeVerifyTree(fx.checkout, verifyDir, stepMs);
@@ -1255,7 +1270,11 @@ describe("hardening fix round 2", () => {
       process.env.PATH = savedPath;
       // Also clean up the real group when readiness or an assertion fails.
       try {
-        if (process.platform === "win32") stalledGit.kill("SIGKILL");
+        if (process.platform === "win32" && stalledGit.pid !== undefined) {
+          childProcess.spawnSync("taskkill.exe", ["/PID", String(stalledGit.pid), "/T", "/F"], {
+            stdio: "ignore", timeout: 3000, windowsHide: true,
+          });
+        }
         else if (stalledGit.pid !== undefined) process.kill(-stalledGit.pid, "SIGKILL");
       } catch { /* already gone */ }
       await waitFor(
@@ -1281,7 +1300,7 @@ describe("hardening fix round 2", () => {
         CLEANUP_CAP_SEC,
     );
     // The preflight cap covers the redaction and artifact writes too.
-    expect(doc).toContain("secret\n  redaction and the `digest-input` / `diff.patch` writes");
+    expect(doc.replaceAll("\r\n", "\n")).toContain("secret\n  redaction and the `digest-input` / `diff.patch` writes");
   });
 
   it("item 4: a hostile diff full of unterminated private-key headers is redacted in bounded time", async () => {
@@ -1329,7 +1348,7 @@ describe("hardening fix round 2", () => {
       verifyArgs(fx, bundle2, ["--json", "--verification-timeout=1000", "--overall-timeout=900"]),
     );
     expect(bad.exitCode).toBe(3);
-  });
+  }, 15_000);
 });
 
 // --- hardening fix round 3 ------------------------------------------------------------
@@ -1375,7 +1394,7 @@ describe("hardening fix round 3", () => {
       stderr.push(args.map(String).join(" "));
     };
     setRootDir(fx.root);
-    process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+    process.env.PATH = `${fx.binDir}${delimiter}${saved.PATH ?? ""}`;
     process.env.HOME = fx.home;
     delete process.env.XDG_CONFIG_HOME;
     delete process.env.GIT_CONFIG_GLOBAL;
@@ -1505,13 +1524,13 @@ describe("hardening fix round 3", () => {
     }
   }
 
-  it("item 2: SIGTERM aborts preflight and no live git process survives", async () => {
+  posixIt("item 2: SIGTERM aborts preflight and no live git process survives", async () => {
     fx = makeVerifyFixture();
     const { pids } = await signalSlowGit("SIGTERM", false);
     for (const pid of pids) expect(pidAlive(pid)).toBe(false);
   }, 40_000);
 
-  it("item 2: preflight SIGINT exits 130 with no surviving git, even when git traps SIGINT and another is sent", async () => {
+  posixIt("item 2: preflight SIGINT exits 130 with no surviving git, even when git traps SIGINT and another is sent", async () => {
     fx = makeVerifyFixture();
     const { exitCode, pids } = await signalSlowGit("SIGINT", true);
     expect(exitCode).toBe(130);
@@ -1545,7 +1564,7 @@ describe("CLI help", () => {
 // --- hardening fix round 5 -------------------------------------------------------
 
 describe("hardening fix round 5", () => {
-  it("finding 1: SIGTERM during preflight reports interrupted, exit 143, no receipt or debris", async () => {
+  posixIt("finding 1: SIGTERM during preflight reports interrupted, exit 143, no receipt or debris", async () => {
     fx = makeVerifyFixture();
     editCheckout(fx);
     const bundle = await cliBundle(fx);
@@ -1589,9 +1608,14 @@ describe("hardening fix round 5", () => {
     const bundle = await cliBundle(fx);
     const realGit = Bun.which("git")!;
     const log = join(fx.scratch, "git-calls.log");
-    const shim = join(fx.binDir, "git");
-    writeFileSync(shim, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec '${realGit}' "$@"\n`);
-    chmodSync(shim, 0o755);
+    installTestCli(fx.binDir, "git", `
+import { appendFileSync } from "fs";
+import { spawnSync } from "child_process";
+const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(log)}, args.join(" ") + "\\n");
+const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+process.exit(result.status ?? 1);
+`);
     const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"], { base: "f".repeat(40) }));
     expect(r.exitCode).toBe(3);
     expect(JSON.parse(r.stdout).reason).toBe("base_unresolvable");
@@ -1643,28 +1667,35 @@ describe("hardening fix round 5", () => {
     }
   });
 
+  // Windows kill(SIGKILL) returns exit 1, indistinguishable from git config's
+  // "key unset" result. Use a fatal exit there; retain real signal death on POSIX.
+  const die = process.platform === "win32"
+    ? "process.exit(137);"
+    : 'process.kill(process.pid, "SIGKILL");';
   for (const mode of ["dies", "hangs"] as const) {
     it(`finding 6: cycle verify refuses when global-excludes git ${mode}`, async () => {
       fx = makeVerifyFixture();
       // Build with an explicitly configured global ignore, then make resolution
       // indeterminate. Falling back to no excludes would misclassify this bundle.
       writeFileSync(join(fx.home, ".gitignore"), ".env\n");
-      writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${join(fx.home, ".gitignore")}\n`);
+      git(fx.home, ["config", "--file", join(fx.home, ".gitconfig"), "core.excludesFile", join(fx.home, ".gitignore")]);
       editCheckout(fx);
       writeFileSync(join(fx.checkout, ".env"), "local secret\n");
       const bundle = await cliBundle(fx);
       const realGit = Bun.which("git")!;
-      const shim = join(fx.binDir, "git");
-      writeFileSync(shim, [
-        "#!/bin/sh",
-        'case " $* " in',
-        '  *" config --global --path --get core.excludesFile "*)',
-        mode === "dies" ? '    kill -KILL $$ ;;' : '    exec sleep 120 ;;',
-        "esac",
-        `exec '${realGit}' "$@"`,
-        "",
-      ].join("\n"));
-      chmodSync(shim, 0o755);
+      const reached = join(fx.scratch, "excludes-shim-reached");
+      installTestCli(fx.binDir, "git", `
+import { writeFileSync } from "fs";
+import { spawnSync } from "child_process";
+const args = process.argv.slice(2);
+if (args.join(" ") === "config --global --path --get core.excludesFile") {
+  writeFileSync(${JSON.stringify(reached)}, args.join(" "));
+  ${mode === "dies" ? die : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
+} else {
+  const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+}
+`);
       if (mode === "dies") {
         const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
         expect(r.exitCode).toBe(3);
@@ -1680,6 +1711,7 @@ describe("hardening fix round 5", () => {
           gitTimeoutMs: 500,
         })).rejects.toThrow("could not resolve");
       }
+      expect(readFileSync(reached, "utf8")).toBe("config --global --path --get core.excludesFile");
       noLeftovers(fx);
       noReceipt(fx);
     }, 15_000);
@@ -1688,28 +1720,31 @@ describe("hardening fix round 5", () => {
       fx = makeVerifyFixture();
       editCheckout(fx);
       writeFileSync(join(fx.home, ".gitignore"), ".env\n");
-      writeFileSync(join(fx.home, ".gitconfig"), `[core]\n\texcludesFile = ${join(fx.home, ".gitignore")}\n`);
+      git(fx.home, ["config", "--file", join(fx.home, ".gitconfig"), "core.excludesFile", join(fx.home, ".gitignore")]);
       writeFileSync(join(fx.checkout, ".env"), "local secret\n");
       const realGit = Bun.which("git")!;
-      const shim = join(fx.binDir, "git");
-      writeFileSync(shim, [
-        "#!/bin/sh",
-        'case " $* " in',
-        '  *" config --global --path --get core.excludesFile "*)',
-        mode === "dies" ? '    kill -KILL $$ ;;' : '    exec sleep 120 ;;',
-        "esac",
-        `exec '${realGit}' "$@"`,
-        "",
-      ].join("\n"));
-      chmodSync(shim, 0o755);
+      const reached = join(fx.scratch, "excludes-shim-reached");
+      installTestCli(fx.binDir, "git", `
+import { writeFileSync } from "fs";
+import { spawnSync } from "child_process";
+const args = process.argv.slice(2);
+if (args.join(" ") === "config --global --path --get core.excludesFile") {
+  writeFileSync(${JSON.stringify(reached)}, args.join(" "));
+  ${mode === "dies" ? die : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
+} else {
+  const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
+  process.exit(result.status ?? 1);
+}
+`);
       const out = join(fx.scratch, "indeterminate-bundle");
       const saved = { PATH: process.env.PATH, HOME: process.env.HOME, XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL };
-      process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+      process.env.PATH = `${fx.binDir}${delimiter}${saved.PATH ?? ""}`;
       process.env.HOME = fx.home;
       delete process.env.XDG_CONFIG_HOME;
       delete process.env.GIT_CONFIG_GLOBAL;
       try {
         await expect(writeBundle({ checkout: fx.checkout, base: fx.base, outDir: out, gitTimeoutMs: 500 })).rejects.toThrow("could not resolve");
+        expect(readFileSync(reached, "utf8")).toBe("config --global --path --get core.excludesFile");
         expect(existsSync(out)).toBe(false);
         expect(readFileSync(join(fx.checkout, ".env"), "utf8")).toBe("local secret\n");
       } finally {
@@ -1762,7 +1797,7 @@ describe("hardening fix round 6", () => {
     }) as typeof process.stdout.write;
     console.error = (...args: unknown[]) => stderr.push(args.map(String).join(" "));
     setRootDir(fx.root);
-    process.env.PATH = `${fx.binDir}:${saved.PATH ?? ""}`;
+    process.env.PATH = `${fx.binDir}${delimiter}${saved.PATH ?? ""}`;
     process.env.HOME = fx.home;
     delete process.env.XDG_CONFIG_HOME;
     delete process.env.GIT_CONFIG_GLOBAL;
