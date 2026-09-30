@@ -113,7 +113,7 @@ export function withInheritedGitGroup<T>(fn: () => Promise<T>): Promise<T> {
   const owned = process.platform !== "win32" && verificationTreeId() === process.pid;
   return inheritedGroupContext.run({ owned, tail: Promise.resolve() }, fn);
 }
-const inheritedGitPids = new Set<number>();
+const inheritedGitPids = new Map<number, ChildProcess>();
 
 
 /**
@@ -148,9 +148,10 @@ function killGitGroup(child: ChildProcess): void {
 
 function gitGroupAlive(pid: number | undefined): boolean {
   if (pid === undefined || isWindows) return false;
-  if (inheritedGitPids.has(pid)) {
+  const child = inheritedGitPids.get(pid);
+  if (child) {
     const members = verificationGroupMembers();
-    return members === null || members.length > 0;
+    return (child.exitCode === null && child.signalCode === null) || members === null || members.length > 0;
   }
   try {
     process.kill(-pid, 0);
@@ -170,35 +171,47 @@ const GIT_REAP_WAIT_MS = 3000;
  */
 const liveGitGroups = new Set<number>();
 
-function registerGitGroup(pid: number | undefined): void {
+function registerGitGroup(child: ChildProcess): void {
+  const pid = child.pid;
   if (pid !== undefined) {
     liveGitGroups.add(pid);
-    if (inheritedGroupContext.getStore()?.owned) inheritedGitPids.add(pid);
+    if (inheritedGroupContext.getStore()?.owned) inheritedGitPids.set(pid, child);
   }
 }
 
 /** Kill remaining members and await the bounded reap before releasing ownership. */
-async function releaseGitGroup(pid: number | undefined): Promise<void> {
-  if (pid === undefined) return;
+async function releaseGitGroup(pid: number | undefined): Promise<boolean> {
+  if (pid === undefined) return true;
   if (isWindows || !gitGroupAlive(pid)) {
     liveGitGroups.delete(pid);
     inheritedGitPids.delete(pid);
-    return;
+    return true;
   }
   signalGitPid(pid, "SIGKILL");
   const deadline = Date.now() + GIT_REAP_WAIT_MS;
   while (liveGitGroups.has(pid) && gitGroupAlive(pid) && Date.now() < deadline) {
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
-  if (liveGitGroups.has(pid) && gitGroupAlive(pid)) signalGitPid(pid, "SIGKILL");
+  if (liveGitGroups.has(pid) && gitGroupAlive(pid)) {
+    signalGitPid(pid, "SIGKILL");
+    // An inherited group cannot be retired while its reap is unproven: keep
+    // the known child available to subsequent CLI signal/cleanup attempts.
+    if (inheritedGitPids.has(pid)) return false;
+  }
   liveGitGroups.delete(pid);
   inheritedGitPids.delete(pid);
+  return true;
 }
 
 function signalGitPid(pid: number, signal: NodeJS.Signals): void {
   try {
-    if (inheritedGitPids.has(pid)) signalVerificationMembers(signal);
-    else if (!isWindows) process.kill(-pid, signal);
+    const child = inheritedGitPids.get(pid);
+    if (child) {
+      // Once the direct child exits its PID may be reused. An unproven group
+      // stays owned, but fallback signals may target only a still-live child.
+      const directPid = child.exitCode === null && child.signalCode === null ? pid : undefined;
+      signalVerificationMembers(signal, directPid);
+    } else if (!isWindows) process.kill(-pid, signal);
     else process.kill(pid, signal);
   } catch {
     /* already gone */
@@ -245,6 +258,8 @@ export interface GitResult {
   truncated: boolean;
   /** The call was stopped by an abort signal; its process group was killed. */
   aborted?: boolean;
+  /** False when an inherited CLI group was not proven reaped. */
+  reaped?: boolean;
   spawnError?: string;
 }
 
@@ -308,7 +323,7 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       });
       return;
     }
-    registerGitGroup(child.pid);
+    registerGitGroup(child);
 
     const stdoutChunks: Buffer[] = [];
     let stdoutLen = 0;
@@ -323,8 +338,13 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      await releaseGitGroup(child.pid);
-      resolve(result);
+      const reaped = await releaseGitGroup(child.pid);
+      resolve(reaped ? { ...result, reaped } : {
+        ...result,
+        code: null,
+        reaped: false,
+        stderr: `${result.stderr}\nGit process tree was not proven reaped`,
+      });
     };
 
     const timer = setTimeout(() => {

@@ -14,7 +14,16 @@ function openDarwin() {
 function linuxGroup(pid: number): number {
   // comm may contain spaces and parentheses; fields after its LAST ')' start
   // at state, ppid, pgrp. Read a PID's own kernel record, never command text.
-  return Number(readFileSync(`/proc/${pid}/stat`, "utf8").split(/\) (?=[A-Z] )/).at(-1)!.split(" ")[2]);
+  const record = readFileSync(`/proc/${pid}/stat`, "utf8");
+  const end = record.lastIndexOf(")");
+  const fields = record.slice(end + 2).trim().split(/\s+/);
+  if (!record.startsWith(`${pid} (`) || end < record.indexOf("(") || record[end + 1] !== " " ||
+      !/^[A-Za-z]$/.test(fields[0] ?? "") ||
+      !fields.slice(1, 3).every(field => /^\d+$/.test(field) && Number.isSafeInteger(Number(field))) ||
+      fields.length < 3) {
+    throw new Error(`Malformed /proc/${pid}/stat record`);
+  }
+  return Number(fields[2]);
 }
 export function verificationTreeId(): number {
   if (process.platform === "darwin") return (darwin ??= openDarwin()).symbols.getpgid(0);
@@ -44,16 +53,26 @@ export function verificationGroupMembers(): number[] | null {
       for (const entry of readdirSync("/proc")) {
         if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
         try { if (linuxGroup(Number(entry)) === group) members.push(Number(entry)); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT" && (error as NodeJS.ErrnoException).code !== "ESRCH") return null; }
+        catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== "ENOENT" && code !== "ESRCH" && code !== "EACCES" && code !== "EPERM") return null;
+        }
       }
       return members;
     }
   } catch { /* fail closed */ }
   return null;
 }
-export function signalVerificationMembers(signal: NodeJS.Signals): void {
+export function signalVerificationMembers(signal: NodeJS.Signals, directPid?: number): void {
   const members = verificationGroupMembers();
-  if (members === null) return;
+  if (members === null) {
+    // Enumeration may fail even for an owned CLI group. A registered direct
+    // child is still ours to stop, but never signal the CLI or its whole group.
+    if (directPid !== undefined && directPid > 0 && directPid !== process.pid) {
+      try { process.kill(directPid, signal); } catch { /* already gone */ }
+    }
+    return;
+  }
   for (const pid of members) {
     // Recheck group immediately before signalling: a recycled PID outside our
     // still-live group is not owned by us.
