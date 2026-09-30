@@ -166,6 +166,7 @@ Each is a stable `reason` code. None records a cycle.
 | `no_verification_command` | the project has no verification command |
 | `verify_in_progress` | another check is running for this project |
 | `materialize_failed` | the isolated worktree could not be built or the patch did not apply |
+| `git_reap_failed` | a Git process tree could not be proven reaped; separate from a Git spawn failure or nonzero exit |
 | `interrupted` | a signal stopped preflight before `cycle_start` (exit 128+N) |
 | `internal_error` | anything unexpected |
 

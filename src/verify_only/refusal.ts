@@ -6,7 +6,7 @@
 
 import { BundleError, type BundleErrorCode } from "./bundle";
 import { DigestError, type DigestErrorCode } from "./digest";
-import { scrubLine } from "./git";
+import { GitReapError, scrubLine } from "./git";
 
 export type RefusalCode =
   | "invalid_argument"
@@ -26,6 +26,7 @@ export type RefusalCode =
   | "no_verification_command"
   | "verify_in_progress"
   | "materialize_failed"
+  | "git_reap_failed"
   | "interrupted"
   | "internal_error";
 
@@ -45,6 +46,7 @@ export function refusalLine(refusal: VerifyRefusal): string {
 }
 
 const BUNDLE_CODE_MAP: Partial<Record<BundleErrorCode | DigestErrorCode, RefusalCode>> = {
+  git_reap_failed: "git_reap_failed",
   bundle_missing: "bundle_missing",
   bundle_empty: "bundle_empty",
   bundle_unreadable: "bundle_unreadable",
@@ -63,6 +65,7 @@ const BUNDLE_CODE_MAP: Partial<Record<BundleErrorCode | DigestErrorCode, Refusal
 /** Turn a bundle or digest error into a refusal. Other errors pass through. */
 export function toRefusal(err: unknown): unknown {
   if (err instanceof VerifyRefusal) return err;
+  if (err instanceof GitReapError) return new VerifyRefusal(err.code, err.message);
   if (err instanceof BundleError || err instanceof DigestError) {
     const code = BUNDLE_CODE_MAP[err.code] ?? "materialize_failed";
     return new VerifyRefusal(code, err.message);

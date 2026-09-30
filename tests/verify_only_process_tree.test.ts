@@ -260,7 +260,8 @@ console.log(JSON.stringify({ members: verificationGroupMembers() }));
     const result = await inheritedProbe("unproven-exit");
     expect(result.survivor).toBe(false);
     expect(result.result.reaped).toBe(false);
-    expect(result.result.code).toBeNull();
+    expect(result.result.code).toBe(0);
+    expect(result.result.reapError).toContain("not proven reaped");
     expect(result.result.stderr).toContain("not proven reaped");
     // Keep the unproven reap result without signalling an exited/reusable PID.
     expect(result.retained).toEqual([]);

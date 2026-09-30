@@ -29,6 +29,7 @@ import {
   collectChangeset,
   DEFAULT_DIGEST_LIMITS,
   DigestError,
+  gitFailure,
   normalizeExclude,
   PATCH_DIGEST_ALGORITHM,
   transportDiffArgs,
@@ -37,7 +38,7 @@ import {
   type DigestLimits,
 } from "./digest";
 import { excludesFilePinArgs, resolveGlobalExcludes } from "./excludes";
-import { runGit } from "./git";
+import { GitReapError, runGit } from "./git";
 
 export type BundleErrorCode =
   | DigestErrorCode
@@ -205,10 +206,7 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
       throw new BundleError("diff_too_large", "the tracked patch is too large to bundle");
     }
     if (transport.code !== 0) {
-      throw new BundleError(
-        "git_failed",
-        `git diff --binary exited with code ${transport.code}`,
-      );
+      throw gitFailure("diff --binary", transport);
     }
     writeFileSync(patchPath, transport.stdout, { mode: 0o600 });
 
@@ -242,6 +240,7 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
   } catch (err) {
     cleanup();
     if (err instanceof BundleError) throw err;
+    if (err instanceof GitReapError) throw new BundleError(err.code, err.message);
     if (err instanceof DigestError) throw new BundleError(err.code, err.message);
     throw err;
   }

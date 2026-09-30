@@ -422,6 +422,8 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
           : checkExcludesPin(req.excludesPin);
       } catch (err) {
         if (err instanceof VerifyRefusal) throw err;
+        const mapped = toRefusal(err);
+        if (mapped instanceof VerifyRefusal && mapped.code === "git_reap_failed") throw mapped;
         throw new VerifyRefusal(
           "materialize_failed",
           `could not resolve the global git excludes file: ${scrubLine(

@@ -175,7 +175,7 @@ const GIT_REAP_WAIT_MS = 3000;
  * the second-signal path forwards a force kill before exiting.
  */
 const liveGitGroups = new Set<number>();
-const windowsTreeKillErrors = new Map<number, string>();
+const windowsTreeKillResults = new Map<number, WindowsTreeKillResult>();
 const windowsStoppedTrees = new Set<number>();
 
 function registerGitGroup(child: ChildProcess): void {
@@ -186,9 +186,46 @@ function registerGitGroup(child: ChildProcess): void {
   }
 }
 
-interface GitGroupReleaseResult {
+export interface GitGroupReleaseResult {
   reaped: boolean;
   error?: string;
+}
+
+type PidState = "alive" | "gone" | "unknown";
+type WindowsTreeKillResult = { status: number | null; error?: Error };
+
+function gitPidState(pid: number): PidState {
+  try {
+    process.kill(pid, 0);
+    return "alive";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ESRCH" ? "gone" : "unknown";
+  }
+}
+
+/** A taskkill not-found race is harmless only with independent proof of death. */
+export async function reconcileWindowsGitReap(
+  pid: number,
+  result: WindowsTreeKillResult | undefined,
+  probe: (pid: number) => PidState = gitPidState,
+  waitMs = GIT_REAP_WAIT_MS,
+): Promise<GitGroupReleaseResult> {
+  if (result?.status === 0 && !result.error) return { reaped: true };
+  // taskkill's not-found status is 128. Other failures (including failure to
+  // start taskkill) cannot prove the tree dead, even if a fallback killed its leader.
+  if (result === undefined || (result.status === 128 && !result.error)) {
+    const deadline = Date.now() + waitMs;
+    let state = probe(pid);
+    while (state === "alive" && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      state = probe(pid);
+    }
+    if (state === "gone") return { reaped: true };
+  }
+  return {
+    reaped: false,
+    error: `could not prove git process tree ${pid} reaped: ${result?.error?.message ?? (result ? `taskkill exited ${result.status}` : "PID probe failed")}`,
+  };
 }
 
 /** Kill remaining members and await the bounded reap before releasing ownership. */
@@ -197,15 +234,12 @@ async function releaseGitGroup(pid: number | undefined): Promise<GitGroupRelease
   if (isWindows) {
     // Abort can reach finish before the child's close event. Stop the native
     // tree before handing its working directory back to the caller.
-    try {
-      process.kill(pid, 0);
-      signalGitPid(pid, "SIGKILL");
-    } catch { /* leader has already exited */ }
+    if (gitPidState(pid) !== "gone") signalGitPid(pid, "SIGKILL");
+    const result = await reconcileWindowsGitReap(pid, windowsTreeKillResults.get(pid));
     liveGitGroups.delete(pid);
-    const error = windowsTreeKillErrors.get(pid);
-    windowsTreeKillErrors.delete(pid);
+    windowsTreeKillResults.delete(pid);
     windowsStoppedTrees.delete(pid);
-    return { reaped: error === undefined, error };
+    return result;
   }
   if (!gitGroupAlive(pid)) {
     liveGitGroups.delete(pid);
@@ -245,8 +279,8 @@ function signalGitPid(pid: number, signal: NodeJS.Signals): void {
       timeout: GIT_REAP_WAIT_MS,
       killSignal: "SIGKILL",
     });
-    if (result.status !== 0) {
-      windowsTreeKillErrors.set(pid, `could not stop git process tree ${pid}: ${result.error?.message ?? `taskkill exited ${result.status}`}`);
+    windowsTreeKillResults.set(pid, result);
+    if (result.status !== 0 && (result.status !== 128 || result.error)) {
       try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
     }
     return;
@@ -307,31 +341,57 @@ export interface GitResult {
   /** False when a Git process tree was not proven reaped. */
   reaped?: boolean;
   spawnError?: string;
+  reapError?: string;
+  signal?: NodeJS.Signals | null;
+}
+
+export class GitReapError extends Error {
+  readonly code = "git_reap_failed";
+  constructor(message: string) {
+    super(message);
+    this.name = "GitReapError";
+  }
+}
+
+/** Do not let a successful exit hide an unproven process-tree reap. */
+export function requireGitReaped(result: GitResult): GitResult {
+  if (result.reaped === false) {
+    throw new GitReapError(result.reapError ?? "Git process tree was not proven reaped");
+  }
+  return result;
+}
+
+/** Per-call injection keeps process lifecycle regressions testable on every OS. */
+export interface GitProcessDependencies {
+  spawn?: typeof spawn;
+  releaseGroup?: (pid: number | undefined) => Promise<GitGroupReleaseResult>;
 }
 
 /** Run git with the hardening pins. `args` starts at the subcommand. */
 export function runGit(
   args: readonly string[],
   opts: GitRunOptions,
+  deps: GitProcessDependencies = {},
 ): Promise<GitResult> {
-  return runGitRaw([...GIT_HARDENING_ARGS, ...args], opts);
+  return runGitRaw([...GIT_HARDENING_ARGS, ...args], opts, deps).then(requireGitReaped);
 }
 
 /** Run git with exactly `args` (no hardening pins added). */
 export function runGitRaw(
   args: readonly string[],
   opts: GitRunOptions,
+  deps: GitProcessDependencies = {},
 ): Promise<GitResult> {
   const context = inheritedGroupContext.getStore();
-  if (!context?.owned) return runGitRawInner(args, opts);
+  if (!context?.owned) return runGitRawInner(args, opts, deps);
   // A group sweep may only follow the last active Git call. Serialize calls
   // sharing the CLI group so one completed diff cannot kill a sibling diff.
-  const run = context.tail.then(() => runGitRawInner(args, opts));
+  const run = context.tail.then(() => runGitRawInner(args, opts, deps));
   context.tail = run.then(() => undefined, () => undefined);
   return run;
 }
 
-function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<GitResult> {
+function runGitRawInner(args: readonly string[], opts: GitRunOptions, deps: GitProcessDependencies): Promise<GitResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS;
   const maxStdout = opts.maxStdoutBytes ?? DEFAULT_MAX_STDOUT_BYTES;
   const signal = opts.signal ?? abortContext.getStore();
@@ -351,7 +411,7 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
     try {
       // Supervised verify calls inherit the CLI group; standalone helpers
       // retain their owned Git groups and existing cleanup contract.
-      child = spawn("git", [...args], {
+      child = (deps.spawn ?? spawn)("git", [...args], {
         cwd: opts.cwd,
         env: opts.env ?? pinnedGitEnv(),
         stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
@@ -370,6 +430,13 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       return;
     }
     registerGitGroup(child);
+    // This base uses node:child_process, whose exit event is the equivalent
+    // of Bun.Subprocess.exited. Capture it before reading the final properties.
+    let exitSignal: NodeJS.Signals | null = null;
+    const exited = new Promise<number | null>((done) => {
+      child.once("exit", (code, sig) => { exitSignal = sig; done(code); });
+      child.once("error", () => done(null));
+    });
 
     const stdoutChunks: Buffer[] = [];
     let stdoutLen = 0;
@@ -384,12 +451,11 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      const { reaped, error } = await releaseGitGroup(child.pid);
-      if (error) result.spawnError = error;
+      const { reaped, error } = await (deps.releaseGroup ?? releaseGitGroup)(child.pid);
       resolve(reaped ? { ...result, reaped } : {
         ...result,
-        code: null,
         reaped: false,
+        reapError: error ?? "Git process tree was not proven reaped",
         stderr: `${result.stderr}\nGit process tree was not proven reaped`,
       });
     };
@@ -440,13 +506,16 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
         timedOut,
         truncated,
         aborted,
-        spawnError: err.message,
+        ...(child.pid === undefined ? { spawnError: err.message } : {}),
       });
     });
-    child.on("close", (code) => {
+    child.on("close", async (code, sig) => {
       if (aborted) return;
+      const settledCode = await exited;
+      const settledSignal = child.signalCode ?? exitSignal ?? sig;
       finish({
-        code,
+        code: settledSignal ? null : (child.exitCode ?? settledCode ?? code),
+        signal: settledSignal,
         stdout: truncated ? Buffer.alloc(0) : Buffer.concat(stdoutChunks),
         stderr: stderrBuf,
         timedOut,
