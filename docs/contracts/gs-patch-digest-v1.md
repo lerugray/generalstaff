@@ -140,7 +140,8 @@ An implementation refuses (throws) rather than return a digest for:
 | `checkout_invalid` | checkout path not absolute, not traversal-free, or not a directory |
 | `revision_invalid` | base not 7 to 64 hex characters |
 | `exclude_invalid` | an exclusion path that is not clean and repo-relative |
-| `git_missing`, `git_failed`, `git_timeout` | git could not run, failed, or ran out of time |
+| `git_missing`, `git_failed`, `git_timeout` | git could not start, failed, or ran out of time; the message includes the underlying cause |
+| `git_reap_failed` | git process ownership or cleanup could not be proven; includes the taskkill/native cause and never means git is missing |
 | `diff_too_large` | D over the cap |
 | `too_many_untracked` | more untracked files than the cap |
 | `file_too_large` | one untracked file over the cap |

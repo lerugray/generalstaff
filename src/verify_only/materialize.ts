@@ -32,6 +32,7 @@ import {
   collectChangeset,
   DEFAULT_DIGEST_LIMITS,
   DigestError,
+  gitFailure,
   type ChangesetSnapshot,
   type DigestLimits,
 } from "./digest";
@@ -41,6 +42,7 @@ import {
   pinnedGitEnv,
   runGit,
   scrubLine,
+  gitErrorDetail,
   withoutGitAbort,
 } from "./git";
 import { VerifyRefusal, toRefusal } from "./refusal";
@@ -94,7 +96,9 @@ export async function baseIsCommit(
     timeoutMs,
     maxStdoutBytes: 1024,
   });
-  return r.code === 0;
+  if (r.code !== 0) throw new VerifyRefusal(r.reaped === false ? "git_reap_failed" : "base_unresolvable",
+    `could not resolve the base revision in the checkout: ${gitErrorDetail(r)}`);
+  return true;
 }
 
 /** True when `checkout` is the top level of a git work tree. */
@@ -108,7 +112,8 @@ export async function isGitTopLevel(
     timeoutMs,
     maxStdoutBytes: 64 * 1024,
   });
-  if (r.code !== 0) return false;
+  if (r.code !== 0) throw new VerifyRefusal(r.reaped === false ? "git_reap_failed" : "checkout_invalid",
+    `could not resolve the checkout top level: ${gitErrorDetail(r)}`);
   try {
     return realpathOf(r.stdout.toString("utf8").trim()) === realpathOf(checkout);
   } catch {
@@ -279,11 +284,12 @@ export async function materializeSnapshot(
     mkdirSync(opts.verifyDir, { recursive: true, mode: 0o700 });
     created = true;
 
-    await runGit([...excludesPin, "worktree", "prune"], {
+    const pruned = await runGit([...excludesPin, "worktree", "prune"], {
       cwd: opts.checkout,
       timeoutMs: opts.gitTimeoutMs,
       maxStdoutBytes: 64 * 1024,
     });
+    if (pruned.reaped === false) throw gitFailure("worktree prune", pruned);
     const add = await runGit(
       [...excludesPin, "worktree", "add", "--detach", tree, opts.base],
       {
@@ -293,8 +299,8 @@ export async function materializeSnapshot(
     });
     if (add.code !== 0) {
       throw new VerifyRefusal(
-        "materialize_failed",
-        `could not create the isolated worktree: ${scrubLine(add.stderr || `git exited ${add.code}`, 160)}`,
+        add.reaped === false ? "git_reap_failed" : "materialize_failed",
+        `could not create the isolated worktree: ${gitErrorDetail(add)}`,
       );
     }
 
@@ -310,8 +316,8 @@ export async function materializeSnapshot(
       });
       if (listed.code !== 0) {
         throw new VerifyRefusal(
-          "bundle_unreadable",
-          `diff.patch is not a valid patch: ${scrubLine(listed.stderr, 160)}`,
+          listed.reaped === false ? "git_reap_failed" : "bundle_unreadable",
+          `could not inspect diff.patch: ${gitErrorDetail(listed)}`,
         );
       }
       for (const p of parseNumstatZ(listed.stdout.toString("utf8"))) {
@@ -335,8 +341,8 @@ export async function materializeSnapshot(
       );
       if (applied.code !== 0) {
         throw new VerifyRefusal(
-          "materialize_failed",
-          `diff.patch does not apply to the base revision: ${scrubLine(applied.stderr, 160)}`,
+          applied.reaped === false ? "git_reap_failed" : "materialize_failed",
+          `could not apply diff.patch to the base revision: ${gitErrorDetail(applied)}`,
         );
       }
     }
@@ -424,8 +430,8 @@ export async function renderReviewDiff(
   });
   if (add.code !== 0) {
     throw new VerifyRefusal(
-      "materialize_failed",
-      `could not stage the change for review: ${scrubLine(add.stderr, 160)}`,
+      add.reaped === false ? "git_reap_failed" : "materialize_failed",
+      `could not stage the change for review: ${gitErrorDetail(add)}`,
     );
   }
   const run = async (extra: string[]): Promise<Buffer> => {
@@ -444,8 +450,8 @@ export async function renderReviewDiff(
     );
     if (r.code !== 0 || r.truncated) {
       throw new VerifyRefusal(
-        "materialize_failed",
-        "could not render the change for review",
+        r.reaped === false ? "git_reap_failed" : "materialize_failed",
+        `could not render the change for review: ${gitErrorDetail(r)}`,
       );
     }
     return r.stdout;

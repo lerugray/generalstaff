@@ -27,6 +27,7 @@ export interface VerifyStageResult {
   timedOut: boolean;
   aborted: boolean;
   spawnError?: string;
+  reapError?: string;
   durationSeconds: number;
   reaped: boolean;
 }
@@ -42,6 +43,7 @@ export interface VerifyVerificationResult {
   durationSeconds: number;
   failedStage: string | null;
   spawnError?: string;
+  reapError?: string;
   logPath: string;
   /** The redacted log text, as written to logPath. */
   logText: string;
@@ -135,6 +137,7 @@ export async function runVerifyOnlyVerification(args: {
   let allReaped = true;
   let failedStage: string | null = null;
   let spawnError: string | undefined;
+  let reapError: string | undefined;
 
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]!;
@@ -185,6 +188,7 @@ export async function runVerifyOnlyVerification(args: {
     log += run.output;
     if (run.timedOut) log += "\n\n=== COMMAND TIMED OUT ===\n";
     if (run.aborted) log += "\n\n=== COMMAND ABORTED ===\n";
+    if (run.reapError) log += `\n=== REAP ERROR: ${run.reapError} ===\n`;
     if (run.spawnError) log += `\n=== SPAWN ERROR: ${run.spawnError} ===\n`;
     log +=
       `\n${"=".repeat(40)}\nExit code: ${run.exitCode}\n` +
@@ -200,7 +204,7 @@ export async function runVerifyOnlyVerification(args: {
     allReaped = allReaped && run.reaped;
 
     const stageOutcome: VerificationOutcome =
-      run.timedOut || run.aborted || run.spawnError !== undefined || run.exitCode !== 0
+      !run.reaped || run.timedOut || run.aborted || run.spawnError !== undefined || run.exitCode !== 0
         ? "failed"
         : "passed";
     // REAL #2: a process group that was not proven reaped fails the stage,
@@ -219,7 +223,7 @@ export async function runVerifyOnlyVerification(args: {
           exit_code: run.exitCode,
           duration_seconds: Math.round(run.durationSeconds),
           timed_out: run.timedOut,
-          ...(run.spawnError ? { error: run.spawnError } : {}),
+          ...((run.reapError ?? run.spawnError) ? { error: run.reapError ?? run.spawnError } : {}),
         },
         cycleId,
       );
@@ -231,6 +235,7 @@ export async function runVerifyOnlyVerification(args: {
       outcome = "failed";
       failedStage = stage.label;
       spawnError = run.spawnError;
+      reapError = run.reapError;
       break;
     }
   }
@@ -250,7 +255,7 @@ export async function runVerifyOnlyVerification(args: {
       timed_out: timedOut,
       verify_only: true,
       ...(failedStage ? { failed_stage: failedStage } : {}),
-      ...(spawnError ? { error: spawnError } : {}),
+      ...((reapError ?? spawnError) ? { error: reapError ?? spawnError } : {}),
     },
     cycleId,
   );
@@ -264,6 +269,7 @@ export async function runVerifyOnlyVerification(args: {
     durationSeconds,
     failedStage,
     spawnError,
+    reapError,
     logPath,
     logText,
   };

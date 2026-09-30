@@ -7,7 +7,8 @@
 // the command left running survives. Output is captured with a head and a
 // tail so a noisy command cannot use unbounded memory.
 
-import { spawn, spawnSync, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
+import { WindowsOwnedProcess, WindowsOwnershipError } from "./windows_process";
 import { signalVerificationMembers, verificationGroupMembers } from "./process_tree";
 
 export interface RunnerOptions {
@@ -28,6 +29,7 @@ export interface RunnerResult {
   timedOut: boolean;
   aborted: boolean;
   spawnError?: string;
+  reapError?: string;
   durationSeconds: number;
   /** Head, an omission marker when needed, and tail, decoded as UTF-8. */
   output: string;
@@ -41,14 +43,12 @@ const isWindows = process.platform === "win32";
 
 /** Process groups currently owned by this process (for signal cleanup). */
 const activeGroups = new Set<number>();
+const windowsChildren = new Map<number, WindowsOwnedProcess>();
 
 function killGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     if (isWindows) {
-      spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-      });
+      windowsChildren.get(pid)?.stop();
     } else {
       signalVerificationMembers(signal);
     }
@@ -129,25 +129,33 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
 
   return new Promise<RunnerResult>((resolve) => {
     let child: ChildProcess;
+    let windowsChild: WindowsOwnedProcess | undefined;
     try {
-      child = spawn("bash", ["-c", opts.command], {
+      const spawnOptions = {
         cwd: opts.cwd,
         env: opts.env,
         detached: false,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"] as ["ignore", "pipe", "pipe"],
         windowsHide: true,
-      });
+      };
+      if (isWindows) {
+        windowsChild = new WindowsOwnedProcess("bash", ["-c", opts.command], spawnOptions);
+        child = windowsChild.child;
+        if (child.pid !== undefined) windowsChildren.set(child.pid, windowsChild);
+      } else child = spawn("bash", ["-c", opts.command], spawnOptions);
     } catch (err) {
       resolve({
         exitCode: null,
         signal: null,
         timedOut: false,
         aborted: false,
-        spawnError: err instanceof Error ? err.message : String(err),
+        ...(err instanceof WindowsOwnershipError
+          ? { reapError: err.message, reaped: false }
+          : { spawnError: err instanceof Error ? err.message : String(err) }),
         durationSeconds: 0,
         output: "",
         omittedBytes: 0,
-        reaped: true,
+        reaped: !(err instanceof WindowsOwnershipError),
         pid: null,
       });
       return;
@@ -199,7 +207,17 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
       if (closeFallback) clearTimeout(closeFallback);
       opts.signal?.removeEventListener("abort", onAbort);
       let reaped = true;
-      if (pid !== null) {
+      let reapError: string | undefined;
+      if (windowsChild) {
+        const result = await windowsChild.release();
+        reaped = result.reaped;
+        reapError = result.error;
+        spawnError ??= windowsChild.spawnError;
+        if (reaped && pid !== null) {
+          activeGroups.delete(pid);
+          windowsChildren.delete(pid);
+        }
+      } else if (pid !== null) {
         // Sweep anything the command left running in its group: a polite
         // signal, a short wait, then a force kill, then proof it is gone.
         if (groupAlive(pid)) {
@@ -225,6 +243,7 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
         timedOut,
         aborted,
         spawnError,
+        reapError,
         durationSeconds: (performance.now() - started) / 1000,
         output: capture.text(),
         omittedBytes: capture.omitted,
@@ -234,7 +253,8 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
     };
 
     child.on("error", (err) => {
-      spawnError = err.message;
+      if (child.pid === undefined) spawnError = err.message;
+      else capture.push(Buffer.from(`\nProcess error: ${err.message}\n`));
       exited = true;
       void finish();
     });

@@ -22,7 +22,7 @@ import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { VerifyRefusal } from "./refusal";
-import { DigestError } from "./digest";
+import { DigestError, gitFailure } from "./digest";
 import { DEFAULT_GIT_TIMEOUT_MS, NULL_DEVICE, runGitRaw } from "./git";
 
 export interface GlobalExcludes {
@@ -43,48 +43,32 @@ function envHome(): string {
 /**
  * Resolve the user's effective global excludes file. Must run under the
  * calling process's own environment: reading user config is the point. Fails
- * closed (`git_failed`) when git itself cannot answer — an indeterminate
+ * closed (with the git failure code) when git itself cannot answer — an indeterminate
  * answer must not become a change-set that skips ignored files.
  */
 export async function resolveGlobalExcludes(
   opts: { timeoutMs?: number } = {},
 ): Promise<GlobalExcludes> {
   let fromConfig: string | null = null;
-  let spawnError: string | null = null;
-  let exitCode: number | null = null;
-  try {
-    const run = await runGitRaw(
-      ["config", "--global", "--path", "--get", "core.excludesFile"],
-      {
-        cwd: process.cwd(),
-        env: fullCallerEnv(),
-        timeoutMs: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
-        maxStdoutBytes: 64 * 1024,
-      },
-    );
-    if (run.spawnError || run.code === null || run.timedOut || run.aborted || run.truncated) {
-      spawnError = run.spawnError ?? "git config did not return a complete answer (killed, timed out or aborted)";
-    } else {
-      exitCode = run.code;
-      if (run.code === 0) {
-        const line = run.stdout.toString("utf8").trim();
-        if (line !== "") fromConfig = line.split("\n")[0].trim();
-      }
-    }
-  } catch (err) {
-    spawnError = err instanceof Error ? err.message : String(err);
+  const run = await runGitRaw(
+    ["config", "--global", "--path", "--get", "core.excludesFile"],
+    {
+      cwd: process.cwd(),
+      env: fullCallerEnv(),
+      timeoutMs: opts.timeoutMs ?? DEFAULT_GIT_TIMEOUT_MS,
+      maxStdoutBytes: 64 * 1024,
+    },
+  );
+  // Exit 1 means the key is unset only if the command and its cleanup completed.
+  if (run.reaped === false || run.spawnError || run.code === null ||
+      run.timedOut || run.aborted || run.truncated || (run.code !== 0 && run.code !== 1)) {
+    const error = gitFailure("config --global --get core.excludesFile", run);
+    throw new DigestError(error.code,
+      `could not resolve the user's global git excludes file: ${error.message}`);
   }
-  // `git config --get` exits 1 when the key is simply unset — that is the
-  // normal case, not a failure. Anything else (spawn failure, hard git error)
-  // is indeterminate: refuse rather than guess what U holds.
-  if (spawnError === null && exitCode !== null && exitCode !== 0 && exitCode !== 1) {
-    spawnError = `git config --global --get exited ${exitCode}`;
-  }
-  if (spawnError !== null) {
-    throw new DigestError(
-      "git_failed",
-      `could not resolve the user's global git excludes file: ${spawnError}`,
-    );
+  if (run.code === 0) {
+    const line = run.stdout.toString("utf8").trim();
+    if (line !== "") fromConfig = line.split("\n")[0].trim();
   }
 
   let source: GlobalExcludes["source"];

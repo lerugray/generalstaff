@@ -166,6 +166,7 @@ Each is a stable `reason` code. None records a cycle.
 | `no_verification_command` | the project has no verification command |
 | `verify_in_progress` | another check is running for this project |
 | `materialize_failed` | the isolated worktree could not be built or the patch did not apply |
+| `git_reap_failed` | Git job setup or cleanup could not be proven; the reason includes the underlying cause |
 | `interrupted` | a signal stopped preflight before `cycle_start` (exit 128+N) |
 | `internal_error` | anything unexpected |
 
@@ -220,7 +221,7 @@ them as scope context. The autonomous cycle's hard hands-off gate is unchanged.
 
 ### Process ownership
 
-The verification command inherits the CLI's process group: it does not detach. `verificationTreeId` in start output and the terminal `verify`
+On Unix, the verification command inherits the CLI's process group: it does not detach. `verificationTreeId` in start output and the terminal `verify`
 block is that group id (the supervised CLI PID). On Unix the caller must launch
 the CLI as group leader (e.g. Node `spawn(..., {detached:true})` or a foreground
 shell job). The CLI refuses to run a command in a shared group it cannot safely
@@ -232,9 +233,16 @@ the CLI remains alive to write its receipt. Normal completion also sweeps and
 proves the group empty except for the CLI itself. Caller group termination
 therefore reaches verification descendants, including grandchildren, and all
 preflight/cleanup Git children of a supervised verify call. Standalone bundle
-helpers retain their existing owned Git groups. Commands
-must not deliberately escape the owned group with setsid/setpgid. Windows still
-uses taskkill tree cleanup; no Windows Job-Object proof is claimed here.
+helpers retain their existing owned Git groups. Unix commands
+must not deliberately escape the owned group with setsid/setpgid. On Windows,
+each Git or verification shell launcher joins a private Job Object before
+starting its command; descendants inherit membership. Cleanup terminates the
+job and checks its active-process count, including after the launcher exits.
+The launcher must also have exited. A bounded taskkill can assist stopping a
+live launcher; its process-not-found status is harmless only with the same
+empty-job proof. Unknown ownership or a failed query fails closed. Job setup
+and reap failures carry `git_reap_failed` for Git, with the native or taskkill
+cause, never `git_missing`. This Windows path requires Bun's native FFI support.
 A process group that could not be *proven* reaped fails the check
 (`verify.reaped` is `false`, category `verification_error`): a surviving group
 may still be running commands against operator state, and must never read as a

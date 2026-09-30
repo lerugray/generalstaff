@@ -34,10 +34,11 @@ import {
   transportDiffArgs,
   withPrivateIndex,
   type DigestErrorCode,
+  gitFailure,
   type DigestLimits,
 } from "./digest";
 import { excludesFilePinArgs, resolveGlobalExcludes } from "./excludes";
-import { runGit } from "./git";
+import { runGit, gitErrorDetail } from "./git";
 
 export type BundleErrorCode =
   | DigestErrorCode
@@ -201,14 +202,13 @@ export async function writeBundle(opts: BundleWriteOptions): Promise<BundleInfo>
           maxStdoutBytes: MAX_BUNDLE_PATCH_BYTES,
         }),
     );
+    if (transport.reaped === false) throw gitFailure("diff --binary", transport);
     if (transport.truncated) {
-      throw new BundleError("diff_too_large", "the tracked patch is too large to bundle");
+      throw new BundleError("diff_too_large", `the tracked patch is too large to bundle: ${gitErrorDetail(transport)}`);
     }
     if (transport.code !== 0) {
-      throw new BundleError(
-        "git_failed",
-        `git diff --binary exited with code ${transport.code}`,
-      );
+      const error = gitFailure("diff --binary", transport);
+      throw new BundleError(error.code, error.message);
     }
     writeFileSync(patchPath, transport.stdout, { mode: 0o600 });
 

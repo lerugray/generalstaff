@@ -26,6 +26,7 @@ export type RefusalCode =
   | "no_verification_command"
   | "verify_in_progress"
   | "materialize_failed"
+  | "git_reap_failed"
   | "interrupted"
   | "internal_error";
 
@@ -45,6 +46,7 @@ export function refusalLine(refusal: VerifyRefusal): string {
 }
 
 const BUNDLE_CODE_MAP: Partial<Record<BundleErrorCode | DigestErrorCode, RefusalCode>> = {
+  git_reap_failed: "git_reap_failed",
   bundle_missing: "bundle_missing",
   bundle_empty: "bundle_empty",
   bundle_unreadable: "bundle_unreadable",

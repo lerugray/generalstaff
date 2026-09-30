@@ -421,7 +421,8 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
           ? await resolveGlobalExcludes({ timeoutMs: req.gitTimeoutMs })
           : checkExcludesPin(req.excludesPin);
       } catch (err) {
-        if (err instanceof VerifyRefusal) throw err;
+        const mapped = toRefusal(err);
+        if (mapped instanceof VerifyRefusal) throw mapped;
         throw new VerifyRefusal(
           "materialize_failed",
           `could not resolve the global git excludes file: ${scrubLine(
@@ -946,7 +947,7 @@ export function decide(
       return {
         ...base,
         finalOutcome: "verification_failed",
-        reason: "Verification command's process tree was not proven reaped",
+        reason: `Verification command's process tree was not proven reaped${ver.reapError ? `: ${scrubLine(ver.reapError)}` : ""}`,
         category: "verification_error",
       };
     }

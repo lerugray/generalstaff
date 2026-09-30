@@ -18,6 +18,9 @@ async function probe(source: string) {
   const git = join(scratch, "git.ts");
   writeFileSync(tree, readFileSync(join(sourceDir, "process_tree.ts"), "utf8").replace('from "fs"', 'from "s188-proc-fs"'));
   writeFileSync(git, readFileSync(join(sourceDir, "git.ts"), "utf8"));
+  for (const file of ["windows_process.ts", "windows_job.ts"]) {
+    writeFileSync(join(scratch, file), readFileSync(join(sourceDir, file), "utf8"));
+  }
   const helper = join(scratch, "probe.ts");
   writeFileSync(helper, source.replace("__PROCESS_TREE__", JSON.stringify(tree)).replace("__GIT__", JSON.stringify(git)));
   const proc = Bun.spawn([process.execPath, helper], { stdout: "pipe", stderr: "pipe" });

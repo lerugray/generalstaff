@@ -44,6 +44,7 @@ import {
   pinnedGitEnv,
   runGit,
   type GitResult,
+  gitErrorDetail,
 } from "./git";
 
 export { PATCH_DIGEST_ALGORITHM };
@@ -68,6 +69,7 @@ export type DigestErrorCode =
   | "revision_invalid"
   | "exclude_invalid"
   | "git_missing"
+  | "git_reap_failed"
   | "git_failed"
   | "git_timeout"
   | "diff_too_large"
@@ -203,19 +205,18 @@ export function buildUntrackedSection(entries: readonly UntrackedEntry[]): strin
   return section;
 }
 
-function gitFailure(what: string, r: GitResult): DigestError {
+export function gitFailure(what: string, r: GitResult): DigestError {
+  const detail = gitErrorDetail(r);
+  if (r.reaped === false || r.reapError !== undefined) {
+    return new DigestError("git_reap_failed", `git process tree was not proven reaped (${what}): ${detail}`);
+  }
   if (r.spawnError !== undefined) {
-    return new DigestError("git_missing", `git could not be started (${what})`);
+    return new DigestError("git_missing", `git could not be started (${what}): ${detail}`);
   }
   if (r.timedOut) {
-    return new DigestError("git_timeout", `git did not finish in time (${what})`);
+    return new DigestError("git_timeout", `git did not finish in time (${what}): ${detail}`);
   }
-  return new DigestError(
-    "git_failed",
-    `git ${what} exited with code ${r.code}${
-      r.stderr ? `: ${r.stderr.trim().split("\n")[0]}` : ""
-    }`,
-  );
+  return new DigestError("git_failed", `git ${what} exited with code ${r.code}: ${detail}`);
 }
 
 /** Pathspec tail for a diff: whole tree minus the exclusions. */
@@ -481,10 +482,11 @@ export async function collectChangeset(
       timeoutMs: opts.gitTimeoutMs,
       maxStdoutBytes: limits.maxDiffBytes,
     });
+    if (diffRun.reaped === false) throw gitFailure("diff", diffRun);
     if (diffRun.truncated) {
       throw new DigestError(
         "diff_too_large",
-        `tracked diff exceeds the ${limits.maxDiffBytes} byte cap`,
+        `tracked diff exceeds the ${limits.maxDiffBytes} byte cap: ${gitErrorDetail(diffRun)}`,
       );
     }
     if (diffRun.code !== 0) throw gitFailure("diff", diffRun);
@@ -498,8 +500,9 @@ export async function collectChangeset(
         maxStdoutBytes: Math.max(limits.maxDiffBytes, 8 * 1024 * 1024),
       },
     );
+    if (listed.reaped === false) throw gitFailure("ls-files", listed);
     if (listed.truncated) {
-      throw new DigestError("too_many_untracked", "untracked file list is too large");
+      throw new DigestError("too_many_untracked", `untracked file list is too large: ${gitErrorDetail(listed)}`);
     }
     if (listed.code !== 0) throw gitFailure("ls-files", listed);
 

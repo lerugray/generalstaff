@@ -6,8 +6,8 @@ import { verificationTreeId, verificationGroupMembers, signalVerificationMembers
 // GIT_DIR, GIT_EXTERNAL_DIFF, user config and similar cannot redirect what is
 // hashed. Hooks, fsmonitor and external diff drivers are switched off.
 
-import { spawn, spawnSync, type ChildProcess } from "child_process";
-import { join } from "path";
+import { spawn, type ChildProcess } from "child_process";
+import { WindowsOwnedProcess, WindowsOwnershipError } from "./windows_process";
 import { AsyncLocalStorage } from "async_hooks";
 
 export const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
@@ -175,8 +175,7 @@ const GIT_REAP_WAIT_MS = 3000;
  * the second-signal path forwards a force kill before exiting.
  */
 const liveGitGroups = new Set<number>();
-const windowsTreeKillErrors = new Map<number, string>();
-const windowsStoppedTrees = new Set<number>();
+const windowsGitChildren = new Map<number, WindowsOwnedProcess>();
 
 function registerGitGroup(child: ChildProcess): void {
   const pid = child.pid;
@@ -195,17 +194,14 @@ interface GitGroupReleaseResult {
 async function releaseGitGroup(pid: number | undefined): Promise<GitGroupReleaseResult> {
   if (pid === undefined) return { reaped: true };
   if (isWindows) {
-    // Abort can reach finish before the child's close event. Stop the native
-    // tree before handing its working directory back to the caller.
-    try {
-      process.kill(pid, 0);
-      signalGitPid(pid, "SIGKILL");
-    } catch { /* leader has already exited */ }
-    liveGitGroups.delete(pid);
-    const error = windowsTreeKillErrors.get(pid);
-    windowsTreeKillErrors.delete(pid);
-    windowsStoppedTrees.delete(pid);
-    return { reaped: error === undefined, error };
+    const owned = windowsGitChildren.get(pid);
+    if (!owned) return { reaped: false, error: "Windows Git job ownership is missing" };
+    const result = await owned.release();
+    if (result.reaped) {
+      liveGitGroups.delete(pid);
+      windowsGitChildren.delete(pid);
+    }
+    return result;
   }
   if (!gitGroupAlive(pid)) {
     liveGitGroups.delete(pid);
@@ -230,25 +226,7 @@ async function releaseGitGroup(pid: number | undefined): Promise<GitGroupRelease
 
 function signalGitPid(pid: number, signal: NodeJS.Signals): void {
   if (isWindows) {
-    // A successful taskkill may precede the child's close event. Retrying in
-    // release would report "not found" as a failure (and double the reap cap).
-    if (windowsStoppedTrees.has(pid)) return;
-    windowsStoppedTrees.add(pid);
-    // Windows signals terminate only the leader. taskkill must see that leader
-    // alive to discover its descendants, and must finish before cleanup or exit.
-    // Use the system binary rather than a project-controlled PATH entry.
-    const root = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.WINDIR;
-    const taskkill = root ? join(root, "System32", "taskkill.exe") : "taskkill.exe";
-    const result = spawnSync(taskkill, ["/PID", String(pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore",
-      timeout: GIT_REAP_WAIT_MS,
-      killSignal: "SIGKILL",
-    });
-    if (result.status !== 0) {
-      windowsTreeKillErrors.set(pid, `could not stop git process tree ${pid}: ${result.error?.message ?? `taskkill exited ${result.status}`}`);
-      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
-    }
+    windowsGitChildren.get(pid)?.stop();
     return;
   }
   try {
@@ -306,7 +284,10 @@ export interface GitResult {
   aborted?: boolean;
   /** False when a Git process tree was not proven reaped. */
   reaped?: boolean;
+  /** Failure to start the executable only; never a cleanup failure. */
   spawnError?: string;
+  /** The process ran, but ownership could not be safely released. */
+  reapError?: string;
 }
 
 /** Run git with the hardening pins. `args` starts at the subcommand. */
@@ -348,16 +329,22 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       return;
     }
     let child: ChildProcess;
+    let windowsChild: WindowsOwnedProcess | undefined;
     try {
       // Supervised verify calls inherit the CLI group; standalone helpers
       // retain their owned Git groups and existing cleanup contract.
-      child = spawn("git", [...args], {
+      const spawnOptions = {
         cwd: opts.cwd,
         env: opts.env ?? pinnedGitEnv(),
-        stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        stdio: [opts.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"] as ["ignore" | "pipe", "pipe", "pipe"],
         detached: !isWindows && !inheritedGroupContext.getStore()?.owned,
         windowsHide: true,
-      });
+      };
+      if (isWindows) {
+        windowsChild = new WindowsOwnedProcess("git", args, spawnOptions);
+        child = windowsChild.child;
+        if (child.pid !== undefined) windowsGitChildren.set(child.pid, windowsChild);
+      } else child = spawn("git", [...args], spawnOptions);
     } catch (err) {
       resolve({
         code: null,
@@ -365,7 +352,9 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
         stderr: "",
         timedOut: false,
         truncated: false,
-        spawnError: err instanceof Error ? err.message : String(err),
+        ...(err instanceof WindowsOwnershipError
+          ? { reapError: err.message, reaped: false }
+          : { spawnError: err instanceof Error ? err.message : String(err) }),
       });
       return;
     }
@@ -378,19 +367,23 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    let closeFallback: ReturnType<typeof setTimeout> | undefined;
 
     const finish = async (result: GitResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(closeFallback);
       signal?.removeEventListener("abort", onAbort);
-      const { reaped, error } = await releaseGitGroup(child.pid);
-      if (error) result.spawnError = error;
+      const { reaped, error } = await (windowsChild && child.pid === undefined
+        ? windowsChild.release() : releaseGitGroup(child.pid));
+      if (windowsChild?.spawnError) result.spawnError = windowsChild.spawnError;
+      if (!reaped) result.reapError = error ?? "Git process tree was not proven reaped";
       resolve(reaped ? { ...result, reaped } : {
         ...result,
         code: null,
         reaped: false,
-        stderr: `${result.stderr}\nGit process tree was not proven reaped`,
+        stderr: `${result.stderr}\nGit process tree was not proven reaped: ${result.reapError}`,
       });
     };
 
@@ -440,10 +433,11 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
         timedOut,
         truncated,
         aborted,
-        spawnError: err.message,
+        ...(child.pid === undefined ? { spawnError: err.message }
+          : { stderr: `${stderrBuf}\n${err.message}` }),
       });
     });
-    child.on("close", (code) => {
+    const onClose = (code: number | null) => {
       if (aborted) return;
       finish({
         code,
@@ -452,6 +446,12 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
         timedOut,
         truncated,
       });
+    };
+    child.on("close", onClose);
+    child.on("exit", code => {
+      // Descendants can keep inherited pipes open after the launcher exits.
+      // Start the same bounded reap without waiting for those pipes to close.
+      if (!settled) closeFallback = setTimeout(() => onClose(code), 1500);
     });
 
     if (opts.stdin !== undefined && child.stdin) {
@@ -467,4 +467,16 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
 export function scrubLine(text: string, max = 300): string {
   const flat = text.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** Keep the underlying cause at every git error boundary, including cleanup. */
+export function gitErrorDetail(r: GitResult): string {
+  return [
+    r.reapError ?? (r.reaped === false ? "Git process tree was not proven reaped" : undefined),
+    r.spawnError,
+    r.timedOut ? "git timed out" : undefined,
+    r.aborted ? "git was aborted" : undefined,
+    r.truncated ? "git output exceeded its byte cap" : undefined,
+    r.stderr.trim(),
+  ].filter(Boolean).join(": ") || `git exited with code ${r.code}`;
 }
