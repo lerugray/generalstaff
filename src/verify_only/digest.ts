@@ -69,6 +69,7 @@ export type DigestErrorCode =
   | "exclude_invalid"
   | "git_missing"
   | "git_failed"
+  | "git_reap_failed"
   | "git_timeout"
   | "diff_too_large"
   | "too_many_untracked"
@@ -203,16 +204,23 @@ export function buildUntrackedSection(entries: readonly UntrackedEntry[]): strin
   return section;
 }
 
-function gitFailure(what: string, r: GitResult): DigestError {
+export function gitFailure(what: string, r: GitResult): DigestError {
+  if (r.reaped === false) {
+    return new DigestError("git_reap_failed", r.reapError ?? `git process tree was not proven reaped (${what})`);
+  }
   if (r.spawnError !== undefined) {
     return new DigestError("git_missing", `git could not be started (${what})`);
   }
   if (r.timedOut) {
     return new DigestError("git_timeout", `git did not finish in time (${what})`);
   }
+  const status = r.signal ? `was terminated by ${r.signal}`
+    : r.aborted ? "was aborted"
+    : r.code === null ? "did not report an exit status"
+    : `exited with code ${r.code}`;
   return new DigestError(
     "git_failed",
-    `git ${what} exited with code ${r.code}${
+    `git ${what} ${status}${
       r.stderr ? `: ${r.stderr.trim().split("\n")[0]}` : ""
     }`,
   );

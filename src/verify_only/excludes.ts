@@ -23,7 +23,7 @@ import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { VerifyRefusal } from "./refusal";
 import { DigestError } from "./digest";
-import { DEFAULT_GIT_TIMEOUT_MS, NULL_DEVICE, runGitRaw } from "./git";
+import { DEFAULT_GIT_TIMEOUT_MS, GitReapError, NULL_DEVICE, requireGitReaped, runGitRaw } from "./git";
 
 export interface GlobalExcludes {
   /** Where the path came from: `git config --global`, the XDG variable, the
@@ -62,6 +62,7 @@ export async function resolveGlobalExcludes(
         maxStdoutBytes: 64 * 1024,
       },
     );
+    requireGitReaped(run);
     if (run.spawnError || run.code === null || run.timedOut || run.aborted || run.truncated) {
       spawnError = run.spawnError ?? "git config did not return a complete answer (killed, timed out or aborted)";
     } else {
@@ -72,6 +73,7 @@ export async function resolveGlobalExcludes(
       }
     }
   } catch (err) {
+    if (err instanceof GitReapError) throw new DigestError(err.code, err.message);
     spawnError = err instanceof Error ? err.message : String(err);
   }
   // `git config --get` exits 1 when the key is simply unset — that is the

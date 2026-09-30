@@ -1412,7 +1412,8 @@ describe("hardening fix round 3", () => {
         ],
         "test",
       );
-      expect(code).toBe(4);
+      // Carry the captured output so an unexpected exit code says why (a refusal names its code).
+      expect({ code, stdout: stdout.join(""), stderr: stderr.join("\n") }).toMatchObject({ code: 4 });
       const record = JSON.parse(stdout.join("").trim()) as {
         refused: boolean;
         reason: string;
@@ -1803,7 +1804,8 @@ describe("hardening fix round 6", () => {
     delete process.env.GIT_CONFIG_GLOBAL;
     try {
       const code = await runCycleVerifyCli(verifyArgs(fx, info, ["--json"]).slice(2), "test");
-      expect(code).toBe(4);
+      // Carry the captured output so an unexpected exit code says why (a refusal names its code).
+      expect({ code, stdout: stdout.join(""), stderr: stderr.join("\n") }).toMatchObject({ code: 4 });
       expect(started).toBe(true);
       expect(failedAppends).toBeGreaterThan(0);
       const events = progressEvents(fx);
