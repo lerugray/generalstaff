@@ -1,9 +1,12 @@
-import { afterEach, expect, it } from "bun:test";
+import { afterEach, expect, it, setDefaultTimeout } from "bun:test";
 import { spawn } from "child_process";
 import { createHash } from "crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "fs";
 import { join } from "path";
 import { makeVerifyFixture, type VerifyFixture } from "./helpers/verify_only_fixture";
+
+// Every test here spawns the real CLI (some several times); Windows process start-up alone can pass bun's 5 s default.
+setDefaultTimeout(60_000);
 
 let fx: VerifyFixture;
 afterEach(() => fx?.cleanup());
