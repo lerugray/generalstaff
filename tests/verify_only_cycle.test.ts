@@ -1667,6 +1667,11 @@ process.exit(result.status ?? 1);
     }
   });
 
+  // Windows kill(SIGKILL) returns exit 1, indistinguishable from git config's
+  // "key unset" result. Use a fatal exit there; retain real signal death on POSIX.
+  const die = process.platform === "win32"
+    ? "process.exit(137);"
+    : 'process.kill(process.pid, "SIGKILL");';
   for (const mode of ["dies", "hangs"] as const) {
     it(`finding 6: cycle verify refuses when global-excludes git ${mode}`, async () => {
       fx = makeVerifyFixture();
@@ -1678,11 +1683,14 @@ process.exit(result.status ?? 1);
       writeFileSync(join(fx.checkout, ".env"), "local secret\n");
       const bundle = await cliBundle(fx);
       const realGit = Bun.which("git")!;
+      const reached = join(fx.scratch, "excludes-shim-reached");
       installTestCli(fx.binDir, "git", `
+import { writeFileSync } from "fs";
 import { spawnSync } from "child_process";
 const args = process.argv.slice(2);
 if (args.join(" ") === "config --global --path --get core.excludesFile") {
-  ${mode === "dies" ? 'process.kill(process.pid, "SIGKILL");' : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
+  writeFileSync(${JSON.stringify(reached)}, args.join(" "));
+  ${mode === "dies" ? die : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
 } else {
   const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
   process.exit(result.status ?? 1);
@@ -1703,6 +1711,7 @@ if (args.join(" ") === "config --global --path --get core.excludesFile") {
           gitTimeoutMs: 500,
         })).rejects.toThrow("could not resolve");
       }
+      expect(readFileSync(reached, "utf8")).toBe("config --global --path --get core.excludesFile");
       noLeftovers(fx);
       noReceipt(fx);
     }, 15_000);
@@ -1714,11 +1723,14 @@ if (args.join(" ") === "config --global --path --get core.excludesFile") {
       git(fx.home, ["config", "--file", join(fx.home, ".gitconfig"), "core.excludesFile", join(fx.home, ".gitignore")]);
       writeFileSync(join(fx.checkout, ".env"), "local secret\n");
       const realGit = Bun.which("git")!;
+      const reached = join(fx.scratch, "excludes-shim-reached");
       installTestCli(fx.binDir, "git", `
+import { writeFileSync } from "fs";
 import { spawnSync } from "child_process";
 const args = process.argv.slice(2);
 if (args.join(" ") === "config --global --path --get core.excludesFile") {
-  ${mode === "dies" ? 'process.kill(process.pid, "SIGKILL");' : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
+  writeFileSync(${JSON.stringify(reached)}, args.join(" "));
+  ${mode === "dies" ? die : 'await new Promise(resolve => setTimeout(resolve, 120_000));'}
 } else {
   const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: "inherit" });
   process.exit(result.status ?? 1);
@@ -1732,6 +1744,7 @@ if (args.join(" ") === "config --global --path --get core.excludesFile") {
       delete process.env.GIT_CONFIG_GLOBAL;
       try {
         await expect(writeBundle({ checkout: fx.checkout, base: fx.base, outDir: out, gitTimeoutMs: 500 })).rejects.toThrow("could not resolve");
+        expect(readFileSync(reached, "utf8")).toBe("config --global --path --get core.excludesFile");
         expect(existsSync(out)).toBe(false);
         expect(readFileSync(join(fx.checkout, ".env"), "utf8")).toBe("local secret\n");
       } finally {

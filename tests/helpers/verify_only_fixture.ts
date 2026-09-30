@@ -127,7 +127,8 @@ export interface FixtureOptions {
 }
 
 export function makeVerifyFixture(opts: FixtureOptions = {}): VerifyFixture {
-  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "gs-verify-test-")));
+  // Match the CLI's canonical paths, including Windows 8.3 temp-directory names.
+  const scratch = realpathSync.native(mkdtempSync(join(tmpdir(), "gs-verify-test-")));
   const root = join(scratch, "gs-root");
   mkdirSync(join(root, "state"), { recursive: true });
   const { dir: checkout, base } = makeRepo(scratch, "project", { files: opts.files });
