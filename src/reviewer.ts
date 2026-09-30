@@ -399,6 +399,15 @@ export async function invokeReviewerProvider(
 ): Promise<string> {
   const p = provider.toLowerCase();
   return withReviewerSemaphore(p, async () => {
+    if (p === "fixed") {
+      const verdict = process.env.GENERALSTAFF_REVIEWER_FIXED_VERDICT;
+      if (verdict !== "verified" && verdict !== "verified_weak" && verdict !== "verification_failed") {
+        return "[REVIEWER ERROR] fixed test reviewer requires GENERALSTAFF_REVIEWER_FIXED_VERDICT=verified|verified_weak|verification_failed";
+      }
+      return JSON.stringify({ verdict, reason: "[fixed test reviewer] configured verdict; no scope review performed",
+        scope_drift_files: [], hands_off_violations: [], task_evidence: [], silent_failures: [],
+        notes: "Deterministic test/sitting reviewer; no model or subprocess was invoked." });
+    }
     if (p === "openrouter") return invokeOpenRouterReviewer(prompt, model);
     if (p === "ollama") return invokeOllamaReviewer(prompt, model);
     return spawnClaude(prompt, cwd, model);
@@ -428,6 +437,7 @@ export async function invokeReviewerWithFallback(
   const primary = await invokeReviewerProvider(provider, prompt, cwd, opts.model);
 
   const shouldFallback =
+    provider !== "fixed" && // A test reviewer must never fall through to a model.
     primary.startsWith("[REVIEWER ERROR]") &&
     fallback.length > 0 &&
     fallback !== provider;

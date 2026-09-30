@@ -244,6 +244,8 @@ process.exit(1);
     async runCli(args, o = {}) {
       const proc = Bun.spawn([process.execPath, "run", CLI_PATH, ...args], {
         cwd: root,
+        // Model the supervising caller: the CLI leads the owned group.
+        detached: process.platform != "win32",
         env: env(o.env),
         stdout: "pipe",
         stderr: "pipe",
@@ -262,6 +264,8 @@ process.exit(1);
     spawnCli(args, o = {}) {
       const proc = Bun.spawn([process.execPath, "run", CLI_PATH, ...args], {
         cwd: root,
+        // Model the supervising caller: the CLI leads the owned group.
+        detached: process.platform != "win32",
         env: env(o.env),
         stdout: "pipe",
         stderr: "pipe",

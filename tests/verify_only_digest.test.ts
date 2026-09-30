@@ -418,3 +418,25 @@ describe("global excludes resolution and pinning", () => {
     expect(unpinned.digestInput.includes(Buffer.from("gs-untracked-file: .env"))).toBe(true);
   });
 });
+
+describe("private index keeps git's racy-clean protection", () => {
+  // withPrivateIndex copies the index; git decides which entries it must compare by content from the index
+  // FILE's mtime. A fresh copy's newer mtime made git trust stale stat data, so a same-size edit inside the
+  // same second as the last index write produced the empty-change digest (seen on macOS CI).
+  it("sees a same-size edit whose stat matches the index entry", async () => {
+    const { dir, base } = makeRepo(scratch, "racy-index", { files: { "a.bin": "AAAA" } });
+    git(dir, ["config", "core.trustctime", "false"]);
+    const t = new Date(Math.floor(Date.now() / 1000) * 1000 - 120_000);
+    utimesSync(join(dir, "a.bin"), t, t);
+    git(dir, ["update-index", "--refresh"]);
+    const clean = (await collectChangeset({ cwd: dir, base })).digest;
+
+    writeFileSync(join(dir, "a.bin"), "BBBB");
+    utimesSync(join(dir, "a.bin"), t, t);
+    utimesSync(join(dir, ".git", "index"), t, t);
+
+    const edited = (await collectChangeset({ cwd: dir, base })).digest;
+    expect(edited).not.toBe(clean);
+    expect(git(dir, ["diff", "--name-only", base])).toBe("a.bin");
+  });
+});

@@ -40,7 +40,7 @@ import {
   VERIFY_MODE,
 } from "./constants";
 import { normalizeExclude, type DigestLimits } from "./digest";
-import { resolveGlobalExcludes, type GlobalExcludes } from "./excludes";
+import { resolveGlobalExcludes, checkExcludesPin, type GlobalExcludes } from "./excludes";
 import { scrubLine, withGitAbort } from "./git";
 import { enterVerifyOnlyMode, verifyOnlyProjectView } from "./guard";
 import { acquireVerifyLock } from "./lock";
@@ -55,6 +55,7 @@ import {
 } from "./materialize";
 import { VerifyRefusal, toRefusal } from "./refusal";
 import { killAllOwnedGroups, type RunnerOptions, type RunnerResult } from "./runner";
+import { verificationTreeId } from "./process_tree";
 import { runVerifyOnlyVerification } from "./verification";
 
 // --- Budgets ---------------------------------------------------------------
@@ -105,6 +106,15 @@ export function worstCaseWallClockSec(b: VerifyBudgets): number {
   );
 }
 
+/** Machine-readable authority; retain actual cleanup costs above A1's +5 floor. */
+export function publishedVerifyBudgets(b: VerifyBudgets = DEFAULT_VERIFY_BUDGETS) {
+  return { preflightCap: b.preflightSec, overall: b.overallSec,
+    verification: b.verificationSec, reviewer: b.reviewerSec, grace: b.graceSec,
+    cleanup: CLEANUP_CAP_SEC, preflightReap: PREFLIGHT_REAP_WAIT_MS / 1000,
+    worstCaseWallClockSec: worstCaseWallClockSec(b),
+    formula: "preflightCap + max(overall + grace, preflightReap) + cleanup" };
+}
+
 export type FailureCategory =
   | "verification_nonzero"
   | "verification_timeout"
@@ -131,6 +141,7 @@ export interface VerifyRunRequest {
   digest: string;
   digestAlgorithm: string;
   exclude?: readonly string[];
+  excludesPin?: { path: string | null; sha256: string | null };
   budgets?: Partial<VerifyBudgets>;
   limits?: Partial<DigestLimits>;
   gitTimeoutMs?: number;
@@ -140,7 +151,7 @@ export interface VerifyRunRequest {
   /** Test seam: replaces the owned shell runner for the verification command. */
   runShell?: (opts: RunnerOptions) => Promise<RunnerResult>;
   /** Called once, right after cycle_start is recorded. */
-  onStarted?: (info: { cycleId: string; projectId: string }) => void;
+  onStarted?: (info: { cycleId: string; projectId: string; verificationTreeId: number }) => void;
 }
 
 export interface VerifyRunResult {
@@ -406,8 +417,11 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
       // rather than guess.
       let globalExcludes: Awaited<ReturnType<typeof resolveGlobalExcludes>>;
       try {
-        globalExcludes = await resolveGlobalExcludes({ timeoutMs: req.gitTimeoutMs });
+        globalExcludes = req.excludesPin === undefined
+          ? await resolveGlobalExcludes({ timeoutMs: req.gitTimeoutMs })
+          : checkExcludesPin(req.excludesPin);
       } catch (err) {
+        if (err instanceof VerifyRefusal) throw err;
         throw new VerifyRefusal(
           "materialize_failed",
           `could not resolve the global git excludes file: ${scrubLine(
@@ -435,6 +449,8 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
         req.gitTimeoutMs,
         globalExcludes.path,
       );
+
+      if (req.excludesPin !== undefined) checkExcludesPin(req.excludesPin);
 
       const cycleDirAbs = ensureCycleDir(project.id, cycleId, req.dispatcher);
       createdCycleDir = cycleDirAbs;
@@ -581,8 +597,16 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
           worktreePath: tree,
           excludedPaths: exclude,
           // REAL #1: the global excludes pin this check ran under.
-          globalExcludesFile: a.globalExcludes.path,
-          globalExcludesSha256: a.globalExcludes.sha256,
+          // The A1 reader aliases these names to the legacy pair; emitting
+          // both would be a duplicate-field error in that reader.
+          ...(req.excludesPin === undefined ? {
+            globalExcludesFile: a.globalExcludes.path,
+            globalExcludesSha256: a.globalExcludes.sha256,
+          } : {
+            excludesFilePath: a.globalExcludes.path ?? "none",
+            excludesFileSha256: a.globalExcludes.sha256 ?? "",
+          }),
+          verificationTreeId: verificationTreeId(),
           handsOffHits,
           cliVersion: req.cliVersion,
           reviewerProvider: decision.reviewerProvider,
@@ -650,7 +674,7 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
       },
       cycleId,
     );
-    req.onStarted?.({ cycleId, projectId: project.id });
+    req.onStarted?.({ cycleId, projectId: project.id, verificationTreeId: verificationTreeId() });
 
     // From here on the check can be aborted (time budget or a signal).
     overallTimer = setTimeout(() => {
@@ -833,7 +857,9 @@ async function runReviewerStep(a: {
     publicFacing: project.public_facing,
     verifyOnly: { handsOffHits: a.handsOffHits },
   };
-  const useQuorum = (project.review?.reviewers.length ?? 0) > 1;
+  const fixed = process.env.GENERALSTAFF_REVIEWER_PROVIDER?.toLowerCase() === "fixed";
+  // Explicit test mode must not dispatch configured quorum providers either.
+  const useQuorum = !fixed && (project.review?.reviewers.length ?? 0) > 1;
   // The reviewer resolves its provider from project configuration and the
   // GENERALSTAFF_REVIEWER_* variables only. This request carries none.
   // Its cwd is the cycle's verify directory, never the materialized tree:

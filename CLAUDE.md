@@ -313,7 +313,8 @@ and low cycle-count means quota isn't at risk.
 **Environment variables:**
 
 - `GENERALSTAFF_REVIEWER_PROVIDER` — selects the provider.
-  Values: `claude` (default), `openrouter`, `ollama`.
+  Values: `claude` (default), `openrouter`, `ollama`, or `fixed` for an explicit
+  [deterministic test/sitting reviewer](docs/contracts/verify-only-cycle.md#deterministic-testsitting-reviewer).
 - `GENERALSTAFF_REVIEWER_MODEL` — optional model override;
   only meaningful for providers that expose a model knob
   (e.g. `qwen/qwen3-coder-plus` for openrouter, `qwen3:8b`

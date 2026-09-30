@@ -31,6 +31,8 @@ import {
   openSync,
   readSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -271,7 +273,14 @@ export async function withPrivateIndex<T>(
   const dir = mkdtempSync(join(tmpdir(), "gs-index-"));
   try {
     const privateIndex = join(dir, "index");
-    if (existsSync(indexPath)) copyFileSync(indexPath, privateIndex);
+    if (existsSync(indexPath)) {
+      copyFileSync(indexPath, privateIndex);
+      // Keep the original index timestamps. Git compares an entry by content ("racily clean") only when its
+      // mtime is not older than the index file's; a copy with a fresh mtime makes git trust stale stat data
+      // and miss a same-size edit made within the same second as the last index write.
+      const stamp = statSync(indexPath);
+      utimesSync(privateIndex, stamp.atime, stamp.mtime);
+    }
     return await fn(pinnedGitEnv({ GIT_INDEX_FILE: privateIndex }));
   } finally {
     rmSync(dir, { recursive: true, force: true });

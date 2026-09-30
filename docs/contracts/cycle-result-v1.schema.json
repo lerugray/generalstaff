@@ -187,6 +187,9 @@
           "type": ["string", "null"],
           "description": "SHA-256 of the pinned excludes file's bytes (null when there is no file or it could not be read)."
         },
+        "verificationTreeId": { "type": "integer", "minimum": 1 },
+        "excludesFilePath": { "type": "string" },
+        "excludesFileSha256": { "type": "string" },
         "reaped": {
           "type": "boolean",
           "description": "Every verification command's process group was proven reaped. An unproven reap fails the check."

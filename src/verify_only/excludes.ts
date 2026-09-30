@@ -21,6 +21,7 @@
 import { createHash } from "crypto";
 import { existsSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import { VerifyRefusal } from "./refusal";
 import { DigestError } from "./digest";
 import { DEFAULT_GIT_TIMEOUT_MS, NULL_DEVICE, runGitRaw } from "./git";
 
@@ -143,4 +144,13 @@ function fullCallerEnv(): Record<string, string> {
     if (value !== undefined) env[key] = value;
   }
   return env;
+}
+
+/** A supplied pin is authoritative; never re-resolve it from HOME/XDG. */
+export function checkExcludesPin(pin: { path: string | null; sha256: string | null }): GlobalExcludes {
+  if (pin.path === null && pin.sha256 === null) return { source: "none", ...pin };
+  if (pin.path === null || pin.sha256 === null || sha256OfMaybeFile(pin.path) !== pin.sha256) {
+    throw new VerifyRefusal("excludes_mismatch", "the pinned global excludes file is missing, unreadable, or has changed");
+  }
+  return { source: "config", ...pin };
 }

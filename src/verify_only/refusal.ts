@@ -21,6 +21,7 @@ export type RefusalCode =
   | "snapshot_limit"
   | "unsupported_digest_algorithm"
   | "digest_mismatch"
+  | "excludes_mismatch"
   | "empty_patch"
   | "no_verification_command"
   | "verify_in_progress"
