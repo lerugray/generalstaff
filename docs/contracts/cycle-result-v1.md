@@ -20,10 +20,14 @@ local inference of a pass.
 | Cwd | GeneralStaff root (directory that holds `projects.yaml` / state) |
 | Exit codes | Process exits `0` after a completed single cycle regardless of `final_outcome` (outcome lives in the audit log). Missing `--project` / unknown project → `1`. |
 | Stdout during run | Human progress lines (unbounded conversational). **Not** the v1 result document. |
-| Result readback | `generalstaff cycle result <cycle-id> --json` → **one** v1 JSON object on stdout, pretty-printed; stderr for errors. Exit `0` on emit; `1` if cycle not found or unreadable. |
+| Result readback | `generalstaff cycle result <cycle-id> --json` → **one** v1 JSON object on stdout, pretty-printed on success. Exit `0` on receipt emit; `1` if cycle not found or unreadable, with a JSON `error` object on stdout and one clean stderr line. |
 
 Bounded result stdout is the `cycle result --json` path only. Do not parse the
-human cycle runner log for gate state.
+human cycle runner log for gate state. Read failures emit
+`{"error":{"code":"receipt_evidence_unreadable","message":"receipt evidence unreadable: digest-input.bin (EISDIR)"}}`
+(with the actual artifact name and filesystem error code), never a passing
+receipt or a stack trace. Missing artifacts retain the existing unavailable
+receipt behavior; other result lookup errors use `cycle_result_unavailable`.
 
 `generalstaff cycle show <cycle-id> [--json]` remains the older dispatch-detail
 view (gs-264). Its JSON shape is **not** this contract.
@@ -128,7 +132,7 @@ already ignore; a cycle that recorded none of them reads exactly as before.
 | --- | --- |
 | `identity.patchDigestAlgorithm` | How `identity.patchDigest` is computed and recomputed. Absent: `sha256` of the bytes of `diff.patch` (§2). `"gs-patch-digest/v1"`: `sha256` of the file at `evidence.bundlePath` (contract: [gs-patch-digest-v1.md](./gs-patch-digest-v1.md)). Recorded on `cycle_start` and `cycle_end` as `patch_digest_algorithm`. An id the reader does not know reads `unavailable` (`unsupported_digest_algorithm`) whenever the cycle would otherwise pass |
 | `evidence.bundlePath` | Relative path of the frozen digest input (`digest-input.bin` in the cycle directory). Emitted only with `patchDigestAlgorithm`; required for `passed` when the algorithm is `gs-patch-digest/v1` |
-| `verify` | Object of verify-only facts, recorded on `cycle_end` and whitelisted on read: `mode`, `changesetDigest`, `digestAlgorithm`, `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`, `verificationTreeId` (owned CLI process group id), `excludesFilePath` / `excludesFileSha256` (caller-pinned calls: path or `"none"`, hash or empty), otherwise the legacy pair `globalExcludesFile`, `globalExcludesSha256` (the pinned global git excludes file and the SHA-256 of its bytes; both `null` when the user has none), `handsOffHits` (`{file, pattern}` list), `cliVersion`, `reviewerProvider`, `failureCategory`, `reaped` (boolean; every verification process group was proven reaped — an unproven reap fails the check), `cleanupFailed` (boolean; added by the reader, not written on `cycle_end`, when the cycle's log has a `verify_cleanup_failed` event: the check's worktree could not be removed) |
+| `verify` | Object of verify-only facts, recorded on `cycle_end` and whitelisted on read: `mode`, `changesetDigest`, `digestAlgorithm`, `baseRevision`, `checkoutPath`, `worktreePath`, `excludedPaths`, `verificationTreeId` (owned CLI process group id), `excludesFilePath` / `excludesFileSha256` (caller-pinned calls: path or `"none"`, hash or empty), otherwise the legacy pair `globalExcludesFile`, `globalExcludesSha256` (the pinned global git excludes file and the SHA-256 of its bytes; both `null` when the user has none), `handsOffHits` (`{file, pattern}` list), `cliVersion`, `reviewerProvider`, `failureCategory`, `reaped` (boolean; every verification and cleanup Git process group was proven reaped — an unproven reap fails the check before the terminal record is written), `cleanupFailed` (boolean; added by the reader, not written on `cycle_end`, when the cycle's log has a `verify_cleanup_failed` event: the worktree could not be removed or cleanup Git could not be proven reaped) |
 
 `verify.mode` is `"verify_only"` for a verification of an uncommitted change.
 A document with no `verify` object, or another `mode`, is not that; consumers

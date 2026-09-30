@@ -52,6 +52,7 @@ import {
   removeVerifyTree,
   renderReviewDiff,
   type Materialized,
+  type VerifyTreeCleanup,
 } from "./materialize";
 import { VerifyRefusal, toRefusal } from "./refusal";
 import { killAllOwnedGroups, type RunnerOptions, type RunnerResult } from "./runner";
@@ -496,6 +497,8 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
     const { globalExcludes, materialized, review, redacted, cycleDirAbs } = preflight;
 
     let result: VerifyRunResult | undefined;
+    let cleanupPromise: Promise<VerifyTreeCleanup> | undefined;
+    const cleanup = () => cleanupPromise ??= removeVerifyTree(req.checkout, verifyDir);
     try {
       result = await runRecordedCheck({
         req,
@@ -508,20 +511,21 @@ async function runInner(req: VerifyRunRequest): Promise<VerifyRunResult> {
         review,
         redacted,
         cycleDirAbs,
+        cleanup,
       });
     } finally {
-      // REAL #2: cleanup must not fail silently. A worktree that survives
-      // its check holds bundled bytes and the tree's index; say so on the
-      // record and on stderr. The receipt's verify block carries reaped;
-      // cleanup status reaches the log through this event.
-      const cleanedUp = await removeVerifyTree(req.checkout, verifyDir);
-      if (result) result.cleanedUp = cleanedUp;
-      if (!cleanedUp) {
-        console.error(
-          `generalstaff: verify cleanup failed: the worktree directory ${verifyDir} could not be removed; the next check for this project will sweep it`,
-        );
+      // Also clean up if recording failed before the terminal writer ran.
+      const cleanedUp = await cleanup();
+      if (result) result.cleanedUp = cleanedUp.removed;
+      if (!cleanedUp.removed || !cleanedUp.reaped) {
+        const reason = !cleanedUp.reaped
+          ? `Git process tree was not proven reaped: ${scrubLine(cleanedUp.error ?? "unknown cleanup ownership")}`
+          : `the worktree directory ${verifyDir} could not be removed; the next check for this project will sweep it`;
+        console.error(`generalstaff: verify cleanup failed: ${reason}`);
         try {
-          await appendProgress(project.id, "verify_cleanup_failed", { path: verifyDir }, cycleId);
+          await appendProgress(project.id, "verify_cleanup_failed", {
+            path: verifyDir, reaped: cleanedUp.reaped, reason,
+          }, cycleId);
         } catch {
           /* the log itself is unwritable; nothing more can be recorded */
         }
@@ -546,6 +550,7 @@ interface RecordedCheckArgs {
   /** Redacted review diff, already written to the cycle's diff.patch. */
   redacted: ReturnType<typeof redactSecrets>;
   cycleDirAbs: string;
+  cleanup: () => Promise<VerifyTreeCleanup>;
 }
 
 /** From cycle_start to cycle_end: everything here is on the record. */
@@ -572,6 +577,15 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
   let terminalWritten = false;
   const writeTerminal = async (decision: Decision): Promise<void> => {
     if (terminalWritten) return;
+    // A passing terminal record is authoritative. Prove cleanup ownership
+    // before writing it, and carry any unproven reap into the returned result.
+    const cleanup = await a.cleanup();
+    if (!cleanup.reaped) {
+      Object.assign(decision, failedDecision(
+        `Cleanup Git process tree was not proven reaped: ${scrubLine(cleanup.error ?? "unknown cleanup ownership")}`,
+        "verification_error", false,
+      ));
+    }
     terminalWritten = true;
     await appendProgress(
       project.id,
@@ -763,6 +777,8 @@ async function runRecordedCheck(a: RecordedCheckArgs): Promise<VerifyRunResult> 
       decision = first.decision;
     }
 
+    // Cleanup has its own cap; the check's work budget ends with its decision.
+    if (overallTimer !== undefined) clearTimeout(overallTimer);
     await writeTerminal(decision);
     return {
       cycleId,

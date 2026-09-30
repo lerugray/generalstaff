@@ -128,7 +128,7 @@ describe("bundle write and read", () => {
     expect(review.diff).toContain("rename from");
     expect(review.stat).toContain("untracked.bin");
 
-    expect(await removeVerifyTree(dir, m.verifyDir)).toBe(true);
+    expect(await removeVerifyTree(dir, m.verifyDir)).toEqual({ removed: true, reaped: true });
     expect(existsSync(m.verifyDir)).toBe(false);
     expect(git(dir, ["worktree", "list"]).split("\n")).toHaveLength(1);
     expect(existsSync(join(dir, ".git", "worktrees"))).toBe(false);

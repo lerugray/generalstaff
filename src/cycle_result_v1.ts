@@ -4,7 +4,7 @@
 import { createHash } from "crypto";
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
-import { join, relative } from "path";
+import { basename, join, relative } from "path";
 import { collectProgressLogPaths } from "./views/dispatch_detail";
 import { loadProjects } from "./projects";
 import { getRootDir } from "./state";
@@ -121,9 +121,24 @@ export interface CycleResultV1 {
 }
 
 export class CycleResultError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly code = "cycle_result_unavailable") {
     super(message);
     this.name = "CycleResultError";
+  }
+}
+
+/** Missing evidence remains unavailable; unreadable evidence is a clean refusal. */
+async function readReceiptArtifact(path: string): Promise<Buffer | null> {
+  try {
+    return await readFile(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    const safe = (value: string) => value.replace(/[\u0000-\u001f\u007f]+/g, " ");
+    throw new CycleResultError(
+      `receipt evidence unreadable: ${safe(basename(path))} (${safe(code ?? "read failed")})`,
+      "receipt_evidence_unreadable",
+    );
   }
 }
 
@@ -321,13 +336,9 @@ export async function getCycleResultV1(
   let relevantMalformedLine = false;
 
   for (const path of paths) {
-    let raw: string;
-    try {
-      raw = await readFile(path, "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of raw.split("\n")) {
+    const bytes = await readReceiptArtifact(path);
+    if (bytes === null) continue;
+    for (const line of bytes.toString("utf8").split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
       const evt = parseRawEvent(trimmed);
@@ -553,20 +564,21 @@ export async function getCycleResultV1(
   const diffAbs = join(cycleDirAbs, "diff.patch");
   const reviewerAbs = join(cycleDirAbs, "reviewer-response.txt");
 
+  // These are evidence even when they are not the digest source. A directory
+  // or unreadable file must never satisfy evidenceComplete via existsSync.
+  const diffBytes = await readReceiptArtifact(diffAbs);
+  const reviewerBytes = await readReceiptArtifact(reviewerAbs);
   const recordedAlgorithm = endAlgorithm ?? startAlgorithm;
   const digestInputAbs = join(cycleDirAbs, DIGEST_INPUT_FILENAME);
   let currentPatchDigest: string | null = null;
   let bundleRel: string | null = null;
   let unsupportedAlgorithm = false;
   if (recordedAlgorithm === null) {
-    if (existsSync(diffAbs)) {
-      const bytes = await readFile(diffAbs);
-      currentPatchDigest = patchDigestFromBytes(bytes);
-    }
+    if (diffBytes !== null) currentPatchDigest = patchDigestFromBytes(diffBytes);
   } else if (recordedAlgorithm === PATCH_DIGEST_ALGORITHM) {
     // The digest binds the frozen digest input, not the human-readable patch.
-    if (existsSync(digestInputAbs)) {
-      const bytes = await readFile(digestInputAbs);
+    const bytes = await readReceiptArtifact(digestInputAbs);
+    if (bytes !== null) {
       currentPatchDigest = patchDigestFromBytes(bytes);
       bundleRel = relFromRoot(root, digestInputAbs);
     }
@@ -589,8 +601,8 @@ export async function getCycleResultV1(
   const cycleDirRel = existsSync(cycleDirAbs)
     ? relFromRoot(root, cycleDirAbs)
     : `state/${projectId}/cycles/${cycleId}`;
-  const diffRel = existsSync(diffAbs) ? relFromRoot(root, diffAbs) : null;
-  const reviewerRel = existsSync(reviewerAbs)
+  const diffRel = diffBytes !== null ? relFromRoot(root, diffAbs) : null;
+  const reviewerRel = reviewerBytes !== null
     ? relFromRoot(root, reviewerAbs)
     : null;
 

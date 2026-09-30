@@ -19,6 +19,7 @@ import { delimiter, join } from "path";
 import { cliFixturePath, installTestCli, scriptCommand, sleepingCommand } from "./helpers/test_cli";
 import { createHash } from "crypto";
 import * as childProcess from "child_process";
+import * as gitRunner from "../src/verify_only/git";
 import {
   getCycleResultV1,
   meetsPassCondition,
@@ -1097,6 +1098,57 @@ if ((" " + args.join(" ") + " ").includes(${JSON.stringify(" " + stallWhen + " "
 
 const stalledRunner = (): Promise<RunnerResult> => new Promise<RunnerResult>(() => undefined);
 
+describe("cleanup Git ownership", () => {
+  for (const command of ["remove", "prune"]) {
+    it(`unproven worktree ${command} fails the result and receipt before any terminal pass`, async () => {
+      fx = makeVerifyFixture();
+      const fixture = fx;
+      const original = gitRunner.runGit;
+      let cleanup = false;
+      let injected = 0;
+      const spy = spyOn(gitRunner, "runGit").mockImplementation(async (args, opts) => {
+        if (cleanup && args[0] === "worktree") {
+          // Even while either cleanup command is in flight, no terminal pass
+          // may exist for a reader to consume.
+          expect(progressEvents(fixture).filter(e => e.event === "cycle_end")).toHaveLength(0);
+          const result = await original(args, opts);
+          if (args[1] === command) {
+            injected++;
+            return { ...result, code: 0, reaped: false,
+              reapError: "QueryInformationJobObject failed (Win32 error 5)" };
+          }
+          return result;
+        }
+        return original(args, opts);
+      });
+      try {
+        const { result, cycleId } = await inProcessVerify(fixture, {
+          onStarted: () => { cleanup = true; },
+          runShell: async () => ({ exitCode: 0, signal: null, timedOut: false, aborted: false,
+            durationSeconds: 0, output: "ok", omittedBytes: 0, reaped: true, pid: null }),
+        });
+        expect(injected).toBe(1);
+        expect(result.cleanedUp).toBe(true);
+        expect(result.passed).toBe(false);
+        expect(result.reaped).toBe(false);
+        expect(result.category).toBe("verification_error");
+        expect(result.reason).toContain("Win32 error 5");
+        const terminal = progressEvents(fixture).filter(e => e.event === "cycle_end");
+        expect(terminal).toHaveLength(1);
+        expect(terminal[0]!.data.outcome).toBe("verification_failed");
+        const doc = await receiptOf(fixture, cycleId);
+        expect(doc.state).toBe("failed");
+        expect(meetsPassCondition(doc)).toBe(false);
+        expect(doc.verify!.reaped).toBe(false);
+        expect(doc.verify!.cleanupFailed).toBe(true);
+        expect(doc.outcome.reason).toContain(`worktree ${command}`);
+        expect(doc.outcome.reason).toContain("Win32 error 5");
+        expect(validateAgainstSchema(doc, SCHEMA, SCHEMA)).toEqual([]);
+      } finally { spy.mockRestore(); }
+    });
+  }
+});
+
 describe("hardening fix round 2", () => {
   posixIt("item 1: cleanupFailed round-trips writer -> schema -> reader when a real worktree removal fails", async () => {
     if (process.getuid?.() === 0) return; // root ignores directory permissions
@@ -1259,7 +1311,7 @@ describe("hardening fix round 2", () => {
       expect(Date.now() - started).toBeLessThan(3 * stepMs + 3000);
       expect(handedOff).toBe(true);
       // The directory removal is its own step and still succeeded.
-      expect(gone).toBe(true);
+      expect(gone.removed).toBe(true);
       expect(existsSync(verifyDir)).toBe(false);
       // SIGKILL can precede OS reaping: allow at most 1 s to observe death,
       // well inside the 30 s timeout. A surviving process still fails the test.

@@ -18,6 +18,7 @@ export class WindowsOwnedProcess {
   private taskkillDetail?: string;
   private stopped = false;
   private released = false;
+  private releaseResult?: ReapResult;
   private readonly job: WindowsJob;
 
   constructor(command: string, args: readonly string[], options: SpawnOptions) {
@@ -65,8 +66,16 @@ export class WindowsOwnedProcess {
   stop(): void {
     if (this.released) return;
     if (this.stopped) {
-      // Later terminal cleanup may retry the native stop without paying for
-      // another taskkill or trusting a PID after its launcher exited.
+      // The launcher may be stuck BEFORE joining the job. Kill its owned
+      // child handle directly on retry; an empty job cannot terminate it.
+      // Never signal a launcher whose exit we have already observed.
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        try {
+          if (!this.child.kill("SIGKILL")) throw new Error("launcher termination could not be delivered");
+        } catch (error) {
+          this.stopError = [this.stopError, error instanceof Error ? error.message : String(error)].filter(Boolean).join(": ");
+        }
+      }
       try { this.job.terminate(); }
       catch (error) { this.stopError = error instanceof Error ? error.message : String(error); }
       return;
@@ -106,19 +115,20 @@ export class WindowsOwnedProcess {
   }
 
   async release(): Promise<ReapResult> {
-    if (this.released) return { reaped: true };
+    if (this.released) return this.releaseResult!;
     try {
       if (!this.empty()) this.stop();
       const deadline = Date.now() + REAP_MS;
       while (!this.empty() && Date.now() < deadline) {
         await new Promise<void>(resolve => setTimeout(resolve, 20));
       }
+      if (!this.empty()) this.stop(); // Retry direct launcher termination too.
       if (!this.empty()) return { reaped: false,
         error: `Windows process job was not proven reaped: ${this.stopError ?? this.taskkillDetail ?? "live processes remain"}` };
       this.job.close();
       this.released = true;
       const error = this.setupError ?? this.stopError;
-      return { reaped: error === undefined, error };
+      return this.releaseResult = { reaped: error === undefined, error };
     } catch (error) {
       this.stop(); // A failed query is not a reason to leave owned work running.
       return { reaped: false, error: [this.setupError, this.stopError ?? this.taskkillDetail,

@@ -240,13 +240,20 @@ starting its command; descendants inherit membership. Cleanup terminates the
 job and checks its active-process count, including after the launcher exits.
 The launcher must also have exited. A bounded taskkill can assist stopping a
 live launcher; its process-not-found status is harmless only with the same
-empty-job proof. Unknown ownership or a failed query fails closed. Job setup
+empty-job proof. A stop retry also directly terminates a still-live launcher,
+including one stuck before job assignment. Timeout/abort completion starts a
+bounded reap without requiring an exit or close event; an unresponsive launcher
+returns an unproven reap. Unknown ownership or a failed query fails closed. Job setup
 and reap failures carry `git_reap_failed` for Git, with the native or taskkill
 cause, never `git_missing`. This Windows path requires Bun's native FFI support.
 A process group that could not be *proven* reaped fails the check
 (`verify.reaped` is `false`, category `verification_error`): a surviving group
 may still be running commands against operator state, and must never read as a
-pass. If the worktree cannot be removed after the check, a
+pass. This includes the Git processes used by `worktree remove` and
+`worktree prune`: directory absence alone is not reap proof. Cleanup completes
+before the terminal `cycle_end` is written; an unproven cleanup reap changes
+the result and receipt to failure and retains the underlying cause.
+If the worktree cannot be removed or cleanup Git cannot be proven reaped, a
 `verify_cleanup_failed` event is appended to the cycle's `PROGRESS.jsonl` and a
 warning goes to stderr; the next check for the project sweeps the leftover.
 The command's environment is a small pinned set (`PATH`, `HOME`, locale,
@@ -284,7 +291,8 @@ with these additive fields (see [cycle-result-v1.md](./cycle-result-v1.md) §8):
   `handsOffHits`, `cliVersion`, `reviewerProvider`, `failureCategory`, and
   `reaped` (whether every verification process group was proven reaped), and
   `cleanupFailed` (added by the receipt reader when the cycle's log has a
-  `verify_cleanup_failed` event; the check's worktree could not be removed).
+  `verify_cleanup_failed` event; the worktree could not be removed or cleanup
+  Git could not be proven reaped).
 
 `verify.failureCategory` is `null` for a pass, else one of
 `verification_nonzero`, `verification_timeout`, `verification_error`,

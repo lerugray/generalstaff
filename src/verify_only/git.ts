@@ -377,6 +377,8 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       signal?.removeEventListener("abort", onAbort);
       const { reaped, error } = await (windowsChild && child.pid === undefined
         ? windowsChild.release() : releaseGitGroup(child.pid));
+      child.stdout?.destroy();
+      child.stderr?.destroy();
       if (windowsChild?.spawnError) result.spawnError = windowsChild.spawnError;
       if (!reaped) result.reapError = error ?? "Git process tree was not proven reaped";
       resolve(reaped ? { ...result, reaped } : {
@@ -390,6 +392,8 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
     const timer = setTimeout(() => {
       timedOut = true;
       killGitGroup(child);
+      // release owns a bounded reap even when the launcher never emits exit.
+      onClose(null);
     }, timeoutMs);
 
     // Finish owns the bounded group reap on every exit, including an abort:
@@ -416,6 +420,7 @@ function runGitRawInner(args: readonly string[], opts: GitRunOptions): Promise<G
       if (stdoutLen > maxStdout) {
         truncated = true;
         killGitGroup(child);
+        onClose(null);
         return;
       }
       stdoutChunks.push(chunk);

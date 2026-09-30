@@ -165,7 +165,6 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
     if (pid !== null) activeGroups.add(pid);
     let timedOut = false;
     let aborted = false;
-    let exited = false;
     let exitCode: number | null = null;
     let exitSignal: NodeJS.Signals | null = null;
     let spawnError: string | undefined;
@@ -180,7 +179,11 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
       if (pid === null || politeUntil !== undefined) return;
       politeUntil = performance.now() + graceMs;
       killGroup(pid, "SIGTERM");
-      escalation = setTimeout(() => killGroup(pid, "SIGKILL"), graceMs);
+      escalation = setTimeout(() => {
+        killGroup(pid, "SIGKILL");
+        // Do not require exit/close to begin the bounded ownership proof.
+        void finish();
+      }, graceMs);
     };
 
     const timer = setTimeout(() => {
@@ -255,11 +258,9 @@ export async function runOwnedShell(opts: RunnerOptions): Promise<RunnerResult> 
     child.on("error", (err) => {
       if (child.pid === undefined) spawnError = err.message;
       else capture.push(Buffer.from(`\nProcess error: ${err.message}\n`));
-      exited = true;
       void finish();
     });
     child.on("exit", (code, sig) => {
-      exited = true;
       exitCode = code;
       exitSignal = sig;
       // Output normally drains and 'close' follows at once. A descendant that

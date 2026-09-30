@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import {
   getCycleResultV1,
+  CycleResultError,
   meetsPassCondition,
   patchDigestFromBytes,
   type CycleResultV1,
@@ -105,6 +106,33 @@ function write(opts: Opts = {}): void {
 
 const read = (): Promise<CycleResultV1> =>
   getCycleResultV1(CYCLE, { fleetLogPath: LOG, checkoutPathOverride: "/work/alpha" });
+
+describe("unreadable receipt evidence", () => {
+  for (const artifact of ["digest-input.bin", "diff.patch", "reviewer-response.txt", "PROGRESS.jsonl"]) {
+    for (const legacy of artifact === "diff.patch" ? [false, true] : [false]) {
+      it(`refuses a directory at ${artifact}${legacy ? " (legacy digest)" : ""} through the reader and JSON CLI`, async () => {
+        write(legacy ? { algorithm: null, verify: null } : {});
+        const path = artifact === "PROGRESS.jsonl" ? LOG : join(CYCLE_DIR, artifact);
+        rmSync(path);
+        mkdirSync(path);
+        let error: unknown;
+        try { await read(); } catch (caught) { error = caught; }
+        expect(error).toBeInstanceOf(CycleResultError);
+        expect((error as Error).message).toBe(`receipt evidence unreadable: ${artifact} (EISDIR)`);
+        const proc = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli.ts"),
+          "cycle", "result", CYCLE, "--json"], { cwd: DIR, stdout: "pipe", stderr: "pipe" });
+        const [stdout, stderr, exit] = await Promise.all([
+          new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+        ]);
+        expect(exit).toBe(1);
+        expect(stderr.trim()).toBe(`Error: receipt evidence unreadable: ${artifact} (EISDIR)`);
+        expect(JSON.parse(stdout)).toEqual({ error: {
+          code: "receipt_evidence_unreadable", message: `receipt evidence unreadable: ${artifact} (EISDIR)`,
+        } });
+      });
+    }
+  }
+});
 
 describe("cycle-result/v1 reader: verify-only additions", () => {
   it("binds a verify-only cycle to the digest of its frozen digest input", async () => {

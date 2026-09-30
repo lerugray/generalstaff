@@ -211,13 +211,18 @@ export const CLEANUP_STEP_MS = 10_000;
 /** Cleanup runs three steps, so it is bounded by three step budgets. */
 export const CLEANUP_CAP_SEC = (3 * CLEANUP_STEP_MS) / 1000;
 
-async function boundedStep(work: Promise<unknown>, ms: number): Promise<void> {
+type StepResult<T> = { value: T } | { error: string };
+
+async function boundedStep<T>(work: Promise<T>, ms: number, onTimeout?: () => void): Promise<StepResult<T>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await Promise.race([
-      work.catch(() => undefined),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, ms);
+    return await Promise.race([
+      work.then(value => ({ value }), error => ({ error: String(error) })),
+      new Promise<StepResult<T>>((resolve) => {
+        timer = setTimeout(() => {
+          onTimeout?.();
+          resolve({ error: `cleanup step exceeded ${ms} ms; reap was not proven` });
+        }, ms);
       }),
     ]);
   } finally {
@@ -225,40 +230,47 @@ async function boundedStep(work: Promise<unknown>, ms: number): Promise<void> {
   }
 }
 
+export interface VerifyTreeCleanup {
+  removed: boolean;
+  reaped: boolean;
+  error?: string;
+}
+
 /**
- * Remove the worktree and its directory. Never throws; returns whether it is
- * gone. Bounded: at most three steps of `stepMs` each. Runs outside any git
- * abort context, so it still works after the check's own git was stopped.
+ * Remove the worktree and its directory. Never throws. Directory removal and
+ * Git ownership are independent facts: absence cannot prove a process reap.
+ * Each step is bounded; a Git deadline aborts the call and fails closed if
+ * its reap result is not available. Cleanup runs outside the check's abort.
  */
 export function removeVerifyTree(
   checkout: string,
   verifyDir: string,
   stepMs: number = CLEANUP_STEP_MS,
-): Promise<boolean> {
-  // git's own timer fires (and kills its group) before the step's race ends.
+): Promise<VerifyTreeCleanup> {
   const gitStepMs = Math.max(100, stepMs - 500);
   return withoutGitAbort(async () => {
-    const tree = join(verifyDir, "tree");
-    if (existsSync(tree)) {
-      await boundedStep(
-        runGit(["worktree", "remove", "--force", tree], {
+    const errors: string[] = [];
+    const cleanupGit = async (args: string[]) => {
+      const abort = new AbortController();
+      const step = await boundedStep(
+        runGit(args, {
           cwd: checkout,
           maxStdoutBytes: 64 * 1024,
           timeoutMs: gitStepMs,
-        }),
-        stepMs,
+          signal: abort.signal,
+        }), stepMs, () => abort.abort(),
       );
-    }
+      if ("error" in step) errors.push(`${args.slice(0, 2).join(" ")}: ${step.error}`);
+      else if (step.value.reaped !== true) {
+        errors.push(`${args.slice(0, 2).join(" ")}: ${gitErrorDetail(step.value)}`);
+      }
+    };
+    const tree = join(verifyDir, "tree");
+    if (existsSync(tree)) await cleanupGit(["worktree", "remove", "--force", tree]);
     await boundedStep(rm(verifyDir, { recursive: true, force: true }), stepMs);
-    await boundedStep(
-      runGit(["worktree", "prune"], {
-        cwd: checkout,
-        maxStdoutBytes: 64 * 1024,
-        timeoutMs: gitStepMs,
-      }),
-      stepMs,
-    );
-    return !existsSync(verifyDir);
+    await cleanupGit(["worktree", "prune"]);
+    return { removed: !existsSync(verifyDir), reaped: errors.length === 0,
+      ...(errors.length ? { error: errors.join("; ") } : {}) };
   });
 }
 
@@ -387,7 +399,10 @@ export async function materializeSnapshot(
     }
     return { treePath: tree, verifyDir: opts.verifyDir, bundle, snapshot };
   } catch (err) {
-    if (created) await removeVerifyTree(opts.checkout, opts.verifyDir);
+    if (created) {
+      const cleanup = await removeVerifyTree(opts.checkout, opts.verifyDir);
+      if (!cleanup.reaped) throw new VerifyRefusal("git_reap_failed", `Snapshot cleanup reap failed: ${cleanup.error}`);
+    }
     const mapped = toRefusal(err);
     if (mapped instanceof VerifyRefusal) throw mapped;
     if (err instanceof BundleError || err instanceof DigestError) throw mapped;
