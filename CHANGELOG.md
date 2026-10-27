@@ -7,6 +7,17 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## v0.16.1 — 2026-10-26
+
+Verify-only now passes on Linux, macOS and Windows, and it is more careful about the processes it stops.
+
+- CI is green on all three platforms again. Test stubs are cross-platform and PATH uses the platform's own separator. (#2)
+- On abort, verify-only stops the whole git process tree it started on Windows. (#2)
+- The verify-only CLI meets the GeneralStaff desktop app's verify-gate contract, checked against the real CLI. (#3)
+- Process-group handling parses `/proc/<pid>/stat` safely, works on systems that hide other users' processes, and never signals its own group. When it can't prove its processes are gone, the receipt says so. (#3)
+- `generalstaff cycle result --json` no longer crashes on an unreadable receipt artifact. It exits 1 with a `receipt_evidence_unreadable` error. (#5)
+- Windows: a git process that had already finished is no longer reported as "could not be started". A reap that can't be proven reports `git_reap_failed`. (#6)
+
 ## v0.16.0 — 2026-09-29
 
 You can now run the gate on work GeneralStaff didn't write: your own change, or one from Claude Code, Cursor or another agent. You get the same checks and a receipt.
