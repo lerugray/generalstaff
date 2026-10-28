@@ -810,13 +810,33 @@ Qwen from emitting unescaped inner content, as belt-and-braces.
 
 ## v5 — Auto-merge / chained-cycles dispatcher behavior (2026-04-18, gs-177)
 
-**Status:** design only. Implementation is queued as **gs-177**.
-This section is the design discussion that gs-177's code should
-land against, written 2026-04-18 after the morning gamr-cycle
+**Status:** implemented via gs-177, with the merge-tree check below.
+This section records the design discussion behind gs-177,
+written 2026-04-18 after the morning gamr-cycle
 test (docs/internal/PHASE-3-COMPLETE-2026-04-18.md §"Generality gaps surfaced")
-exposed that the current dispatcher caps every project at one
+exposed that the dispatcher then capped every project at one
 cycle per session when `auto_merge: false`, which is the
 default per Hard Rule #4.
+
+### 2026-10-28 — Verify the tree that auto-merge lands (#7)
+
+Cycle-start and session-end auto-merges share `mergeVerified`. It always
+builds the `--no-ff` merge commit in a detached `.bot-worktree` at the HEAD
+it inspected and lands that commit with `--ff-only`, so a commit that reaches
+HEAD in the meantime makes the land refuse rather than merge an untested
+tree. When HEAD is an ancestor of the branch, the merge tree is the verified
+branch tip and is not re-verified. When HEAD has diverged, verification runs
+on the merged tree in the worktree under a separate merge check ID and log.
+Failed verification or HEAD moving preserves the bot branch; at cycle start
+it also blocks the project for the rest of the session. Conflicts stay in the
+temporary worktree, which is removed, and the helper refuses to run while a
+merge is already in progress in the main checkout.
+
+Re-verification is skipped when all HEAD-side changes since the merge base
+are under `state/`, but only if the checkout's real path is the GeneralStaff
+root, where dispatcher state commits occur. Other projects' `state/` paths
+receive normal verification. One session-end flush performs the merge and
+writes the success or failure audit event.
 
 ### The bug as observed
 
@@ -874,8 +894,8 @@ seeding the initial idea"* (Ray, 2026-04-18).
 **How it works.** Drop the "reset bot/work to HEAD before each
 cycle" step in `src/cycle.ts:499-507`. Each cycle starts from
 the current `bot/work` HEAD and adds new commits on top. With
-`auto_merge: true`, master fast-forwards every cycle as today
-— `bot/work` and master stay aligned. With `auto_merge: false`,
+`auto_merge: true`, verified bot work is merged into master at the next
+cycle start or session end using the merge-tree check above. With `auto_merge: false`,
 `bot/work` accumulates verified-cycle commits across the
 session. Master is unchanged until human merge.
 

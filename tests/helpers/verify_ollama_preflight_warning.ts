@@ -45,6 +45,7 @@ mock.module("../../src/projects", () => ({
 
 mock.module("../../src/cycle", () => ({
   countCommitsAhead: async () => 0,
+  mergeVerified: async () => { throw new Error("unexpected merge in session fixture"); },
   executeCycle: async (): Promise<CycleResult> => {
     const now = new Date().toISOString();
     return {

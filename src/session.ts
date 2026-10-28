@@ -13,7 +13,7 @@ import {
 import { appendProgress, loadProgressEvents, setVerboseMode } from "./audit";
 import { isStopFilePresent } from "./safety";
 import { join as pathJoin } from "path";
-import { executeCycle, countCommitsAhead } from "./cycle";
+import { executeCycle, countCommitsAhead, mergeVerified } from "./cycle";
 import { killActiveEngineer } from "./active_engineer";
 import { startStopFileWatcher } from "./stop_watcher";
 import {
@@ -1342,35 +1342,6 @@ export async function runSession(options: SessionOptions) {
     }
   }
 
-  // Session-end merge: for any project with auto_merge=true that has
-  // verified work sitting on its bot branch, merge it into HEAD now.
-  // Without this, the final cycle's work waits on bot/work until the
-  // next session's first cycle picks it up via the cycle.ts path —
-  // cosmetically confusing because the digest says N verified while
-  // master only reflects N-1. Safe because gs-132 guarantees it:
-  // verification_failed cycles roll their commits off bot/work before
-  // cycle_end, so anything reachable here has passed the gate.
-  for (const p of projects) {
-    if (!p.auto_merge) continue;
-    if (!cyclesPerProject.has(p.id)) continue;
-    if (sessionBlockedProjects.has(p.id)) continue;
-    try {
-      const unmerged = await countCommitsAhead(p.path, p.branch, "HEAD");
-      if (unmerged > 0) {
-        console.log(
-          `Session end: auto-merging ${unmerged} commit(s) from ${p.branch} into HEAD (${p.id})...`,
-        );
-        const msg = `Merge branch '${p.branch}' (session-end auto, ${unmerged} cycle-commit(s))`;
-        await $`git -C ${p.path} merge --no-ff ${p.branch} -m ${msg}`.quiet();
-        console.log(`Merged ${p.branch} into HEAD.`);
-      }
-    } catch {
-      console.log(
-        `Warning: session-end merge of ${p.branch} failed for ${p.id} — manual merge required`,
-      );
-    }
-  }
-
   // Write session summary
   const elapsed = elapsedMinutes();
   // Session-end auto-merge flush (gs-254). The cycle-start merge
@@ -1378,13 +1349,14 @@ export async function runSession(options: SessionOptions) {
   // session ends on a verified cycle its bot/work commits sit unmerged
   // until the NEXT session. That confused the 2026-04-19 morning run
   // (gs-252 shipped, verified, but didn't appear on master because no
-  // follow-up cycle ran to trigger the merge). Flushing here guarantees
-  // "verified work that the user already saw in PROGRESS.jsonl is on
-  // master before we close the session."
+  // follow-up cycle ran to trigger the merge). The shared helper checks
+  // combined trees before landing them and reports rejected merges.
   await flushSessionEndMerges(
     projects,
     cyclesPerProject,
     sessionBlockedProjects,
+    config,
+    dryRun,
   );
 
   console.log(`\n=== Session Complete ===`);
@@ -2219,6 +2191,8 @@ export async function flushSessionEndMerges(
   projects: ProjectConfig[],
   cyclesPerProject: Map<string, number>,
   blockedProjectIds: ReadonlySet<string> = new Set(),
+  config?: DispatcherConfig,
+  dryRun: boolean = false,
 ): Promise<SessionEndMergeResult[]> {
   const results: SessionEndMergeResult[] = [];
   for (const p of projects) {
@@ -2281,7 +2255,10 @@ export async function flushSessionEndMerges(
     );
     try {
       const msg = `Merge branch '${p.branch}' (session-end auto, ${unmerged} cycle-commit(s))`;
-      await $`git -C ${p.path} merge --no-ff ${p.branch} -m ${msg}`.quiet();
+      const ts = new Date().toISOString().replace(/[-:T]/g, "").replace(/\.\d+Z$/, "");
+      const checkId = `${ts}_${Math.random().toString(36).slice(2, 6)}-session-end-merge`;
+      const merge = await mergeVerified(p, p.branch, msg, checkId, config, dryRun);
+      if (!merge.ok) throw new Error(`${merge.kind}: ${merge.reason}`);
       console.log(`  Merged ${p.branch} into HEAD.`);
       await appendProgress(p.id, "session_end_auto_merge", {
         branch: p.branch,
@@ -2298,7 +2275,7 @@ export async function flushSessionEndMerges(
       const reason = err instanceof Error ? err.message : String(err);
       console.log(
         `  WARNING: session-end merge of ${p.branch} failed — manual intervention required ` +
-          `(likely a dirty working tree or a conflict with interactive work on master).`,
+          `(${reason}).`,
       );
       await appendProgress(p.id, "session_end_auto_merge", {
         branch: p.branch,

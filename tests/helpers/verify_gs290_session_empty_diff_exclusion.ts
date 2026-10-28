@@ -43,6 +43,7 @@ let executeCycleCalls = 0;
 
 mock.module("../../src/cycle", () => ({
   countCommitsAhead: async () => 0,
+  mergeVerified: async () => { throw new Error("unexpected merge in session fixture"); },
   executeCycle: async (
     _p: ProjectConfig,
     _c: DispatcherConfig,

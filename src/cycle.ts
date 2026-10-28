@@ -2,7 +2,7 @@
 // Orchestrate: engineer → verification → reviewer → audit log
 
 import { readFile } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { join, resolve as resolvePath } from "path";
 import { $ } from "bun";
 import {
@@ -289,6 +289,87 @@ export async function preflightCleanupWorktree(
     };
   }
   return { wasStale: true, removed: !existsSync(wt) };
+}
+
+export type VerifiedMergeResult =
+  | { ok: true; mode: "descendant" | "state_only" | "verified" }
+  | {
+      ok: false;
+      kind: "conflict" | "verification_failed" | "head_moved" | "error";
+      reason: string;
+    };
+
+// Land only the branch's already-verified tree or a checked combined tree.
+// GeneralStaff's own state commits are exempt; another project's state/
+// directory may contain application code and must go through verification.
+// checkId belongs to this merge check, never to the originating cycle.
+//
+// Every path builds the merge commit in the disposable .bot-worktree and
+// lands it with `merge --ff-only`, so a commit that reaches HEAD after the
+// ancestry check makes the land refuse instead of merging an untested tree,
+// and a conflict never leaves the main checkout mid-merge.
+export async function mergeVerified(
+  project: ProjectConfig,
+  branch: string,
+  msg: string,
+  checkId: string,
+  config?: DispatcherConfig,
+  dryRun: boolean = false,
+): Promise<VerifiedMergeResult> {
+  const wt = botWorktreePath(project);
+  try {
+    const cleanup = await preflightCleanupWorktree(project);
+    if (cleanup.wasStale && !cleanup.removed) {
+      return { ok: false, kind: "error", reason: cleanup.warning ?? `could not remove stale ${wt}` };
+    }
+    const inProgress = await $`git -C ${project.path} rev-parse -q --verify MERGE_HEAD`.quiet().nothrow();
+    if (inProgress.exitCode === 0) {
+      return { ok: false, kind: "error", reason: `a merge is already in progress in ${project.path}` };
+    }
+    const headBefore = (await $`git -C ${project.path} rev-parse HEAD`.quiet().text()).trim();
+    const descendant = await $`git -C ${project.path} merge-base --is-ancestor ${headBefore} ${branch}`.quiet().nothrow();
+    if (descendant.exitCode > 1) {
+      return { ok: false, kind: "error", reason: descendant.stderr.toString().trim() || "could not check merge ancestry" };
+    }
+    let mode: "descendant" | "state_only" | "verified" =
+      descendant.exitCode === 0 ? "descendant" : "verified";
+    if (mode === "verified" && realpathSync(project.path) === realpathSync(getRootDir())) {
+      const base = (await $`git -C ${project.path} merge-base ${headBefore} ${branch}`.quiet().text()).trim();
+      // Preserve unusual filenames and both endpoints of renames, so moving
+      // application code into state/ cannot hide a non-state deletion.
+      const paths = (await $`git -C ${project.path} diff --no-renames --name-only -z ${base} ${headBefore}`.quiet().text())
+        .split("\0").filter(Boolean);
+      if (paths.every((path) => path.startsWith("state/"))) mode = "state_only";
+    }
+
+    try {
+      await $`git -C ${project.path} worktree add --detach ${wt} ${headBefore}`.quiet();
+      const merge = await $`git -C ${wt} merge --no-ff ${branch} -m ${msg}`.quiet().nothrow();
+      if (merge.exitCode !== 0) {
+        return { ok: false, kind: "conflict", reason: merge.stderr.toString().trim() || merge.stdout.toString().trim() };
+      }
+      if (mode === "verified") {
+        const verification = await runVerification(project, checkId, config, dryRun, wt);
+        if (verification.outcome === "failed") {
+          return { ok: false, kind: "verification_failed", reason: `merged tree failed verification; log: ${verification.logPath}` };
+        }
+      }
+      const sha = (await $`git -C ${wt} rev-parse HEAD`.quiet().text()).trim();
+      const landed = await $`git -C ${project.path} merge --ff-only ${sha}`.quiet().nothrow();
+      if (landed.exitCode !== 0) {
+        const headNow = (await $`git -C ${project.path} rev-parse HEAD`.quiet().text()).trim();
+        const detail = landed.stderr.toString().trim();
+        return headNow !== headBefore
+          ? { ok: false, kind: "head_moved", reason: `HEAD moved during the merge check; nothing landed (${detail})` }
+          : { ok: false, kind: "error", reason: `could not fast-forward HEAD to the merge: ${detail}` };
+      }
+      return { ok: true, mode };
+    } finally {
+      await cleanupWorktree(project);
+    }
+  } catch (err) {
+    return { ok: false, kind: "error", reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export function validateExpectedWorktree(
@@ -908,17 +989,19 @@ export async function executeCycle(
       console.log(
         `Auto-merging ${handling.unmerged} commit(s) from ${branch} into HEAD...`,
       );
-      try {
-        const msg = `Merge branch '${branch}' (auto, ${handling.unmerged} cycle-commit(s))`;
-        await $`git -C ${project.path} merge --no-ff ${branch} -m ${msg}`.quiet();
-        console.log(`Merged ${branch} into HEAD.`);
-      } catch {
+      const msg = `Merge branch '${branch}' (auto, ${handling.unmerged} cycle-commit(s))`;
+      const merge = await mergeVerified(project, branch, msg, `${cycleId}-merge`, config, dryRun);
+      if (!merge.ok) {
         result.reason =
-          `auto-merge of ${branch} into HEAD failed — ` +
-          `manual intervention required (likely a conflict with interactive work on master)`;
+          `auto-merge of ${branch} into HEAD failed (${merge.kind}) — ${merge.reason}; manual intervention required`;
+        if (merge.kind === "verification_failed" || merge.kind === "head_moved") {
+          result.blocked_for_session = true;
+          result.reason += "; project blocked for the rest of this session";
+        }
         console.log(`\nERROR: ${result.reason}\n`);
         break assemble;
       }
+      console.log(`Merged ${branch} into HEAD.`);
     } else if (handling.kind === "accumulate") {
       // gs-177 / DESIGN.md §v5(a): auto_merge=false with unmerged work.
       // Leave bot/work where it is — the new cycle's worktree will start

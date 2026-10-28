@@ -30,6 +30,7 @@ mock.module("../../src/projects", () => ({
 
 mock.module("../../src/cycle", () => ({
   countCommitsAhead: async () => 0,
+  mergeVerified: async () => { throw new Error("unexpected merge in session fixture"); },
   executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
     executeCycleCalls++;
     // Fixed 60s cycle duration so the ETA math is deterministic.

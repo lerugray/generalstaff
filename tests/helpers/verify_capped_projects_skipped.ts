@@ -37,10 +37,11 @@ mock.module("../../src/projects", () => ({
 }));
 
 mock.module("../../src/cycle", () => ({
-  // session.ts imports countCommitsAhead for the session-end auto-merge.
+  // session.ts imports the merge helpers for session-end auto-merge.
   // This helper's project has auto_merge=false so the code path is never
   // taken, but the import must still resolve in the mocked module.
   countCommitsAhead: async () => 0,
+  mergeVerified: async () => { throw new Error("unexpected merge in session fixture"); },
   executeCycle: async (p: ProjectConfig): Promise<CycleResult> => {
     executeCycleCalls++;
     const now = new Date().toISOString();

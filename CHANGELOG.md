@@ -7,6 +7,10 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## Unreleased
+
+Auto-merge now checks the combined tree when HEAD has moved since the bot's work was verified, leaving HEAD unchanged if that check fails (reported in #7). Session-end merges use the same check and record their result in the audit log.
+
 ## v0.16.1 — 2026-10-26
 
 Verify-only now passes on Linux, macOS and Windows, and it is more careful about the processes it stops.

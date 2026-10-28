@@ -23,11 +23,13 @@ import {
   maxConsecutiveEmptyLimitForRound,
 } from "../src/session";
 import { $ } from "bun";
+import { executeCycle, mergeVerified } from "../src/cycle";
+import { loadProgressEvents } from "../src/audit";
 import { tmpdir } from "os";
 import type { ProjectConfig, ProjectsYaml, DispatcherConfig } from "../src/types";
 import { setRootDir } from "../src/state";
 import { join } from "path";
-import { mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import type { CycleResult } from "../src/types";
 import type { SessionPlanEstimate } from "../src/dispatcher";
 import { makeProjectConfig, makeDispatcherConfig } from "./helpers/fixtures";
@@ -2126,10 +2128,249 @@ describe("flushSessionEndMerges (gs-254)", () => {
       expect(results[0].result).toBe("ok");
       expect(results[0].merged_commits).toBe(1);
       expect(await headSubject(repo)).toContain("Merge branch 'bot/work' (session-end auto");
+      const events = await loadProgressEvents(project.id, (e) => e.event === "session_end_auto_merge");
+      expect(events).toHaveLength(1);
+      expect(events[0].data.result).toBe("ok");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
   });
+
+  it("refuses individually green branches whose combined tree fails verification (#7)", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      project.verification_command = 'test "$(cat a.txt b.txt 2>/dev/null | wc -l)" -le 1';
+      await addBotWorkCommit(repo, "b.txt", "bot\n", "bot adds one line");
+      await $`git -C ${repo} checkout bot/work`.quiet();
+      expect((await $`bash -c ${project.verification_command}`.cwd(repo).quiet().nothrow()).exitCode).toBe(0);
+      await $`git -C ${repo} checkout master`.quiet();
+      writeFileSync(join(repo, "a.txt"), "human\n");
+      await $`git -C ${repo} add a.txt`.quiet();
+      await $`git -C ${repo} commit -m ${"human adds one line"}`.quiet();
+      expect((await $`bash -c ${project.verification_command}`.cwd(repo).quiet().nothrow()).exitCode).toBe(0);
+      const before = await $`git -C ${repo} rev-parse HEAD`.quiet().text();
+      const results = await flushSessionEndMerges([project], new Map([[project.id, 1]]));
+      expect(results[0].result).toBe("failed");
+      expect(await $`git -C ${repo} rev-parse HEAD`.quiet().text()).toBe(before);
+      expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  async function commitOnHead(repo: string, file: string, content: string): Promise<void> {
+    writeFileSync(join(repo, file), content);
+    await $`git -C ${repo} add ${file}`.quiet();
+    await $`git -C ${repo} commit -m ${"interactive change"}`.quiet();
+  }
+
+  async function sha(repo: string, ref = "HEAD"): Promise<string> {
+    return (await $`git -C ${repo} rev-parse ${ref}`.quiet().text()).trim();
+  }
+
+  it("mergeVerified lands a descendant with two parents without verification", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      const before = await sha(repo);
+      await addBotWorkCommit(repo, "bot.txt", "bot", "bot");
+      const bot = await sha(repo, project.branch);
+      project.verification_command = "exit 99";
+      expect(await mergeVerified(project, project.branch, "merge test", "descendant-merge"))
+        .toEqual({ ok: true, mode: "descendant" });
+      expect((await $`git -C ${repo} show -s --format=%P HEAD`.quiet().text()).trim())
+        .toBe(`${before} ${bot}`);
+      expect(await sha(repo, "HEAD^{tree}")).toBe(await sha(repo, `${bot}^{tree}`));
+      expect(await loadProgressEvents(project.id, (e) => e.event === "verification_run")).toHaveLength(0);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("mergeVerified verifies the combined tree and preserves the cycle log", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "b.txt", "bot\n", "bot");
+      await commitOnHead(repo, "a.txt", "human\n");
+      const before = await sha(repo);
+      const bot = await sha(repo, project.branch);
+      project.verification_command = "test -f a.txt && test -f b.txt";
+      const cycleDir = join(TEST_DIR, "state", project.id, "cycles", "cycle-test");
+      mkdirSync(cycleDir, { recursive: true });
+      writeFileSync(join(cycleDir, "verification.log"), "original cycle log");
+      // A stale, unregistered worktree directory must be removed first.
+      mkdirSync(join(repo, ".bot-worktree"));
+      writeFileSync(join(repo, ".bot-worktree", "stale"), "stale");
+      expect(await mergeVerified(project, project.branch, "merge test", "cycle-test-merge"))
+        .toEqual({ ok: true, mode: "verified" });
+      expect((await $`git -C ${repo} show -s --format=%P HEAD`.quiet().text()).trim())
+        .toBe(`${before} ${bot}`);
+      expect(readFileSync(join(repo, "a.txt"), "utf8")).toBe("human\n");
+      expect(readFileSync(join(repo, "b.txt"), "utf8")).toBe("bot\n");
+      expect(readFileSync(join(cycleDir, "verification.log"), "utf8")).toBe("original cycle log");
+      expect(existsSync(join(cycleDir + "-merge", "verification.log"))).toBe(true);
+      const checks = await loadProgressEvents(project.id, (e) => e.event.startsWith("verification_"));
+      expect(checks.map((e) => e.event)).toEqual(["verification_run", "verification_outcome"]);
+      expect(checks.every((e) => e.cycle_id === "cycle-test-merge")).toBe(true);
+      expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+      expect((await $`git -C ${repo} worktree list --porcelain`.quiet().text())).not.toContain(".bot-worktree");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  for (const failure of ["verification_failed", "conflict", "head_moved"] as const) {
+    it(`mergeVerified refuses ${failure} without landing bot work`, async () => {
+      const { repo, project } = await makeRepo(true);
+      try {
+        await addBotWorkCommit(repo, "b.txt", "bot\n", "bot");
+        await commitOnHead(repo, failure === "conflict" ? "b.txt" : "a.txt", "human\n");
+        const before = await sha(repo);
+        const bot = await sha(repo, project.branch);
+        project.verification_command = failure === "head_moved"
+          ? 'git -C .. commit --allow-empty -m "concurrent human commit"'
+          : "exit 1";
+        const result = await mergeVerified(project, project.branch, "merge test", "failure-merge");
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("expected merge rejection");
+        expect(result.kind).toBe(failure);
+        if (failure === "verification_failed") expect(result.reason).toContain("failure-merge/verification.log");
+        if (failure === "head_moved") {
+          expect(await sha(repo, "HEAD^")).toBe(before);
+          expect(await headSubject(repo)).toBe("concurrent human commit");
+        } else {
+          expect(await sha(repo)).toBe(before);
+        }
+        expect(await sha(repo, project.branch)).toBe(bot);
+        expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
+        expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+        expect((await $`git -C ${repo} status --porcelain`.quiet().text()).trim()).toBe("");
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    }, 20_000);
+  }
+
+  it("mergeVerified leaves an operator's in-progress merge alone", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "bot.txt", "bot", "bot");
+      await $`git -C ${repo} checkout -b side`.quiet();
+      await commitOnHead(repo, "seed.txt", "side");
+      await $`git -C ${repo} checkout master`.quiet();
+      await commitOnHead(repo, "seed.txt", "master");
+      expect((await $`git -C ${repo} merge side`.quiet().nothrow()).exitCode).not.toBe(0);
+      const mergeHead = readFileSync(join(repo, ".git", "MERGE_HEAD"), "utf8");
+      const result = await mergeVerified(project, project.branch, "merge test", "busy-merge");
+      expect(result).toMatchObject({ ok: false, kind: "error" });
+      expect(readFileSync(join(repo, ".git", "MERGE_HEAD"), "utf8")).toBe(mergeHead);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("mergeVerified refuses over local edits without calling it a conflict or losing them", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "seed.txt", "bot", "bot edits seed");
+      const before = await sha(repo);
+      writeFileSync(join(repo, "seed.txt"), "uncommitted operator edit");
+      const result = await mergeVerified(project, project.branch, "merge test", "dirty-merge");
+      expect(result).toMatchObject({ ok: false, kind: "error" });
+      expect(await sha(repo)).toBe(before);
+      expect(readFileSync(join(repo, "seed.txt"), "utf8")).toBe("uncommitted operator edit");
+      expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  for (const ownRoot of [true, false]) {
+    it(`mergeVerified exempts state-only changes only at the GeneralStaff root (root=${ownRoot})`, async () => {
+      const { repo, project } = await makeRepo(true);
+      try {
+        await addBotWorkCommit(repo, "bot.txt", "bot", "bot");
+        mkdirSync(join(repo, "state"));
+        await commitOnHead(repo, "state/data.json", "{}");
+        const before = await sha(repo);
+        if (ownRoot) setRootDir(repo);
+        project.verification_command = "exit 1";
+        const result = await mergeVerified(project, project.branch, "merge test", "state-merge");
+        if (ownRoot) {
+          expect(result).toEqual({ ok: true, mode: "state_only" });
+          expect(await loadProgressEvents(project.id, (e) => e.event === "verification_run")).toHaveLength(0);
+        } else {
+          expect(result).toMatchObject({ ok: false, kind: "verification_failed" });
+          expect(await sha(repo)).toBe(before);
+        }
+        expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+      } finally {
+        setRootDir(TEST_DIR);
+        rmSync(repo, { recursive: true, force: true });
+      }
+    }, 20_000);
+  }
+
+  it("mergeVerified still verifies code changes in the GeneralStaff root", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "bot.txt", "bot", "bot");
+      mkdirSync(join(repo, "state"));
+      await commitOnHead(repo, "state/data.json", "{}");
+      await commitOnHead(repo, "code.txt", "code");
+      setRootDir(repo);
+      project.verification_command = "exit 1";
+      expect(await mergeVerified(project, project.branch, "merge test", "code-merge"))
+        .toMatchObject({ ok: false, kind: "verification_failed" });
+    } finally {
+      setRootDir(TEST_DIR);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("mergeVerified does not exempt a rename from code into state", async () => {
+    const { repo, project } = await makeRepo(true);
+    try {
+      await addBotWorkCommit(repo, "bot.txt", "bot", "bot");
+      mkdirSync(join(repo, "state"));
+      await $`git -C ${repo} mv seed.txt state/seed.txt`.quiet();
+      await $`git -C ${repo} commit -m ${"move code into state"}`.quiet();
+      const before = await sha(repo);
+      setRootDir(repo);
+      project.verification_command = "exit 1";
+      expect(await mergeVerified(project, project.branch, "merge test", "rename-merge"))
+        .toMatchObject({ ok: false, kind: "verification_failed" });
+      expect(await sha(repo)).toBe(before);
+    } finally {
+      setRootDir(TEST_DIR);
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  for (const failure of ["verification_failed", "head_moved", "conflict"] as const) {
+    it(`cycle-start ${failure} preserves the bot branch and applies session blocking`, async () => {
+      const { repo, project } = await makeRepo(true);
+      try {
+        await addBotWorkCommit(repo, "b.txt", "bot\n", "bot");
+        await commitOnHead(repo, failure === "conflict" ? "b.txt" : "a.txt", "human\n");
+        const bot = await sha(repo, project.branch);
+        project.verification_command = failure === "head_moved"
+          ? 'git -C .. commit --allow-empty -m "concurrent human commit"'
+          : "exit 1";
+        const result = await executeCycle(project, makeDispatcherConfig());
+        expect(result.reason).toContain(failure);
+        expect(result.blocked_for_session ?? false).toBe(failure !== "conflict");
+        if (failure !== "conflict") expect(result.reason).toContain("project blocked for the rest of this session");
+        expect(result.engineer_exit_code).toBeNull();
+        expect(await sha(repo, project.branch)).toBe(bot);
+        expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+        const checks = await loadProgressEvents(project.id, (e) => e.event.startsWith("verification_"));
+        expect(checks.length).toBe(failure === "conflict" ? 0 : 2);
+        expect(checks.every((e) => e.cycle_id === `${result.cycle_id}-merge`)).toBe(true);
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
+    }, 20_000);
+  }
 
   it("skips when auto_merge=false", async () => {
     const { repo, project } = await makeRepo(false);
@@ -2200,9 +2441,10 @@ describe("flushSessionEndMerges (gs-254)", () => {
       const results = await flushSessionEndMerges([project], cyclesPerProject);
       expect(results[0].result).toBe("failed");
       expect(results[0].merged_commits).toBe(0);
-      // Working tree is left in the conflict state; clean it up so the
-      // temp-dir rmSync doesn't race a lock.
-      await $`git -C ${repo} merge --abort`.quiet().nothrow();
+      // Conflicts are now isolated in the disposable merge worktree.
+      expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
+      expect(existsSync(join(repo, ".bot-worktree"))).toBe(false);
+      expect((await $`git -C ${repo} status --porcelain`.quiet().text()).trim()).toBe("");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
