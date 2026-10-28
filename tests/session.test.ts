@@ -2079,6 +2079,9 @@ describe("flushSessionEndMerges (gs-254)", () => {
     await $`git -C ${repo} config user.email test@example.com`.quiet();
     await $`git -C ${repo} config user.name test`.quiet();
     await $`git -C ${repo} config commit.gpgsign false`.quiet();
+    // Windows runners default to autocrlf=true; keep checked-out bytes
+    // identical to what the tests wrote.
+    await $`git -C ${repo} config core.autocrlf false`.quiet();
     writeFileSync(join(repo, "seed.txt"), "seed", "utf8");
     await $`git -C ${repo} add seed.txt`.quiet();
     await $`git -C ${repo} commit -m ${"initial"}`.quiet();
@@ -2233,7 +2236,7 @@ describe("flushSessionEndMerges (gs-254)", () => {
         expect(result.ok).toBe(false);
         if (result.ok) throw new Error("expected merge rejection");
         expect(result.kind).toBe(failure);
-        if (failure === "verification_failed") expect(result.reason).toContain("failure-merge/verification.log");
+        if (failure === "verification_failed") expect(result.reason).toContain(join("failure-merge", "verification.log"));
         if (failure === "head_moved") {
           expect(await sha(repo, "HEAD^")).toBe(before);
           expect(await headSubject(repo)).toBe("concurrent human commit");
