@@ -13,6 +13,17 @@ A review that did not really happen can no longer count as a pass. A diff over t
 
 Auto-merge now checks the combined tree when HEAD has moved since the bot's work was verified, leaving HEAD unchanged if that check fails (reported in #7). Session-end merges use the same check and record their result in the audit log.
 
+Co-seats: a headless orchestrator seat that keeps a fleet moving while nobody has a session open, with every safety rail enforced in code rather than in a prompt.
+
+- A small driver with no model in it, `generalstaff co-seat run`, wakes one bounded agent turn when a cycle finishes, an Aide inbox gets a row, an outside sentinel file appears, or a heartbeat is due. The turn reads a standing brief and a state file, acts inside declared authority, rewrites the state file and ends. Anything only a person can decide is parked for them. Guide: `docs/CO-SEATS.md`; templates and scheduler examples: `examples/co-seat/`.
+- Cycles stay the only way code lands. A seat starts gated cycles, verifies outside work with `cycle verify`, and reads verdicts with `cycle result --json`. It adds no merge path, and a seat may list an `auto_merge` project only when its config says `authority.land: true`.
+- Rails that hold without trusting the turn: meters that fail closed (any error or unreadable output reads as 100 percent used), ordered runners with fallback, a local, fleet and remote STOP that also kills a running turn within seconds, a single-instance lock, a deadline you extend on purpose, and a config pin that holds turns when the seat's own config, its projects' config or the brief changes.
+- Adds `generalstaff co-seat init|go|extend|stop|status|watchdog|run|park`. `watchdog` is meant for cron, a systemd timer, launchd or Task Scheduler. `park` writes to the same fork ledger as autonomous mode, so parked items show in `generalstaff forks` and the dashboard, and it enforces a per-day cap.
+- With `GS_CO_SEAT=1` set for a turn, `generalstaff start`, `session`, `autonomous`, `welcome`, `engineer-benchmark`, `co-seat go`, `co-seat extend`, `co-seat run` and `co-seat watchdog` refuse. `cycle`, `cycle verify` and `cycle-redo` refuse a project outside the seat's list (and a repeated `--project`), `aides say` and `co-seat park` count against daily caps, and every one of these first checks the config still matches the pin `go` recorded. A turn cannot lift a stop, extend its own life or widen its own authority.
+- Config: co-seats are declared under `dispatcher.co_seats` in `projects.yaml` (a commented example is in `projects.yaml.example`). A malformed block throws at load. Every turn's full prompt, events, runner, meter reading and outcome are written to `state/_co-seat/<id>/turns.jsonl`.
+- A driver that dies does not leave its turn running: the turn's pid is recorded and the next driver or `co-seat stop` kills it. A turn that fails to start hands its events to the next one. A running turn is also stopped at the deadline.
+- Out of scope: releases, deploys, publishing, a model-run merge path, and killing a turn when a meter crosses its limit mid-turn.
+
 ## v0.16.1 — 2026-10-26
 
 Verify-only now passes on Linux, macOS and Windows, and it is more careful about the processes it stops.

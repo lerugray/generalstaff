@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(generalstaff:*)",
+      "Bash(bun src/cli.ts:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Read",
+      "Grep",
+      "Glob",
+      "Edit(./co-seat/STATE.md)",
+      "Write(./co-seat/STATE.md)"
+    ],
+    "deny": [
+      "Edit(./projects.yaml)",
+      "Write(./projects.yaml)",
+      "Edit(./co-seat/BRIEF.md)",
+      "Write(./co-seat/BRIEF.md)",
+      "Edit(./STOP)",
+      "Write(./STOP)",
+      "Edit(./state/_co-seat/**)",
+      "Write(./state/_co-seat/**)",
+      "Edit(./state/fork-ledger.json)",
+      "Write(./state/fork-ledger.json)",
+      "Edit(./aides.yaml)",
+      "Write(./aides.yaml)",
+      "Bash(generalstaff start:*)",
+      "Bash(generalstaff co-seat go:*)",
+      "Bash(generalstaff co-seat extend:*)",
+      "Bash(git push:*)",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}

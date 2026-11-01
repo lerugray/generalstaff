@@ -1,0 +1,25 @@
+# systemd user unit: one watchdog pass for a GeneralStaff co-seat.
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp gs-co-seat-watchdog.service gs-co-seat-watchdog.timer ~/.config/systemd/user/
+#   # edit WorkingDirectory below, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gs-co-seat-watchdog.timer
+# To keep the seat alive after you log out:
+#   loginctl enable-linger "$USER"
+[Unit]
+Description=GeneralStaff co-seat watchdog (main)
+
+[Service]
+Type=oneshot
+# Replace with the folder that holds projects.yaml.
+WorkingDirectory=/path/to/GeneralStaff
+# User units start with a short PATH. Add the folders that hold generalstaff, bun and your agent CLI.
+Environment=PATH=%h/.bun/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Optional private file with one NAME=value line per variable your runners' `env` blocks name.
+# Keep it readable by you only (chmod 600). The leading "-" means "ignore if missing".
+EnvironmentFile=-%h/.config/generalstaff/co-seat.env
+ExecStart=/usr/bin/env generalstaff co-seat watchdog --id=main
+# The watchdog starts the driver detached and exits. Without this, systemd would stop the
+# detached driver when this one-shot unit finishes.
+KillMode=process

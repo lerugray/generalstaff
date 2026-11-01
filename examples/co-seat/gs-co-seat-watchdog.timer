@@ -1,0 +1,12 @@
+# systemd user timer: run the co-seat watchdog every 5 minutes.
+# Pairs with gs-co-seat-watchdog.service. See that file for install steps.
+[Unit]
+Description=Run the GeneralStaff co-seat watchdog every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

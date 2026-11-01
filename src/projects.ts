@@ -1,8 +1,8 @@
 // GeneralStaff — projects.yaml loader + validator (build step 4)
 
-import { existsSync } from "fs";
+import { existsSync, realpathSync } from "fs";
 import { readFile } from "fs/promises";
-import { join } from "path";
+import { isAbsolute, join, resolve } from "path";
 import { spawnSync } from "child_process";
 import {
   parseDocument,
@@ -15,7 +15,19 @@ import {
 } from "yaml";
 import { getRootDir } from "./state";
 import { matchesHandsOff } from "./safety";
+import { redactSecrets } from "./secrets";
+import {
+  CO_SEAT_AUTHORITY_DEFAULTS,
+  CO_SEAT_DEFAULTS,
+  CO_SEAT_WAKE_DEFAULTS,
+  isInsidePath,
+} from "./co_seat/defaults";
 import type {
+  CoSeatAuthority,
+  CoSeatConfig,
+  CoSeatRemoteControl,
+  CoSeatRunnerConfig,
+  CoSeatWake,
   ProjectConfig,
   DispatcherConfig,
   ProjectsYaml,
@@ -1743,6 +1755,7 @@ function validateDispatcher(
     session_budget: sessionBudget,
     weak_streak_threshold: dispatcherWeakStreakThreshold(raw),
     autonomous: dispatcherAutonomous(raw),
+    co_seats: parseCoSeats(raw.co_seats),
   };
 }
 
@@ -1848,6 +1861,349 @@ function normalizeParallelSlots(raw: unknown): number {
   return n < 1 ? 1 : n;
 }
 
+// --- v11 co-seats (DESIGN.md §v11 "Configuration" / "Validation") ---
+//
+// Like session_budget and autonomous, a malformed co_seats block throws at
+// load: a misconfigured seat could silently grant unattended authority.
+
+const CO_SEAT_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function coSeatError(field: string, message: string): ProjectValidationError {
+  return new ProjectValidationError("dispatcher", field, message);
+}
+
+function coSeatRecord(v: unknown, field: string): Record<string, unknown> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) {
+    throw coSeatError(
+      field,
+      `must be an object, got ${Array.isArray(v) ? "array" : v === null ? "null" : typeof v}`,
+    );
+  }
+  return v as Record<string, unknown>;
+}
+
+function coSeatOnlyKeys(o: Record<string, unknown>, allowed: string[], field: string): void {
+  for (const key of Object.keys(o)) {
+    if (!allowed.includes(key)) {
+      throw coSeatError(`${field}.${key}`, `is not a known field (known: ${allowed.join(", ")})`);
+    }
+  }
+}
+
+function coSeatString(v: unknown, field: string): string {
+  if (typeof v !== "string" || v.trim() === "") {
+    throw coSeatError(field, "must be a non-empty string");
+  }
+  return v;
+}
+
+function coSeatInt(v: unknown, field: string, min: number, max?: number): number {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min || (max !== undefined && v > max)) {
+    throw coSeatError(
+      field,
+      `must be an integer ${max !== undefined ? `from ${min} to ${max}` : `>= ${min}`}, got ${JSON.stringify(v)}`,
+    );
+  }
+  return v;
+}
+
+function coSeatBool(v: unknown, field: string): boolean {
+  if (typeof v !== "boolean") throw coSeatError(field, `must be a boolean, got ${typeof v}`);
+  return v;
+}
+
+function coSeatStringList(v: unknown, field: string, nonEmpty: boolean): string[] {
+  if (!Array.isArray(v)) throw coSeatError(field, `must be a list, got ${typeof v}`);
+  if (nonEmpty && v.length === 0) throw coSeatError(field, "must not be empty");
+  return v.map((item, i) => coSeatString(item, `${field}[${i}]`));
+}
+
+function coSeatEnvName(v: string, field: string): void {
+  if (!ENV_NAME_RE.test(v)) {
+    throw coSeatError(field, `"${v}" is not an environment variable name (letters, digits, _)`);
+  }
+  if (v.toUpperCase().startsWith("GS_CO_SEAT")) {
+    throw coSeatError(field, "GS_CO_SEAT* variables are set by the driver and cannot be mapped or unset");
+  }
+}
+
+function parseCoSeatRunner(raw: unknown, field: string): CoSeatRunnerConfig {
+  const o = coSeatRecord(raw, field);
+  coSeatOnlyKeys(o, ["id", "command", "env", "env_unset", "meter"], field);
+  const id = coSeatString(o.id, `${field}.id`);
+  if (!CO_SEAT_ID_RE.test(id)) {
+    throw coSeatError(`${field}.id`, `"${id}" must be a slug ([a-z0-9][a-z0-9_-]*)`);
+  }
+  const command = coSeatStringList(o.command, `${field}.command`, true);
+
+  let env: Record<string, string> | undefined;
+  if (o.env !== undefined && o.env !== null) {
+    const e = coSeatRecord(o.env, `${field}.env`);
+    env = {};
+    for (const [child, parent] of Object.entries(e)) {
+      coSeatEnvName(child, `${field}.env.${child}`);
+      const value = coSeatString(parent, `${field}.env.${child}`);
+      // The Aides registry's check: a credential-shaped value is rejected
+      // outright, with a message that says what to put there instead.
+      if (redactSecrets(value).hits.length > 0) {
+        throw coSeatError(
+          `${field}.env.${child}`,
+          "looks like a secret value; env maps a child variable to the NAME of a variable in the driver's environment, never a value",
+        );
+      }
+      if (!ENV_NAME_RE.test(value)) {
+        throw coSeatError(
+          `${field}.env.${child}`,
+          `"${value}" is not an environment variable name; env maps a child variable to the NAME of a variable in the driver's environment, never a value`,
+        );
+      }
+      env[child] = value;
+    }
+  }
+
+  let envUnset: string[] | undefined;
+  if (o.env_unset !== undefined && o.env_unset !== null) {
+    envUnset = coSeatStringList(o.env_unset, `${field}.env_unset`, false);
+    envUnset.forEach((name, i) => coSeatEnvName(name, `${field}.env_unset[${i}]`));
+    for (const name of envUnset) {
+      if (env && Object.prototype.hasOwnProperty.call(env, name)) {
+        throw coSeatError(
+          `${field}.env_unset`,
+          `"${name}" is both mapped in env and listed in env_unset`,
+        );
+      }
+    }
+  }
+
+  if (o.meter === undefined || o.meter === null) {
+    throw coSeatError(`${field}.meter`, "is required: every runner needs a meter (a missing meter would grant unmetered turns)");
+  }
+  const m = coSeatRecord(o.meter, `${field}.meter`);
+  coSeatOnlyKeys(m, ["command", "max_used_percent"], `${field}.meter`);
+  const meterCommand = coSeatStringList(m.command, `${field}.meter.command`, true);
+  const max = m.max_used_percent;
+  if (typeof max !== "number" || !Number.isFinite(max) || max <= 0 || max > 100) {
+    throw coSeatError(
+      `${field}.meter.max_used_percent`,
+      `must be a number above 0 and at most 100, got ${JSON.stringify(max)}`,
+    );
+  }
+
+  const runner: CoSeatRunnerConfig = {
+    id,
+    command,
+    meter: { command: meterCommand, max_used_percent: max },
+  };
+  if (env) runner.env = env;
+  if (envUnset) runner.env_unset = envUnset;
+  return runner;
+}
+
+function parseCoSeatRemote(raw: unknown, field: string): CoSeatRemoteControl {
+  const o = coSeatRecord(raw, field);
+  coSeatOnlyKeys(o, ["repo", "remote", "branch", "dir"], field);
+  const repo = coSeatString(o.repo, `${field}.repo`);
+  const remote =
+    o.remote === undefined || o.remote === null
+      ? CO_SEAT_DEFAULTS.remote
+      : coSeatString(o.remote, `${field}.remote`);
+  const branch = coSeatString(o.branch, `${field}.branch`);
+  const dir = coSeatString(o.dir, `${field}.dir`);
+  // These reach git's argv; keep them plain names, never options or paths out of the repo.
+  for (const [key, val] of [["remote", remote], ["branch", branch]] as const) {
+    if (val.startsWith("-") || /[\s\x00-\x1f:~^?*[\\]/.test(val)) {
+      throw coSeatError(`${field}.${key}`, `"${val}" is not a plain git ${key} name`);
+    }
+  }
+  const dirNorm = dir.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (
+    dirNorm === "" ||
+    isAbsolute(dir) ||
+    /^[A-Za-z]:/.test(dir) ||
+    dirNorm.split("/").some((seg) => seg === ".." || seg === ".")
+  ) {
+    throw coSeatError(`${field}.dir`, "must be a relative directory inside the control repo, with no . or .. segments");
+  }
+  return { repo, remote, branch, dir: dirNorm };
+}
+
+function parseCoSeat(raw: unknown, field: string): CoSeatConfig {
+  const o = coSeatRecord(raw, field);
+  coSeatOnlyKeys(
+    o,
+    ["id", "brief", "state_file", "projects", "authority", "runners", "wake",
+     "turn_timeout_seconds", "run_days", "remote_control"],
+    field,
+  );
+  const id = coSeatString(o.id, `${field}.id`);
+  if (!CO_SEAT_ID_RE.test(id)) {
+    throw coSeatError(`${field}.id`, `"${id}" must be a slug ([a-z0-9][a-z0-9_-]*)`);
+  }
+  const brief = coSeatString(o.brief, `${field}.brief`);
+  const stateFile = coSeatString(o.state_file, `${field}.state_file`);
+  const projects = coSeatStringList(o.projects, `${field}.projects`, true);
+  const seenProject = new Set<string>();
+  for (const p of projects) {
+    if (seenProject.has(p)) throw coSeatError(`${field}.projects`, `lists "${p}" twice`);
+    seenProject.add(p);
+  }
+
+  const authority: CoSeatAuthority = { ...CO_SEAT_AUTHORITY_DEFAULTS };
+  if (o.authority !== undefined && o.authority !== null) {
+    const a = coSeatRecord(o.authority, `${field}.authority`);
+    coSeatOnlyKeys(a, ["verify", "land", "park_per_day", "aide_messages_per_day"], `${field}.authority`);
+    if (a.verify !== undefined) authority.verify = coSeatBool(a.verify, `${field}.authority.verify`);
+    if (a.land !== undefined) authority.land = coSeatBool(a.land, `${field}.authority.land`);
+    if (a.park_per_day !== undefined) {
+      authority.park_per_day = coSeatInt(a.park_per_day, `${field}.authority.park_per_day`, 0);
+    }
+    if (a.aide_messages_per_day !== undefined) {
+      authority.aide_messages_per_day = coSeatInt(
+        a.aide_messages_per_day, `${field}.authority.aide_messages_per_day`, 0,
+      );
+    }
+  }
+
+  if (!Array.isArray(o.runners) || o.runners.length === 0) {
+    throw coSeatError(`${field}.runners`, "must be a list with at least one runner");
+  }
+  const runners = o.runners.map((r, i) => parseCoSeatRunner(r, `${field}.runners[${i}]`));
+  const runnerIds = new Set<string>();
+  for (const r of runners) {
+    if (runnerIds.has(r.id)) throw coSeatError(`${field}.runners`, `runner id "${r.id}" appears twice`);
+    runnerIds.add(r.id);
+  }
+
+  const wake: CoSeatWake = { ...CO_SEAT_WAKE_DEFAULTS, done_globs: [] };
+  if (o.wake !== undefined && o.wake !== null) {
+    const w = coSeatRecord(o.wake, `${field}.wake`);
+    coSeatOnlyKeys(
+      w, ["heartbeat_seconds", "min_gap_seconds", "cycles", "aide_inboxes", "done_globs"], `${field}.wake`,
+    );
+    if (w.heartbeat_seconds !== undefined) {
+      wake.heartbeat_seconds = coSeatInt(w.heartbeat_seconds, `${field}.wake.heartbeat_seconds`, 1);
+    }
+    if (w.min_gap_seconds !== undefined) {
+      wake.min_gap_seconds = coSeatInt(w.min_gap_seconds, `${field}.wake.min_gap_seconds`, 0);
+    }
+    if (w.cycles !== undefined) wake.cycles = coSeatBool(w.cycles, `${field}.wake.cycles`);
+    if (w.aide_inboxes !== undefined) {
+      wake.aide_inboxes = coSeatBool(w.aide_inboxes, `${field}.wake.aide_inboxes`);
+    }
+    if (w.done_globs !== undefined && w.done_globs !== null) {
+      wake.done_globs = coSeatStringList(w.done_globs, `${field}.wake.done_globs`, false);
+    }
+  }
+
+  const turnTimeout =
+    o.turn_timeout_seconds === undefined || o.turn_timeout_seconds === null
+      ? CO_SEAT_DEFAULTS.turn_timeout_seconds
+      : coSeatInt(o.turn_timeout_seconds, `${field}.turn_timeout_seconds`, 1, CO_SEAT_DEFAULTS.max_turn_timeout_seconds);
+  const runDays =
+    o.run_days === undefined || o.run_days === null
+      ? CO_SEAT_DEFAULTS.run_days
+      : coSeatInt(o.run_days, `${field}.run_days`, 1, CO_SEAT_DEFAULTS.max_run_days);
+
+  const seat: CoSeatConfig = {
+    id,
+    brief,
+    state_file: stateFile,
+    projects,
+    authority,
+    runners,
+    wake,
+    turn_timeout_seconds: turnTimeout,
+    run_days: runDays,
+  };
+  if (o.remote_control !== undefined && o.remote_control !== null) {
+    seat.remote_control = parseCoSeatRemote(o.remote_control, `${field}.remote_control`);
+  }
+  return seat;
+}
+
+/** Structural validation of `dispatcher.co_seats`. Absent => undefined. */
+export function parseCoSeats(raw: unknown): CoSeatConfig[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) {
+    throw coSeatError(
+      "co_seats",
+      `must be a list, got ${typeof raw === "object" ? "object" : typeof raw}`,
+    );
+  }
+  const seats = raw.map((item, i) => parseCoSeat(item, `co_seats[${i}]`));
+  const seen = new Set<string>();
+  for (const seat of seats) {
+    if (seen.has(seat.id)) throw coSeatError("co_seats", `duplicate co-seat id "${seat.id}"`);
+    seen.add(seat.id);
+  }
+  return seats;
+}
+
+function realOrResolved(p: string, root: string): string {
+  const abs = isAbsolute(p) ? p : resolve(root, p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return resolve(abs);
+  }
+}
+
+/**
+ * Cross-checks that need the parsed project list: registered ids, one owner
+ * per project, `auto_merge` projects need `authority.land`, and a control repo
+ * that is a git checkout outside every project path.
+ */
+export function checkCoSeatProjects(
+  dispatcher: DispatcherConfig,
+  projects: ProjectConfig[],
+  root: string = getRootDir(),
+): void {
+  const seats = dispatcher.co_seats ?? [];
+  if (seats.length === 0) return;
+  const byId = new Map(projects.map((p) => [p.id, p]));
+  const owner = new Map<string, string>();
+  seats.forEach((seat, i) => {
+    const field = `co_seats[${i}]`;
+    for (const pid of seat.projects) {
+      const project = byId.get(pid);
+      if (!project) {
+        throw coSeatError(`${field}.projects`, `project "${pid}" is not registered (seat "${seat.id}")`);
+      }
+      const other = owner.get(pid);
+      if (other !== undefined) {
+        throw coSeatError(
+          `${field}.projects`,
+          `project "${pid}" belongs to two co-seats ("${other}" and "${seat.id}"); one owner per project`,
+        );
+      }
+      owner.set(pid, seat.id);
+      if (project.auto_merge && !seat.authority.land) {
+        throw coSeatError(
+          `${field}.authority.land`,
+          `project "${pid}" has auto_merge: true, so seat "${seat.id}" needs authority.land: true to list it`,
+        );
+      }
+    }
+    const rc = seat.remote_control;
+    if (rc) {
+      const repo = realOrResolved(rc.repo, root);
+      if (!existsSync(repo) || !isGitRepo(repo)) {
+        throw coSeatError(`${field}.remote_control.repo`, `"${rc.repo}" is not a git checkout`);
+      }
+      for (const p of projects) {
+        const projectPath = realOrResolved(p.path, root);
+        if (isInsidePath(repo, projectPath) || isInsidePath(projectPath, repo)) {
+          throw coSeatError(
+            `${field}.remote_control.repo`,
+            `"${rc.repo}" overlaps project "${p.id}"; the control repo must be a git checkout outside every project path`,
+          );
+        }
+      }
+    }
+  });
+}
+
 function isGitRepo(dirPath: string): boolean {
   const result = spawnSync("git", ["rev-parse", "--git-dir"], {
     cwd: dirPath,
@@ -1933,6 +2289,7 @@ export class ProjectsYamlNotFoundError extends Error {
 
 export async function loadProjectsYaml(
   yamlPath?: string,
+  opts: { quiet?: boolean } = {},
 ): Promise<ProjectsYaml> {
   const filePath = yamlPath ?? join(getRootDir(), "projects.yaml");
   if (!existsSync(filePath)) {
@@ -1972,6 +2329,9 @@ export async function loadProjectsYaml(
   // dispatcher and projects are parsed.
   validateBudgetHierarchy(dispatcher, projects);
 
+  // v11: co-seat cross-checks need the parsed project list too.
+  checkCoSeatProjects(dispatcher, projects);
+
   // Check for duplicate IDs
   const ids = new Set<string>();
   for (const p of projects) {
@@ -1982,9 +2342,12 @@ export async function loadProjectsYaml(
   }
 
   // Validate project paths exist and are git repos (warn only, don't fail)
-  const warnings = warnProjectPaths(projects);
-  for (const w of warnings) {
-    console.warn(`[generalstaff] warning: project "${w.projectId}": ${w.message}`);
+  // `quiet` is for long-running callers (the co-seat driver reloads every tick).
+  if (!opts.quiet) {
+    const warnings = warnProjectPaths(projects);
+    for (const w of warnings) {
+      console.warn(`[generalstaff] warning: project "${w.projectId}": ${w.message}`);
+    }
   }
 
   return { projects, dispatcher };

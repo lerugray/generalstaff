@@ -145,15 +145,31 @@ export function findAide(aides: Aide[], name: string): Aide {
   return aide;
 }
 
-function commandAvailable(executable: string, rootDir: string): boolean {
+/**
+ * Resolve an executable the way the Aides registry check does: a path with a
+ * separator is taken relative to `rootDir`; a bare name is searched on PATH
+ * (with PATHEXT extensions on Windows). Returns the path found, or null.
+ * Shared with the co-seat driver (runners and meters) rather than copied.
+ */
+export function resolveExecutable(executable: string, rootDir: string): string | null {
   if (executable.includes("/") || executable.includes("\\")) {
-    return existsSync(aidePath(rootDir, executable));
+    const direct = aidePath(rootDir, executable);
+    return existsSync(direct) ? direct : null;
   }
   const extensions = process.platform === "win32"
     ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
     : [""];
-  return (process.env.PATH ?? "").split(delimiter).some((dir) =>
-    ["", ...extensions].some((extension) => existsSync(join(dir, executable + extension))));
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    for (const extension of ["", ...extensions]) {
+      const candidate = join(dir, executable + extension);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+function commandAvailable(executable: string, rootDir: string): boolean {
+  return resolveExecutable(executable, rootDir) !== null;
 }
 
 /** Check the registry and the local contact/archive files without invoking a door. */

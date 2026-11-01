@@ -1811,3 +1811,262 @@ Decisions worth keeping:
 Contracts: `docs/contracts/verify-only-cycle.md`,
 `docs/contracts/gs-patch-digest-v1.md` (with `tests/fixtures/gs-patch-digest-v1/`),
 and §8 of `docs/contracts/cycle-result-v1.md`.
+
+
+## §v11 — Co-seats (2026-11-01)
+
+A co-seat is a headless orchestrator seat that keeps a fleet moving while no
+person has a session open. A small driver with no model in it,
+`generalstaff co-seat run`, loops. When something finishes, or on a
+heartbeat, it wakes ONE bounded agent turn. The turn reads a standing brief
+and a state file, acts inside declared authority, rewrites the state file and
+ends. It has no memory between turns except that file. Anything only a person
+may decide is parked for them.
+
+The design rule follows the wedge: **every safety rail lives in the driver or
+in a GeneralStaff command, never only in the prompt.** The brief tells the
+turn what to do; code decides whether a turn runs, which account pays for
+it, how long it lives, whether a stop holds (also mid-turn), which projects
+it may cycle, and how often it may ask the person for something.
+
+**Trust boundary.** The turn runs as the same OS user as the driver. These
+rails stop mistakes, drift and an agent that wanders; they do not contain a
+hostile agent with shell access, which could kill the driver itself. For
+that, run the turn as a separate OS user or in a sandbox. The docs say so.
+
+### How it fits the existing pieces
+
+- **Heartbeat mode** (`docs/HEARTBEAT.md`) has the same shape, one
+  fresh-context turn per event, but keeps an interactive session alive
+  through the Stop hook and acts on actions someone queued. A co-seat starts
+  a separate headless process per turn, derives its own wake events and keeps
+  its memory in a state file. Heartbeat is unchanged. The co-seat reuses the
+  existing process helpers (`killProcessTree` in `safety.ts` for timeouts and
+  stops on every platform, the Aides executable resolution for Windows
+  `.cmd` shims) rather than adding a third copy.
+- **Cycles stay the only way code lands.** The turn starts gated bot cycles
+  with `generalstaff cycle --project=<id>`, checks outside agents' work with
+  `generalstaff cycle verify`, and reads verdicts with
+  `generalstaff cycle result --json`. Work lands only where a project's own
+  gate lands it: verification, reviewer and the project's `auto_merge`
+  (Hard Rules 4 and 6). A co-seat adds no merge path. A seat may list a
+  project that has `auto_merge: true` only when its config says
+  `authority.land: true`, so unattended merging is always an explicit choice.
+- **Parking reuses the fork ledger.** `generalstaff co-seat park` writes a
+  `kind: "co-seat"` entry (id namespaced `co-seat:<seat>::<project>::<slug>`
+  so it never collides with an autonomous-mode fork) to the same
+  `fork-ledger.json`, so a parked item shows in `generalstaff forks` and the
+  dashboard. The command enforces a per-day cap; re-parking an existing id
+  only refreshes it and costs nothing.
+- **The fleet STOP is the existing one.** The co-seat reads the same
+  `STOP` path `safety.ts` uses (`isStopFilePresent`). Fleet STOP idles a
+  seat; the seat's own STOP ends it.
+- **Audit log.** Each turn's full prompt (`turns/<n>/PROMPT.md`), events,
+  runner, meter reading, exit code, duration and end reason go to
+  `state/_co-seat/<id>/turns.jsonl`, with stdout and stderr under `turns/<n>/`
+  (Hard Rule 9).
+
+### Configuration
+
+Co-seats are declared under `dispatcher.co_seats` in `projects.yaml`. A
+malformed block throws at load, like `session_budget` and `autonomous`.
+
+```yaml
+dispatcher:
+  co_seats:
+    - id: main
+      brief: ./co-seat/BRIEF.md       # standing brief (start from `generalstaff co-seat init`)
+      state_file: ./co-seat/STATE.md   # the seat's only memory between turns
+      projects: [app, site]            # the only projects this seat may cycle
+      authority:
+        verify: true                   # may run `cycle verify` on finished outside work
+        land: false                    # must be true to list a project with auto_merge on
+        park_per_day: 2                # items parked for the person per local day
+        aide_messages_per_day: 0       # Aide door sends per local day (0 = none)
+      runners:                         # ordered; first runner under its meter limit takes the turn
+        - id: primary
+          command: [claude, -p, "{prompt}", --permission-mode, dontAsk,
+                    --settings, ./co-seat/claude-settings.json, --output-format, stream-json, --verbose]
+          env: { CLAUDE_CODE_OAUTH_TOKEN: MY_PRIMARY_TOKEN }  # child var <- parent var NAME
+          env_unset: [ANTHROPIC_API_KEY]
+          meter:
+            command: [./scripts/meter-primary.sh]   # prints used percent, 0-100
+            max_used_percent: 85                     # leave one turn of headroom
+        - id: fallback
+          command: [...]
+          meter: { command: [./scripts/meter-fallback.sh], max_used_percent: 95 }
+      wake:
+        heartbeat_seconds: 1800        # wake at least this often
+        min_gap_seconds: 300           # never wake sooner than this after a turn
+        cycles: true                   # new cycle_end records in the seat's projects
+        aide_inboxes: true             # new non-outbound rows in registered Aide inboxes
+        done_globs: []                 # outside work's sentinels, e.g. ../lanes/*/run.done
+      turn_timeout_seconds: 1800
+      run_days: 7                      # deadline `go` and `extend` set by default (any value up to 30)
+      remote_control:                  # optional: GO/STOP markers on a branch of a repo you own
+        repo: ../my-control-repo       # a git checkout outside every registered project
+        remote: origin
+        branch: main
+        dir: co-seat/main
+```
+
+Validation: ids are unique slugs; every `projects` entry is registered; no
+project belongs to two co-seats (one owner per project); an `auto_merge`
+project needs `authority.land: true`; at least one runner; every runner has
+a meter; `env` values are variable names, never values (checked with
+`redactSecrets`, as the Aides registry does); `env` and `env_unset` keys do
+not overlap; `run_days` is 1 to 30; `remote_control.repo` is a git checkout
+outside every project path.
+
+### The driver
+
+`generalstaff co-seat run [--id <id>] [--once]` is the whole driver. Each
+tick (60 s) it:
+
+1. **Ends** past its deadline or when the seat's local `STOP` exists, and
+   writes `EXIT.json` with the reason. A stop is sticky: `co-seat stop`
+   writes STOP and removes GO, and only `co-seat go` restores GO.
+2. **Idles** (no turn, keeps ticking) while the fleet STOP exists; while
+   `remote_control` is set and the remote branch has a `STOP` marker, has no
+   `GO` marker, or cannot be fetched; and while the **pinned config** has
+   changed. `go` records a hash of the seat's config block, the config of
+   each of its projects (including `auto_merge` and `hands_off`) and the
+   brief. If any of them changes, turns hold until a person runs `go` again,
+   so a turn that edits its own authority stops itself. Unreadable control
+   holds turns; it never grants them.
+3. **Collects wake events** and records the watermark at collection time,
+   so anything landing during the turn is seen next time: new `cycle_end`
+   records in the seat's projects, new non-outbound Aide inbox rows, done
+   sentinels that are new or changed, a first-turn note, a heartbeat note,
+   and a note when the previous turn was killed or its state file restored.
+4. Decides a turn is **due** when events exist and `min_gap_seconds` has
+   passed, or when `heartbeat_seconds` has passed.
+5. **Picks a runner**: the first whose meter reads under its
+   `max_used_percent` and whose `env` source variables are all set and
+   non-empty. The meter command runs with a 15 s timeout; a non-zero exit,
+   timeout, empty output or anything that is not a number from 0 to 100
+   reads as **100** (fail closed). No runner available means no turn; the
+   driver logs once and checks again in 10 minutes. Runners are re-picked
+   before every turn, so a fallback takes over and hands back without a
+   restart.
+6. **Runs the turn**: snapshots the state file, writes `EVENTS.md` and
+   `PROMPT.md`, and spawns the runner's argv with `{prompt}` substituted (or
+   the prompt on stdin when there is no placeholder). The child gets
+   `GS_CO_SEAT=1`, `GS_CO_SEAT_ID`, `GS_CO_SEAT_TURN` and `GS_CO_SEAT_DIR`,
+   with `env` and `env_unset` applied. **While it runs**, the driver checks
+   the local STOP and fleet STOP every 10 s and the remote marker every 60 s,
+   and kills the turn's process tree on a stop; it kills it at
+   `turn_timeout_seconds` too.
+7. **Records** the result in `turns.jsonl` and `driver.log`. If the state
+   file lost a required heading or vanished, the driver restores the
+   snapshot and records `state_restored`. A killed turn is recorded as such,
+   and the next turn's events tell it to check bot worktrees
+   (`generalstaff status`) before starting cycles.
+
+**Single instance.** The lock is a directory created atomically
+(`state/_co-seat/<id>/lock/`) holding pid, host, a nonce and start time; the
+driver touches `heartbeat` every tick. A same-host lock is live while its pid
+is alive and the heartbeat is under three ticks old; a lock from another host
+is live while its heartbeat is fresh. A stale lock is taken over by renaming
+it aside first (only one taker's rename succeeds), so two watchdogs cannot
+both start a driver. The driver releases the lock on every exit path.
+
+### Commands
+
+- `co-seat init [--id]` writes the brief, state and Claude Code settings
+  templates to the configured paths (never overwrites).
+- `co-seat go [--id] [--days N] [--remote]` clears the local STOP, writes GO
+  with the config pin and a deadline N days out (default `run_days`, at most
+  30), optionally commits the remote GO marker, then does one watchdog pass.
+- `co-seat extend [--id] [--days N]` moves the deadline; nothing else.
+- `co-seat stop [--id] [--remote]` writes STOP and removes GO. The driver's
+  in-flight check kills a running turn within 10 s (a fleet STOP does the
+  same, then idles the seat). `--remote` commits the remote STOP marker. It
+  needs no agent turn.
+- `co-seat status [--id] [--json]`: live or not, heartbeat age, turns,
+  deadline (warns under 24 h), last runner and meter reading, markers, pin
+  state, parked today, last `EXIT.json`.
+- `co-seat watchdog [--id]` is idempotent and meant for a scheduler every
+  few minutes (cron, systemd timer, launchd, Task Scheduler; examples in
+  `examples/co-seat/`): inside the deadline, with GO, no local STOP and no
+  live lock, it starts the driver detached. A scheduler is the supported way
+  for a seat to survive reboots and logouts.
+- `co-seat park --project <id> "<what the person decides>" [--evidence <path>]`
+  writes the fork-ledger entry and refuses past `park_per_day`.
+
+**Guards that do not trust the turn.** With `GS_CO_SEAT=1` set:
+`generalstaff start` (which clears the fleet STOP), `co-seat go` and
+`co-seat extend` refuse, so a turn cannot lift a stop or extend its own life;
+`generalstaff session` refuses (a multi-cycle picker inside a bounded turn);
+`generalstaff cycle` refuses a project outside the seat's `projects`;
+`generalstaff aides say` counts against `aide_messages_per_day` and refuses
+past it. `co-seat stop` stays allowed so a seat can stop itself. Caps are
+read from config, not from the caller, and counted in the seat's state
+directory.
+
+### The brief and the state file
+
+`generalstaff co-seat init` writes templates from `examples/co-seat/`:
+
+- **BRIEF.md**: every-turn order (read state and events, act, rewrite state,
+  end inside the time box), the authority section mirroring the config, a
+  never-do list (publish, release, deploy, message people outside Aide doors,
+  change `projects.yaml`, `auto_merge` or hands-off lists, edit managed code
+  outside a cycle, clear a stop), one-owner rules, and how to park.
+- **STATE.md** with fixed headings: `Open items`, `Owned work` (each with the
+  sentinel or cycle id that ends it), `Waiting on`, `Held by a person`
+  (items a person is working on; the turn never touches them), `Parked`, and
+  `Last turn`.
+- **claude-settings.json** for a Claude Code runner: allows `generalstaff`
+  commands, reads, and writes to the state file; denies edits to
+  `projects.yaml`, the brief, the fork ledger, STOP files and the co-seat
+  state directory. GeneralStaff passes no permission-bypass flag; the
+  runner command is the user's.
+
+### Hard Rules
+
+No rule is relaxed. Cycles keep every gate (6); landing stays opt-in per
+project (4) and a seat needs its own explicit `land` to operate on one that
+opted in; hands-off lists still bind every cycle (5); the co-seat pushes to
+no project remote, only optional marker commits to a control repo outside
+every project (7); runners use the user's own keys and CLIs (8); every turn
+is logged with its full prompt (9); nothing is hosted (10); parked decisions
+keep taste work with the person (1); one turn at a time, cycles only (no
+`session`), and they follow `max_parallel_slots` (3).
+
+### Out of scope
+
+Releases, deploys and publishing; a model-run merge path; killing a turn
+when a meter crosses its limit mid-turn (the start-of-turn check plus the
+turn timeout bound spend; set `max_used_percent` with one turn of headroom);
+co-seats coordinating with each other beyond one owner per project; a
+general file-watch wake source; any hosted relay. A phone or chat bridge
+stops a seat by writing the local STOP file or pushing the remote STOP
+marker; the in-flight check honours either within a minute.
+
+### Review (2026-11-01)
+
+One independent design review (Sakana Fugu, `fugu-max`) returned BUILD WITH
+FIXES with 19 findings. Folded in: config pinning against turn edits, in-flight
+stop enforcement, killed-turn and torn-state recovery, runner env checks, a
+host-aware lock with rename takeover, reuse of `killProcessTree` and the Aides
+executable resolution, the existing STOP path, a `session` ban and project
+scoping for `cycle`, explicit `land` for `auto_merge` projects, a namespaced
+fork-ledger id, an Aide-message cap, the collection-time watermark, full
+prompts in the log, remote-repo validation and `EXIT.json`. Narrowed: mid-turn
+meter kills (out of scope above) and the shared-supervisor extraction (reuse
+of the kill and executable helpers instead of refactoring heartbeat's
+module-level supervisor). Cut: `watch_files` and `queue_tasks`.
+
+One independent end review of the build (Opus, the build itself by Sonnet
+workers) returned ACCEPT-WITH-FIXES; all thirteen findings were fixed before
+merge. The ones that changed behaviour: every `--project` value is checked (a
+repeated flag no longer slips past the scope guard) and `autonomous`,
+`welcome` and `engineer-benchmark` join `session` as refused inside a turn;
+the running turn's pid is recorded (`turn.json`) so a dead driver's turn is
+killed by the next driver or by `stop`, and a turn's leftover process group
+is stopped when it exits; `dispatcher.state_dir` joins the pin and every
+guard re-checks the pin, so a turn that edits its authority loses it within
+the same turn; the daily caps sit behind a lock; a failed turn's events carry
+forward; the deadline stops a running turn; re-parking a resolved item
+returns the person's answer.

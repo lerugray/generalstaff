@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: run the GeneralStaff co-seat watchdog every 5 minutes.
+  Install:
+    cp com.generalstaff.co-seat-watchdog.plist ~/Library/LaunchAgents/
+    # edit the paths below, then:
+    launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.generalstaff.co-seat-watchdog.plist
+  Remove:
+    launchctl bootout "gui/$(id -u)/com.generalstaff.co-seat-watchdog"
+  A launchd job sees only the variables set here. If your runners' `env` blocks name
+  variables, point ProgramArguments at a small wrapper script that loads a private file
+  (readable by you only) and then runs the same watchdog command with the id of your seat.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.generalstaff.co-seat-watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>generalstaff</string>
+    <string>co-seat</string>
+    <string>watchdog</string>
+    <string>--id=main</string>
+  </array>
+
+  <!-- Replace with the folder that holds projects.yaml. -->
+  <key>WorkingDirectory</key>
+  <string>/path/to/GeneralStaff</string>
+
+  <!-- launchd starts jobs with a short PATH. Add the folders that hold generalstaff, bun and your agent CLI. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- The watchdog starts the driver detached and exits. Without this, launchd would
+       stop the detached driver when the watchdog finishes. -->
+  <key>AbandonProcessGroup</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/gs-co-seat-watchdog.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/gs-co-seat-watchdog.err.log</string>
+</dict>
+</plist>

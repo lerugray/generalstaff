@@ -263,7 +263,7 @@ export interface ClassifiedItem {
 // (Ray's private decision/branch data) — the machinery is public, the DATA
 // is not. Surfaced at the next interactive session's catch-up.
 
-export type ForkKind = "design-fork" | "live-held";
+export type ForkKind = "design-fork" | "live-held" | "co-seat";
 export type LedgerStatus = "pending" | "resolved";
 
 // A decision that needs Ray (a design-fork, or a bot-safe item held because
@@ -278,6 +278,8 @@ export interface ForkEntry {
   first_seen: string;   // ISO 8601 / run timestamp
   last_seen: string;
   resolution: string | null;
+  // v11 co-seats: optional path or note pointing at the evidence for a parked item.
+  evidence?: string;
 }
 
 export interface ForkLedger {
@@ -578,6 +580,64 @@ export interface DispatcherConfig {
   // ProjectConfig.autonomous fields override these. Absent => built-in
   // defaults (scoper "openrouter/qwen3.6-plus", scope_count 3).
   autonomous?: AutonomousDispatcherConfig;
+  // v11 (2026-11-01): headless co-seats — see DESIGN.md §v11. Validated at
+  // load (a malformed block throws). Absent => no co-seats declared.
+  co_seats?: CoSeatConfig[];
+}
+
+// --- Co-seats (DESIGN.md §v11) ---
+
+export interface CoSeatMeterConfig {
+  /** argv of a command that prints the runner's used percent (0-100). */
+  command: string[];
+  /** A runner is used only while its meter reads strictly below this. */
+  max_used_percent: number;
+}
+
+export interface CoSeatRunnerConfig {
+  id: string;
+  /** argv; `{prompt}` in any arg is replaced by the turn prompt, else stdin. */
+  command: string[];
+  /** child env var -> NAME of the parent env var that supplies it (never a value). */
+  env?: Record<string, string>;
+  /** env var names removed from the child environment. */
+  env_unset?: string[];
+  meter: CoSeatMeterConfig;
+}
+
+export interface CoSeatAuthority {
+  verify: boolean;
+  land: boolean;
+  park_per_day: number;
+  aide_messages_per_day: number;
+}
+
+export interface CoSeatWake {
+  heartbeat_seconds: number;
+  min_gap_seconds: number;
+  cycles: boolean;
+  aide_inboxes: boolean;
+  done_globs: string[];
+}
+
+export interface CoSeatRemoteControl {
+  repo: string;
+  remote: string;
+  branch: string;
+  dir: string;
+}
+
+export interface CoSeatConfig {
+  id: string;
+  brief: string;
+  state_file: string;
+  projects: string[];
+  authority: CoSeatAuthority;
+  runners: CoSeatRunnerConfig[];
+  wake: CoSeatWake;
+  turn_timeout_seconds: number;
+  run_days: number;
+  remote_control?: CoSeatRemoteControl;
 }
 
 export interface ProjectsYaml {

@@ -456,3 +456,52 @@ dispatcher:
   #   dispatch_cap: 2                  # Phase 2: non-live dispatches per run
   #   live_dispatch: false             # Phase 2: also branch-dispatch live products
   #   live_dispatch_cap: 1             # Phase 2: conservative live cap
+
+  # -----------------------------------------------------------------
+  # Co-seats: OPT-IN, default off (docs/CO-SEATS.md)
+  # -----------------------------------------------------------------
+  #
+  # A co-seat is a headless seat that wakes one bounded agent turn when
+  # cycles finish (or on a heartbeat), acts inside the authority below,
+  # rewrites its state file and ends. Safety rails live in code: fail-closed
+  # meters, local/fleet/remote STOP (also mid-turn), a deadline, a config pin,
+  # and daily caps. A MALFORMED block here THROWS at config load.
+  # Start from `generalstaff co-seat init --id=main`; run `co-seat go` to start.
+  #
+  # co_seats:
+  #   - id: main
+  #     brief: ./co-seat/BRIEF.md        # standing brief (written by `co-seat init`)
+  #     state_file: ./co-seat/STATE.md   # the seat's only memory between turns
+  #     projects: [example-service]      # the only projects this seat may cycle;
+  #                                      # a project belongs to at most one seat
+  #     authority:
+  #       verify: true                   # may run `cycle verify` on finished outside work
+  #       land: false                    # must be true to list a project with auto_merge on
+  #       park_per_day: 2                # items parked for the person per local day
+  #       aide_messages_per_day: 0       # Aide door sends per local day (0 = none)
+  #     runners:                         # ordered; first runner under its meter limit takes the turn
+  #       - id: primary
+  #         command: [claude, -p, "{prompt}", --permission-mode, dontAsk,
+  #                   --settings, ./co-seat/claude-settings.json,
+  #                   --output-format, stream-json, --verbose]
+  #         env: { CLAUDE_CODE_OAUTH_TOKEN: MY_PRIMARY_TOKEN }  # child var <- parent var NAME, never a value
+  #         env_unset: [ANTHROPIC_API_KEY]
+  #         meter:
+  #           command: [./scripts/meter-primary.sh]  # prints used percent 0-100, exits 0
+  #           max_used_percent: 85                   # leave one turn of headroom
+  #       - id: fallback                             # used while the primary is over its limit
+  #         command: [...]
+  #         meter: { command: [./scripts/meter-fallback.sh], max_used_percent: 95 }
+  #     wake:
+  #       heartbeat_seconds: 1800        # wake at least this often
+  #       min_gap_seconds: 300           # never wake sooner than this after a turn
+  #       cycles: true                   # new cycle_end records in the seat's projects
+  #       aide_inboxes: true             # new non-outbound rows in registered Aide inboxes
+  #       done_globs: []                 # outside work's sentinels, e.g. ../lanes/*/run.done
+  #     turn_timeout_seconds: 1800       # a turn is killed at this limit
+  #     run_days: 7                      # deadline `go` and `extend` set by default (1 to 30)
+  #     remote_control:                  # optional: GO/STOP markers on a branch of a repo you own
+  #       repo: ../my-control-repo       # a git checkout outside every registered project
+  #       remote: origin
+  #       branch: main
+  #       dir: co-seat/main

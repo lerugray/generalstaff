@@ -1,0 +1,5 @@
+# Add with `crontab -e`. Replace /path/to/GeneralStaff with the folder that holds projects.yaml.
+# Cron starts jobs with a short PATH, so the line sets one that includes generalstaff and bun.
+# If your runners' `env` blocks name variables, put them in a private file (readable by you only)
+# and load it in a wrapper script instead of calling generalstaff directly.
+*/5 * * * * cd /path/to/GeneralStaff && PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin" generalstaff co-seat watchdog --id=main >> /tmp/gs-co-seat-watchdog.log 2>&1

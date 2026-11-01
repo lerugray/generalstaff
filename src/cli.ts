@@ -103,6 +103,17 @@ import type { ProviderHealth, ProviderRole } from "./providers/types";
 import type { EngineerProvider, GreenfieldTask, ProjectConfig } from "./types";
 import { lookupCachedPreview } from "./integrations/mission_swarm/format";
 import { appendFleetMessage } from "./fleet_messages";
+import {
+  extractProjectFlags,
+  guardAideSay,
+  inCoSeat,
+  refuseDispatcher,
+  refuseGoOrExtend,
+  refuseProjectCommand,
+  refuseSession,
+  refuseStart,
+  seatForTurn,
+} from "./co_seat/guards";
 
 // Sourced from package.json so a release version bump propagates to
 // `gs --version` automatically. Previously a hardcoded const, it drifted
@@ -354,12 +365,27 @@ Usage:
     Example: generalstaff message send --from=ray --body="heads up on the next run"
     Example: generalstaff message send --from=bot --kind=handoff --task-id=gs-240 "body as final arg"
 
+  generalstaff co-seat init|go|extend|stop|status|watchdog|run|park [--id=<id>] ...
+                                                          Headless co-seat: a bounded agent turn per event (see: co-seat --help)
+    Example: generalstaff co-seat init --id=main
+    Example: generalstaff co-seat go --id=main --days=7
+    Example: generalstaff co-seat status --id=main
+
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help
 
 Global flags:
   --no-color                                              Disable ANSI color output (also honors NO_COLOR env var)`);
 }
+
+// Co-seat guards (src/co_seat/guards.ts): one plain line on stderr and exit 1.
+function refuseInTurn(refusal: string | null): void {
+  if (refusal) {
+    console.error(`Co-seat refused: ${refusal}.`);
+    process.exit(1);
+  }
+}
+const wantsHelp = (a: string[]) => a.includes("--help") || a.includes("-h") || a[1] === "help";
 
 const rawArgs = process.argv.slice(2);
 
@@ -415,6 +441,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "phase",
   "autonomous",
   "aides",
+  "co-seat",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -471,6 +498,8 @@ switch (command) {
       if (subcommand === "say") {
         if (!args[2] || args.length < 4) throw new Error("Usage: generalstaff aides say <name> <message>");
         const aide = findAide(aides, args[2]);
+        // Inside a co-seat turn, every send counts against aide_messages_per_day first.
+        await guardAideSay();
         await sayToAide(aide, args.slice(3).join(" "), rootDir);
         console.log(`Sent to ${aide.name}; outbound row appended to ${aide.inbox}.`);
         break;
@@ -536,6 +565,144 @@ switch (command) {
     }
     break;
   }
+  case "co-seat": {
+    const sub = args[1];
+    if (!sub || sub === "help" || args.includes("--help") || args.includes("-h")) {
+      console.log(
+        "Usage: generalstaff co-seat <command> [--id=<id>] [options]\n" +
+          "\n" +
+          "A co-seat keeps a fleet moving while no person has a session open: a small\n" +
+          "driver wakes one bounded agent turn per event or heartbeat. See docs/CO-SEATS.md.\n" +
+          "\n" +
+          "Commands:\n" +
+          "  init                 Write the brief, state and Claude Code settings templates (never overwrites)\n" +
+          "  go [--days=N] [--remote]\n" +
+          "                       Clear STOP, write GO with the config pin and a deadline (default run_days, at most 30)\n" +
+          "  extend [--days=N]    Move the deadline; nothing else\n" +
+          "  stop [--remote]      Write STOP and remove GO; a running turn is killed within 10 s\n" +
+          "  status [--json]      Live or not, deadline, last turn, markers, pin, caps, last exit\n" +
+          "  watchdog             Start the driver detached if it should be running (for a scheduler)\n" +
+          "  run [--once]         The driver itself (started for you by go and watchdog)\n" +
+          "  park --project=<id> \"<what the person decides>\" [--evidence=<path>]\n" +
+          "                       Park a decision in the fork ledger (capped per day)\n" +
+          "\n" +
+          "--id is optional when exactly one co-seat is declared in projects.yaml.\n",
+      );
+      break;
+    }
+    try {
+      const refusal = refuseGoOrExtend(sub);
+      if (refusal) throw new Error(refusal);
+      if (!["init", "go", "extend", "stop", "status", "watchdog", "run", "park"].includes(sub)) {
+        throw new Error(`Unknown co-seat command: ${sub} (try: generalstaff co-seat --help)`);
+      }
+      const { values, positionals } = parseArgs({
+        args: args.slice(2),
+        allowPositionals: true,
+        options: {
+          id: { type: "string" },
+          days: { type: "string" },
+          remote: { type: "boolean", default: false },
+          json: { type: "boolean", default: false },
+          once: { type: "boolean", default: false },
+          project: { type: "string" },
+          evidence: { type: "string" },
+        },
+      });
+      let days: number | undefined;
+      if (values.days !== undefined) {
+        if (!/^\d+$/.test(values.days)) throw new Error("--days must be a whole number of days");
+        days = Number(values.days);
+      }
+      const { loadSeatContext } = await import("./co_seat/context");
+      const ctl = await import("./co_seat/ctl");
+      // Inside a turn, park and stop act on the turn's own seat whatever --id says.
+      const inTurn = inCoSeat();
+      const turnDirEnv = process.env.GS_CO_SEAT_DIR;
+      if (inTurn && (sub === "park" || sub === "stop")) {
+        const own = process.env.GS_CO_SEAT_ID;
+        if (!own) throw new Error(`co-seat ${sub} inside a turn needs GS_CO_SEAT_ID`);
+        if (values.id !== undefined && values.id !== own) {
+          throw new Error(`a co-seat turn may only ${sub} its own seat ("${own}"), not "${values.id}"`);
+        }
+        values.id = own;
+      }
+      let ctx;
+      try {
+        // Park inside a turn runs on the config as pinned by the last go, never on one the turn edited.
+        ctx = inTurn && sub === "park" ? await seatForTurn() : await loadSeatContext(values.id);
+      } catch (error) {
+        // A stop must land even when projects.yaml cannot be validated: write the local STOP by id.
+        if (sub === "stop" && values.id) {
+          const { reapRecordedTurn } = await import("./co_seat/turn");
+          const fb = ctl.fallbackSeatDir(getRootDir(), values.id);
+          const targets = [...new Set([...(inTurn && turnDirEnv ? [turnDirEnv] : []), fb.dir])];
+          for (const dir of targets) {
+            ctl.stopLocal(dir);
+            if (!inTurn) await reapRecordedTurn(dir);
+          }
+          console.log(
+            `Co-seat ${values.id}: projects.yaml could not be validated (${(error as Error).message}); ` +
+              `wrote STOP and removed GO at ${targets.join(" and ")} (state dir from ${fb.source}). ` +
+              `If your driver uses a different directory, create STOP there yourself.`,
+          );
+          break;
+        }
+        throw error;
+      }
+      const tag = `Co-seat ${ctx.seat.id}`;
+
+      if (sub === "init") {
+        const r = ctl.initSeat(ctx);
+        for (const p of r.written) console.log(`Wrote ${p}`);
+        for (const p of r.kept) console.log(`Kept existing ${p}`);
+        console.log(`${tag}: templates ready. Edit the brief, then run: generalstaff co-seat go --id=${ctx.seat.id}`);
+      } else if (sub === "go") {
+        const r = ctl.goSeat(ctx, { days, remote: values.remote });
+        console.log(`${tag}: GO set, deadline ${r.go.deadline} (${r.go.days} days), pin ${r.go.pin.slice(0, 12)}`);
+        if (r.remoteSet) console.log(`${tag}: remote GO marker committed and pushed`);
+        if (r.hint) console.log(`${tag}: ${r.hint}`);
+        console.log(`${tag}: watchdog ${r.watchdog.action}${r.watchdog.pid ? ` (pid ${r.watchdog.pid})` : ""}: ${r.watchdog.reason}`);
+      } else if (sub === "extend") {
+        const go = ctl.extendSeat(ctx, { days });
+        console.log(`${tag}: deadline moved to ${go.deadline}`);
+      } else if (sub === "stop") {
+        // A turn that edited state_dir must not be able to point its stop away from the driver's directory.
+        if (inTurn && turnDirEnv && resolve(turnDirEnv) !== resolve(ctx.dir)) ctl.stopLocal(turnDirEnv);
+        const r = await ctl.stopSeat(ctx, { remote: values.remote });
+        const killed = r.reaped?.state === "killed" ? `; killed the running turn (pid ${r.reaped.turn.pid})` : "";
+        console.log(`${tag}: STOP written, GO removed; a running turn is killed within 10 s${killed}${r.remoteSet ? "; remote STOP marker committed and pushed" : ""}`);
+      } else if (sub === "status") {
+        const status = await ctl.seatStatus(ctx);
+        console.log(values.json ? JSON.stringify(status, null, 2) : ctl.formatStatus(status));
+      } else if (sub === "watchdog") {
+        const r = ctl.watchdogSeat(ctx);
+        console.log(`${tag}: watchdog ${r.action}${r.pid ? ` (pid ${r.pid})` : ""}: ${r.reason}`);
+      } else if (sub === "run") {
+        const { runDriver, installDriverSignalHandlers } = await import("./co_seat/driver");
+        const controller = new AbortController();
+        const uninstall = installDriverSignalHandlers(controller);
+        let result;
+        try {
+          result = await runDriver(ctx, { once: values.once, abort: controller.signal, exitHook: true });
+        } finally {
+          uninstall();
+        }
+        console.log(`${tag}: driver ended: ${result.reason}; turns run: ${result.turns}`);
+        process.exit(result.code);
+      } else if (sub === "park") {
+        if (!values.project) throw new Error('Usage: generalstaff co-seat park --project=<id> "<what the person decides>" [--evidence=<path>]');
+        if (positionals.length !== 1) throw new Error('park needs one quoted description: generalstaff co-seat park --project=<id> "<what the person decides>"');
+        const { parkItem } = await import("./co_seat/park");
+        const r = parkItem(ctx, values.project, positionals[0]!, values.evidence);
+        console.log(`${tag}: ${r.outcome === "added" ? "parked" : "already parked, refreshed"}: ${r.id} (${r.used} of ${r.cap} today)`);
+      }
+    } catch (error) {
+      console.error(`Co-seat: ${(error as Error).message}`);
+      process.exitCode = 1;
+    }
+    break;
+  }
   case "session": {
     // gs-244: subcommand-level --help / help matching gs-233's view pattern.
     if (args.includes("--help") || args.includes("-h") || args[1] === "help") {
@@ -563,6 +730,13 @@ switch (command) {
           "  generalstaff session --provider=ollama        # use Ollama reviewer for this session\n",
       );
       process.exit(0);
+    }
+    {
+      const refusal = refuseSession();
+      if (refusal) {
+        console.error(`Co-seat refused: ${refusal}.`);
+        process.exit(1);
+      }
     }
     const { values } = parseArgs({
       args: args.slice(1),
@@ -867,6 +1041,13 @@ switch (command) {
   }
 
   case "cycle": {
+    // Inside a co-seat turn a cycle (or cycle verify) may only target the seat's own
+    // projects: EVERY --project value is checked (the command keeps the last one).
+    if (inCoSeat() && args[1] !== "show" && args[1] !== "result" && !wantsHelp(args)) {
+      refuseInTurn(
+        await refuseProjectCommand(args[1] === "verify" ? "verify" : "cycle", extractProjectFlags(args.slice(1))),
+      );
+    }
     // Verify-only check of a bundled uncommitted change (own flags, own help).
     if (args[1] === "verify") {
       const { runCycleVerifyCli } = await import("./verify_only/cli");
@@ -1715,6 +1896,11 @@ switch (command) {
   }
 
   case "start": {
+    const refusal = refuseStart();
+    if (refusal) {
+      console.error(`Co-seat refused: ${refusal}.`);
+      process.exit(1);
+    }
     await removeStopFile();
     console.log("STOP file removed. Dispatcher is ready.");
     break;
@@ -2700,6 +2886,7 @@ switch (command) {
   }
 
   case "cycle-redo": {
+    refuseInTurn(await refuseProjectCommand("redo", extractProjectFlags(args.slice(1))));
     const { values: redoValues } = parseArgs({
       args: args.slice(1),
       options: {
@@ -3333,6 +3520,7 @@ switch (command) {
   }
 
   case "welcome": {
+    if (!wantsHelp(args)) refuseInTurn(refuseDispatcher("welcome"));
     // First-run wizard. Composes provider setup + bootstrap + register
     // + one cycle + audit display into a guided flow for non-technical
     // users. Light staff-officer voice; substance is plain. See
@@ -4028,6 +4216,7 @@ switch (command) {
   }
 
   case "engineer-benchmark": {
+    if (!wantsHelp(args)) refuseInTurn(refuseDispatcher("engineer-benchmark"));
     // gs-271: Phase 7 benchmark harness. Replays previously-shipped
     // tasks against an alternative engineer provider in disposable
     // temp clones so we can decide whether to flip a project's
@@ -4651,6 +4840,7 @@ switch (command) {
   // gs-332 (v0.8.0): autonomous mode — Phase 1 dry-run. SURVEY→SCOPE→
   // GATE+CLASSIFY→LEDGER across projects with `autonomous.enabled: true`.
   case "autonomous": {
+    if (!wantsHelp(args)) refuseInTurn(refuseDispatcher("autonomous"));
     if (args[1] === "--help" || args[1] === "help") {
       console.log(
         "Usage: generalstaff autonomous [--execute] [--live-dispatch] [--cycle-dry-run] [--project=<id>[,<id>...]]\n" +

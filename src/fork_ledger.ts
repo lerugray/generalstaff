@@ -11,8 +11,9 @@
 // The ledger DATA file is gitignored, per-host (Ray's private decision data);
 // this machinery is public.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "fs";
 import { dirname } from "path";
+import { withDirLock } from "./co_seat/dirlock";
 import type {
   ForkLedger,
   ForkEntry,
@@ -131,4 +132,72 @@ export function updateForkLedger(
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(led, null, 1));
   return newCount;
+}
+
+// --- v11 co-seats: parking an item for a person (DESIGN.md §v11) ---
+
+/** What `generalstaff co-seat park` records. The id is namespaced by the
+ *  caller (`co-seat:<seat>::<project>::<slug>`) so it never collides with an
+ *  autonomous-mode fork. */
+export interface CoSeatForkInput {
+  id: string;
+  project: string;
+  title: string;
+  evidence?: string;
+}
+
+export function hasFork(path: string, id: string): boolean {
+  return readForkLedger(path).forks.some((f) => f.id === id);
+}
+
+export function getFork(path: string, id: string): ForkEntry | undefined {
+  return readForkLedger(path).forks.find((f) => f.id === id);
+}
+
+/** Add a `kind: "co-seat"` entry, or refresh an existing id's `last_seen`
+ *  (status, resolution and first_seen are preserved; a given `evidence` is
+ *  updated). Returns which one happened. Written atomically; this does not
+ *  touch `updateForkLedger`'s behaviour. */
+export function upsertCoSeatFork(
+  path: string,
+  input: CoSeatForkInput,
+  ts: string,
+): "added" | "refreshed" {
+  // Two seats can park at once; the read-modify-write must not lose an entry.
+  return withDirLock(`${path}.lock`, () => upsertCoSeatForkLocked(path, input, ts));
+}
+
+function upsertCoSeatForkLocked(
+  path: string,
+  input: CoSeatForkInput,
+  ts: string,
+): "added" | "refreshed" {
+  const led = readForkLedger(path);
+  const existing = led.forks.find((f) => f.id === input.id);
+  let outcome: "added" | "refreshed";
+  if (existing) {
+    existing.last_seen = ts;
+    if (input.evidence !== undefined) existing.evidence = input.evidence;
+    outcome = "refreshed";
+  } else {
+    const entry: ForkEntry = {
+      id: input.id,
+      project: input.project,
+      title: input.title,
+      kind: "co-seat",
+      status: "pending",
+      first_seen: ts,
+      last_seen: ts,
+      resolution: null,
+    };
+    if (input.evidence !== undefined) entry.evidence = input.evidence;
+    led.forks.push(entry);
+    outcome = "added";
+  }
+  led.updated = ts;
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(led, null, 1));
+  renameSync(tmp, path);
+  return outcome;
 }
