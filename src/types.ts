@@ -45,6 +45,10 @@ export interface ReviewerEntry {
   fallback?: string;
   // Display label for audit output; defaults to provider (or provider:model).
   label?: string;
+  // Largest diff (in chars) this voice may be sent. A bigger diff drops the
+  // voice (input_delivery_failed) rather than letting it review a cut-off diff.
+  // Default 50000; GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS[_<PROVIDER>] also applies.
+  max_diff_chars?: number;
 }
 
 export interface ReviewConfig {

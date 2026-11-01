@@ -4,7 +4,11 @@
 import { spawn, type ChildProcess } from "child_process";
 import { writeCycleFile } from "./state";
 import { appendProgress } from "./audit";
-import { buildReviewerPrompt, type ReviewerPromptParams } from "./prompts/reviewer";
+import {
+  buildReviewerPromptChecked,
+  MAX_DIFF_LENGTH,
+  type ReviewerPromptParams,
+} from "./prompts/reviewer";
 import { formatSecretRedactionWarning, redactSecrets } from "./secrets";
 import {
   isReviewerResponse,
@@ -36,6 +40,123 @@ const DEFAULT_FAILED_RESPONSE: ReviewerResponse = {
   notes: "Malformed reviewer response — defaulting to verification_failed (fail-safe)",
 };
 
+// A review that did not really happen is reported as a "[REVIEWER ERROR] <kind>: ..."
+// string. Every provider invoker uses this one shape so the fallback retry, the
+// quorum (voiceErrored) and verify-only all treat the failure as a failure.
+export type ReviewerFailureKind =
+  | "input_delivery_failed" // the reviewer would not see the whole diff
+  | "nonzero_exit" // claude -p exited nonzero or was killed
+  | "reviewer_timeout" // the time limit ended the review
+  | "empty_response" // a clean stop with nothing in it
+  | "token_limit" // the reply was cut off at the output limit
+  | "provider_error"; // HTTP error, error payload or abnormal stop reason
+
+export function reviewerError(kind: ReviewerFailureKind, detail: string): string {
+  return `[REVIEWER ERROR] ${kind}: ${detail}`;
+}
+
+export function reviewerFailureKind(raw: string): ReviewerFailureKind | null {
+  const m = raw
+    .trimStart()
+    .match(/^\[REVIEWER ERROR\] (input_delivery_failed|nonzero_exit|reviewer_timeout|empty_response|token_limit|provider_error):/);
+  return m ? (m[1] as ReviewerFailureKind) : null;
+}
+
+// Per-attempt evidence, filled in by the invokers and logged by the cycle.
+export interface ReviewerAttempt {
+  provider: string;
+  failure_kind?: ReviewerFailureKind;
+  exit_code?: number | null;
+  signal?: string | null;
+  stop_reason?: string;
+  timed_out?: boolean;
+  duration_ms?: number;
+}
+
+// Largest diff a reviewer is sent. A bigger one is never cut: the voice is
+// refused (input_delivery_failed) or the diff goes to a reviewer whose cap fits.
+// Precedence: per-entry cap > GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS_<PROVIDER>
+// > GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS > 50000.
+const warnedEnv = new Set<string>();
+function positiveIntEnv(key: string): number | null {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return null;
+  const n = Number(raw);
+  if (Number.isInteger(n) && n > 0) return n;
+  if (!warnedEnv.has(`${key}=${raw}`)) {
+    warnedEnv.add(`${key}=${raw}`);
+    console.warn(`[generalstaff] warning: ${key}=${JSON.stringify(raw)} is not a positive integer; ignoring it`);
+  }
+  return null;
+}
+
+export function reviewerMaxDiffChars(provider: string, entryCap?: number): number {
+  if (entryCap !== undefined && Number.isFinite(entryCap) && entryCap > 0) return entryCap;
+  for (const key of [
+    `GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS_${provider.toUpperCase()}`,
+    "GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS",
+  ]) {
+    const n = positiveIntEnv(key);
+    if (n !== null) return n;
+  }
+  return MAX_DIFF_LENGTH;
+}
+
+// Picks which provider gets a diff of `diffLen` chars. fits=false means
+// neither the primary nor its fallback can take the whole diff.
+export function planReviewerRoute(
+  diffLen: number,
+  provider: string,
+  fallback: string,
+  entryCap?: number,
+): { provider: string; fallback: string; cap: number; fits: boolean } {
+  const primaryCap = reviewerMaxDiffChars(provider, entryCap);
+  const fbCap = fallback ? reviewerMaxDiffChars(fallback) : 0;
+  if (diffLen <= primaryCap) {
+    return { provider, fallback: fallback && diffLen <= fbCap ? fallback : "", cap: primaryCap, fits: true };
+  }
+  if (fallback && fallback !== provider && diffLen <= fbCap) {
+    return { provider: fallback, fallback: "", cap: fbCap, fits: true };
+  }
+  return { provider, fallback: "", cap: primaryCap, fits: false };
+}
+
+function oversizeDiffError(full: number, cap: number, provider: string): string {
+  return reviewerError(
+    "input_delivery_failed",
+    `diff is ${full} chars, over the ${cap} char cap for ${provider}; nothing past the cap would have been reviewed`,
+  );
+}
+
+function reviewerTimeoutMs(): number {
+  return positiveIntEnv("GENERALSTAFF_REVIEWER_TIMEOUT_MS") ?? 10 * 60 * 1000;
+}
+
+// Test seam: run a stand-in command instead of `claude`.
+let claudeCommand: string[] = ["claude"];
+export function _setClaudeCommandForTests(cmd: string[] | null): void {
+  claudeCommand = cmd ?? ["claude"];
+}
+
+// Races `fn` against a time limit and aborts it on expiry. Throws
+// ReviewerTimeoutError so callers can report reviewer_timeout.
+class ReviewerTimeoutError extends Error {}
+async function withTimeout<T>(ms: number, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort();
+      reject(new ReviewerTimeoutError(`no response after ${Math.round(ms / 1000)}s`));
+    }, ms);
+  });
+  try {
+    return await Promise.race([fn(ctrl.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface ReviewerProviderOverride {
   provider?: string;
   fallback?: string;
@@ -50,7 +171,37 @@ export async function runReviewer(
   cwdOverride?: string,
   providerOverride?: ReviewerProviderOverride,
 ): Promise<ReviewerResult> {
-  const promptScan = redactSecrets(buildReviewerPrompt(promptParams));
+  // Provider routing. Default: claude -p (behavior since Phase 1). Opt-in:
+  // GENERALSTAFF_REVIEWER_PROVIDER=openrouter uses the OpenRouter Chat
+  // Completions API with Qwen3 Coder (see FUTURE-DIRECTIONS-2026-04-15.md
+  // §2 tier taxonomy). GENERALSTAFF_REVIEWER_PROVIDER=ollama uses a
+  // locally running Ollama server — zero-cost, offline, and the best
+  // story for users who don't want to pay for an LLM API. The reviewer
+  // is structured JSON-in/JSON-out so a tools-capable agent is not
+  // required on any of these paths.
+  // gs-249 precedence: CLI override > env var > default "claude".
+  // Override is scoped to this single call — process.env is not mutated.
+  const configuredProvider = (
+    providerOverride?.provider ??
+    process.env.GENERALSTAFF_REVIEWER_PROVIDER ??
+    "claude"
+  ).toLowerCase();
+  const configuredFallback = (
+    providerOverride?.fallback ??
+    process.env.GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER ??
+    ""
+  ).toLowerCase();
+  // A diff is never cut for a reviewer: it goes to a provider whose cap fits,
+  // or the review fails closed (see planReviewerRoute).
+  const route = planReviewerRoute(
+    promptParams.fullDiff.length,
+    configuredProvider,
+    configuredFallback,
+  );
+  const provider = route.provider;
+  const fallback = route.fallback;
+  const checked = buildReviewerPromptChecked(promptParams, route.cap);
+  const promptScan = redactSecrets(checked.prompt);
   const prompt = promptScan.redacted;
   if (promptScan.hits.length > 0) {
     console.warn(formatSecretRedactionWarning("reviewer-prompt.txt", promptScan.hits));
@@ -72,6 +223,8 @@ export async function runReviewer(
   await appendProgress(project.id, "reviewer_invoked", {
     prompt_length: prompt.length,
     dry_run: dryRun,
+    diff_chars_full: checked.diffCharsFull,
+    diff_chars_sent: route.fits ? checked.diffCharsSent : 0,
   }, cycleId);
 
   if (dryRun) {
@@ -104,38 +257,28 @@ export async function runReviewer(
     return { verdict: "verified", response: dryResponse, rawResponse: raw, parseError: null };
   }
 
-  // Provider routing. Default: claude -p (behavior since Phase 1). Opt-in:
-  // GENERALSTAFF_REVIEWER_PROVIDER=openrouter uses the OpenRouter Chat
-  // Completions API with Qwen3 Coder (see FUTURE-DIRECTIONS-2026-04-15.md
-  // §2 tier taxonomy). GENERALSTAFF_REVIEWER_PROVIDER=ollama uses a
-  // locally running Ollama server — zero-cost, offline, and the best
-  // story for users who don't want to pay for an LLM API. The reviewer
-  // is structured JSON-in/JSON-out so a tools-capable agent is not
-  // required on any of these paths.
-  // gs-249 precedence: CLI override > env var > default "claude".
-  // Override is scoped to this single call — process.env is not mutated.
-  const provider = (
-    providerOverride?.provider ??
-    process.env.GENERALSTAFF_REVIEWER_PROVIDER ??
-    "claude"
-  ).toLowerCase();
-  const fallback = (
-    providerOverride?.fallback ??
-    process.env.GENERALSTAFF_REVIEWER_FALLBACK_PROVIDER ??
-    ""
-  ).toLowerCase();
   const cwd = cwdOverride ?? project.path;
-  const { rawResponse, usedFallback } = await invokeReviewerWithFallback(prompt, cwd, {
-    provider,
-    fallback,
-    onFallback: async (primaryError) => {
-      await appendProgress(project.id, "reviewer_fallback", {
-        primary_provider: provider,
-        fallback_provider: fallback,
-        primary_error: primaryError.slice(0, 500),
-      }, cycleId);
-    },
-  });
+  const attempts: ReviewerAttempt[] = [];
+  let rawResponse: string;
+  let usedFallback = false;
+  if (!route.fits) {
+    // Fail closed without calling any model: nothing was reviewed.
+    rawResponse = oversizeDiffError(checked.diffCharsFull, route.cap, provider);
+    attempts.push({ provider, failure_kind: "input_delivery_failed" });
+  } else {
+    ({ rawResponse, usedFallback } = await invokeReviewerWithFallback(prompt, cwd, {
+      provider,
+      fallback,
+      attempts,
+      onFallback: async (primaryError) => {
+        await appendProgress(project.id, "reviewer_fallback", {
+          primary_provider: provider,
+          fallback_provider: fallback,
+          primary_error: primaryError.slice(0, 500),
+        }, cycleId);
+      },
+    }));
+  }
 
   await writeCycleFile(
     project.id,
@@ -147,6 +290,10 @@ export async function runReviewer(
 
   await appendProgress(project.id, "reviewer_response", {
     response_length: rawResponse.length,
+    failure_kind: reviewerFailureKind(rawResponse),
+    diff_chars_full: checked.diffCharsFull,
+    diff_chars_sent: route.fits ? checked.diffCharsFull : 0,
+    attempts,
   }, cycleId);
 
   // Parse JSON verdict
@@ -197,12 +344,18 @@ export function terminateReviewerChildren(signal: NodeJS.Signals = "SIGKILL"): n
   return count;
 }
 
-async function spawnClaude(prompt: string, cwd: string, model?: string): Promise<string> {
+async function spawnClaude(
+  prompt: string,
+  cwd: string,
+  model?: string,
+  attempt?: ReviewerAttempt,
+): Promise<string> {
   return new Promise<string>((resolve) => {
     const args = buildClaudeReviewerArgs(model);
+    const [cmd, ...cmdArgs] = claudeCommand;
     const child = spawn(
-      "claude",
-      args,
+      cmd,
+      [...cmdArgs, ...args],
       {
         cwd,
         stdio: ["pipe", "pipe", "pipe"],
@@ -212,10 +365,15 @@ async function spawnClaude(prompt: string, cwd: string, model?: string): Promise
     activeReviewerChildren.add(child);
     child.on("close", () => activeReviewerChildren.delete(child));
     child.on("error", () => activeReviewerChildren.delete(child));
+    child.stdin?.on("error", () => { /* child exited before reading the prompt */ });
     child.stdin?.end(prompt);
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const limitMs = reviewerTimeoutMs();
 
     child.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -225,26 +383,53 @@ async function spawnClaude(prompt: string, cwd: string, model?: string): Promise
       stderr += chunk.toString();
     });
 
-    // 10-minute timeout for reviewer
+    // 10-minute timeout for reviewer (GENERALSTAFF_REVIEWER_TIMEOUT_MS)
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000);
-    }, 10 * 60 * 1000);
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    }, limitMs);
 
-    child.on("close", (code) => {
+    const done = (s: string) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      if (code !== 0 && stdout.length === 0) {
-        resolve(
-          `[REVIEWER ERROR] claude -p exited ${code}.\nstderr: ${stderr.slice(0, 2000)}`,
-        );
-      } else {
-        resolve(stdout);
+      clearTimeout(killTimer);
+      resolve(s);
+    };
+
+    // The verdict only counts from a clean exit 0. Output printed before a
+    // nonzero exit, a signal or the time limit is discarded, never parsed.
+    child.on("close", (code, signal) => {
+      if (attempt) {
+        attempt.exit_code = code;
+        attempt.signal = signal;
+        attempt.timed_out = timedOut;
       }
+      if (timedOut) {
+        return done(
+          reviewerError(
+            "reviewer_timeout",
+            `claude -p stopped after ${Math.round(limitMs / 1000)}s (${signal ?? `exit ${code}`}); ${stdout.length} chars of partial output discarded`,
+          ),
+        );
+      }
+      if (code !== 0) {
+        return done(
+          reviewerError(
+            "nonzero_exit",
+            `claude -p exited ${code}${signal ? ` (${signal})` : ""}; ${stdout.length} chars of output discarded\nstderr: ${stderr.slice(0, 2000)}`,
+          ),
+        );
+      }
+      if (stdout.trim() === "") {
+        return done(reviewerError("empty_response", "claude -p exited 0 with no output"));
+      }
+      done(stdout);
     });
 
     child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve(`[REVIEWER ERROR] Failed to spawn claude: ${err.message}`);
+      done(reviewerError("provider_error", `Failed to spawn claude: ${err.message}`));
     });
   });
 }
@@ -396,22 +581,40 @@ export async function invokeReviewerProvider(
   prompt: string,
   cwd: string,
   model?: string,
+  attempt?: ReviewerAttempt,
 ): Promise<string> {
   const p = provider.toLowerCase();
   return withReviewerSemaphore(p, async () => {
-    if (p === "fixed") {
-      const verdict = process.env.GENERALSTAFF_REVIEWER_FIXED_VERDICT;
-      if (verdict !== "verified" && verdict !== "verified_weak" && verdict !== "verification_failed") {
-        return "[REVIEWER ERROR] fixed test reviewer requires GENERALSTAFF_REVIEWER_FIXED_VERDICT=verified|verified_weak|verification_failed";
-      }
-      return JSON.stringify({ verdict, reason: "[fixed test reviewer] configured verdict; no scope review performed",
-        scope_drift_files: [], hands_off_violations: [], task_evidence: [], silent_failures: [],
-        notes: "Deterministic test/sitting reviewer; no model or subprocess was invoked." });
+    const started = Date.now();
+    const a: ReviewerAttempt = attempt ?? { provider: p };
+    a.provider = p;
+    try {
+      return await dispatchReviewer(p, prompt, cwd, model, a);
+    } finally {
+      a.duration_ms = Date.now() - started;
     }
-    if (p === "openrouter") return invokeOpenRouterReviewer(prompt, model);
-    if (p === "ollama") return invokeOllamaReviewer(prompt, model);
-    return spawnClaude(prompt, cwd, model);
   });
+}
+
+async function dispatchReviewer(
+  p: string,
+  prompt: string,
+  cwd: string,
+  model: string | undefined,
+  a: ReviewerAttempt,
+): Promise<string> {
+  if (p === "fixed") {
+    const verdict = process.env.GENERALSTAFF_REVIEWER_FIXED_VERDICT;
+    if (verdict !== "verified" && verdict !== "verified_weak" && verdict !== "verification_failed") {
+      return "[REVIEWER ERROR] fixed test reviewer requires GENERALSTAFF_REVIEWER_FIXED_VERDICT=verified|verified_weak|verification_failed";
+    }
+    return JSON.stringify({ verdict, reason: "[fixed test reviewer] configured verdict; no scope review performed",
+      scope_drift_files: [], hands_off_violations: [], task_evidence: [], silent_failures: [],
+      notes: "Deterministic test/sitting reviewer; no model or subprocess was invoked." });
+  }
+  if (p === "openrouter") return invokeOpenRouterReviewer(prompt, model, a);
+  if (p === "ollama") return invokeOllamaReviewer(prompt, model, a);
+  return spawnClaude(prompt, cwd, model, a);
 }
 
 // Runs the primary reviewer provider and, if the response begins with
@@ -428,13 +631,18 @@ export async function invokeReviewerWithFallback(
     fallback?: string;
     model?: string;
     onFallback?: (primaryError: string) => void | Promise<void>;
+    // Receives one evidence record per provider call made.
+    attempts?: ReviewerAttempt[];
   } = {},
 ): Promise<{ rawResponse: string; usedFallback: boolean }> {
   const provider = (opts.provider ?? "claude").toLowerCase();
   const fallback = (opts.fallback ?? "").toLowerCase();
   // model applies to the primary voice only; the fallback provider uses its
   // own default (a per-reviewer tuned model rarely transfers across providers).
-  const primary = await invokeReviewerProvider(provider, prompt, cwd, opts.model);
+  const primaryAttempt: ReviewerAttempt = { provider };
+  opts.attempts?.push(primaryAttempt);
+  const primary = await invokeReviewerProvider(provider, prompt, cwd, opts.model, primaryAttempt);
+  primaryAttempt.failure_kind = reviewerFailureKind(primary) ?? undefined;
 
   const shouldFallback =
     provider !== "fixed" && // A test reviewer must never fall through to a model.
@@ -447,7 +655,10 @@ export async function invokeReviewerWithFallback(
   }
 
   if (opts.onFallback) await opts.onFallback(primary);
-  const retry = await invokeReviewerProvider(fallback, prompt, cwd);
+  const retryAttempt: ReviewerAttempt = { provider: fallback };
+  opts.attempts?.push(retryAttempt);
+  const retry = await invokeReviewerProvider(fallback, prompt, cwd, undefined, retryAttempt);
+  retryAttempt.failure_kind = reviewerFailureKind(retry) ?? undefined;
   return { rawResponse: retry, usedFallback: true };
 }
 
@@ -460,48 +671,90 @@ export async function invokeReviewerWithFallback(
 export async function invokeOpenRouterReviewer(
   prompt: string,
   modelOverride?: string,
+  attempt?: ReviewerAttempt,
 ): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return (
-      "[REVIEWER ERROR] OPENROUTER_API_KEY not set in environment. " +
-      "Set it via `export OPENROUTER_API_KEY=...` or source it from " +
-      "your provider .env file before running with " +
-      "GENERALSTAFF_REVIEWER_PROVIDER=openrouter."
+    return reviewerError(
+      "provider_error",
+      "OPENROUTER_API_KEY not set in environment. " +
+        "Set it via `export OPENROUTER_API_KEY=...` or source it from " +
+        "your provider .env file before running with " +
+        "GENERALSTAFF_REVIEWER_PROVIDER=openrouter.",
     );
   }
   const model =
     modelOverride ?? process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen/qwen3-coder-30b-a3b-instruct";
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0,
-        max_tokens: 4000,
-      }),
+    return await withTimeout(reviewerTimeoutMs(), async (signal) => {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0,
+          max_tokens: 4000,
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        return reviewerError(
+          "provider_error",
+          `OpenRouter ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`,
+        );
+      }
+      const data = (await response.json()) as {
+        error?: unknown;
+        choices?: Array<{
+          message?: { content?: string };
+          finish_reason?: string | null;
+          native_finish_reason?: string | null;
+          error?: unknown;
+        }>;
+      };
+      const choice = data?.choices?.[0];
+      if (data?.error || choice?.error) {
+        return reviewerError(
+          "provider_error",
+          `OpenRouter returned an error payload: ${JSON.stringify(data.error ?? choice?.error).slice(0, 1500)}`,
+        );
+      }
+      // Only a normal stop is a finished review. An absent finish_reason is
+      // accepted (some providers omit it) and logged as "absent".
+      const finish = choice?.finish_reason;
+      if (attempt) attempt.stop_reason = finish ?? "absent";
+      if (finish && finish.toLowerCase() !== "stop") {
+        const native = choice?.native_finish_reason ? ` (native: ${choice.native_finish_reason})` : "";
+        return reviewerError(
+          finish.toLowerCase() === "length" ? "token_limit" : "provider_error",
+          `OpenRouter stopped with finish_reason=${finish}${native}; the reply is incomplete`,
+        );
+      }
+      const content = choice?.message?.content;
+      if (typeof content !== "string") {
+        return reviewerError(
+          "provider_error",
+          `OpenRouter response missing content: ${JSON.stringify(data).slice(0, 1500)}`,
+        );
+      }
+      if (content.trim() === "") {
+        return reviewerError("empty_response", "OpenRouter returned an empty reply");
+      }
+      return content;
     });
-    if (!response.ok) {
-      const body = await response.text();
-      return `[REVIEWER ERROR] OpenRouter ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`;
-    }
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== "string") {
-      return `[REVIEWER ERROR] OpenRouter response missing content: ${JSON.stringify(data).slice(0, 1500)}`;
-    }
-    return content;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `[REVIEWER ERROR] OpenRouter fetch failed: ${msg}`;
+    if (err instanceof ReviewerTimeoutError) {
+      if (attempt) attempt.timed_out = true;
+      return reviewerError("reviewer_timeout", `OpenRouter ${msg}`);
+    }
+    return reviewerError("provider_error", `OpenRouter fetch failed: ${msg}`);
   }
 }
 
@@ -545,50 +798,76 @@ export function validateOllamaHost(raw: string): string {
 export async function invokeOllamaReviewer(
   prompt: string,
   modelOverride?: string,
+  attempt?: ReviewerAttempt,
 ): Promise<string> {
   let host: string;
   try {
     host = validateOllamaHost(process.env.OLLAMA_HOST ?? "http://localhost:11434");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `[REVIEWER ERROR] ${msg}`;
+    return reviewerError("provider_error", msg);
   }
   const model = modelOverride ?? process.env.GENERALSTAFF_REVIEWER_MODEL ?? "qwen3:8b";
 
   try {
-    const response = await fetch(`${host}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        stream: false,
-        options: {
-          temperature: 0,
-          num_predict: 8000,
-        },
-      }),
+    return await withTimeout(reviewerTimeoutMs(), async (signal) => {
+      const response = await fetch(`${host}/api/chat`, {
+        method: "POST",
+        signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+          options: {
+            temperature: 0,
+            num_predict: 8000,
+          },
+        }),
+      });
+      if (!response.ok) {
+        const body = await response.text();
+        return reviewerError(
+          "provider_error",
+          `Ollama ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`,
+        );
+      }
+      const data = (await response.json()) as {
+        message?: { content?: string };
+        done_reason?: string;
+      };
+      // Any stop other than a normal one means the reply may be cut off,
+      // whether or not it has content.
+      const doneReason = data?.done_reason;
+      if (attempt) attempt.stop_reason = doneReason || "absent";
+      if (doneReason && doneReason !== "stop") {
+        const length = doneReason === "length";
+        return reviewerError(
+          length ? "token_limit" : "provider_error",
+          `Ollama stopped with done_reason=${doneReason}` +
+            (length ? " (response truncated — consider raising num_predict)" : "") +
+            "; the reply is incomplete",
+        );
+      }
+      const content = data?.message?.content;
+      if (typeof content !== "string" || content.length === 0) {
+        return reviewerError(
+          "empty_response",
+          `Ollama response missing content: ${JSON.stringify(data).slice(0, 1500)}`,
+        );
+      }
+      return content;
     });
-    if (!response.ok) {
-      const body = await response.text();
-      return `[REVIEWER ERROR] Ollama ${response.status} ${response.statusText}: ${body.slice(0, 1500)}`;
-    }
-    const data = (await response.json()) as {
-      message?: { content?: string };
-      done_reason?: string;
-    };
-    const content = data?.message?.content;
-    if (typeof content !== "string" || content.length === 0) {
-      const hint =
-        data?.done_reason === "length"
-          ? " (response truncated — consider raising num_predict)"
-          : "";
-      return `[REVIEWER ERROR] Ollama response missing content${hint}: ${JSON.stringify(data).slice(0, 1500)}`;
-    }
-    return content;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `[REVIEWER ERROR] Ollama fetch failed (is the Ollama server running at ${host}?): ${msg}`;
+    if (err instanceof ReviewerTimeoutError) {
+      if (attempt) attempt.timed_out = true;
+      return reviewerError("reviewer_timeout", `Ollama ${msg}`);
+    }
+    return reviewerError(
+      "provider_error",
+      `Ollama fetch failed (is the Ollama server running at ${host}?): ${msg}`,
+    );
   }
 }
 
@@ -627,6 +906,14 @@ export function parseReviewerResponse(raw: string): {
   // Try to extract JSON from the response
   // The reviewer is instructed to return JSON only, but might include
   // markdown fences or prose despite instructions
+  // An error report is never a verdict, whatever JSON its text happens to hold.
+  if (raw.trimStart().startsWith("[REVIEWER ERROR]")) {
+    return {
+      verdict: "verification_failed",
+      response: DEFAULT_FAILED_RESPONSE,
+      parseError: `Reviewer did not complete: ${raw.trimStart().slice(0, 200)}`,
+    };
+  }
   const trimmed = stripThinkTags(raw).trim();
 
   // Try direct parse first
@@ -900,7 +1187,12 @@ export interface QuorumVoice {
   // timeout, or unparseable output). Honest-error contract hinges on this.
   errored: boolean;
   errorDetail?: string;
+  // Typed failure and per-attempt evidence (logged in reviewer-quorum.json).
+  failureKind?: ReviewerFailureKind;
+  attempts?: ReviewerAttempt[];
 }
+
+class InputDeliveryError extends Error {}
 
 type FindingKind = "scope_drift" | "hands_off" | "silent_failure";
 
@@ -1146,7 +1438,23 @@ export async function runQuorumReview(
   const reviewers = reviewCfg.reviewers;
   const policy: QuorumPolicy = reviewCfg.quorum_policy ?? "conservative";
   const minReal = reviewCfg.min_real_reviews ?? 2;
-  const promptScan = redactSecrets(buildReviewerPrompt(promptParams));
+  const diffLen = promptParams.fullDiff.length;
+  // Each voice gets the diff only if its own cap fits it (see planReviewerRoute).
+  // The audit copy of the prompt uses the largest cap, so it shows the most any
+  // voice was sent.
+  const routes = reviewers.map((entry) =>
+    planReviewerRoute(
+      diffLen,
+      entry.provider.toLowerCase(),
+      (entry.fallback ?? "").toLowerCase(),
+      entry.max_diff_chars,
+    ),
+  );
+  const auditChecked = buildReviewerPromptChecked(
+    promptParams,
+    Math.max(...routes.map((r) => r.cap)),
+  );
+  const promptScan = redactSecrets(auditChecked.prompt);
   const prompt = promptScan.redacted;
   const cwd = cwdOverride ?? project.path;
 
@@ -1169,6 +1477,8 @@ export async function runQuorumReview(
       reviewer_count: reviewers.length,
       quorum_policy: policy,
       min_real_reviews: minReal,
+      diff_chars_full: auditChecked.diffCharsFull,
+      diff_chars_sent: auditChecked.diffCharsSent,
     },
     cycleId,
   );
@@ -1198,14 +1508,27 @@ export async function runQuorumReview(
   // so parallel OpenRouter/Ollama voices serialize per-provider rather than
   // stampeding the free tier / local GPU.
   const voices: QuorumVoice[] = await Promise.all(
-    reviewers.map(async (entry): Promise<QuorumVoice> => {
+    reviewers.map(async (entry, idx): Promise<QuorumVoice> => {
       const label = entry.label ?? (entry.model ? `${entry.provider}:${entry.model}` : entry.provider);
+      const route = routes[idx];
+      const attempts: ReviewerAttempt[] = [];
       let rawResponse: string;
       try {
-        const r = await invokeReviewerWithFallback(prompt, cwd, {
-          provider: entry.provider,
-          fallback: entry.fallback ?? "",
-          model: entry.model,
+        if (!route.fits) {
+          // A voice that cannot take the whole diff is dropped, never a vote.
+          attempts.push({ provider: entry.provider, failure_kind: "input_delivery_failed" });
+          throw new InputDeliveryError(oversizeDiffError(diffLen, route.cap, entry.provider));
+        }
+        // Rerouted to the fallback when only it can take the whole diff.
+        const rerouted = route.provider !== entry.provider.toLowerCase();
+        const voicePrompt = redactSecrets(
+          buildReviewerPromptChecked(promptParams, route.cap).prompt,
+        ).redacted;
+        const r = await invokeReviewerWithFallback(voicePrompt, cwd, {
+          provider: route.provider,
+          fallback: route.fallback,
+          model: rerouted ? undefined : entry.model,
+          attempts,
           onFallback: async (primaryError) => {
             await appendProgress(
               project.id,
@@ -1222,9 +1545,12 @@ export async function runQuorumReview(
         });
         rawResponse = r.rawResponse;
       } catch (err) {
-        rawResponse = `[REVIEWER ERROR] quorum voice ${label} threw: ${
-          err instanceof Error ? err.message : String(err)
-        }`;
+        rawResponse =
+          err instanceof InputDeliveryError
+            ? err.message
+            : `[REVIEWER ERROR] quorum voice ${label} threw: ${
+                err instanceof Error ? err.message : String(err)
+              }`;
       }
       const { verdict, response, parseError } = parseReviewerResponse(rawResponse);
       const errored = voiceErrored(rawResponse, parseError);
@@ -1238,6 +1564,8 @@ export async function runQuorumReview(
         parseError,
         errored,
         errorDetail: errored ? parseError ?? rawResponse.slice(0, 200) : undefined,
+        failureKind: reviewerFailureKind(rawResponse) ?? undefined,
+        attempts,
       };
     }),
   );
@@ -1257,6 +1585,7 @@ export async function runQuorumReview(
         real: synth.realCount,
         dropped: synth.droppedCount,
         quorum_reached: synth.quorumReached,
+        diff_chars_full: auditChecked.diffCharsFull,
         aggregate_verdict: synth.verdict,
         tagged_findings: synth.taggedFindings,
         per_voice: voices.map((v) => ({
@@ -1266,6 +1595,8 @@ export async function runQuorumReview(
           verdict: v.errored ? "errored" : v.verdict,
           errored: v.errored,
           error_detail: v.errorDetail,
+          failure_kind: v.failureKind ?? null,
+          attempts: v.attempts ?? [],
           raw: v.rawResponse.slice(0, 4000),
         })),
       },
@@ -1280,7 +1611,12 @@ export async function runQuorumReview(
   await appendProgress(
     project.id,
     "reviewer_response",
-    { response_length: mergedRaw.length, quorum: true },
+    {
+      response_length: mergedRaw.length,
+      quorum: true,
+      diff_chars_full: auditChecked.diffCharsFull,
+      failure_kinds: voices.map((v) => v.failureKind ?? null),
+    },
     cycleId,
   );
   await appendProgress(

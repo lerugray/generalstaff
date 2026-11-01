@@ -122,7 +122,7 @@ describe("reviewer prompt template", () => {
 
       expect(prompt).not.toContain("x".repeat(60_000));
       expect(prompt).toContain("[... truncated at 50000 chars");
-      expect(prompt).toContain("full diff in cycle directory");
+      expect(prompt).toContain("the rest of the diff was NOT provided");
     });
 
     it("does not truncate diff at exactly 50KB", () => {

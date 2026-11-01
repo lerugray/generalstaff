@@ -35,15 +35,32 @@ export interface ReviewerPromptParams {
 
 const MAX_MISSIONSWARM_CONTEXT = 12_000;
 
-const MAX_DIFF_LENGTH = 50_000;
+export const MAX_DIFF_LENGTH = 50_000;
 const MAX_VERIFICATION_OUTPUT = 10_000;
 
+export interface CheckedReviewerPrompt {
+  prompt: string;
+  // True when the diff was cut to fit maxDiffChars. A reviewer that did not
+  // see the whole diff cannot vouch for it, so callers must not count a
+  // verdict built on a truncated prompt.
+  truncated: boolean;
+  diffCharsFull: number;
+  diffCharsSent: number;
+}
+
 export function buildReviewerPrompt(params: ReviewerPromptParams): string {
-  const diff =
-    params.fullDiff.length > MAX_DIFF_LENGTH
-      ? params.fullDiff.slice(0, MAX_DIFF_LENGTH) +
-        `\n\n[... truncated at ${MAX_DIFF_LENGTH} chars — full diff in cycle directory]`
-      : params.fullDiff;
+  return buildReviewerPromptChecked(params, MAX_DIFF_LENGTH).prompt;
+}
+
+export function buildReviewerPromptChecked(
+  params: ReviewerPromptParams,
+  maxDiffChars: number = MAX_DIFF_LENGTH,
+): CheckedReviewerPrompt {
+  const truncated = params.fullDiff.length > maxDiffChars;
+  const diff = truncated
+    ? params.fullDiff.slice(0, maxDiffChars) +
+      `\n\n[... truncated at ${maxDiffChars} chars — the rest of the diff was NOT provided]`
+    : params.fullDiff;
 
   const verOutput =
     params.verificationOutputTruncated.length > MAX_VERIFICATION_OUTPUT
@@ -85,7 +102,7 @@ export function buildReviewerPrompt(params: ReviewerPromptParams): string {
     ? buildVerifyOnlySection(params.verifyOnly.handsOffHits)
     : "";
 
-  return `You are the Reviewer agent for GeneralStaff, reviewing one cycle
+  const prompt = `You are the Reviewer agent for GeneralStaff, reviewing one cycle
 of work on the ${params.projectId} project.
 
 Your job is SCOPE MATCH. Given the diff produced by this cycle
@@ -94,8 +111,9 @@ confirm that the diff actually matches the claimed work. This is
 the final gate before a cycle is marked done — if you cannot
 confirm the match, the cycle does NOT get marked done.
 
-You have read-only access. You cannot edit files. You CAN run
-git commands and read any file in the project.
+You have read-only access. You cannot edit files or run commands.
+Depending on how you were launched you may be able to read files
+in the project; the diff below is the complete input to review.
 
 ## The cycle's claimed work
 
@@ -237,6 +255,7 @@ cost of a false \`verified\` is much higher than the cost of a
 false \`verification_failed\`. False verified is the Polsia
 failure mode; false failed just means a human looks at the
 diff.${verifyOnlySection}`;
+  return { prompt, truncated, diffCharsFull: params.fullDiff.length, diffCharsSent: truncated ? maxDiffChars : params.fullDiff.length };
 }
 
 const MAX_VERIFY_ONLY_HITS = 50;

@@ -1309,7 +1309,10 @@ describe("hardening fix round 2", () => {
     editCheckout(fx, { "spam.txt": spam });
     const bundle = await cliBundle(fx);
     const started = Date.now();
-    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]));
+    // The 1 MiB diff is over the reviewer's default size cap, which now fails the review.
+    const r = await fx.runCli(verifyArgs(fx, bundle, ["--json"]), {
+      env: { GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS: "5000000" },
+    });
     expect(r.exitCode).toBe(0);
     // The quadratic form took over ten seconds on 1 MiB of this.
     expect(Date.now() - started).toBeLessThan(20_000);

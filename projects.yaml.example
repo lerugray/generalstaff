@@ -295,6 +295,12 @@
 #           Defaults to `provider` (or `provider:model` when model
 #           is set).
 #
+#       max_diff_chars: int   (optional, default: 50000)
+#           Largest diff, in characters, this voice may be sent. A
+#           bigger diff is never cut: the voice is dropped (or its
+#           fallback is used if the fallback's cap fits). Raise it
+#           for models with a large context window.
+#
 #   review.quorum_policy: "conservative" | "majority"   (optional)
 #       How individual reviewer verdicts are synthesized.
 #

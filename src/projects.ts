@@ -978,7 +978,7 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
       throw new ProjectValidationError(
         id,
         "review.reviewers",
-        "must be a non-empty array of { provider, model?, fallback?, label? } entries",
+        "must be a non-empty array of { provider, model?, fallback?, label?, max_diff_chars? } entries",
       );
     }
     const reviewers: ReviewerEntry[] = rv.reviewers.map((entry, i) => {
@@ -1002,11 +1002,25 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
           );
         }
       }
+      if (e.max_diff_chars !== undefined && e.max_diff_chars !== null) {
+        if (
+          typeof e.max_diff_chars !== "number" ||
+          !Number.isInteger(e.max_diff_chars) ||
+          e.max_diff_chars < 1
+        ) {
+          throw new ProjectValidationError(
+            id,
+            `review.reviewers[${i}].max_diff_chars`,
+            `must be a positive integer if specified, got ${JSON.stringify(e.max_diff_chars)}`,
+          );
+        }
+      }
       return {
         provider: e.provider,
         model: e.model as string | undefined,
         fallback: e.fallback as string | undefined,
         label: e.label as string | undefined,
+        max_diff_chars: (e.max_diff_chars ?? undefined) as number | undefined,
       };
     });
     let quorumPolicy: QuorumPolicy | undefined;

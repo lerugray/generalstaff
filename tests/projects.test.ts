@@ -584,6 +584,18 @@ describe("validateConfig", () => {
     ).toThrow(/review\.quorum_policy/);
   });
 
+  for (const bad of [0, -1, 1.5, "x"]) {
+    it(`rejects max_diff_chars ${JSON.stringify(bad)}`, () => {
+      expect(() =>
+        validateProject(
+          validProjectRaw({
+            review: { reviewers: [{ provider: "claude", max_diff_chars: bad }] },
+          }),
+        ),
+      ).toThrow(/max_diff_chars/);
+    });
+  }
+
   it("rejects min_real_reviews < 1", () => {
     expect(() =>
       validateProject(

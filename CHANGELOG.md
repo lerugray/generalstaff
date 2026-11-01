@@ -9,6 +9,8 @@ in practice, entries prioritize
 
 ## Unreleased
 
+A review that did not really happen can no longer count as a pass. A diff over the reviewer's size cap is no longer cut and reviewed anyway: it goes to a reviewer whose cap fits, or the review fails. A `claude -p` reviewer that exits nonzero, is killed, or hits the time limit now fails even if it printed a verdict, so the fallback reviewer runs and a quorum drops that voice. OpenRouter and Ollama reviews that stop for any reason other than a normal stop (such as the output limit) fail, and both now time out instead of hanging. Failures are typed (`input_delivery_failed`, `nonzero_exit`, `reviewer_timeout`, `empty_response`, `token_limit`, `provider_error`) and logged with the exit code or stop reason and the diff sizes. The default cap is 50,000 characters. A diff over the cap now fails review (and that cycle's commits roll back) instead of being reviewed half-read. To raise the cap set `GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS=200000`, or `GENERALSTAFF_REVIEWER_MAX_DIFF_CHARS_<PROVIDER>`, or `max_diff_chars` on a quorum reviewer. `GENERALSTAFF_REVIEWER_TIMEOUT_MS` sets the reviewer time limit.
+
 Auto-merge now checks the combined tree when HEAD has moved since the bot's work was verified, leaving HEAD unchanged if that check fails (reported in #7). Session-end merges use the same check and record their result in the audit log.
 
 ## v0.16.1 — 2026-10-26
