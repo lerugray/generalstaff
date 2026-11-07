@@ -152,6 +152,23 @@ export const VALID_JUDGMENT_GATE_MODES: readonly JudgmentGateMode[] = [
 
 export type JudgmentVerdictKind = "keep" | "reject" | "error";
 
+// --- Spec-anchor gate (v0.18.0) ---
+// Optional pre-cycle gate that checks a picked task against the project's
+// SPEC.md (the owner's own words), not against the plan. See docs/SPEC-GATE.md.
+//   - "off"   : disabled, zero overhead (default).
+//   - "flag"  : log the verdict, proceed regardless.
+//   - "block" : proceed only on ON-SPEC; OFF-SPEC, UNCLEAR and error skip the
+//               cycle (fail closed, reason `spec_gate_<verdict>`).
+export type SpecGateMode = "off" | "flag" | "block";
+export const VALID_SPEC_GATE_MODES: readonly SpecGateMode[] = [
+  "off",
+  "flag",
+  "block",
+];
+
+export type SpecVerdictKind = "on-spec" | "off-spec" | "unclear" | "error";
+export type SpecTaskKind = "build" | "verify" | "ship";
+
 // --- Autonomous-mode item class (gs-332, 2026-06-22, v0.8.0) ---
 // Alongside KEEP/REJECT, the gate classifies a proposed work item as either
 // safe to auto-dispatch (mechanical, bounded) or needing a human taste/scope/
@@ -278,9 +295,16 @@ export interface ForkEntry {
   first_seen: string;   // ISO 8601 / run timestamp
   last_seen: string;
   resolution: string | null;
+  // v0.18.0: whether the resolution is the owner's ruling (carries quoted
+  // owner words) or a seat option (a pick made from option labels, no words).
+  resolution_kind?: ResolutionKind;
+  // v0.18.0: the owner's quoted words, stored when resolution_kind is "ruling".
+  owner_words?: string;
   // v11 co-seats: optional path or note pointing at the evidence for a parked item.
   evidence?: string;
 }
+
+export type ResolutionKind = "ruling" | "seat_option";
 
 export interface ForkLedger {
   forks: ForkEntry[];
@@ -461,6 +485,15 @@ export interface ProjectConfig {
   // above. BYOK per Hard Rule 8 — needs OPENROUTER_API_KEY; graceful
   // no-op (proceeds) when the key is unset. Composes with `advisor`.
   judgment_gate?: JudgmentGateMode;
+  // v0.18.0: optional spec-anchor gate. "off" (default) / "flag" / "block".
+  // The anchor is a SPEC.md at the project root (spec_anchor overrides the
+  // path); owner_docs lists owner-approved design docs whose exact quotes
+  // count as owner words; picture_first requires a first-screen picture on
+  // user-facing build tasks. See docs/SPEC-GATE.md.
+  spec_gate?: SpecGateMode;
+  spec_anchor?: string;
+  owner_docs?: string[];
+  picture_first?: boolean;
   // gs-302: optional early-kill when the engineer prints no task-claim
   // line (GENERALSTAFF_TASK_CLAIM_JSON) within this many minutes.
   // Fractions allowed (e.g. 0.05 ≈ 3s). Unset disables the timer;
@@ -814,7 +847,14 @@ export type ProgressEventType =
   // raw_output (truncated)}. Logged for every gate run; gates a cycle only
   // when project.judgment_gate==="skip" AND verdict==="reject" (in which
   // case a sibling cycle_skipped event records the gating).
-  | "judgment_verdict";
+  | "judgment_verdict"
+  // v0.18.0: pre-cycle spec-anchor gate returned a verdict. Data carries
+  // {task_id, kind, verdict, reason, user_can, anchor_step, owner_words_present,
+  // stand_in, source ("model" | "cache" | "mechanical"), model, mode}.
+  | "spec_verdict"
+  // v0.18.0: GENERALSTAFF_SPEC_GATE_OVERRIDE let a blocked card proceed.
+  // Data carries {task_id, verdict, reason}.
+  | "spec_override";
 
 export interface ProgressEntry {
   timestamp: string;
@@ -883,6 +923,16 @@ export interface GreenfieldTask {
   // README section).
   creative?: boolean;
   voice_reference_override?: string[];
+  // v0.18.0 spec-anchor gate (all optional; inert unless the project sets
+  // spec_gate). user_facing marks a task that adds or reshapes a user-facing
+  // feature, mode or screen; such a build task must carry the owner's own
+  // words for the feature (owner_words, an `OWNER-ASK:` line, or a verified
+  // owner_quote). first_screen is a project-relative picture of the first
+  // screen, required when the project sets picture_first.
+  user_facing?: boolean;
+  owner_words?: string | string[];
+  owner_quote?: { text: string; source: string };
+  first_screen?: string;
 }
 
 // --- gs-279: creative-work cycle context ---
@@ -1042,6 +1092,8 @@ const VALID_EVENTS: readonly string[] = [
   "advisor_verdict",
   // gs-330 (2026-06-16): pre-cycle judgment-gate verdict (KEEP/REJECT slop screen)
   "judgment_verdict",
+  // v0.18.0: spec-anchor gate
+  "spec_verdict", "spec_override",
 ];
 
 export function isReviewerResponse(v: unknown): v is ReviewerResponse {

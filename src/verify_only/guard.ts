@@ -55,6 +55,7 @@ export function verifyOnlyProjectView<
     engineer_model?: unknown;
     advisor?: unknown;
     judgment_gate?: unknown;
+    spec_gate?: unknown;
     missionswarm?: unknown;
     creative_work_allowed?: boolean;
   },
@@ -66,6 +67,7 @@ export function verifyOnlyProjectView<
     engineer_model: undefined,
     advisor: undefined,
     judgment_gate: "off",
+    spec_gate: "off",
     missionswarm: undefined,
     creative_work_allowed: false,
   } as T;

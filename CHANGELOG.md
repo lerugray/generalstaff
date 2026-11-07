@@ -7,6 +7,24 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## v0.18.0 — 2026-11-07
+
+A new spec-anchor gate checks each task against the owner's own words before it runs. Until now a stand-in could pass every review, because each review compared the work against the plan and none against the owner.
+
+The existing verification gate checks a cycle against its task, and the judgment gate asks whether a task is slop. Neither reads what the owner asked for. The new gate does. Put the owner's words in `SPEC.md`, set `spec_gate: flag` or `spec_gate: block` on a project, and each picked task is compared against that file. The verdict is ON-SPEC, OFF-SPEC or UNCLEAR, and in `block` mode only ON-SPEC proceeds. It is off by default, and with `spec_gate: off` nothing runs. Guide: `docs/SPEC-GATE.md`.
+
+- Config per project: `spec_gate: off | flag | block`, `spec_anchor` (default `SPEC.md`), `owner_docs`, `picture_first`. Optional task fields: `user_facing`, `owner_words`, `owner_quote`, `first_screen`. An `OWNER-ASK: "<words>"` line in a free-text card also counts. Owner words need at least three words. A fix that restores approved behaviour is simply not marked `user_facing`; the gate never reads a fix exemption from a title. A malformed value throws at load. Commented example in `projects.yaml.example`.
+- The checker reads only the anchor and the card, is told to assume drift, and decides the kind of work (build, verify or ship) before the verdict. A user-facing build card with no owner words returns UNCLEAR without a model call. An `owner_quote` counts only if its text occurs verbatim in a file listed in `owner_docs`. A card that gives the user an easier stand-in for the experience the owner described is OFF-SPEC with `stand_in: true`.
+- Only a normally completed reply with a valid verdict counts. A timeout, a non-stop finish reason, an empty reply or a malformed one is an `error`, which `block` mode treats as a refusal. A project with no anchor file logs a warning and proceeds, so list `SPEC.md` and the `owner_docs` in the project's `hands_off`. An anchor that resolves outside the project is not read.
+- Verdicts are cached in `state/<project>/spec_checks.jsonl`, keyed on the prompt version, the anchor and the card. Errors are not cached. Each check adds a `spec_verdict` event to `PROGRESS.jsonl`.
+- `GENERALSTAFF_SPEC_GATE_OVERRIDE="<reason>"` (or `--override`) lets a blocked card proceed. It needs a reason of at least three words, is logged as a `spec_override` event, and never passes a verdict with `stand_in: true`. A co-seat turn cannot use it.
+- The checker model is the new `spec_checker` role in `provider_config.yaml`. Unrouted, it uses the inline OpenRouter path with `GENERALSTAFF_SPEC_GATE_MODEL`, which defaults to the judgment gate's model. OpenRouter and Ollama providers now pass back the finish reason when they have one.
+- Adds `generalstaff spec check` (for a task, or for any card file against any anchor file; exit 0 ON-SPEC, 3 OFF-SPEC, 4 UNCLEAR, 1 could not check) and `generalstaff spec audit`, a drift report of every user-facing task with its owner words, latest verdict and overrides, for use before a launch.
+- With `picture_first: true`, a user-facing build task needs a `first_screen` picture that exists, or it returns UNCLEAR.
+- Fork-ledger resolutions carry `resolution_kind: ruling | seat_option`. `generalstaff forks resolve` stores a ruling only when it carries quoted owner words, and records a pick without words as a seat option.
+- Documented practice, not enforced in code: looks judge intent and quote the owner's words (template in `examples/spec-gate/look-brief.md`), and client issues stay in the client's own words.
+- Nothing changes for a project that leaves `spec_gate` off. The judgment gate and the reviewer behave as before.
+
 ## v0.17.0 — 2026-11-01
 
 Co-seats keep a fleet moving while nobody has a session open, a review that did not complete can no longer pass, and auto-merge checks the tree it actually lands.

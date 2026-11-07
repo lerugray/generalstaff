@@ -31,6 +31,7 @@ const ALLOWED_ROLES: readonly ProviderRole[] = [
   "digest",
   "cycle_summary",
   "classifier",
+  "spec_checker",
 ];
 
 export class ProviderConfigError extends Error {
@@ -50,6 +51,7 @@ function emptyRoutes(): Record<ProviderRole, string> {
     digest: NOOP_PROVIDER_ID,
     cycle_summary: NOOP_PROVIDER_ID,
     classifier: NOOP_PROVIDER_ID,
+    spec_checker: NOOP_PROVIDER_ID,
   };
 }
 

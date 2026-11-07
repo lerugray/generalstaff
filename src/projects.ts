@@ -44,6 +44,7 @@ import type {
   ReviewerEntry,
   QuorumPolicy,
   JudgmentGateMode,
+  SpecGateMode,
   AutonomousConfig,
   AutonomousDispatcherConfig,
 } from "./types";
@@ -54,6 +55,7 @@ import {
   VALID_BUDGET_PROVIDER_SOURCES,
   VALID_BUDGET_ON_EXHAUSTED,
   VALID_JUDGMENT_GATE_MODES,
+  VALID_SPEC_GATE_MODES,
 } from "./types";
 
 const VALID_WORK_DETECTION: WorkDetectionMode[] = [
@@ -904,6 +906,74 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     judgmentGate = raw.judgment_gate as JudgmentGateMode;
   }
 
+  // v0.18.0: optional spec-anchor gate config. All four fields are optional
+  // and inert unless spec_gate is "flag" or "block".
+  let specGate: SpecGateMode | undefined;
+  if (raw.spec_gate !== undefined && raw.spec_gate !== null) {
+    if (
+      typeof raw.spec_gate !== "string" ||
+      !VALID_SPEC_GATE_MODES.includes(raw.spec_gate as SpecGateMode)
+    ) {
+      throw new ProjectValidationError(
+        id,
+        "spec_gate",
+        `must be one of: ${VALID_SPEC_GATE_MODES.join(", ")} — got ${JSON.stringify(raw.spec_gate)}`,
+      );
+    }
+    specGate = raw.spec_gate as SpecGateMode;
+  }
+  const projectRelativePath = (field: string, value: unknown): string => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new ProjectValidationError(
+        id,
+        field,
+        `must be a non-empty relative path string — got ${JSON.stringify(value)}`,
+      );
+    }
+    const norm = value.replace(/\\/g, "/");
+    if (
+      isAbsolute(value) ||
+      /^[a-zA-Z]:/.test(value) ||
+      norm.startsWith("/") ||
+      norm.split("/").includes("..")
+    ) {
+      throw new ProjectValidationError(
+        id,
+        field,
+        `must be a path inside the project (relative, no "..") — got ${JSON.stringify(value)}`,
+      );
+    }
+    return value;
+  };
+  let specAnchor: string | undefined;
+  if (raw.spec_anchor !== undefined && raw.spec_anchor !== null) {
+    specAnchor = projectRelativePath("spec_anchor", raw.spec_anchor);
+  }
+  let ownerDocs: string[] | undefined;
+  if (raw.owner_docs !== undefined && raw.owner_docs !== null) {
+    if (!Array.isArray(raw.owner_docs)) {
+      throw new ProjectValidationError(
+        id,
+        "owner_docs",
+        `must be an array of relative paths — got ${JSON.stringify(raw.owner_docs)}`,
+      );
+    }
+    ownerDocs = raw.owner_docs.map((d: unknown, i: number) =>
+      projectRelativePath(`owner_docs[${i}]`, d),
+    );
+  }
+  let pictureFirst: boolean | undefined;
+  if (raw.picture_first !== undefined && raw.picture_first !== null) {
+    if (typeof raw.picture_first !== "boolean") {
+      throw new ProjectValidationError(
+        id,
+        "picture_first",
+        `must be a boolean — got ${JSON.stringify(raw.picture_first)}`,
+      );
+    }
+    pictureFirst = raw.picture_first;
+  }
+
   // gs-332: optional autonomous-mode opt-in. `enabled` is required when the
   // block is present; the rest are optional overrides of the dispatcher's
   // autonomous fleet defaults. Absent => undefined (project never scoped).
@@ -1091,6 +1161,10 @@ export function validateProject(raw: Record<string, unknown>): ProjectConfig {
     journal,
     advisor,
     judgment_gate: judgmentGate,
+    spec_gate: specGate,
+    spec_anchor: specAnchor,
+    owner_docs: ownerDocs,
+    picture_first: pictureFirst,
     review,
     public_facing: publicFacing,
     customer_facing_smoke: customerFacingSmoke,

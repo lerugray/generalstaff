@@ -1,0 +1,16 @@
+Players can run a solo tabletop-style campaign against the computer and play every scenario in the normal game mode, with the software running the opposing side. (owner, kickoff message)
+
+What the user does, in order:
+
+1. Opens the game and picks a scenario from a list that shows a picture of each one. (owner, kickoff message)
+2. Plays the scenario in the normal mode: moves pieces on the map, and the software plays the other side without being asked. (owner, kickoff message)
+3. Sees the result and a short plain-language summary of what happened. (owner, review note)
+4. Saves and resumes a campaign later. (owner, review note)
+
+Out of spec:
+
+- A rehearsal, demo or scripted playthrough in place of the real game. (owner, kickoff message)
+- A person moving the opposing pieces by hand. (owner, kickoff message)
+- A setup screen of fields, tables or dropdowns before the user can play. (owner, review note)
+- A smaller game with fewer scenarios than the full list. (owner, kickoff message)
+- Anything the owner has rejected: online play, accounts, a store. (owner, review note)

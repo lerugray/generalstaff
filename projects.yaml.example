@@ -235,6 +235,29 @@
 # Nothing is shipped, nothing is hosted on your behalf.
 
 # -------------------------------------------------------------------
+# Spec-anchor gate (v0.18.0) - does this task build what the owner asked for?
+# -------------------------------------------------------------------
+#
+# Optional. Checks each picked task against the project's SPEC.md (the owner's
+# own words) before the engineer runs. Verdict ON-SPEC / OFF-SPEC / UNCLEAR,
+# logged to PROGRESS.jsonl as `spec_verdict`. Full docs: docs/SPEC-GATE.md.
+#
+#   spec_gate: off | flag | block      (default: off - zero overhead)
+#       off   - disabled; the gate never runs.
+#       flag  - run the gate, log the verdict, proceed regardless.
+#       block - proceed only on ON-SPEC. OFF-SPEC, UNCLEAR and a failed check
+#               skip the cycle (reason spec_gate_<verdict>).
+#   spec_anchor: SPEC.md               (path inside the project; default SPEC.md)
+#   owner_docs:                        (owner-approved design docs whose exact
+#     - docs/GDD.md                     quotes count as owner words)
+#   picture_first: false               (true: a user_facing build task needs a
+#                                       first_screen picture that exists)
+#
+# A project with no anchor file logs a warning and proceeds in every mode.
+# Per-task fields in tasks.json: user_facing, owner_words, owner_quote,
+# first_screen. Override a blocked card with GENERALSTAFF_SPEC_GATE_OVERRIDE.
+
+# -------------------------------------------------------------------
 # Autonomous mode (gs-332, v0.8.0) — OPT-IN, default off
 # -------------------------------------------------------------------
 #

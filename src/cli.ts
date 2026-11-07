@@ -10,7 +10,7 @@ import { runSingleCycle, countCommitsAhead } from "./cycle";
 import { $ } from "bun";
 import { loadFleetState, getProjectSummary, getRootDir, cycleDir, getStateDir } from "./state";
 import { runAutonomousSession, formatRunSummary } from "./autonomous_session";
-import { readForkLedger, pendingForks } from "./fork_ledger";
+import { readForkLedger, pendingForks, recordForkResolution } from "./fork_ledger";
 import { readDispatchLedger, pendingDispatches } from "./dispatch_ledger";
 import {
   loadProjects,
@@ -162,6 +162,8 @@ Usage:
     Example: generalstaff autonomous                     # dry-run scope+gate over autonomous-enabled projects
     Example: generalstaff autonomous --project=myapp     # restrict to one project
   generalstaff forks                                      List pending autonomous-mode decisions awaiting your review
+  generalstaff forks resolve <id> "<decided>" [--owner-words "<quoted>"] [--kind ruling|seat_option]
+                                                          Record a decision; a ruling needs the owner's quoted words
   generalstaff branches                                   List auto-dispatched branches awaiting review+merge
 
   generalstaff status [--json] [--watch[=N]] [--sessions[=N]] [--summary] [--backlog] [--totals] [--fleet] [--auto-merge-failed]
@@ -371,6 +373,13 @@ Usage:
     Example: generalstaff co-seat go --id=main --days=7
     Example: generalstaff co-seat status --id=main
 
+  generalstaff spec check --project=<id> --task=<id> [--json] [--override "<reason>"]
+  generalstaff spec check --anchor <file> --card <file> [--json]
+  generalstaff spec audit --project=<id> [--out <file>]
+                                                          Check a task or card against the owner's SPEC.md; drift audit (see: spec --help)
+    Example: generalstaff spec check --project=myapp --task=app-012
+    Example: generalstaff spec audit --project=myapp --out=drift-audit.md
+
   generalstaff --version                                  Show version
   generalstaff --help                                     Show this help
 
@@ -442,6 +451,7 @@ const SUBCOMMANDS_WITH_OWN_HELP = new Set([
   "autonomous",
   "aides",
   "co-seat",
+  "spec",
 ]);
 if (
   (args.includes("--help") || args.includes("-h") || args.length === 0) &&
@@ -563,6 +573,21 @@ switch (command) {
       console.error(`Aides: ${(error as Error).message}`);
       process.exitCode = 1;
     }
+    break;
+  }
+  case "spec": {
+    const { runSpecCli } = await import("./spec_cli");
+    const specArgs = args.slice(1);
+    const wantsOverride = specArgs.some((a) => a === "--override" || a.startsWith("--override="));
+    if (process.env.GS_CO_SEAT === "1" && wantsOverride) {
+      console.error("Co-seat refused: a co-seat turn cannot override the spec-anchor gate.");
+      process.exit(1);
+    }
+    const normalized = specArgs.flatMap((a) => (a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a]));
+    process.exitCode = await runSpecCli(normalized, {
+      env: process.env.GS_CO_SEAT === "1" ? { ...process.env, GENERALSTAFF_SPEC_GATE_OVERRIDE: undefined } : process.env,
+      rootDir: getRootDir(),
+    });
     break;
   }
   case "co-seat": {
@@ -4906,6 +4931,38 @@ switch (command) {
   case "forks": {
     const yaml = await loadProjectsYaml();
     const ledgerPath = join(getStateDir(yaml.dispatcher), "fork-ledger.json");
+    if (args[1] === "resolve") {
+      if (process.env.GS_CO_SEAT === "1") {
+        console.error("Co-seat refused: a co-seat turn cannot record a fork resolution.");
+        process.exit(1);
+      }
+      const { values: rv, positionals: rp } = parseArgs({
+        args: args.slice(2),
+        options: {
+          "owner-words": { type: "string" },
+          kind: { type: "string" },
+        },
+        allowPositionals: true,
+      });
+      if (rp.length !== 2 || (rv.kind !== undefined && rv.kind !== "ruling" && rv.kind !== "seat_option")) {
+        console.error(
+          'Usage: generalstaff forks resolve <id> "<what was decided>" [--owner-words "<quoted words>"] [--kind ruling|seat_option]',
+        );
+        process.exit(2);
+      }
+      const res = recordForkResolution(
+        ledgerPath,
+        rp[0],
+        { resolution: rp[1], ownerWords: rv["owner-words"], kind: rv.kind as "ruling" | "seat_option" | undefined },
+        new Date().toISOString(),
+      );
+      if (!res.ok) {
+        console.error(`Error: ${res.error}`);
+        process.exit(1);
+      }
+      console.log(`Resolved ${res.entry.id} as ${res.entry.resolution_kind}.`);
+      break;
+    }
     const ledger = readForkLedger(ledgerPath);
     const pending = pendingForks(ledger);
     if (pending.length === 0) {

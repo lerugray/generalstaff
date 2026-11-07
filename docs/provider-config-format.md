@@ -95,10 +95,11 @@ easy to locate.
 | `digest`        | no       | End-of-session narrative (gs-154, gs-158).                 |
 | `cycle_summary` | no       | Per-cycle plain-English summaries (Phase 2+).              |
 | `classifier`    | no       | Work-item classification (Phase 2+).                       |
+| `spec_checker`  | no       | The spec-anchor gate's model (v0.18.0).                    |
 
 Every route is optional. An omitted role silently routes to `"noop"`
 and callers must check `hasProviderForRole()` before dispatching.
-Unknown role names (anything outside the three above) are a validation
+Unknown role names (anything outside the four above) are a validation
 error, not a silent ignore — this catches typos early.
 
 Any role whose value is not a non-empty string, or whose value
@@ -174,6 +175,18 @@ difficulty, or surface area. Medium-stakes: a bad classification can
 send a task to the wrong queue. If classification accuracy matters
 for your workflow, consider routing this role to a heavier provider
 once Phase 3 lands `openrouter` / `claude` support.
+
+### 4.4 `spec_checker`
+
+The model that checks one task card against the owner's `SPEC.md` (see
+`docs/SPEC-GATE.md`). The gate needs a reply that follows a strict JSON
+schema, and a reply that does not finish normally counts as an error, so
+pick a provider that follows instructions well. When the role is unrouted
+the gate calls OpenRouter inline, using `GENERALSTAFF_SPEC_GATE_MODEL`
+(default: the judgment gate's model) and `OPENROUTER_API_KEY`. If the routed
+provider fails, the gate reports an error and does not quietly switch to
+another backend. The role has no effect while a project's `spec_gate` is
+`off`.
 
 ---
 

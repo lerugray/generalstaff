@@ -6,7 +6,11 @@
 
 export type ProviderKind = "ollama" | "openrouter" | "claude";
 
-export type ProviderRole = "digest" | "cycle_summary" | "classifier";
+export type ProviderRole =
+  | "digest"
+  | "cycle_summary"
+  | "classifier"
+  | "spec_checker";
 
 export interface ProviderInvokeOptions {
   timeoutMs?: number;
@@ -17,6 +21,10 @@ export interface ProviderInvokeOptions {
 export interface ProviderInvokeResult {
   content: string;
   error?: string;
+  // Present only when the backend reported why generation stopped
+  // ("stop" is a normal finish). Callers that need a finished reply (the
+  // spec-anchor gate) treat any other value as incomplete.
+  finish_reason?: string;
 }
 
 export interface ProviderHealth {

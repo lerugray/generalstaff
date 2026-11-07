@@ -56,6 +56,12 @@ The bot works in `.bot-worktree/` on a `bot/work` branch. Automatic local mergin
 - **Empty-diff streaks.** When the queue is thin the engineer may return `verified_weak` with no diff. Watch substantive landings, not raw cycle count.
 - **Remote effects of engineer commands and hooks.** GeneralStaff has no built-in remote-push stage, but it does not enforce a remote-access restriction on the tools you configure.
 
+## Does the task build what the owner asked for?
+
+The verification gate checks a cycle against its task. It does not check the task against the owner. A stand-in that enters at the plan level, such as a demo, a rehearsal or a form where the owner described an experience, passes every later review because each layer compares against the layer above it.
+
+The optional spec-anchor gate checks that. Put the owner's own words in a `SPEC.md` at the project root and set `spec_gate: flag` or `spec_gate: block` for the project. Before a task runs, the gate compares the task card to those words and returns ON-SPEC, OFF-SPEC or UNCLEAR. A task that adds a user-facing feature must carry the owner's words for it, or it comes back UNCLEAR. In `block` mode anything but ON-SPEC skips the cycle. It is off by default. See [`docs/SPEC-GATE.md`](docs/SPEC-GATE.md).
+
 ## Verify work that is already done
 
 The gate can also check changes GeneralStaff didn't write: yours, or ones from Claude Code, Cursor or any other agent. `generalstaff changeset bundle` snapshots the uncommitted change with a digest. `generalstaff cycle verify` replays it in an isolated worktree, runs your `verification_command` and the reviewer, and writes a receipt bound to that digest. GeneralStaff's own engineer never runs. Register the project first, with `--checkout` as its path.
@@ -97,6 +103,7 @@ A wargame designer built this by treating AI failure modes as an adversarial rul
 - [`QUICKSTART.md`](QUICKSTART.md) — step-by-step first cycle.
 - [`SECURITY.md`](SECURITY.md) — key storage, threat model, limitations.
 - [`DESIGN.md`](DESIGN.md) — architecture and hard rules.
+- [`docs/SPEC-GATE.md`](docs/SPEC-GATE.md): checking tasks against the owner's words.
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes.
 - [`projects.yaml.example`](projects.yaml.example) — configuration schema.
 

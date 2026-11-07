@@ -10,6 +10,7 @@ import { buildAdvisorPlan, runAdvisor } from "../src/advisor";
 import { executeCycle } from "../src/cycle";
 import { runEngineer } from "../src/engineer";
 import { runJudgmentGate } from "../src/judgment_gate";
+import { checkCardAgainstAnchor } from "../src/spec_gate";
 import { runMissionSwarmPreview } from "../src/integrations/mission_swarm/hook";
 import {
   assertNotVerifyOnly,
@@ -81,6 +82,8 @@ describe("verify-only import graph", () => {
       "active_engineer.ts",
       "advisor.ts",
       "judgment_gate.ts",
+      "spec_gate.ts",
+      "spec_cli.ts",
       "cycle.ts",
       `${"sess"}ion.ts`,
       "dispatcher.ts",
@@ -134,7 +137,7 @@ describe("verify-only runtime guard", () => {
     expect(isVerifyOnlyActive()).toBe(false);
   });
 
-  it("refuses the engineer, advisor, judgment gate, mission swarm and a full cycle", async () => {
+  it("refuses the engineer, advisor, judgment gate, spec gate, mission swarm and a full cycle", async () => {
     const leave = enterVerifyOnlyMode();
     try {
       await expect(runEngineer(project, "c1", dispatcher)).rejects.toBeInstanceOf(VerifyOnlyGuardError);
@@ -144,6 +147,12 @@ describe("verify-only runtime guard", () => {
         } as never),
       ).rejects.toBeInstanceOf(VerifyOnlyGuardError);
       await expect(runJudgmentGate({ id: "p" }, { id: "t" })).rejects.toBeInstanceOf(VerifyOnlyGuardError);
+      await expect(
+        checkCardAgainstAnchor(
+          { anchorText: "anchor", anchorLabel: "SPEC.md", card: { id: "t", title: "t" }, project: { path: "/tmp/x" } },
+          { checker: async () => ({ model: "m", content: "{}" }) },
+        ),
+      ).rejects.toBeInstanceOf(VerifyOnlyGuardError);
       await expect(runMissionSwarmPreview({ id: "t", title: "t" } as never, project)).rejects.toBeInstanceOf(
         VerifyOnlyGuardError,
       );
@@ -159,6 +168,7 @@ describe("verify-only runtime guard", () => {
       engineer_provider: "codex",
       engineer_model: "x",
       judgment_gate: "skip",
+      spec_gate: "block",
       creative_work_allowed: true,
       advisor: { enabled: true, gate: true } as never,
     });
@@ -167,11 +177,13 @@ describe("verify-only runtime guard", () => {
     expect(view.engineer_provider).toBeUndefined();
     expect(view.advisor).toBeUndefined();
     expect(view.judgment_gate).toBe("off");
+    expect(view.spec_gate).toBe("off");
     expect(view.missionswarm).toBeUndefined();
     expect(view.creative_work_allowed).toBe(false);
     expect(view.verification_command).toBe(original.verification_command);
     expect(original.engineer_command).toBe("touch /tmp/should-never-run");
     expect(original.judgment_gate).toBe("skip");
+    expect(original.spec_gate).toBe("block");
   });
 });
 

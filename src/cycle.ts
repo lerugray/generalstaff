@@ -20,6 +20,13 @@ import { runEngineer, type EngineerResult } from "./engineer";
 import { loadTasks, nextBotPickableTask } from "./tasks";
 import { runAdvisor, buildAdvisorPlan, normalizeAdvisorConfig } from "./advisor";
 import { runJudgmentGate, shouldGateSkipCycle } from "./judgment_gate";
+import {
+  decideSpecGate,
+  parseOverride,
+  recordSpecOverride,
+  runSpecGate,
+  specChecksPath,
+} from "./spec_gate";
 import { runVerification } from "./verification";
 import { runReviewer, runQuorumReview, type ReviewerResult } from "./reviewer";
 import { runMissionSwarmPreview } from "./integrations/mission_swarm/hook";
@@ -1167,6 +1174,75 @@ export async function executeCycle(
       );
       if (shouldGateSkipCycle(gateMode, gv.verdict)) {
         result.reason = `judged_stupid_industrious: ${gv.reason.slice(0, 200)}`;
+        break assemble;
+      }
+    }
+
+    // 3c. Pre-cycle spec-anchor gate (v0.18.0)
+    //
+    // Checks the picked task against the project's SPEC.md (the owner's own
+    // words), not against the plan: "does this task build what the owner asked
+    // for?". Off by default (zero overhead). "flag" logs the verdict and
+    // proceeds; "block" proceeds only on ON-SPEC and fails closed on OFF-SPEC,
+    // UNCLEAR and checker error (cycle_skipped, reason `spec_gate_<verdict>`).
+    // A missing anchor file warns and proceeds in both modes. An override
+    // (GENERALSTAFF_SPEC_GATE_OVERRIDE) lets a blocked card proceed but never
+    // a stand-in verdict. Implementation: src/spec_gate.ts; docs/SPEC-GATE.md.
+    const specMode = project.spec_gate ?? "off";
+    if (specMode !== "off" && nextTask) {
+      assertNotVerifyOnly("the spec-anchor gate");
+      const checksPath = specChecksPath(join(getRootDir(), "state", project.id));
+      const sv = await runSpecGate(project, nextTask, { checksPath });
+      await appendProgress(
+        project.id,
+        "spec_verdict",
+        {
+          task_id: nextTask.id,
+          kind: sv.kind,
+          verdict: sv.verdict,
+          reason: sv.reason,
+          user_can: sv.user_can,
+          anchor_step: sv.anchor_step,
+          owner_words_present: sv.owner_words_present,
+          stand_in: sv.stand_in,
+          no_anchor: sv.no_anchor === true ? true : undefined,
+          source: sv.source,
+          model: sv.model,
+          duration_sec: sv.duration_sec,
+          mode: specMode,
+          raw_output: sv.raw_output?.slice(0, 4000),
+        },
+        cycleId,
+      );
+      console.log(
+        sv.no_anchor
+          ? `Spec gate WARNING: ${sv.reason}; cycle proceeds`
+          : `Spec gate (${sv.model ?? sv.source}) → ${sv.verdict.toUpperCase()} ` +
+              `(${sv.duration_sec.toFixed(1)}s): ${sv.reason.slice(0, 120)}`,
+      );
+      const decision = decideSpecGate(
+        specMode,
+        sv,
+        parseOverride(process.env.GS_CO_SEAT === "1" ? undefined : process.env.GENERALSTAFF_SPEC_GATE_OVERRIDE),
+      );
+      if (decision.overridden) {
+        recordSpecOverride(checksPath, nextTask.id, sv, decision.overridden.reason);
+        await appendProgress(
+          project.id,
+          "spec_override",
+          {
+            task_id: nextTask.id,
+            verdict: sv.verdict,
+            reason: decision.overridden.reason,
+          },
+          cycleId,
+        );
+        console.log(`Spec gate OVERRIDDEN: ${decision.overridden.reason}`);
+      } else if (decision.overrideNote) {
+        console.log(`Spec gate override ignored: ${decision.overrideNote}`);
+      }
+      if (!decision.proceed) {
+        result.reason = `${decision.reasonCode}: ${sv.reason.slice(0, 200)}`;
         break assemble;
       }
     }

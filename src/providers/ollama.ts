@@ -76,7 +76,9 @@ export function createOllamaProvider(descriptor: ProviderDescriptor): LLMProvide
             error: `Ollama response missing content${hint}`,
           };
         }
-        return { content };
+        return typeof data?.done_reason === "string"
+          ? { content, finish_reason: data.done_reason }
+          : { content };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return {

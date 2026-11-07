@@ -18,6 +18,7 @@ import type {
   ForkLedger,
   ForkEntry,
   ForkKind,
+  ResolutionKind,
   JudgmentVerdictKind,
   JudgmentClass,
 } from "./types";
@@ -200,4 +201,59 @@ function upsertCoSeatForkLocked(
   writeFileSync(tmp, JSON.stringify(led, null, 1));
   renameSync(tmp, path);
   return outcome;
+}
+
+// --- v0.18.0: recording a resolution (docs/SPEC-GATE.md, "Picks are not rulings") ---
+
+/** Fewest words a quote needs to count as the owner's words rather than a bare pick. */
+export const MIN_RULING_WORDS = 3;
+
+export interface ForkResolutionInput {
+  resolution: string;
+  /** The owner's own words for the decision, quoted. Needed for a `ruling`. */
+  ownerWords?: string;
+  /** Asked-for kind. Defaults to `ruling` with owner words, `seat_option` without. */
+  kind?: ResolutionKind;
+}
+
+export type ForkResolutionResult =
+  | { ok: true; entry: ForkEntry }
+  | { ok: false; error: string };
+
+/** Resolve a pending entry. A `ruling` needs quoted owner words; a pick without
+ *  words is stored as a `seat_option`. Asking for `ruling` without words is refused. */
+export function recordForkResolution(
+  path: string,
+  id: string,
+  input: ForkResolutionInput,
+  ts: string,
+): ForkResolutionResult {
+  const resolution = input.resolution.trim();
+  if (!resolution) return { ok: false, error: "a resolution needs a non-empty description" };
+  const words = (input.ownerWords ?? "").trim().replace(/\s+/g, " ");
+  const hasWords = words.split(" ").filter(Boolean).length >= MIN_RULING_WORDS;
+  if (input.kind === "ruling" && !hasWords) {
+    return {
+      ok: false,
+      error: `a ruling must carry the owner's quoted words (at least ${MIN_RULING_WORDS} words); a pick without words is a seat option`,
+    };
+  }
+  const kind: ResolutionKind = input.kind === "seat_option" ? "seat_option" : hasWords ? "ruling" : "seat_option";
+  return withDirLock(`${path}.lock`, () => {
+    const led = readForkLedger(path);
+    const entry = led.forks.find((f) => f.id === id);
+    if (!entry) return { ok: false as const, error: `no fork-ledger entry with id ${id}` };
+    entry.status = "resolved";
+    entry.resolution = resolution;
+    entry.resolution_kind = kind;
+    if (kind === "ruling") entry.owner_words = words;
+    else delete entry.owner_words;
+    entry.last_seen = ts;
+    led.updated = ts;
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify(led, null, 1));
+    renameSync(tmp, path);
+    return { ok: true as const, entry };
+  });
 }

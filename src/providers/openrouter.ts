@@ -110,7 +110,9 @@ export function createOpenRouterProvider(
               : "";
           return { content: "", error: `OpenRouter response missing content${hint}` };
         }
-        return { content };
+        return typeof choice?.finish_reason === "string"
+          ? { content, finish_reason: choice.finish_reason }
+          : { content };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         const aborted = err instanceof Error && err.name === "AbortError";

@@ -11,10 +11,11 @@
 # Scope: what this file controls, and what it does NOT control
 # ----------------------------------------------------------------------
 #
-# This file controls routing for THREE roles:
+# This file controls routing for these roles:
 #   - digest          end-of-session narrative (see gs-154, gs-158)
 #   - cycle_summary   per-cycle plain-English summaries (Phase 2+)
 #   - classifier      work-item classification (Phase 2+)
+#   - spec_checker    the spec-anchor gate's model (optional; v0.18.0)
 #
 # The REVIEWER role is NOT controlled here. Reviewer dispatch remains
 # inline in src/reviewer.ts and is selected at launch via the
@@ -86,3 +87,8 @@ routes:
   # Or route the judgement-shaped role off the box and leave the narrative
   # ones local:
   #   classifier: openrouter_remote
+  #
+  # spec_checker: the spec-anchor gate's model (docs/SPEC-GATE.md). Leave it
+  # unrouted to use the inline OpenRouter path (GENERALSTAFF_SPEC_GATE_MODEL).
+  # Route it to a provider that can follow a strict JSON reply:
+  #   spec_checker: openrouter_remote
