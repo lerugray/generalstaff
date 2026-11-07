@@ -7,15 +7,11 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 const mode = process.argv[2] ?? "fallback";
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  `cycle_test_attempted_task_${mode}`,
-);
+const TEST_DIR = testTempDir(`cycle_test_attempted_task_${mode}`);
 const PROJ_DIR = join(TEST_DIR, "proj");
 
 let verificationCalled = false;

@@ -13,15 +13,11 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig, ReviewerVerdict } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 const scenario = process.argv[2] ?? "verified";
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  `cycle_test_rollback_${scenario}`,
-);
+const TEST_DIR = testTempDir(`cycle_test_rollback_${scenario}`);
 const PROJ_DIR = join(TEST_DIR, "proj");
 
 type ProgressEvent = {

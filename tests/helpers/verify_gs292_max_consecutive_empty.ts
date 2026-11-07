@@ -7,15 +7,11 @@ import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 const mode = process.argv[2] ?? "sequential-fleet-5";
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  `session_gs292_${mode.replace(/[^a-z0-9_-]/gi, "_")}`,
-);
+const TEST_DIR = testTempDir(`session_gs292_${mode.replace(/[^a-z0-9_-]/gi, "_")}`);
 
 let executeCycleCalls = 0;
 

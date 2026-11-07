@@ -152,17 +152,9 @@ async function autoCommitState(
   outcome: CycleOutcome,
 ): Promise<void> {
   try {
-    const root = getRootDir();
-    // Stage state artifacts — use pathspec that won't error on ignored/missing paths
-    await $`git -C ${root} add --ignore-errors state/`.quiet().nothrow();
-    // Check if there's anything staged
-    const hasStagedChanges = await $`git -C ${root} diff --cached --quiet`
-      .quiet()
-      .nothrow()
-      .then((r) => r.exitCode !== 0);
-    if (hasStagedChanges) {
-      await $`git -C ${root} commit -m ${"state: cycle " + cycleId.slice(0, 12) + " — " + outcome}`.quiet();
-    }
+    // v0.18.1: commits state/ only, and only when the root is its own repo.
+    const { commitRootState } = await import("./state_commit");
+    await commitRootState(getRootDir(), "state: cycle " + cycleId.slice(0, 12) + " — " + outcome);
   } catch {
     // Non-fatal — state commit is convenience, not critical
     console.log("Warning: could not auto-commit state artifacts");

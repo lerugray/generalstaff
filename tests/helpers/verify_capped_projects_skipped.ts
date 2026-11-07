@@ -12,8 +12,9 @@ import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "session_cap_test");
+const TEST_DIR = testTempDir("session_cap_test");
 const MAX_CYCLES = 2;
 
 let executeCycleCalls = 0;

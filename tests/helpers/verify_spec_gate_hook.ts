@@ -9,10 +9,11 @@ import { tmpdir } from "os";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 // Outside the repo: the cycle's state auto-commit runs `git -C <root>`, and a
 // root inside this checkout would commit the enclosing repo's index.
-const TEST_DIR = mkdtempSync(join(tmpdir(), `gs-cycle-spec-gate-${process.env.SG_MODE}-${process.env.SG_VERDICT}-`));
+const TEST_DIR = testTempDir(`cycle-spec-gate-${process.env.SG_MODE}-${process.env.SG_VERDICT}`);
 const PROJ_DIR = join(TEST_DIR, "proj");
 const MODE = process.env.SG_MODE ?? "off";
 const VERDICT = process.env.SG_VERDICT ?? "ON-SPEC";

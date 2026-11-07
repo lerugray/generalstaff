@@ -24,8 +24,9 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, cpSync, chm
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_full_non_dogfood");
+const TEST_DIR = testTempDir("cycle_full_non_dogfood");
 const TEST_ROOT = join(TEST_DIR, "generalstaff-root");
 const PROJ_DIR = join(TEST_DIR, "fake_project");
 const FIXTURE_SRC = join(import.meta.dir, "..", "fixtures", "fake_project");
@@ -192,7 +193,7 @@ async function run() {
     // verify.sh runs under bash, which on Windows prints POSIX-style
     // paths ("/c/Users/...") into the marker. Normalize both sides
     // to a comparable suffix so the assertion works on both OSes.
-    const wtSuffix = "cycle_full_non_dogfood/fake_project/.bot-worktree";
+    const wtSuffix = `${TEST_DIR.replace(/\\/g, "/").split("/").pop()}/fake_project/.bot-worktree`;
     const verifyMarkerNormalized = verifyMarkerContent.replace(/\\/g, "/");
 
     const output = {

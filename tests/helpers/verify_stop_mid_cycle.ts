@@ -11,8 +11,9 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_test_stop_mid");
+const TEST_DIR = testTempDir("cycle_test_stop_mid");
 const PROJ_DIR = join(TEST_DIR, "proj");
 const stopFilePath = join(TEST_DIR, "STOP");
 

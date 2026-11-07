@@ -9,8 +9,9 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "cycle_emptydiff_test");
+const TEST_DIR = testTempDir("cycle_emptydiff_test");
 const PROJ_DIR = join(TEST_DIR, "proj");
 
 let verificationCalled = false;

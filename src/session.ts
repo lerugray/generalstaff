@@ -625,17 +625,9 @@ export async function runSession(options: SessionOptions) {
   // (matters for dogfooding where the project IS the GeneralStaff repo)
   try {
     const root = (await import("./state")).getRootDir();
-    await import("bun").then(({ $ }) =>
-      $`git -C ${root} add --ignore-errors state/`.quiet().nothrow()
-    );
-    const hasStagedChanges = await import("bun").then(({ $ }) =>
-      $`git -C ${root} diff --cached --quiet`.quiet().nothrow().then((r) => r.exitCode !== 0)
-    );
-    if (hasStagedChanges) {
-      await import("bun").then(({ $ }) =>
-        $`git -C ${root} commit -m ${"state: session init"}`.quiet()
-      );
-    }
+    // v0.18.1: commits state/ only, and only when the root is its own repo.
+    const { commitRootState } = await import("./state_commit");
+    await commitRootState(root, "state: session init");
   } catch { /* non-fatal */ }
 
   let currentProject: ProjectConfig | null = null;
@@ -2163,16 +2155,10 @@ export async function commitSessionEndState(
   totalCycles: number,
 ): Promise<boolean> {
   try {
-    const root = getRootDir();
-    await $`git -C ${root} add --ignore-errors state/`.quiet().nothrow();
-    const hasStagedChanges = await $`git -C ${root} diff --cached --quiet`
-      .quiet()
-      .nothrow()
-      .then((r) => r.exitCode !== 0);
-    if (!hasStagedChanges) return false;
     const msg = `state: session_end (${totalCycles} cycle(s), ${Math.round(durationMinutes)}m)`;
-    await $`git -C ${root} commit -m ${msg}`.quiet();
-    return true;
+    // v0.18.1: commits state/ only, and only when the root is its own repo.
+    const { commitRootState } = await import("./state_commit");
+    return await commitRootState(getRootDir(), msg);
   } catch {
     console.log("Warning: could not auto-commit session_end state");
     return false;

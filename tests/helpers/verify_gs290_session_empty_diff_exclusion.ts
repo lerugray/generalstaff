@@ -8,13 +8,9 @@ import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import type { ProjectConfig, DispatcherConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  "session_gs290_exclusion_test",
-);
+const TEST_DIR = testTempDir("session_gs290_exclusion_test");
 
 const tasksJson = JSON.stringify([
   { id: "task-a", title: "A", status: "pending", priority: 1 },

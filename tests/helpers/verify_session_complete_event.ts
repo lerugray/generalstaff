@@ -7,13 +7,9 @@ import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  "session_complete_event_test",
-);
+const TEST_DIR = testTempDir("session_complete_event_test");
 
 let pickCalls = 0;
 let executeCycleCalls = 0;

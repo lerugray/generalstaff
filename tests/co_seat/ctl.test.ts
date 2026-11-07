@@ -311,7 +311,7 @@ describe("watchdog", () => {
     goSeat(ctx, { days: 1 }, { now: () => NOW, spawnDriver: () => 1 });
     const deps = {
       now: () => NOW,
-      lock: { now: () => Date.now(), host: "h" },
+      lock: { now: () => NOW, host: "h" },
       // The stub plays the driver: it takes the lock for real.
       spawnDriver: () => {
         const got = acquireLock(ctx.dir, { host: "h" });
@@ -332,7 +332,7 @@ describe("watchdog", () => {
     const live = acquireLock(ctx.dir, { host: "h", pid: 99999999 });
     expect(live.ok).toBe(true);
     const s = spawnCounter();
-    const r = watchdogSeat(ctx, { now: () => Date.now(), lock: { host: "h", isPidAlive: () => false }, ...s });
+    const r = watchdogSeat(ctx, { now: () => NOW, lock: { host: "h", isPidAlive: () => false }, ...s });
     expect(r.action).toBe("started");
     expect(r.reason).toContain("stale lock");
     expect(s.calls).toHaveLength(1);
@@ -396,7 +396,7 @@ describe("status", () => {
     parkItem(ctx, "app", "Decide something", undefined, NOW);
     const lock = acquireLock(ctx.dir, { host: "h" });
     expect(lock.ok).toBe(true);
-    const live = await seatStatus(ctx, { now: () => Date.now(), lock: { host: "h" } });
+    const live = await seatStatus(ctx, { now: () => NOW, lock: { host: "h" } });
     expect(live).toMatchObject({ live: true, markers: { go: "ok" }, pin: { matches: true } });
     expect(live.lock.pid).toBe(process.pid);
     expect(live.heartbeat_age_seconds).toBeLessThan(5);
@@ -436,6 +436,7 @@ describe("status", () => {
       const t = new Date(Date.now() - 600_000);
       utimesSync(p, t, t);
     }
+    // real clock: this check compares against file times set from the real clock just above.
     const stale = await seatStatus(ctx, { now: () => Date.now(), lock: { host: "h", isPidAlive: () => false } });
     expect(stale.live).toBe(false);
     expect(formatStatus(stale)).toContain("stale lock");

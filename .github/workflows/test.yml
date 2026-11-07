@@ -27,6 +27,15 @@ jobs:
           bun-version: 1.3.0
       - run: bun install --frozen-lockfile
       - run: bun test
+      # Date-bomb check (v0.18.1): the co-seat suites that take their clock by
+      # injection run again with the system clock 400 days ahead, so a test
+      # that mixes a fixed date with the real clock fails now, not on the day
+      # the dates drift apart. Suites that poll the clock or compare against
+      # real file times (driver, lock, park, turn) are left out.
+      - name: Co-seat tests with the clock 400 days ahead
+        env:
+          GENERALSTAFF_TEST_CLOCK_SKEW_DAYS: "400"
+        run: bun test tests/co_seat/cli.test.ts tests/co_seat/config.test.ts tests/co_seat/control.test.ts tests/co_seat/ctl.test.ts tests/co_seat/events.test.ts tests/co_seat/guards.test.ts tests/co_seat/meter.test.ts
       - run: bun run typecheck
 
   # install.sh smoke (unix only). Windows has install.ps1 but this job

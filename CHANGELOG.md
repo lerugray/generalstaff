@@ -7,6 +7,17 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 in practice, entries prioritize
 *why-it-shipped* over taxonomical neatness.
 
+## v0.18.1 — 2026-11-07
+
+Running the test suite can no longer commit your staged work, neither can GeneralStaff's own state commits, and CI is green again.
+
+The cycle, session-start and session-end steps commit the dispatcher's `state/` folder. They used to stage `state/` and then commit the whole index, so anything else you had staged went into a "state: ..." commit with it. When the GeneralStaff root was a plain folder inside another repository, git committed that outer repository instead. About twenty test helpers set their root to a folder under `tests/fixtures/`, inside this repo, so running `bun test` with anything staged committed it.
+
+- State commits now record only `state/`, and only when the root is the top level of its own git repository. Other staged changes stay staged and uncommitted.
+- Test helpers that run full cycles or sessions now use a throwaway directory in the system temp folder (`tests/helpers/temp_dir.ts`).
+- CI is green again. Two co-seat tests set a seat's deadline from a fixed date (2026-11-01) and then checked it against the real clock, so they began failing on 2026-11-02, the day after v0.17.0 shipped. They now use the fixed clock throughout. A new test fails any test file that pins a fixed date and also passes the real clock to the code under test, and CI runs the clock-injected co-seat suites a second time with the system clock 400 days ahead (`GENERALSTAFF_TEST_CLOCK_SKEW_DAYS`).
+- A test preload (`tests/preload/real_checkout_guard.ts`, set in `bunfig.toml`) fails the run if any test moves HEAD or changes the index of the checkout it runs from. Set `GENERALSTAFF_SKIP_CHECKOUT_GUARD=1` to turn it off when you commit on purpose during a long run.
+
 ## v0.18.0 — 2026-11-07
 
 A new spec-anchor gate checks each task against the owner's own words before it runs. Until now a stand-in could pass every review, because each review compared the work against the plan and none against the owner.

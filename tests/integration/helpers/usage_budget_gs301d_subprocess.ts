@@ -8,6 +8,7 @@ import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../../src/types";
 import type { ConsumptionReader, ConsumptionSnapshot } from "../../../src/usage/types";
 import { makeProjectConfig, makeDispatcherConfig } from "../../helpers/fixtures";
+import { testTempDir } from "../../helpers/temp_dir";
 
 const scenario = process.argv[2] ?? "";
 
@@ -58,14 +59,7 @@ if (scenario === "7") {
 
 // --- scenario 6 (mocked session) ---
 
-const WORK = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "usage",
-  "fixtures",
-  "gs301d_workspace",
-);
+const WORK = testTempDir("gs301d_workspace");
 
 let executeCycleCalls = 0;
 const cycledProjectIds: string[] = [];

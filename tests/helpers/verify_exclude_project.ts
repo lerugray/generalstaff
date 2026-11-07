@@ -11,6 +11,7 @@ import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 const scenario = process.argv[2];
 if (!scenario) {
@@ -18,12 +19,7 @@ if (!scenario) {
   process.exit(1);
 }
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  `session_exclude_${scenario}_test`,
-);
+const TEST_DIR = testTempDir(`session_exclude_${scenario}_test`);
 
 const makeProject = (id: string): ProjectConfig =>
   makeProjectConfig({

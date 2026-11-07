@@ -12,8 +12,9 @@ import { join } from "path";
 import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
-const TEST_DIR = join(import.meta.dir, "..", "fixtures", "parallel_session_test");
+const TEST_DIR = testTempDir("parallel_session_test");
 
 let executeCycleCalls = 0;
 const executeCycleOverlap: Array<{ project: string; startMs: number; endMs: number }> = [];

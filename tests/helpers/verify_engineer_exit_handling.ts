@@ -11,17 +11,13 @@ import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { $ } from "bun";
 import type { ProjectConfig, DispatcherConfig } from "../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "./fixtures";
+import { testTempDir } from "./temp_dir";
 
 const exitCodeArg = process.argv[2] ?? "0";
 const engineerExitCode: number | null =
   exitCodeArg === "null" ? null : parseInt(exitCodeArg, 10);
 
-const TEST_DIR = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  `cycle_test_exit_${exitCodeArg}`,
-);
+const TEST_DIR = testTempDir(`cycle_test_exit_${exitCodeArg}`);
 const PROJ_DIR = join(TEST_DIR, "proj");
 
 let verificationCalled = false;

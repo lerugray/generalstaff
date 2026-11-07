@@ -1,2 +1,5 @@
 [test]
 timeout = 30000
+# v0.18.1: fail the run if any test commits to, or changes the index of, this checkout,
+# and let CI move the clock ahead to catch date-dependent tests.
+preload = ["./tests/preload/real_checkout_guard.ts", "./tests/preload/clock_skew.ts"]

@@ -7,16 +7,10 @@ import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../../src/types";
 import type { ConsumptionReader, ConsumptionSnapshot } from "../../../src/usage/types";
 import { makeProjectConfig, makeDispatcherConfig } from "../../helpers/fixtures";
+import { testTempDir } from "../../helpers/temp_dir";
 
 const scenario = process.argv[2] ?? "";
-const WORK = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "usage",
-  "fixtures",
-  "gs301c_workspace",
-);
+const WORK = testTempDir("gs301c_workspace");
 
 let executeCycleCalls = 0;
 

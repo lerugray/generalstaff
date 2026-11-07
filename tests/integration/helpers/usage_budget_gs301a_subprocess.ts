@@ -9,16 +9,10 @@ import { mkdirSync, rmSync } from "fs";
 import type { ProjectConfig, CycleResult } from "../../../src/types";
 import { makeProjectConfig, makeDispatcherConfig } from "../../helpers/fixtures";
 import { ClaudeCodeReader } from "../../../src/usage/claude_code";
+import { testTempDir } from "../../helpers/temp_dir";
 
 const scenario = process.argv[2] ?? "";
-const WORK = join(
-  import.meta.dir,
-  "..",
-  "..",
-  "usage",
-  "fixtures",
-  "gs301a_workspace",
-);
+const WORK = testTempDir("gs301a_workspace");
 
 let executeCycleCalls = 0;
 
